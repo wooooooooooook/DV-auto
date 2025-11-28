@@ -1,4 +1,4 @@
-const { safeGoto, sendTelegramHttps } = require('../modules/utils');
+const { safeGoto, sendTelegram } = require('../modules/utils');
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 
@@ -41,11 +41,11 @@ async function run({ page, context, env }) {
         }
 
         const appliedCount = await page.locator('a:has(.ico_completion)').count();
-        await sendTelegramHttps(`✅ ${items.length}개 세미나 신청 완료! (${appliedCount}/${totalCount})`).catch(() => { });
+        await sendTelegram(`✅ ${items.length}개 세미나 신청 완료! (${appliedCount}/${totalCount})`).catch(() => { });
         return true;
     } catch (e) {
         console.error('seminar task error', e && e.stack ? e.stack : e);
-        await sendTelegramHttps(`❗ 세미나 신청 작업 오류: ${e && e.message ? e.message : String(e)}`).catch(() => { });
+        await sendTelegram(`❗ 세미나 신청 작업 오류: ${e && e.message ? e.message : String(e)}`).catch(() => { });
         return false;
     }
 }

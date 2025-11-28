@@ -1,6 +1,7 @@
 
 const { Telegraf } = require('telegraf');
 const https = require('https');
+const { setBot } = require('./bot_instance');
 const logger = require('./logger');
 const scheduler = require('./scheduler');
 const runner = require('./runner');
@@ -19,6 +20,7 @@ const bot = new Telegraf(BOT_TOKEN, {
         agent: ipv4Agent
     }
 });
+setBot(bot);
 
 bot.start((ctx) => ctx.reply('Welcome!'));
 
@@ -63,6 +65,5 @@ function launch() {
 }
 
 module.exports = {
-    bot,
     launch
 };
