@@ -30,7 +30,7 @@ bot.command('schedules', (ctx) => {
     ctx.reply(message);
 });
 
-bot.command('run-routine-now', async (ctx) => {
+bot.command('run_routine_now', async (ctx) => {
     logger.info('User requested to run daily_routine now', { from: ctx.from.username });
     const task = taskRegistry.getByName('daily_routine');
     if (!task) {
