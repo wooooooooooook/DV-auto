@@ -2,6 +2,7 @@ require('dotenv').config();
 const scheduler = require('./scheduler');
 const logger = require('./logger');
 const telegram = require('./telegram');
+const taskRegistry = require('./taskRegistry');
 
 // Configuration
 const HEADLESS = (process.env.HEADLESS || 'true').toLowerCase() === 'true';
@@ -52,6 +53,7 @@ const scheduledTask = {
 
 // Register the scheduled task. The process will keep running so cron can trigger jobs.
 scheduler.scheduleTaskCron(scheduledTask);
+taskRegistry.registerTask(scheduledTask);
 logger.info('Scheduled `daily_routine` at', CRON_EXPR, 'timezone=', TIMEZONE);
 
 // Guidance: to add more scheduled jobs, create more task objects like `scheduledTask` above
