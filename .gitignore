@@ -2,3 +2,6 @@
 .env
 node_modules/
 screenshot/
+data/
+cookies.json
+localstorage.json
