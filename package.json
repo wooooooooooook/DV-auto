@@ -1,0 +1,20 @@
+{
+  "name": "doctorville-auto",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "update": "git pull && cp deploy/doctorville-auto.service /etc/systemd/system/ && systemctl daemon-reload && systemctl restart doctorville-auto.service"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "node-cron": "^3.0.3",
+    "playwright": "^1.57.0",
+    "telegraf": "^4.16.3",
+    "undici": "^7.16.0"
+  }
+}
