@@ -1,3 +1,4 @@
+require('dns').setDefaultResultOrder('ipv4first');
 require('dotenv').config();
 const scheduler = require('./scheduler');
 const logger = require('./logger');

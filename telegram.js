@@ -1,5 +1,6 @@
 
 const { Telegraf } = require('telegraf');
+const https = require('https');
 const logger = require('./logger');
 const scheduler = require('./scheduler');
 const runner = require('./runner');
@@ -10,7 +11,14 @@ if (!BOT_TOKEN) {
     logger.warn('TELEGRAM_BOT_TOKEN is not set. The Telegram bot will not be initialized.');
 }
 
-const bot = new Telegraf(BOT_TOKEN);
+// Force IPv4 for Telegram API requests to work around network issues
+const ipv4Agent = new https.Agent({ family: 4 });
+
+const bot = new Telegraf(BOT_TOKEN, {
+    telegram: {
+        agent: ipv4Agent
+    }
+});
 
 bot.start((ctx) => ctx.reply('Welcome!'));
 
