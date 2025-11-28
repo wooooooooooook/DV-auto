@@ -1,0 +1,19 @@
+{
+  "name": "doctorville-auto",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "node-fetch": "^3.3.2",
+    "playwright": "^1.57.0",
+    "node-cron": "^3.0.2",
+    "undici": "^7.16.0"
+  }
+}
