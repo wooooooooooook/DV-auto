@@ -18,7 +18,7 @@ async function run({ page, context, env }) {
         for (const item of items) {
             console.log('Applying for seminar:', item.text, item.href);
             await safeGoto(page, item.href, { waitUntil: 'load', timeout: 30000 }, 1);
-            // await page.screenshot({ path: 'shot.png', fullPage: true }).catch(() => { });
+            // await page.screenshot({ path: 'screenshot/shot.png', fullPage: true }).catch(() => { });
 
             // Click the apply button but avoid long default timeouts
             try {
