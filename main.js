@@ -1,6 +1,7 @@
 require('dotenv').config();
 const scheduler = require('./scheduler');
 const logger = require('./logger');
+const telegram = require('./telegram');
 
 // Configuration
 const HEADLESS = (process.env.HEADLESS || 'true').toLowerCase() === 'true';
@@ -60,3 +61,6 @@ logger.info('Scheduled `daily_routine` at', CRON_EXPR, 'timezone=', TIMEZONE);
 // Keep the process alive explicitly (node-cron uses timers which usually keep the process alive,
 // but calling `process.stdin.resume()` prevents accidental exit in some environments).
 process.stdin.resume();
+
+// Launch the Telegram bot
+telegram.launch();
