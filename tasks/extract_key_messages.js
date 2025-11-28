@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { sendTelegramHttps, safeGoto } = require('../modules/utils');
+const { sendTelegram, safeGoto } = require('../modules/utils');
 
 const STORE_FILE = path.join(__dirname, '..', 'data', 'last_key_message.json');
 const DEFAULT_URL = 'https://www.doctorville.co.kr/seminar/broadcastSeminarPopup?viewType=2&seminarId=4759';
@@ -60,7 +60,7 @@ async function run({ page, context, env } = {}, options = {}) {
             } else if (text !== last) {
                 console.log('extract_key_messages: change detected, sending notification');
                 try {
-                    await sendTelegramHttps(`🔔 Key message changed:\n${text.substring(0, 800)}`);
+                    await sendTelegram(`🔔 Key message changed:\n${text.substring(0, 800)}`);
                 } catch (e) {
                     console.error('notify failed', e && e.stack ? e.stack : e);
                 }

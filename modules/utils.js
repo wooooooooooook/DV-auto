@@ -1,6 +1,7 @@
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
+const { getBot } = require('../bot_instance');
 
 const COOKIE_FILE = path.join(__dirname, '..', 'cookies.json');
 const LOCALSTORAGE_FILE = path.join(__dirname, '..', 'localstorage.json');
@@ -12,109 +13,34 @@ function maskToken(token) {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-function sendTelegramHttps(text, imagePath = null) {
-    const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-    const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
-    if (!BOT_TOKEN || !CHAT_ID) {
-        console.error('BOT_TOKEN 또는 CHAT_ID가 설정되지 않았습니다.');
-        return Promise.reject(new Error('Missing Telegram config'));
+async function sendTelegram(text, imagePath = null) {
+    const bot = getBot();
+    if (!bot) {
+        console.error('Bot is not initialized. Cannot send message.');
+        return;
     }
-    const safeToken = encodeURIComponent(BOT_TOKEN);
-    console.log(`sendTelegramHttps to chat_id=${CHAT_ID} text=${text ? text.slice(0, 50) : ''}... using bot=${maskToken(BOT_TOKEN)}${imagePath ? ' with image' : ''}`);
 
-    if (!imagePath) {
-        // Send text message
-        const payload = JSON.stringify({ chat_id: String(CHAT_ID), text, parse_mode: 'Markdown' });
-        return new Promise((resolve, reject) => {
-            const options = {
-                hostname: 'api.telegram.org',
-                path: `/bot${safeToken}/sendMessage`,
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
-                timeout: 10000
-            };
-            const req = https.request(options, res => {
-                let body = '';
-                res.on('data', chunk => body += chunk);
-                res.on('end', () => {
-                    if (res.statusCode >= 400) {
-                        const err = new Error(`Request Failed. Status Code: ${res.statusCode}`);
-                        err.raw = body;
-                        return reject(err);
-                    }
-                    try { resolve(JSON.parse(body)); }
-                    catch (e) { e.raw = body; reject(e); }
-                });
-            });
-            req.on('error', reject);
-            req.on('timeout', () => req.destroy(new Error('request timeout')));
-            req.write(payload);
-            req.end();
-        });
-    } else {
-        // Send photo
-        return new Promise((resolve, reject) => {
-            if (!fs.existsSync(imagePath)) {
-                return reject(new Error(`Image file not found: ${imagePath}`));
-            }
+    const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+    if (!CHAT_ID) {
+        console.error('TELEGRAM_CHAT_ID is not set.');
+        return;
+    }
 
-            const boundary = '--------------------------' + Date.now().toString(16);
-            const options = {
-                hostname: 'api.telegram.org',
-                path: `/bot${safeToken}/sendPhoto`,
-                method: 'POST',
-                headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
-                timeout: 30000
-            };
-
-            const req = https.request(options, res => {
-                let body = '';
-                res.on('data', chunk => body += chunk);
-                res.on('end', () => {
-                    if (res.statusCode >= 400) {
-                        const err = new Error(`Request Failed. Status Code: ${res.statusCode}`);
-                        err.raw = body;
-                        return reject(err);
-                    }
-                    try { resolve(JSON.parse(body)); }
-                    catch (e) { e.raw = body; reject(e); }
-                });
-            });
-
-            req.on('error', reject);
-            req.on('timeout', () => req.destroy(new Error('request timeout')));
-
-            const CRLF = '\r\n';
-            function addField(name, value) {
-                req.write(`--${boundary}${CRLF}`);
-                req.write(`Content-Disposition: form-data; name="${name}"${CRLF}${CRLF}`);
-                req.write(`${value}${CRLF}`);
-            }
-
-            addField('chat_id', String(CHAT_ID));
-            if (text) {
-                addField('caption', text);
-                addField('parse_mode', 'Markdown');
-            }
-
-            const filename = path.basename(imagePath);
-            req.write(`--${boundary}${CRLF}`);
-            req.write(`Content-Disposition: form-data; name="photo"; filename="${filename}"${CRLF}`);
-            const mimeType = 'image/png';
-            req.write(`Content-Type: ${mimeType}${CRLF}${CRLF}`);
-
-            const fileStream = fs.createReadStream(imagePath);
-            fileStream.on('error', readErr => {
-                req.destroy(readErr);
-                // reject(readErr) is not needed because req.destroy will emit 'error'
-            });
-
-            fileStream.pipe(req, { end: false });
-            fileStream.on('end', () => {
-                req.write(`${CRLF}--${boundary}--${CRLF}`);
-                req.end();
-            });
-        });
+    try {
+        if (imagePath) {
+            await bot.telegram.sendPhoto(CHAT_ID, { source: imagePath }, { caption: text, parse_mode: 'Markdown' });
+        } else {
+            await bot.telegram.sendMessage(CHAT_ID, text, { parse_mode: 'Markdown' });
+        }
+    } catch (error) {
+        console.error('Failed to send Telegram message:', error);
+        // To preserve original behavior of notifying about notification failures,
+        // we can try to send a simplified plain text message about the failure.
+        try {
+            await bot.telegram.sendMessage(CHAT_ID, `Failed to send a complex Telegram message. Error: ${error.message}`);
+        } catch (nestedError) {
+            console.error('Failed to send the failure notification as well:', nestedError);
+        }
     }
 }
 
@@ -229,7 +155,7 @@ async function safeGoto(page, url, options = {}, retries = 2) {
         } catch (err) {
             const meta = { originalUrl, resolvedUrl, attempt, name: err && err.name, code: err && err.code, message: err && err.message };
             console.error('safeGoto error:', meta, err && err.stack ? err.stack : err);
-            try { await sendTelegramHttps(`❗ safeGoto failed (${resolvedUrl}) attempt ${attempt}: ${err && err.name ? err.name : String(err)} ${err && err.code ? '(' + err.code + ')' : ''}`); } catch (e) { console.error('notify failed', e && e.stack ? e.stack : e); }
+            try { await sendTelegram(`❗ safeGoto failed (${resolvedUrl}) attempt ${attempt}: ${err && err.name ? err.name : String(err)} ${err && err.code ? '(' + err.code + ')' : ''}`); } catch (e) { console.error('notify failed', e && e.stack ? e.stack : e); }
             if (attempt > retries) throw new Error(`safeGoto failed after ${attempt} attempts for ${resolvedUrl}: ${err && err.message ? err.message : String(err)}`);
             await sleep(1000 * attempt);
         }
@@ -237,7 +163,7 @@ async function safeGoto(page, url, options = {}, retries = 2) {
 }
 
 module.exports = {
-    sendTelegramHttps,
+    sendTelegram,
     saveCookies,
     loadCookies,
     saveLocalStorage,
