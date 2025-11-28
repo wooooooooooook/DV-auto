@@ -20,10 +20,10 @@ async function run({ page, context, env }) {
             await sendTelegramHttps('✅ 출석체크 완료!').catch(() => { });
             return true;
         }
-        await page.screenshot({ path: 'dbg_tit_box.png', fullPage: true });
+        await page.screenshot({ path: 'screenshot/dbg_tit_box.png', fullPage: true });
         const html = await page.locator('.tit_box').first().innerHTML();
         console.log('tit_box innerHTML:', html);
-        await sendTelegramHttps('❗ 출석체크 버튼을 찾지 못함!').catch(() => { });
+        await sendTelegramHttps('❗ 출석체-크 버튼을 찾지 못함!').catch(() => { });
         return true;
     } catch (e) {
         console.error('attendance task error', e && e.stack ? e.stack : e);
