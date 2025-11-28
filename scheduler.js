@@ -2,6 +2,8 @@ const cron = require('node-cron');
 const logger = require('./logger');
 const runner = require('./runner');
 
+const scheduledTasks = [];
+
 function scheduleTaskCron(task) {
     if (!task || !task.schedule) throw new Error('task.schedule is required for cron scheduling');
     const opts = { scheduled: true };
@@ -17,7 +19,12 @@ function scheduleTaskCron(task) {
             logger.error('scheduler: task error', task.name, e && e.stack ? e.stack : e);
         }
     }, opts);
+
+    scheduledTasks.push({ ...task, job });
     return job;
 }
 
-module.exports = { scheduleTaskCron };
+module.exports = {
+    scheduleTaskCron,
+    getScheduledTasks: () => scheduledTasks
+};
