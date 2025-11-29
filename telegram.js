@@ -71,9 +71,20 @@ bot.command('inspect', async (ctx) => {
         const result = await inspect(url, selector);
         let message = `Found ${result.count} elements matching selector "${selector}".\n\n`;
         if (result.count > 0) {
-            message += 'Inner texts:\n';
-            result.innerTexts.forEach((text, i) => {
-                message += `${i + 1}: ${text}\n`;
+            result.elements.forEach((element, i) => {
+                message += `Element ${i + 1}:\n`;
+                message += `  - Inner Text: ${element.innerText}\n`;
+                if (element.id) message += `  - ID: ${element.id}\n`;
+                if (element.className) message += `  - Class: ${element.className}\n`;
+
+                const otherAttributes = Object.entries(element.attributes).filter(([key]) => key !== 'id' && key !== 'class');
+                if (otherAttributes.length > 0) {
+                    message += `  - Other Attributes:\n`;
+                    otherAttributes.forEach(([key, value]) => {
+                        message += `    - ${key}: ${value}\n`;
+                    });
+                }
+                message += '\n';
             });
         }
         ctx.reply(message);
