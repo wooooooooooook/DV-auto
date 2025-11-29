@@ -6,6 +6,7 @@ const logger = require('./logger');
 const scheduler = require('./scheduler');
 const runner = require('./runner');
 const taskRegistry = require('./taskRegistry');
+const { inspect } = require('./modules/inspect');
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 if (!BOT_TOKEN) {
@@ -54,6 +55,30 @@ bot.command('run_routine_now', async (ctx) => {
         ctx.reply('daily_routine finished successfully.');
     } catch (e) {
         ctx.reply(`daily_routine failed: ${e && e.message ? e.message : e}`);
+    }
+});
+
+bot.command('inspect', async (ctx) => {
+    logger.info('User requested to inspect a page', { from: ctx.from.username });
+    const args = ctx.message.text.split(' ').slice(1);
+    if (args.length !== 2) {
+        return ctx.reply('Usage: /inspect <url> <selector>');
+    }
+    const [url, selector] = args;
+
+    try {
+        ctx.reply(`Inspecting ${url} with selector "${selector}"...`);
+        const result = await inspect(url, selector);
+        let message = `Found ${result.count} elements matching selector "${selector}".\n\n`;
+        if (result.count > 0) {
+            message += 'Inner texts:\n';
+            result.innerTexts.forEach((text, i) => {
+                message += `${i + 1}: ${text}\n`;
+            });
+        }
+        ctx.reply(message);
+    } catch (e) {
+        ctx.reply(`Error inspecting ${url}: ${e && e.message ? e.message : e}`);
     }
 });
 
