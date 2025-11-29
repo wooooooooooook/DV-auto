@@ -20,9 +20,50 @@ async function inspect(url, selector) {
         await fs.mkdir(screenshotDir, { recursive: true });
 
         screenshotPath = path.join(screenshotDir, `inspect-${Date.now()}.png`);
-        await page.screenshot({ path: screenshotPath, fullPage: true });
+        await page.screenshot({ path: screenshotPath, fullPage: false });
 
-        const elements = await page.locator(selector).all();
+        const parts = selector.split('>>').map(s => s.trim());
+        let locator;
+        let isFirst = true;
+
+        for (const part of parts) {
+            const locatorMatch = part.match(/^locator\((.*)\)$/i);
+            const nthMatch = part.match(/^nth\((\d+)\)$/i);
+
+            if (locatorMatch) {
+                let selectorArg = locatorMatch[1].trim();
+                if ((selectorArg.startsWith("'") && selectorArg.endsWith("'")) || (selectorArg.startsWith('"') && selectorArg.endsWith('"'))) {
+                    selectorArg = selectorArg.slice(1, -1);
+                }
+
+                if (isFirst) {
+                    locator = page.locator(selectorArg);
+                    isFirst = false;
+                } else {
+                    if (!locator) throw new Error("Invalid selector chain: cannot call locator here.");
+                    locator = locator.locator(selectorArg);
+                }
+            } else if (nthMatch) {
+                if (!locator) throw new Error("Invalid selector chain: 'nth' must be preceded by a locator.");
+                const index = parseInt(nthMatch[1], 10);
+                locator = locator.nth(index);
+            } else {
+                // Fallback for old syntax without locator() or nth()
+                if (isFirst) {
+                    locator = page.locator(part);
+                    isFirst = false;
+                } else {
+                    if (!locator) throw new Error("Invalid selector chain.");
+                    locator = locator.locator(part);
+                }
+            }
+        }
+
+        if (!locator) {
+            throw new Error("Invalid selector provided.");
+        }
+
+        const elements = await locator.all();
 
         const elementsData = await Promise.all(elements.map(el => {
             return el.evaluate(element => {
