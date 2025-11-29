@@ -8,10 +8,11 @@ async function inspect(url, selector) {
     const context = await browser.newContext();
     const page = await context.newPage();
     let screenshotPath = null;
+    const warnings = [];
 
     try {
-        await loadCookies(context).catch(err => console.warn('Failed to load cookies during inspect', err));
-        await loadLocalStorage(page, url).catch(err => console.warn('Failed to load local storage during inspect', err));
+        await loadCookies(context).catch(err => warnings.push(`Failed to load cookies: ${err.message}`));
+        await loadLocalStorage(page, url).catch(err => warnings.push(`Failed to load local storage: ${err.message}`));
 
         await safeGoto(page, url, { waitUntil: 'load', timeout: 30000 });
 
@@ -41,7 +42,8 @@ async function inspect(url, selector) {
         return {
             count: elements.length,
             elements: elementsData,
-            screenshotPath: screenshotPath
+            screenshotPath: screenshotPath,
+            warnings: warnings
         };
     } finally {
         await browser.close();

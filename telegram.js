@@ -74,6 +74,15 @@ bot.command('inspect', async (ctx) => {
         const result = await inspect(url, selector);
         screenshotPath = result.screenshotPath;
         let message = `Found ${result.count} elements matching selector "${selector}".\n\n`;
+
+        if (result.warnings && result.warnings.length > 0) {
+            message += 'Warnings:\n';
+            result.warnings.forEach(warning => {
+                message += `- ${warning}\n`;
+            });
+            message += '\n';
+        }
+
         if (result.count > 0) {
             result.elements.forEach((element, i) => {
                 message += `Element ${i + 1}:\n`;
@@ -97,7 +106,13 @@ bot.command('inspect', async (ctx) => {
             await ctx.replyWithPhoto({ source: screenshotPath });
         }
     } catch (e) {
-        ctx.reply(`Error inspecting ${url}: ${e && e.message ? e.message : e}`);
+        let errorMessage = `An error occurred while inspecting ${url}.`;
+        if (e.message && e.message.includes('Timeout')) {
+            errorMessage = `Navigation timeout: The page at ${url} took too long to load or was unreachable.`;
+        } else if (e.message) {
+            errorMessage += `\nDetails: ${e.message}`;
+        }
+        ctx.reply(errorMessage);
     } finally {
         if (screenshotPath) {
             await fs.unlink(screenshotPath).catch(err => logger.error(`Failed to delete screenshot: ${screenshotPath}`, err));
