@@ -20,9 +20,14 @@ async function inspect(url, selector) {
         await fs.mkdir(screenshotDir, { recursive: true });
 
         screenshotPath = path.join(screenshotDir, `inspect-${Date.now()}.png`);
-        await page.screenshot({ path: screenshotPath, fullPage: true });
+        await page.screenshot({ path: screenshotPath, fullPage: false });
 
-        const elements = await page.locator(selector).all();
+        const parts = selector.split('>>').map(s => s.trim());
+        let locator = page.locator(parts[0]);
+        for (let i = 1; i < parts.length; i++) {
+            locator = locator.locator(parts[i]);
+        }
+        const elements = await locator.all();
 
         const elementsData = await Promise.all(elements.map(el => {
             return el.evaluate(element => {
