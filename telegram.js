@@ -61,19 +61,31 @@ bot.command('run_routine_now', async (ctx) => {
 bot.command('inspect', async (ctx) => {
     logger.info('User requested to inspect a page', { from: ctx.from.username });
     const args = ctx.message.text.split(' ').slice(1);
-    if (args.length !== 2) {
+    if (args.length < 2) {
         return ctx.reply('Usage: /inspect <url> <selector>');
     }
-    const [url, selector] = args;
+    const url = args[0];
+    const selector = args.slice(1).join(' ');
 
     try {
         ctx.reply(`Inspecting ${url} with selector "${selector}"...`);
         const result = await inspect(url, selector);
         let message = `Found ${result.count} elements matching selector "${selector}".\n\n`;
         if (result.count > 0) {
-            message += 'Inner texts:\n';
-            result.innerTexts.forEach((text, i) => {
-                message += `${i + 1}: ${text}\n`;
+            result.elements.forEach((element, i) => {
+                message += `Element ${i + 1}:\n`;
+                message += `  - Inner Text: ${element.innerText}\n`;
+                if (element.id) message += `  - ID: ${element.id}\n`;
+                if (element.className) message += `  - Class: ${element.className}\n`;
+
+                const otherAttributes = Object.entries(element.attributes).filter(([key]) => key !== 'id' && key !== 'class');
+                if (otherAttributes.length > 0) {
+                    message += `  - Other Attributes:\n`;
+                    otherAttributes.forEach(([key, value]) => {
+                        message += `    - ${key}: ${value}\n`;
+                    });
+                }
+                message += '\n';
             });
         }
         ctx.reply(message);
