@@ -1,5 +1,6 @@
 
 const { Telegraf } = require('telegraf');
+const fs = require('fs/promises');
 const https = require('https');
 const { setBot } = require('./bot_instance');
 const logger = require('./logger');
@@ -66,11 +67,22 @@ bot.command('inspect', async (ctx) => {
     }
     const url = args[0];
     const selector = args.slice(1).join(' ');
+    let screenshotPath = null;
 
     try {
         ctx.reply(`Inspecting ${url} with selector "${selector}"...`);
         const result = await inspect(url, selector);
+        screenshotPath = result.screenshotPath;
         let message = `Found ${result.count} elements matching selector "${selector}".\n\n`;
+
+        if (result.warnings && result.warnings.length > 0) {
+            message += 'Warnings:\n';
+            result.warnings.forEach(warning => {
+                message += `- ${warning}\n`;
+            });
+            message += '\n';
+        }
+
         if (result.count > 0) {
             result.elements.forEach((element, i) => {
                 message += `Element ${i + 1}:\n`;
@@ -88,9 +100,23 @@ bot.command('inspect', async (ctx) => {
                 message += '\n';
             });
         }
-        ctx.reply(message);
+        await ctx.reply(message);
+
+        if (screenshotPath) {
+            await ctx.replyWithPhoto({ source: screenshotPath });
+        }
     } catch (e) {
-        ctx.reply(`Error inspecting ${url}: ${e && e.message ? e.message : e}`);
+        let errorMessage = `An error occurred while inspecting ${url}.`;
+        if (e.message && e.message.includes('Timeout')) {
+            errorMessage = `Navigation timeout: The page at ${url} took too long to load or was unreachable.`;
+        } else if (e.message) {
+            errorMessage += `\nDetails: ${e.message}`;
+        }
+        ctx.reply(errorMessage);
+    } finally {
+        if (screenshotPath) {
+            await fs.unlink(screenshotPath).catch(err => logger.error(`Failed to delete screenshot: ${screenshotPath}`, err));
+        }
     }
 });
 
