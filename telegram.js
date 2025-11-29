@@ -1,5 +1,6 @@
 
 const { Telegraf } = require('telegraf');
+const fs = require('fs/promises');
 const https = require('https');
 const { setBot } = require('./bot_instance');
 const logger = require('./logger');
@@ -61,24 +62,61 @@ bot.command('run_routine_now', async (ctx) => {
 bot.command('inspect', async (ctx) => {
     logger.info('User requested to inspect a page', { from: ctx.from.username });
     const args = ctx.message.text.split(' ').slice(1);
-    if (args.length !== 2) {
+    if (args.length < 2) {
         return ctx.reply('Usage: /inspect <url> <selector>');
     }
-    const [url, selector] = args;
+    const url = args[0];
+    const selector = args.slice(1).join(' ');
+    let screenshotPath = null;
 
     try {
         ctx.reply(`Inspecting ${url} with selector "${selector}"...`);
         const result = await inspect(url, selector);
+        screenshotPath = result.screenshotPath;
         let message = `Found ${result.count} elements matching selector "${selector}".\n\n`;
+
+        if (result.warnings && result.warnings.length > 0) {
+            message += 'Warnings:\n';
+            result.warnings.forEach(warning => {
+                message += `- ${warning}\n`;
+            });
+            message += '\n';
+        }
+
         if (result.count > 0) {
-            message += 'Inner texts:\n';
-            result.innerTexts.forEach((text, i) => {
-                message += `${i + 1}: ${text}\n`;
+            result.elements.forEach((element, i) => {
+                message += `Element ${i + 1}:\n`;
+                message += `  - Inner Text: ${element.innerText}\n`;
+                if (element.id) message += `  - ID: ${element.id}\n`;
+                if (element.className) message += `  - Class: ${element.className}\n`;
+
+                const otherAttributes = Object.entries(element.attributes).filter(([key]) => key !== 'id' && key !== 'class');
+                if (otherAttributes.length > 0) {
+                    message += `  - Other Attributes:\n`;
+                    otherAttributes.forEach(([key, value]) => {
+                        message += `    - ${key}: ${value}\n`;
+                    });
+                }
+                message += '\n';
             });
         }
-        ctx.reply(message);
+        await ctx.reply(message);
+
+        if (screenshotPath) {
+            await ctx.replyWithPhoto({ source: screenshotPath });
+        }
     } catch (e) {
-        ctx.reply(`Error inspecting ${url}: ${e && e.message ? e.message : e}`);
+        let errorMessage = `An error occurred while inspecting ${url}.`;
+        if (e.message && e.message.includes('Timeout')) {
+            errorMessage = `Navigation timeout: The page at ${url} took too long to load or was unreachable.`;
+        } else if (e.message) {
+            errorMessage += `\nDetails: ${e.message}`;
+        }
+        ctx.reply(errorMessage);
+    } finally {
+        if (screenshotPath) {
+            await fs.unlink(screenshotPath).catch(err => logger.error(`Failed to delete screenshot: ${screenshotPath}`, err));
+        }
     }
 });
 
