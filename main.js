@@ -35,8 +35,8 @@ const scheduledTask = {
         });
         const page = await context.newPage();
 
-        await utils.loadCookies(context).catch(() => { });
-        await utils.loadLocalStorage(page, LOGIN_URL).catch(() => { });
+        await utils.loadCookies(context).catch(err => logger.warn('Failed to load cookies', err));
+        await utils.loadLocalStorage(page, LOGIN_URL).catch(err => logger.warn('Failed to load local storage', err));
 
         try {
             const env = { LOGIN_URL, TARGET_PAGE, DV_USER, DV_PASS };
