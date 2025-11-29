@@ -61,10 +61,11 @@ bot.command('run_routine_now', async (ctx) => {
 bot.command('inspect', async (ctx) => {
     logger.info('User requested to inspect a page', { from: ctx.from.username });
     const args = ctx.message.text.split(' ').slice(1);
-    if (args.length !== 2) {
+    if (args.length < 2) {
         return ctx.reply('Usage: /inspect <url> <selector>');
     }
-    const [url, selector] = args;
+    const url = args[0];
+    const selector = args.slice(1).join(' ');
 
     try {
         ctx.reply(`Inspecting ${url} with selector "${selector}"...`);
