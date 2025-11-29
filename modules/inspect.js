@@ -12,12 +12,25 @@ async function inspect(url, selector) {
 
         await safeGoto(page, url, { waitUntil: 'load', timeout: 30000 });
         const elements = await page.locator(selector).all();
-        const count = elements.length;
-        const innerTexts = await Promise.all(elements.map(el => el.innerText()));
+
+        const elementsData = await Promise.all(elements.map(el => {
+            return el.evaluate(element => {
+                const attributes = {};
+                for (const attr of element.attributes) {
+                    attributes[attr.name] = attr.value;
+                }
+                return {
+                    innerText: element.innerText,
+                    id: element.id,
+                    className: element.className,
+                    attributes: attributes
+                };
+            });
+        }));
 
         return {
-            count,
-            innerTexts
+            count: elements.length,
+            elements: elementsData,
         };
     } finally {
         await browser.close();
