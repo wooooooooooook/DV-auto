@@ -69,6 +69,51 @@ scheduler.scheduleTaskCron(scheduledTask);
 taskRegistry.registerTask(scheduledTask);
 logger.info('Scheduled `daily_routine` at', CRON_EXPR, 'timezone=', TIMEZONE);
 
+// --- Register individual tasks to be runnable from Telegram ---
+const todaySeminarCheckTask = {
+    name: 'today_seminar_check',
+    run: async () => {
+        const { chromium } = require('playwright');
+        const utils = require('./modules/utils');
+        const task = require('./tasks/today_seminar_check');
+        const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
+        const context = await browser.newContext();
+        const page = await context.newPage();
+        await utils.loadCookies(context).catch(err => logger.warn('Failed to load cookies', err));
+        await utils.loadLocalStorage(page, LOGIN_URL).catch(err => logger.warn('Failed to load local storage', err));
+        const env = { LOGIN_URL, TARGET_PAGE, DV_USER, DV_PASS };
+        try {
+            await utils.ensureLoggedIn({ page, context, env });
+            await task.run({ page, context, env });
+        } finally {
+            await browser.close();
+        }
+    }
+};
+taskRegistry.registerTask(todaySeminarCheckTask);
+
+const fiveDaysSeminarCheckTask = {
+    name: '5days_seminar_check',
+    run: async () => {
+        const { chromium } = require('playwright');
+        const utils = require('./modules/utils');
+        const task = require('./tasks/5days_seminar_check');
+        const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
+        const context = await browser.newContext();
+        const page = await context.newPage();
+        await utils.loadCookies(context).catch(err => logger.warn('Failed to load cookies', err));
+        await utils.loadLocalStorage(page, LOGIN_URL).catch(err => logger.warn('Failed to load local storage', err));
+        const env = { LOGIN_URL, TARGET_PAGE, DV_USER, DV_PASS };
+        try {
+            await utils.ensureLoggedIn({ page, context, env });
+            await task.run({ page, context, env });
+        } finally {
+            await browser.close();
+        }
+    }
+};
+taskRegistry.registerTask(fiveDaysSeminarCheckTask);
+
 // Guidance: to add more scheduled jobs, create more task objects like `scheduledTask` above
 // and call `scheduler.scheduleTaskCron(yourTask)`. Tasks should export `run` async function or be
 // objects with `name`, `schedule`, `timezone`, and `run`.
