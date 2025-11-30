@@ -17,15 +17,42 @@ async function run({ page, context, env }) {
         if (seminarDay === todayString) {
             const seminarDetails = await firstSeminar.locator('.list_detail');
             const count = await seminarDetails.count();
-            let message = `오늘 ${count}개의 세미나가 있습니다.\n\n`;
+
+            const lunchSeminars = [];
+            const dinnerSeminars = [];
 
             for (let i = 0; i < count; i++) {
                 const detail = seminarDetails.nth(i);
-                const num = await detail.locator('.txt_num').innerText();
+                const timeStr = await detail.locator('span.txt_num').innerText();
                 const title = await detail.locator('.list_tit').innerText();
-                message += `${num}. ${title}\n`;
+                const hour = parseInt(timeStr.split(':')[0], 10);
+
+                const seminarInfo = `${timeStr}. ${title}`;
+
+                if (hour >= 11 && hour < 14) {
+                    lunchSeminars.push(seminarInfo);
+                } else if (hour >= 17 && hour < 20) {
+                    dinnerSeminars.push(seminarInfo);
+                }
             }
-            await sendTelegram(message);
+
+            let message = `오늘 점심 ${lunchSeminars.length}개, 저녁 ${dinnerSeminars.length}개의 세미나가 있습니다.\n`;
+
+            if (lunchSeminars.length > 0) {
+                message += `\n[점심 세미나]\n`;
+                message += lunchSeminars.join('\n');
+            }
+
+            if (dinnerSeminars.length > 0) {
+                message += `\n[저녁 세미나]\n`;
+                message += dinnerSeminars.join('\n');
+            }
+
+            if (lunchSeminars.length === 0 && dinnerSeminars.length === 0) {
+                await sendTelegram('오늘 점심/저녁 세미나가 없습니다.');
+            } else {
+                await sendTelegram(message);
+            }
         } else {
             await sendTelegram('오늘은 세미나가 없습니다.');
         }
