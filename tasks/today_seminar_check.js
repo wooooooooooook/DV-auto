@@ -23,7 +23,7 @@ async function run({ page, context, env }) {
 
             for (let i = 0; i < count; i++) {
                 const detail = seminarDetails.nth(i);
-                const timeStr = await detail.locator('.txt_num').innerText();
+                const timeStr = await detail.locator('.txt_num.time').first().innerText();
                 const title = await detail.locator('.list_tit').innerText();
                 const hour = parseInt(timeStr.split(':')[0], 10);
 
