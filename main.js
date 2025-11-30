@@ -185,5 +185,33 @@ logger.info('Scheduled `monitor_dinner_seminars` at 17:00 timezone=', TIMEZONE);
 // but calling `process.stdin.resume()` prevents accidental exit in some environments).
 process.stdin.resume();
 
+// --- Auto-resume logic on startup ---
+function checkAndResumeTasks() {
+    const runner = require('./runner');
+    const now = new Date(new Date().toLocaleString('en-US', { timeZone: TIMEZONE }));
+    const currentHour = now.getHours();
+
+    logger.info(`Startup check: current hour is ${currentHour} in ${TIMEZONE}`);
+
+    // Check for lunch monitoring window (11 AM to 2 PM)
+    if (currentHour >= 11 && currentHour < 14) {
+        logger.info('Inside lunch monitoring window, attempting to resume task.');
+        runner.runTask(monitorLunchSeminarsTask).catch(err => {
+            logger.error('Failed to auto-resume lunch monitoring task:', err);
+        });
+    }
+
+    // Check for dinner monitoring window (5 PM to 9 PM)
+    if (currentHour >= 17 && currentHour < 21) {
+        logger.info('Inside dinner monitoring window, attempting to resume task.');
+        runner.runTask(monitorDinnerSeminarsTask).catch(err => {
+            logger.error('Failed to auto-resume dinner monitoring task:', err);
+        });
+    }
+}
+
+checkAndResumeTasks();
+
+
 // Launch the Telegram bot
 telegram.launch();
