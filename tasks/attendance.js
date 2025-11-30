@@ -1,4 +1,4 @@
-const { safeGoto, sendTelegram } = require('../modules/utils');
+const { safeGoto, sendNotificationToChannel } = require('../modules/utils');
 
 async function run({ page, context, env }) {
     // Placeholder: implement attendance check logic here
@@ -10,24 +10,24 @@ async function run({ page, context, env }) {
         if (checkedCount > 0) {
             const loc = page.locator('.tit_box button.complete', { hasText: '출석완료' }).first();
             if (await loc.isVisible()) {
-                await sendTelegram('✅ 이미 출석체크되어있습니다.').catch(() => { });
+                await sendNotificationToChannel('✅ 이미 출석체크되어있습니다.').catch(() => { });
                 return true;
             }
         }
         const loc = await page.locator('.tit_box button.point_down', { hasText: '출석하기' }).first();
         if (await loc.isVisible()) {
             loc.click();
-            await sendTelegram('✅ 출석체크 완료!').catch(() => { });
+            await sendNotificationToChannel('✅ 출석체크 완료!').catch(() => { });
             return true;
         }
         await page.screenshot({ path: 'screenshot/dbg_tit_box.png', fullPage: true });
         const html = await page.locator('.tit_box').first().innerHTML();
         console.log('tit_box innerHTML:', html);
-        await sendTelegram('❗ 출석체-크 버튼을 찾지 못함!').catch(() => { });
+        await sendNotificationToChannel('❗ 출석체-크 버튼을 찾지 못함!').catch(() => { });
         return true;
     } catch (e) {
         console.error('attendance task error', e && e.stack ? e.stack : e);
-        await sendTelegram(`❗ 출석체크 작업 오류: ${e && e.message ? e.message : String(e)}`).catch(() => { });
+        await sendNotificationToChannel(`❗ 출석체크 작업 오류: ${e && e.message ? e.message : String(e)}`).catch(() => { });
         return false;
     }
 }
