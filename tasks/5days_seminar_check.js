@@ -1,4 +1,4 @@
-const { safeGoto, sendNotificationToChannel } = require('../modules/utils');
+const { safeGoto, sendTelegram } = require('../modules/utils');
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 
@@ -31,11 +31,11 @@ async function run({ page, context, env }) {
             message = '앞으로 5일간 예정된 세미나가 없습니다.';
         }
 
-        await sendNotificationToChannel(message);
+        await sendTelegram(message);
         return true;
     } catch (e) {
         console.error('5days seminar check task error', e && e.stack ? e.stack : e);
-        await sendNotificationToChannel(`❗ 5일 세미나 확인 작업 오류: ${e && e.message ? e.message : String(e)}`).catch(() => { });
+        await sendTelegram(`❗ 5일 세미나 확인 작업 오류: ${e && e.message ? e.message : String(e)}`).catch(() => { });
         return false;
     }
 }
