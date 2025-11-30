@@ -1,0 +1,8 @@
+const { monitorSeminars } = require('./monitor_seminars');
+
+async function run(context) {
+    //                      periodName, startHour, endHour
+    return monitorSeminars(context, '저녁', 17, 21);
+}
+
+module.exports = { run };
