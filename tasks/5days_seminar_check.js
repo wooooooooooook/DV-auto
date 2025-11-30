@@ -20,7 +20,7 @@ async function run({ page, context, env }) {
                 message += `[${seminarDay}]\n`;
                 for (const detail of seminarDetails) {
                     const time = await detail.locator('.txt_num.time').first().innerText();
-                    const title = await detail.locator('.list_tit').innerText();
+                    const title = await detail.locator('.list_tit .tit').innerText();
                     message += `${time} - ${title}\n`;
                 }
                 message += '\n';
