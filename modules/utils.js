@@ -162,6 +162,15 @@ async function safeGoto(page, url, options = {}, retries = 2) {
     }
 }
 
+async function ensureLoggedIn({ page, context, env }) {
+    const loginButtonCount = await page.locator(':text("로그인")').count();
+    if (loginButtonCount > 0) {
+        console.log('로그인이 필요합니다. login 태스크를 실행합니다.');
+        const loginTask = require('../tasks/login');
+        await loginTask.run({ page, context, env });
+    }
+}
+
 module.exports = {
     sendTelegram,
     saveCookies,
@@ -170,5 +179,6 @@ module.exports = {
     loadLocalStorage,
     safeGoto,
     sleep,
-    maskToken
+    maskToken,
+    ensureLoggedIn
 };

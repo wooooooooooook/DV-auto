@@ -41,11 +41,21 @@ const scheduledTask = {
 
         try {
             const env = { LOGIN_URL, TARGET_PAGE, DV_USER, DV_PASS };
-            const loggedIn = await loginTask.run({ page, context, env });
-            if (!loggedIn) throw new Error('login failed in scheduled daily_routine');
-            await attendanceTask.run({ page, context, env }).catch(() => { });
-            await applySeminarTask.run({ page, context, env }).catch(() => { });
-            await todaySeminarCheckTask.run({ page, context, env }).catch(() => { });
+            const tasks = [
+                { name: 'attendance', task: attendanceTask },
+                { name: 'apply_seminar', task: applySeminarTask },
+                { name: 'today_seminar_check', task: todaySeminarCheckTask }
+            ];
+
+            for (const { name, task } of tasks) {
+                try {
+                    await utils.ensureLoggedIn({ page, context, env });
+                    await task.run({ page, context, env });
+                } catch (err) {
+                    logger.error(`Error during ${name} task:`, err);
+                    await utils.sendTelegram(`daily_routine 중 ${name} 작업 실패: ${err.message}`).catch(() => {});
+                }
+            }
         } finally {
             try { await context.close(); } catch (e) { }
             try { await browser.close(); } catch (e) { }
