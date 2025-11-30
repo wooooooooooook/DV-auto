@@ -9,8 +9,10 @@ async function run({ page, context, env }) {
         const firstSeminar = await page.locator('.list_cont').nth(0);
         const seminarDay = await firstSeminar.locator('.seminar_day').innerText();
 
-        const today = new Date();
-        const todayString = `${today.getMonth() + 1}/${today.getDate()}`;
+        const now = new Date();
+        const month = now.toLocaleDateString('en-US', { month: 'numeric', timeZone: 'Asia/Seoul' });
+        const day = now.toLocaleDateString('en-US', { day: 'numeric', timeZone: 'Asia/Seoul' });
+        const todayString = `${month}/${day}`;
 
         if (seminarDay === todayString) {
             const seminarDetails = await firstSeminar.locator('.list_detail');
