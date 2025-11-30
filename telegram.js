@@ -59,6 +59,40 @@ bot.command('run_routine_now', async (ctx) => {
     }
 });
 
+bot.command('5days_seminar_check', async (ctx) => {
+    logger.info('User requested to run 5days_seminar_check now', { from: ctx.from.username });
+    const task = taskRegistry.getByName('5days_seminar_check');
+    if (!task) {
+        logger.error('5days_seminar_check task not found, cannot run');
+        return ctx.reply('5days_seminar_check task not found!');
+    }
+
+    try {
+        ctx.reply('5일간의 세미나를 확인합니다...');
+        await runner.runTask(task);
+        ctx.reply('세미나 확인이 완료되었습니다.');
+    } catch (e) {
+        ctx.reply(`세미나 확인 중 오류 발생: ${e && e.message ? e.message : e}`);
+    }
+});
+
+bot.command('today_seminar_check', async (ctx) => {
+    logger.info('User requested to run today_seminar_check now', { from: ctx.from.username });
+    const task = taskRegistry.getByName('today_seminar_check');
+    if (!task) {
+        logger.error('today_seminar_check task not found, cannot run');
+        return ctx.reply('today_seminar_check task not found!');
+    }
+
+    try {
+        ctx.reply('오늘의 세미나를 확인합니다...');
+        await runner.runTask(task);
+        ctx.reply('세미나 확인이 완료되었습니다.');
+    } catch (e) {
+        ctx.reply(`세미나 확인 중 오류 발생: ${e && e.message ? e.message : e}`);
+    }
+});
+
 bot.command('inspect', async (ctx) => {
     logger.info('User requested to inspect a page', { from: ctx.from.username });
     const args = ctx.message.text.split(' ').slice(1);
