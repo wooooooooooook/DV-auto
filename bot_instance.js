@@ -1,12 +1,17 @@
 
-let bot = null;
+const bots = {
+    admin: null,
+    notice: null,
+};
 
-function setBot(instance) {
-    bot = instance;
+function setBot(name, instance) {
+    if (bots.hasOwnProperty(name)) {
+        bots[name] = instance;
+    }
 }
 
-function getBot() {
-    return bot;
+function getBot(name) {
+    return bots[name] || null;
 }
 
 module.exports = {

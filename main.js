@@ -53,7 +53,7 @@ const scheduledTask = {
                     await task.run({ page, context, env });
                 } catch (err) {
                     logger.error(`Error during ${name} task:`, err);
-                    await utils.sendTelegram(`daily_routine 중 ${name} 작업 실패: ${err.message}`).catch(() => {});
+                    await utils.sendNotificationToChannel(`daily_routine 중 ${name} 작업 실패: ${err.message}`).catch(() => {});
                 }
             }
         } finally {

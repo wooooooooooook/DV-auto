@@ -1,4 +1,4 @@
-const { safeGoto, sendTelegram } = require('../modules/utils');
+const { safeGoto, sendNotificationToChannel } = require('../modules/utils');
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const BASE_URL = 'https://www.doctorville.co.kr';
@@ -52,7 +52,7 @@ async function monitorSeminars({ page, context, env }, periodName, startHour, en
     let monitoringList = {}; // href -> status
 
     try {
-        await sendTelegram(`[${periodName}] 세미나 감시를 시작합니다.`);
+        await sendNotificationToChannel(`[${periodName}] 세미나 감시를 시작합니다.`);
 
         // Initial population of the monitoring list
         await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'load', timeout: 30000 }, 1);
@@ -61,13 +61,13 @@ async function monitorSeminars({ page, context, env }, periodName, startHour, en
         for (const [url, { status }] of Object.entries(initialSeminars)) {
              monitoringList[url] = status;
              if (status === '입장가능' || status === '입장하기') {
-                await sendTelegram(`세미나 입장 가능합니다 ${url}`);
+                await sendNotificationToChannel(`세미나 입장 가능합니다 ${url}`);
                 delete monitoringList[url]; // Remove from monitoring
              }
         }
 
         if (Object.keys(monitoringList).length === 0) {
-            await sendTelegram(`[${periodName}] 감시할 세미나가 없습니다. 태스크를 종료합니다.`);
+            await sendNotificationToChannel(`[${periodName}] 감시할 세미나가 없습니다. 태스크를 종료합니다.`);
             return true;
         }
 
@@ -79,7 +79,7 @@ async function monitorSeminars({ page, context, env }, periodName, startHour, en
                 if (remainingSeminars.length > 0) {
                     let message = `[${periodName}] 모니터링 시간이 종료되었지만, 마치지 않은 세미나가 있습니다:\n`;
                     message += remainingSeminars.join('\n');
-                    await sendTelegram(message);
+                    await sendNotificationToChannel(message);
                 }
                 break;
             }
@@ -94,13 +94,13 @@ async function monitorSeminars({ page, context, env }, periodName, startHour, en
             for (const url of monitoredUrls) {
                 if (!currentSeminarsOnPage[url]) {
                     // Seminar disappeared from the list
-                    await sendTelegram(`세미나가 종료되었습니다. ${url}`);
+                    await sendNotificationToChannel(`세미나가 종료되었습니다. ${url}`);
                     delete monitoringList[url];
                 } else {
                     // Seminar still exists, check status
                     const newStatus = currentSeminarsOnPage[url].status;
                     if ((newStatus === '입장가능' || newStatus === '입장하기') && monitoringList[url] === '신청완료') {
-                         await sendTelegram(`세미나 입장 가능합니다 ${url}`);
+                         await sendNotificationToChannel(`세미나 입장 가능합니다 ${url}`);
                          delete monitoringList[url];
                     } else {
                          monitoringList[url] = newStatus; // Update status
@@ -109,12 +109,12 @@ async function monitorSeminars({ page, context, env }, periodName, startHour, en
             }
         }
 
-        await sendTelegram(`[${periodName}] 세미나 감시를 종료합니다.`);
+        await sendNotificationToChannel(`[${periodName}] 세미나 감시를 종료합니다.`);
         return true;
 
     } catch (e) {
         console.error(`[${periodName}] seminar monitoring task error`, e && e.stack ? e.stack : e);
-        await sendTelegram(`❗ [${periodName}] 세미나 감시 작업 오류: ${e && e.message ? e.message : String(e)}`).catch(() => {});
+        await sendNotificationToChannel(`❗ [${periodName}] 세미나 감시 작업 오류: ${e && e.message ? e.message : String(e)}`).catch(() => {});
         return false;
     }
 }

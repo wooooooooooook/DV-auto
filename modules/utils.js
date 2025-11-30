@@ -14,9 +14,9 @@ function maskToken(token) {
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function sendTelegram(text, imagePath = null) {
-    const bot = getBot();
+    const bot = getBot('admin');
     if (!bot) {
-        console.error('Bot is not initialized. Cannot send message.');
+        console.error('Admin bot is not initialized. Cannot send message.');
         return;
     }
 
@@ -171,8 +171,39 @@ async function ensureLoggedIn({ page, context, env }) {
     }
 }
 
+async function sendNotificationToChannel(text, imagePath = null) {
+    const bot = getBot('notice');
+    if (!bot) {
+        console.error('Notice bot is not initialized. Cannot send message.');
+        return;
+    }
+
+    const CHANNEL_ID = process.env.NOTICE_CHANNEL_ID;
+    if (!CHANNEL_ID) {
+        console.error('NOTICE_CHANNEL_ID is not set.');
+        return;
+    }
+
+    try {
+        if (imagePath) {
+            await bot.telegram.sendPhoto(CHANNEL_ID, { source: imagePath }, { caption: text, parse_mode: 'Markdown' });
+        } else {
+            await bot.telegram.sendMessage(CHANNEL_ID, text, { parse_mode: 'Markdown' });
+        }
+    } catch (error) {
+        console.error('Failed to send Telegram notification to channel:', error);
+        // Attempt to send a simplified failure notice
+        try {
+            await bot.telegram.sendMessage(CHANNEL_ID, `Failed to send a complex message. Error: ${error.message}`);
+        } catch (nestedError) {
+            console.error('Failed to send the failure notification as well:', nestedError);
+        }
+    }
+}
+
 module.exports = {
     sendTelegram,
+    sendNotificationToChannel,
     saveCookies,
     loadCookies,
     saveLocalStorage,
