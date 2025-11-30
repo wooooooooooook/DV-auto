@@ -114,6 +114,69 @@ const fiveDaysSeminarCheckTask = {
 };
 taskRegistry.registerTask(fiveDaysSeminarCheckTask);
 
+const monitorLunchSeminarsTask = {
+    name: 'monitor_lunch_seminars',
+    run: async () => {
+        const { chromium } = require('playwright');
+        const utils = require('./modules/utils');
+        const task = require('./tasks/monitor_lunch_seminars');
+        const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
+        const context = await browser.newContext();
+        const page = await context.newPage();
+        await utils.loadCookies(context).catch(err => logger.warn('Failed to load cookies', err));
+        await utils.loadLocalStorage(page, LOGIN_URL).catch(err => logger.warn('Failed to load local storage', err));
+        const env = { LOGIN_URL, TARGET_PAGE, DV_USER, DV_PASS };
+        try {
+            await utils.ensureLoggedIn({ page, context, env });
+            await task.run({ page, context, env });
+        } finally {
+            await browser.close();
+        }
+    }
+};
+taskRegistry.registerTask(monitorLunchSeminarsTask);
+
+const monitorDinnerSeminarsTask = {
+    name: 'monitor_dinner_seminars',
+    run: async () => {
+        const { chromium } = require('playwright');
+        const utils = require('./modules/utils');
+        const task = require('./tasks/monitor_dinner_seminars');
+        const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
+        const context = await browser.newContext();
+        const page = await context.newPage();
+        await utils.loadCookies(context).catch(err => logger.warn('Failed to load cookies', err));
+        await utils.loadLocalStorage(page, LOGIN_URL).catch(err => logger.warn('Failed to load local storage', err));
+        const env = { LOGIN_URL, TARGET_PAGE, DV_USER, DV_PASS };
+        try {
+            await utils.ensureLoggedIn({ page, context, env });
+            await task.run({ page, context, env });
+        } finally {
+            await browser.close();
+        }
+    }
+};
+taskRegistry.registerTask(monitorDinnerSeminarsTask);
+
+// Schedule the lunch monitoring task
+scheduler.scheduleTaskCron({
+    name: 'monitor_lunch_seminars',
+    schedule: '0 11 * * *', // Every day at 11:00
+    timezone: TIMEZONE,
+    run: monitorLunchSeminarsTask.run
+});
+logger.info('Scheduled `monitor_lunch_seminars` at 11:00 timezone=', TIMEZONE);
+
+// Schedule the dinner monitoring task
+scheduler.scheduleTaskCron({
+    name: 'monitor_dinner_seminars',
+    schedule: '0 17 * * *', // Every day at 17:00
+    timezone: TIMEZONE,
+    run: monitorDinnerSeminarsTask.run
+});
+logger.info('Scheduled `monitor_dinner_seminars` at 17:00 timezone=', TIMEZONE);
+
+
 // Guidance: to add more scheduled jobs, create more task objects like `scheduledTask` above
 // and call `scheduler.scheduleTaskCron(yourTask)`. Tasks should export `run` async function or be
 // objects with `name`, `schedule`, `timezone`, and `run`.
