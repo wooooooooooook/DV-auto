@@ -27,6 +27,7 @@ const scheduledTask = {
         const loginTask = require('./tasks/login');
         const attendanceTask = require('./tasks/attendance');
         const applySeminarTask = require('./tasks/apply_seminar');
+        const todaySeminarCheckTask = require('./tasks/today_seminar_check');
 
         logger.info('daily_routine: launching browser to perform daily tasks');
         const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
@@ -44,6 +45,7 @@ const scheduledTask = {
             if (!loggedIn) throw new Error('login failed in scheduled daily_routine');
             await attendanceTask.run({ page, context, env }).catch(() => { });
             await applySeminarTask.run({ page, context, env }).catch(() => { });
+            await todaySeminarCheckTask.run({ page, context, env }).catch(() => { });
         } finally {
             try { await context.close(); } catch (e) { }
             try { await browser.close(); } catch (e) { }
