@@ -23,6 +23,7 @@ const scheduledTask = {
         const attendanceTask = require('./tasks/attendance');
         const applySeminarTask = require('./tasks/apply_seminar');
         const todaySeminarCheckTask = require('./tasks/today_seminar_check');
+        const todayQuizTask = require('./tasks/today_quiz');
 
         logger.info('daily_routine: launching browser to perform daily tasks');
         const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
@@ -35,7 +36,8 @@ const scheduledTask = {
             const tasks = [
                 { name: 'attendance', task: attendanceTask },
                 { name: 'apply_seminar', task: applySeminarTask },
-                { name: 'today_seminar_check', task: todaySeminarCheckTask }
+                { name: 'today_seminar_check', task: todaySeminarCheckTask },
+                { name: 'today_quiz', task: todayQuizTask }
             ];
 
             for (const { name, task } of tasks) {
