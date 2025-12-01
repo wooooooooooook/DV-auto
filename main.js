@@ -196,12 +196,12 @@ const broadcastTodayLinksTask = {
         const utils = require('./modules/utils');
         const task = require('./tasks/today_links');
         const { chromium } = require('playwright');
-        
+
         logger.info('broadcast_today_links_daily: running scheduled task');
         const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
         const context = await browser.newContext();
         const page = await context.newPage();
-        
+
         try {
             await utils.ensureLoggedIn({ page, context });
             const result = await task.run({ page, context });
@@ -216,11 +216,11 @@ const broadcastTodayLinksTask = {
         } catch (e) {
             logger.error('broadcast_today_links_daily: scheduled task failed', e && e.stack ? e.stack : e);
             // Notify admin of failure
-            await utils.sendTelegram(`❗ Daily link broadcast failed: ${e.message}`).catch(()=>{});
-            return { success: false, message: `Broadcast failed: ${e.message}`};
+            await utils.sendTelegram(`❗ Daily link broadcast failed: ${e.message}`).catch(() => { });
+            return { success: false, message: `Broadcast failed: ${e.message}` };
         } finally {
-            try { await context.close(); } catch(e) {}
-            try { await browser.close(); } catch(e) {}
+            try { await context.close(); } catch (e) { }
+            try { await browser.close(); } catch (e) { }
         }
     }
 };
