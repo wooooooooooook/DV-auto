@@ -164,6 +164,12 @@ async function safeGoto(page, url, options = {}, retries = 2) {
 
 const LOGIN_URL = "https://mims-account.mcircle.co.kr/login?cb=https://www.doctorville.co.kr/mims/directLogin";
 async function ensureLoggedIn({ page, context }) {
+    // If the current page is blank, navigate to LOGIN_URL first.
+    if (page.url() === 'about:blank' || !page.url()) {
+        console.log('Current page is blank or empty, navigating to LOGIN_URL for login check.');
+        await safeGoto(page, LOGIN_URL);
+    }
+
     // Try restoring session state first
     try {
         await loadCookies(context).catch(() => { });

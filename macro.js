@@ -24,6 +24,8 @@ async function main() {
     const TELEGRAM_ENABLED = process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID;
     if (!TELEGRAM_ENABLED) {
         console.warn('macro.js: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set. Telegram notifications will be skipped.');
+    } else {
+        console.log('macro.js: Telegram notifications are enabled.');
     }
 
     const HEADLESS = (process.env.HEADLESS || 'true').toLowerCase() === 'true';
@@ -49,8 +51,14 @@ async function main() {
             try {
                 console.log(`macro.js: Running ${name} task.`);
                 await utils.ensureLoggedIn({ page, context });
-                await task.run({ page, context });
-                console.log(`macro.js: ${name} task completed successfully.`);
+                const taskResult = await task.run({ page, context }); // Capture the result
+                if (taskResult && taskResult.message && TELEGRAM_ENABLED) {
+                    await utils.sendTelegram(taskResult.message, taskResult.imagePath).catch(sendErr => {
+                        console.error(`macro.js: Failed to send Telegram message for ${name} task result:`, sendErr);
+                    });
+                } else {
+                    console.log(`macro.js: ${name} task completed successfully.`);
+                }
             } catch (err) {
                 console.error(`macro.js: Error during ${name} task:`, err);
                 if (TELEGRAM_ENABLED) {

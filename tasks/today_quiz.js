@@ -58,7 +58,7 @@ async function run({ page, context }) {
         const pop = page.locator('#quizLayerPop');
         const visible = await pop.isVisible().catch(() => false);
         if (!visible) {
-            return { success: false, message: '퀴즈 팝업이 열리지 않았습니다. 수동 확인이 필요합니다. ' + href };
+            return { success: false, message: '퀴즈 팝업이 열리지 않았습니다. 직접 퀴즈를 풀어주세요. ' + href };
         }
 
         // Get product title
@@ -67,7 +67,7 @@ async function run({ page, context }) {
         const productTitle = titleCount ? (await titleElem.first().innerText()).trim() : '';
 
         if (!productTitle) {
-            return { success: false, message: '제품 제목을 찾을 수 없습니다. 수동 확인: ' + href };
+            return { success: false, message: '제품 제목을 찾을 수 없습니다. 직접 퀴즈를 풀어주세요. ' + href };
         }
 
         // Load mapping from data/quiz.json
@@ -80,7 +80,7 @@ async function run({ page, context }) {
 
         const answers = mapping[productTitle];
         if (!answers || !Array.isArray(answers) || answers.length === 0) {
-            return { success: true, message: `정답이 등록되지 않았습니다. 직접 풀어주세요. ${href}` };
+            return { success: true, message: `정답이 등록되지 않았습니다. 직접 퀴즈를 풀어주세요. ${href}` };
         }
 
         // Click the labels based on mapping
@@ -117,7 +117,7 @@ async function run({ page, context }) {
                     } catch (e) {
                         // ignore screenshot errors
                     }
-                    return { success: true, message: `오늘의 퀴즈 제출 후 팝업이 표시되었습니다. (제품: ${productTitle}), ${href}`, imagePath: shot };
+                    return { success: true, message: `오늘의 퀴즈를 제출했습니다. (제품: ${productTitle}), ${href}`, imagePath: shot };
                 } else {
                     return { success: true, message: `오늘의 퀴즈를 제출했습니다. (제품: ${productTitle}), ${href}` };
                 }

@@ -15,13 +15,24 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '18'
+          node-version: '20'
 
       - name: Install dependencies
         run: npm install
 
+      - name: Cache Playwright Browsers
+        id: cache-playwright-browsers
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('**/package-lock.json') }}-${{ matrix.node-version }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-${{ hashFiles('**/package-lock.json') }}
+            ${{ runner.os }}-playwright-
+
       - name: Install Playwright Browsers
         run: npx playwright install --with-deps
+
 
       - name: Run macro.js
         run: node macro.js
@@ -30,8 +41,3 @@ jobs:
           DV_PASS: ${{ secrets.DV_PASS }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          NOTICE_BOT_TOKEN: ${{ secrets.NOTICE_BOT_TOKEN }}
-          NOTICE_CHANNEL_ID: ${{ secrets.NOTICE_CHANNEL_ID }}
-          HEADLESS: ${{ secrets.HEADLESS || 'true' }}
-          DAILY_CRON: ${{ secrets.DAILY_CRON || '0 0 13 * * *' }}
-          SCHEDULE_TZ: ${{ secrets.SCHEDULE_TZ || 'Asia/Seoul' }}

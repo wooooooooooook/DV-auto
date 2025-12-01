@@ -43,7 +43,10 @@ const scheduledTask = {
             for (const { name, task } of tasks) {
                 try {
                     await utils.ensureLoggedIn({ page, context });
-                    await task.run({ page, context });
+                    const taskResult = await task.run({ page, context }); // Capture the result
+                    if (taskResult && taskResult.message) {
+                        await utils.sendTelegram(taskResult.message, taskResult.imagePath).catch((e) => logger.error(`Failed to send Telegram message for ${name} task result:`, e));
+                    }
                 } catch (err) {
                     logger.error(`Error during ${name} task:`, err);
                     await utils.sendTelegram(`daily_routine 중 ${name} 작업 실패: ${err.message}`).catch(() => { });

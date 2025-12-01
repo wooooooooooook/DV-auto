@@ -1,4 +1,3 @@
-
 const { Telegraf } = require('telegraf');
 const fs = require('fs/promises');
 const https = require('https');
