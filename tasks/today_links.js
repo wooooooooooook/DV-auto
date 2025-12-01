@@ -1,8 +1,11 @@
-const { safeGoto } = require('../modules/utils');
+const { safeGoto, getSeminarIdFromUrl } = require('../modules/utils');
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const QUIZ_LIST_URL = 'https://www.doctorville.co.kr/product/medicineList';
 const BASE = 'https://www.doctorville.co.kr';
+
+const BASE_URL = 'https://www.doctorville.co.kr/'
+const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/'
 
 async function collectSeminarLinks(page) {
     try {
@@ -42,10 +45,17 @@ async function collectSeminarLinks(page) {
                         return null;
                     }, titleHandle).catch(() => null);
                 }
-                
+
                 if (href) {
                     const full = href.startsWith('http') ? href : (BASE + href);
-                    links.push({ title: title.trim(), url: full });
+                    const seminarId = getSeminarIdFromUrl(full);
+                    let seminarLink = '';
+                    if (seminarId) {
+                        seminarLink = `${SEMINAR_DETAIL_PAGE}${seminarId}`;
+                    } else {
+                        seminarLink = full; // Fallback to original full URL if ID not found
+                    }
+                    links.push({ title: title.trim(), url: seminarLink });
                 }
             }
         }
@@ -88,21 +98,18 @@ async function run({ page, context }) {
         const seminarLinks = await collectSeminarLinks(page);
         const quizLink = await collectQuizLink(page);
 
-        let message = '';
+        let message = '✨ 출석체크: https://m.doctorville.co.kr/mypage/attendance\n';
+
+        message += `✨ 오늘의 퀴즈 링크:\n${(quizLink) ? quizLink : '오늘은 퀴즈가 없습니다.'}\n`;
+
+        message += '\n';
         if (seminarLinks && seminarLinks.length > 0) {
-            message += `오늘의 세미나 (${seminarLinks.length}):\n`;
+            message += `✨ 오늘의 세미나 (${seminarLinks.length}):\n`;
             seminarLinks.forEach((s, i) => {
                 message += `${i + 1}. ${s.title}\n${s.url}\n`;
             });
         } else {
-            message += '오늘의 세미나가 없습니다.\n';
-        }
-
-        message += '\n';
-        if (quizLink) {
-            message += `오늘의 퀴즈 링크:\n${quizLink}\n`;
-        } else {
-            message += '오늘의 퀴즈 링크가 없습니다.\n';
+            message += '✨ 오늘은 세미나가 없습니다.\n';
         }
 
         return { success: true, message };
