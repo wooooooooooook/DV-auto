@@ -110,25 +110,30 @@ async function run({ page, context }) {
                 await page.waitForTimeout(500);
 
                 const popupVisible = await page.locator('#modalType2').isVisible().catch(() => false);
+                const shot = 'screenshot/today_quiz_result.png';
+                try {
+                    await page.screenshot({ path: shot });
+                } catch (e) {
+                    // ignore screenshot errors
+                }
                 if (popupVisible) {
-                    const shot = 'screenshot/today_quiz_result.png';
-                    try {
-                        await page.screenshot({ path: shot });
-                    } catch (e) {
-                        // ignore screenshot errors
-                    }
                     return { success: true, message: `오늘의 퀴즈를 제출했습니다. (제품: ${productTitle}), ${href}`, imagePath: shot };
                 } else {
-                    return { success: true, message: `오늘의 퀴즈를 제출했습니다. (제품: ${productTitle}), ${href}` };
+                    return { success: true, message: `오늘의 퀴즈를 제출했습니다. (제품: ${productTitle}), ${href}`, imagePath: shot };
                 }
             } catch (e) {
                 // fallback to other selectors below
                 submitted = false;
             }
         }
-
+        const shot = 'screenshot/today_quiz_result.png';
+        try {
+            await page.screenshot({ path: shot });
+        } catch (e) {
+            // ignore screenshot errors
+        }
         // Fallback
-        return { success: false, message: `퀴즈 제출을 실패했습니다. (제품: ${productTitle}), ${href}` };
+        return { success: false, message: `퀴즈 제출을 실패했습니다. (제품: ${productTitle}), ${href}`, imagePath: shot };
     } catch (e) {
         console.error('today_quiz task error', e && e.stack ? e.stack : e);
         await sendTelegram(`❗ 오늘의 퀴즈 작업 오류: ${e && e.message ? e.message : String(e)}`).catch(() => { });
