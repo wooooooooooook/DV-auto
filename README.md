@@ -8,6 +8,7 @@
 -   출석 체크 자동화
 -   새로운 세미나 자동 신청
 -   오늘의 세미나 목록 확인 및 텔레그램 알림
+-   오늘의 브랜드 퀴즈 알림
 
 ## 🚀 권장 설정: GitHub Actions를 이용한 자동화
 
@@ -30,7 +31,6 @@
     *   `DV_PASS`: 닥터빌 로그인 비밀번호 (필수)
     *   `TELEGRAM_BOT_TOKEN`: 텔레그램 봇 토큰 (선택 사항)
     *   `TELEGRAM_CHAT_ID`: 텔레그램 알림을 받을 채팅 ID (선택 사항)
-    *   `HEADLESS`: (선택 사항) `true` 또는 `false`. 브라우저를 화면 없이 실행할지 여부를 설정합니다. 기본값은 `true`.
 
     **⚠️ 중요:** `DV_USER`와 `DV_PASS`는 반드시 설정해야 합니다. 텔레그램 알림 기능을 사용하려면 `TELEGRAM_BOT_TOKEN`과 `TELEGRAM_CHAT_ID`를 함께 설정해야 합니다. 텔레그램 봇 토큰 및 채팅 ID를 얻는 방법은 아래 "텔레그램 봇 및 채팅 ID 설정 (선택 사항)" 섹션을 참고하세요.
 
@@ -55,8 +55,12 @@ Secrets 설정이 완료되면, GitHub Actions 워크플로우가 자동으로 �
     *   생성이 완료되면, BotFather가 **API 토큰**을 알려줍니다. 이 토큰을 복사하여 `TELEGRAM_BOT_TOKEN` Secret 값으로 사용합니다.
 
 2.  **텔레그램 채팅 ID 확인:**
-    *   텔레그램에서 **[@get_id_bot](https://t.me/get_id_bot)**을 검색하여 대화를 시작합니다.
-    *   `/start` 명령어를 입력하면, 봇이 당신의 **채팅 ID**를 알려줍니다. 이 ID를 복사하여 `TELEGRAM_CHAT_ID` Secret 값으로 사용합니다.
+    *   **BotFather**를 통해 발급받은 봇(`TELEGRAM_BOT_TOKEN`으로 설정할 봇)에게 메시지(아무 내용이나 가능)를 보냅니다.
+    *   웹 브라우저에서 다음 URL에 접속합니다 (YOUR_BOT_TOKEN 부분에 발급받은 봇 토큰을 입력):
+        `https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getUpdates`
+    *   접속 후 나타나는 JSON 응답에서 `result` 배열을 찾습니다. 그 안에 있는 `chat` 객체에서 `id` 값을 찾습니다. 이 `id` 값이 당신의 채팅 ID입니다.
+    *   예시: `{"ok":true,"result":[{"update_id":...,"message":{"message_id":...,"from":{...},"chat":{"id":123456789,"first_name":...` 여기서 `123456789`가 채팅 ID입니다.
+    *   이 ID를 복사하여 `TELEGRAM_CHAT_ID` Secret 값으로 사용합니다.
 
 ---
 
