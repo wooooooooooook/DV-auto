@@ -46,12 +46,12 @@ The primary purpose of this tool is to automate daily routines on the Doctorvill
     cp .env.example .env
     ```
 2.  Edit the `.env` file and provide the necessary values for:
-    *   `ID`: Your Doctorville username.
-    *   `PASS`: Your Doctorville password.
+    *   `DV_USER`: Your Doctorville username.
+    *   `DV_PASS`: Your Doctorville password.
     *   `TELEGRAM_BOT_TOKEN`: Your admin Telegram bot token.
+    *   `TELEGRAM_CHAT_ID`: The chat ID for admin notifications.
     *   `NOTICE_BOT_TOKEN`: Your notice Telegram bot token.
-    *   `ADMIN_CHAT_ID`: The chat ID for admin notifications.
-    *   `NOTICE_CHAT_ID`: The chat ID for public notifications.
+    *   `NOTICE_CHANNEL_ID`: The chat ID for public notifications.
     *   Other optional variables like `HEADLESS`, `DAILY_CRON`, `SCHEDULE_TZ`.
 
 ### Running the Application
