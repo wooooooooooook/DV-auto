@@ -55,7 +55,7 @@ async function main() {
             { name: 'today_seminar_check', task: todaySeminarCheckTask },
             { name: 'today_quiz', task: todayQuizTask }
         ];
-
+        await utils.sendTelegram('🕗 데일리 루틴 작업을 시작합니다.(출석체크, 세미나등록, 브랜드퀴즈)').catch(() => { });
         for (const { name, task } of tasks) {
             try {
                 console.log(`macro.js: Running ${name} task.`);
@@ -88,6 +88,7 @@ async function main() {
             });
         }
     } finally {
+        await utils.sendTelegram('🕗 데일리 루틴 작업이 종료되었습니다.').catch(() => { });
         if (context) {
             try { await context.close(); } catch (e) { console.error('macro.js: Error closing context:', e); }
         }

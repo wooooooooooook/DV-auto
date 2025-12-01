@@ -1,17 +1,4 @@
-const { sendNotificationToChannel, safeGoto } = require('../modules/utils');
-const storage = require('../storage');
-
-const KEY = 'key_messages';
-
-function getSeminarIdFromUrl(url) {
-    try {
-        const urlObj = new URL(url);
-        return urlObj.searchParams.get('seminarId');
-    } catch (e) {
-        console.error('Failed to extract seminarId from URL:', url, e);
-        return null;
-    }
-}
+const { sendNotificationToChannel, safeGoto, getSeminarIdFromUrl } = require('../modules/utils');
 
 async function getKeyMessages(page) {
     const messages = await page.locator('.key_message .txt').allInnerTexts();

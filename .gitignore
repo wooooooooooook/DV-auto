@@ -1,6 +1,6 @@
 .env
 node_modules/
 screenshot/
-data/
+data/state.json
 cookies.json
 localstorage.json

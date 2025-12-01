@@ -226,5 +226,16 @@ module.exports = {
     safeGoto,
     sleep,
     maskToken,
-    ensureLoggedIn
+    ensureLoggedIn,
+    getSeminarIdFromUrl
 };
+
+function getSeminarIdFromUrl(url) {
+    try {
+        const urlObj = new URL(url);
+        return urlObj.searchParams.get('seminarId');
+    } catch (e) {
+        console.error('Failed to extract seminarId from URL:', url, e);
+        return null;
+    }
+}

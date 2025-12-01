@@ -1,6 +1,8 @@
-const { safeGoto, sendTelegram } = require('../modules/utils');
+const { safeGoto, sendTelegram, getSeminarIdFromUrl } = require('../modules/utils');
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
+const BASE_URL = 'https://www.doctorville.co.kr/'
+const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/'
 
 async function run({ page, context }) {
     try {
@@ -32,8 +34,16 @@ async function run({ page, context }) {
                 const time = timeRaw.replace(/\n/g, '').trim();
                 const title = await detail.locator('.list_tit .tit').innerText();
                 const classAttr = (await timeElem.getAttribute('class')) || '';
-
-                const seminarInfo = `　${time}. ${title}`;
+                const href = await detail.getAttribute('href');
+                const fullUrl = new URL(href, BASE_URL).toString();
+                const seminarId = getSeminarIdFromUrl(fullUrl);
+                let seminarLink = '';
+                if (seminarId) {
+                    seminarLink = `${SEMINAR_DETAIL_PAGE}${seminarId}`;
+                } else {
+                    seminarLink = fullUrl; // Fallback to original full URL if ID not found
+                }
+                const seminarInfo = `　${time}. ${title} ${seminarLink}`;
 
                 // If the time element has the `night_time` class treat as dinner, otherwise lunch
                 if (classAttr.includes('night_time')) {
@@ -45,7 +55,7 @@ async function run({ page, context }) {
         }
 
         if (lunchSeminars.length > 0 || dinnerSeminars.length > 0) {
-            let message = `오늘 점심 ${lunchSeminars.length}개, 저녁 ${dinnerSeminars.length}개의 세미나가 있습니다.\n`;
+            let message = `오늘의 세미나 리스트: 점심 ${lunchSeminars.length}개, 저녁 ${dinnerSeminars.length}개\n`;
 
             if (lunchSeminars.length > 0) {
                 message += `\n🍴[점심 세미나]\n`;
@@ -59,7 +69,7 @@ async function run({ page, context }) {
             return { success: true, message };
         }
         else {
-            return { success: true, message: '오늘은 세미나가 없습니다.' };
+            return { success: true, message: '오늘의 세미나 리스트: 오늘은 세미나가 없습니다.' };
         }
     } catch (e) {
         console.error('seminar check task error', e && e.stack ? e.stack : e);

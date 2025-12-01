@@ -1,6 +1,8 @@
-const { safeGoto, sendTelegram } = require('../modules/utils');
+const { safeGoto, sendTelegram, getSeminarIdFromUrl } = require('../modules/utils');
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
+const BASE_URL = 'https://www.doctorville.co.kr/'
+const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/'
 
 async function run({ page, context }) {
     try {
@@ -26,7 +28,16 @@ async function run({ page, context }) {
                     const time = timeRaw.replace(/\n/g, '').trim();
                     const title = await detail.locator('.list_tit .tit').innerText();
                     const classAttr = (await timeElem.getAttribute('class')) || '';
-                    const seminarInfo = `　${time} - ${title}`;
+                    const href = await detail.getAttribute('href');
+                    const fullUrl = new URL(href, BASE_URL).toString();
+                    const seminarId = getSeminarIdFromUrl(fullUrl);
+                    let seminarLink = '';
+                    if (seminarId) {
+                        seminarLink = `${SEMINAR_DETAIL_PAGE}${seminarId}`;
+                    } else {
+                        seminarLink = fullUrl; // Fallback to original full URL if ID not found
+                    }
+                    const seminarInfo = `　${time}. ${title} ${seminarLink}`;
 
                     if (classAttr.includes('night_time')) {
                         dinnerSeminars.push(seminarInfo);
