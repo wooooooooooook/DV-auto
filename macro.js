@@ -5,6 +5,7 @@ const utils = require('./modules/utils'); // Assuming utils.js has sendTelegram 
 const attendanceTask = require('./tasks/attendance');
 const applySeminarTask = require('./tasks/apply_seminar');
 const todaySeminarCheckTask = require('./tasks/today_seminar_check');
+const todayQuizTask = require('./tasks/today_quiz');
 
 async function main() {
     console.log('macro.js: Starting daily routine.');
@@ -40,7 +41,8 @@ async function main() {
         const tasks = [
             { name: 'attendance', task: attendanceTask },
             { name: 'apply_seminar', task: applySeminarTask },
-            { name: 'today_seminar_check', task: todaySeminarCheckTask }
+            { name: 'today_seminar_check', task: todaySeminarCheckTask },
+            { name: 'today_quiz', task: todayQuizTask }
         ];
 
         for (const { name, task } of tasks) {
