@@ -119,7 +119,7 @@ if (adminBot) {
             logger.error('today_links task not found, cannot run broadcast');
             return ctx.reply('today_links task not found!');
         }
-    
+
         try {
             await ctx.reply('Running today_links and broadcasting to channel...');
             const result = await runner.runTask(task);
@@ -147,6 +147,7 @@ if (adminBot) {
 - /5days_seminar_check: 향후 5일간의 세미나 일정을 확인합니다.
 - /today_seminar_check: 오늘의 세미나를 확인합니다.
 - /today_links: 오늘의 세미나 링크들과 오늘의 퀴즈 링크를 가져옵니다.
+- /broadcast_today_links: 오늘의 링크를 채널에 공지합니다.
 
 명령어 사용 예: /inspect https://example.com "div.article"`;
         ctx.reply(message);

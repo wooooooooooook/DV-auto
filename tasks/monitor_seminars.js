@@ -1,4 +1,5 @@
 const { safeGoto, sendNotificationToChannel } = require('../modules/utils');
+const keyMessageMonitor = require('./monitor_key_messages');
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const BASE_URL = 'https://www.doctorville.co.kr';
@@ -11,7 +12,7 @@ const randomDelay = () => {
 
 // Helper function to get today's seminars within a specific time range
 async function getTodaysSeminars(page, startHour, endHour) {
-    const seminars = {}; // href -> { status }
+    const seminars = {}; // href -> { status, name }
 
     const listConts = await page.locator('.list_cont');
     const count = await listConts.count();
@@ -39,7 +40,8 @@ async function getTodaysSeminars(page, startHour, endHour) {
                     const fullUrl = `${BASE_URL}${href}`;
                     const statusElement = detail.locator('.progress .ico_box');
                     const statusText = await statusElement.count() > 0 ? await statusElement.innerText() : '상태없음';
-                    seminars[fullUrl] = { status: statusText };
+                    const seminarName = await detail.locator('strong').first().innerText();
+                    seminars[fullUrl] = { status: statusText, name: seminarName };
                 }
             }
             break; // Found today's seminars, no need to check other containers
@@ -49,7 +51,7 @@ async function getTodaysSeminars(page, startHour, endHour) {
 }
 
 async function monitorSeminars({ page, context }, periodName, startHour, endHour) {
-    let monitoringList = {}; // href -> status
+    let monitoringList = {}; // href -> {status, name}
 
     try {
         // await sendNotificationToChannel(`[${periodName}] 세미나 감시를 시작합니다.`);
@@ -58,11 +60,15 @@ async function monitorSeminars({ page, context }, periodName, startHour, endHour
         await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'load', timeout: 30000 }, 1);
 
         const initialSeminars = await getTodaysSeminars(page, startHour, endHour);
-        for (const [url, { status }] of Object.entries(initialSeminars)) {
-            monitoringList[url] = status;
+        for (const [url, { status, name }] of Object.entries(initialSeminars)) {
             if (status === '입장가능' || status === '입장하기') {
-                await sendNotificationToChannel(`세미나 입장 가능합니다 ${url}`);
-                delete monitoringList[url]; // Remove from monitoring
+                console.log(`[${periodName}] Seminar already available: ${name}. Starting key message monitor.`);
+                const newPage = await context.newPage();
+                // Do not await, let it run in the background
+                keyMessageMonitor.monitor({ page: newPage, context }, url, name)
+                    .catch(e => console.error(`Key message monitor failed for ${name}`, e));
+            } else {
+                monitoringList[url] = { status, name };
             }
         }
 
@@ -75,7 +81,7 @@ async function monitorSeminars({ page, context }, periodName, startHour, endHour
         while (Object.keys(monitoringList).length > 0) {
             const currentTime = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
             if (currentTime.getHours() >= endHour) {
-                const remainingSeminars = Object.keys(monitoringList);
+                const remainingSeminars = Object.values(monitoringList).map(s => s.name);
                 if (remainingSeminars.length > 0) {
                     let message = `[${periodName}] 모니터링 시간이 종료되었지만, 마치지 않은 세미나가 있습니다:\n`;
                     message += remainingSeminars.join('\n');
@@ -92,18 +98,29 @@ async function monitorSeminars({ page, context }, periodName, startHour, endHour
 
             const monitoredUrls = [...Object.keys(monitoringList)]; // Create a copy to iterate over
             for (const url of monitoredUrls) {
+                const monitoredInfo = monitoringList[url];
+                if (!monitoredInfo) continue;
+
                 if (!currentSeminarsOnPage[url]) {
                     // Seminar disappeared from the list
-                    await sendNotificationToChannel(`세미나가 종료되었습니다. ${url}`);
+                    await sendNotificationToChannel(`[${monitoredInfo.name}] 세미나가 목록에서 사라졌습니다.`);
                     delete monitoringList[url];
                 } else {
                     // Seminar still exists, check status
-                    const newStatus = currentSeminarsOnPage[url].status;
-                    if ((newStatus === '입장가능' || newStatus === '입장하기') && monitoringList[url] === '신청완료') {
-                        await sendNotificationToChannel(`세미나 입장 가능합니다 ${url}`);
+                    const { status: newStatus, name: newName } = currentSeminarsOnPage[url];
+                    if ((newStatus === '입장가능' || newStatus === '입장하기') && monitoredInfo.status === '신청완료') {
+                        console.log(`[${periodName}] Seminar ready for entry: ${newName}. Starting key message monitor.`);
+                        await sendNotificationToChannel(`[${newName}] 세미나 입장이 시작되었습니다. 키 메시지 모니터링을 시작합니다.`);
+
+                        const newPage = await context.newPage();
+                        // Do not await, let it run in the background
+                        keyMessageMonitor.monitor({ page: newPage, context }, url, newName)
+                            .catch(e => console.error(`Key message monitor failed for ${newName}`, e));
+
                         delete monitoringList[url];
                     } else {
-                        monitoringList[url] = newStatus; // Update status
+                        // Update status and name just in case
+                        monitoringList[url] = { status: newStatus, name: newName };
                     }
                 }
             }
@@ -118,5 +135,6 @@ async function monitorSeminars({ page, context }, periodName, startHour, endHour
         return false;
     }
 }
+
 
 module.exports = { monitorSeminars };
