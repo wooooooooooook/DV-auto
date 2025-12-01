@@ -43,7 +43,7 @@ async function run({ page, context }) {
         // Click the banner button to open the quiz popup
         const btn = page.locator('#btn_quiz_banner');
         if ((await btn.count()) > 0) {
-            if (await page.locator('#btn_quiz_banner .ico_finish').count() > 0) {
+            if (await btn.first().isDisabled()) {
                 return { success: true, message: '오늘의 퀴즈는 이미 완료되었습니다. ' + href };
             }
             await btn.first().click().catch(() => { });
