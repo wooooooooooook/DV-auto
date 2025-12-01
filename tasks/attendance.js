@@ -16,19 +16,19 @@ async function run({ page, context }) {
         if (checkedCount > 0) {
             const loc = page.locator('.tit_box button.complete', { hasText: '출석완료' }).first();
             if (await loc.isVisible()) {
-                await page.screenshot({ path: screenshotPath, fullPage: true });
-                return { success: true, message: '이미 출석체크되어있습니다.', imagePath: screenshotPath };
+                await page.screenshot({ path: screenshotPath, fullPage: false });
+                return { success: true, message: '출석체크: 이미 출석체크되어있습니다.', imagePath: screenshotPath };
             }
         }
         const loc = await page.locator('.tit_box button.point_down', { hasText: '출석하기' }).first();
         if (await loc.isVisible()) {
             await loc.click();
-            await page.screenshot({ path: screenshotPath, fullPage: true });
+            await page.screenshot({ path: screenshotPath, fullPage: false });
             return { success: true, message: '출석체크 완료!', imagePath: screenshotPath };
         }
 
         // If neither '출석완료' nor '출석하기' is found
-        await page.screenshot({ path: screenshotPath, fullPage: true }); // Capture state when buttons are not found
+        await page.screenshot({ path: screenshotPath, fullPage: false }); // Capture state when buttons are not found
         const html = await page.locator('.tit_box').first().innerHTML();
         console.log('tit_box innerHTML:', html);
         return { success: false, message: '출석체크 버튼을 찾지 못함!', imagePath: screenshotPath };
@@ -39,7 +39,7 @@ async function run({ page, context }) {
             const baseScreenshotDir = path.join(__dirname, '..', 'screenshot');
             await fs.mkdir(baseScreenshotDir, { recursive: true });
             screenshotPath = path.join(baseScreenshotDir, `attendance_error.png`);
-            await page.screenshot({ path: screenshotPath, fullPage: true }).catch(err => console.error('Failed to capture error screenshot:', err));
+            await page.screenshot({ path: screenshotPath, fullPage: false }).catch(err => console.error('Failed to capture error screenshot:', err));
         }
         await sendTelegram(`❗ 출석체크 작업 오류: ${e && e.message ? e.message : String(e)}`, screenshotPath).catch(() => { });
         return { success: false, message: `출석체크 작업 오류: ${e && e.message ? e.message : String(e)}`, imagePath: screenshotPath };

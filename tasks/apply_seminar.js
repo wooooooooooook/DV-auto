@@ -49,7 +49,7 @@ async function run({ page, context }) {
         const baseScreenshotDir = path.join(__dirname, '..', 'screenshot');
         await fs.mkdir(baseScreenshotDir, { recursive: true });
         screenshotPath = path.join(baseScreenshotDir, `apply_seminar_result.png`);
-        await page.screenshot({ path: screenshotPath, fullPage: true });
+        await page.screenshot({ path: screenshotPath, fullPage: false });
 
         return { success: true, message: message, imagePath: screenshotPath };
     } catch (e) {
@@ -58,7 +58,7 @@ async function run({ page, context }) {
             const baseScreenshotDir = path.join(__dirname, '..', 'screenshot');
             await fs.mkdir(baseScreenshotDir, { recursive: true });
             screenshotPath = path.join(baseScreenshotDir, `apply_seminar_error.png`);
-            await page.screenshot({ path: screenshotPath, fullPage: true }).catch(err => console.error('Failed to capture error screenshot:', err));
+            await page.screenshot({ path: screenshotPath, fullPage: false }).catch(err => console.error('Failed to capture error screenshot:', err));
         }
         await sendTelegram(`❗ 세미나 신청 작업 오류: ${e && e.message ? e.message : String(e)}`, screenshotPath).catch(() => { });
         return { success: false, message: `세미나 신청 작업 오류: ${e && e.message ? e.message : String(e)}`, imagePath: screenshotPath };
