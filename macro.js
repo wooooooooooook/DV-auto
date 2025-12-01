@@ -6,6 +6,7 @@ const attendanceTask = require('./tasks/attendance');
 const applySeminarTask = require('./tasks/apply_seminar');
 const todaySeminarCheckTask = require('./tasks/today_seminar_check');
 const todayQuizTask = require('./tasks/today_quiz');
+const telegram = require('./telegram'); // Import telegram module
 
 async function main() {
     console.log('macro.js: Starting daily routine.');
@@ -26,6 +27,14 @@ async function main() {
         console.warn('macro.js: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set. Telegram notifications will be skipped.');
     } else {
         console.log('macro.js: Telegram notifications are enabled.');
+        try {
+            telegram.launch();
+            console.log('macro.js: Telegram bot launched successfully.');
+        } catch (e) {
+            console.error('macro.js: Failed to launch Telegram bot:', e);
+            // If bot launch fails, disable Telegram for this run
+            TELEGRAM_ENABLED = false;
+        }
     }
 
     const HEADLESS = (process.env.HEADLESS || 'true').toLowerCase() === 'true';
@@ -56,7 +65,10 @@ async function main() {
                     await utils.sendTelegram(taskResult.message, taskResult.imagePath).catch(sendErr => {
                         console.error(`macro.js: Failed to send Telegram message for ${name} task result:`, sendErr);
                     });
-                } else {
+                } else if (taskResult && taskResult.message) {
+                    console.log(`macro.js: Telegram is disabled, but ${name} task produced a message: ${taskResult.message}`);
+                }
+                else {
                     console.log(`macro.js: ${name} task completed successfully.`);
                 }
             } catch (err) {
@@ -81,6 +93,14 @@ async function main() {
         }
         if (browser) {
             try { await browser.close(); } catch (e) { console.error('macro.js: Error closing browser:', e); }
+        }
+        if (TELEGRAM_ENABLED) {
+            try {
+                telegram.stop();
+                console.log('macro.js: Telegram bot stopped successfully.');
+            } catch (e) {
+                console.error('macro.js: Failed to stop Telegram bot:', e);
+            }
         }
         console.log('macro.js: Daily routine finished.');
     }

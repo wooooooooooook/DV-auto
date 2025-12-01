@@ -333,6 +333,18 @@ function launch() {
     }
 }
 
+function stop() {
+    if (adminBot) {
+        adminBot.stop();
+        logger.info('Admin bot stopped');
+    }
+    if (noticeBot) {
+        noticeBot.stop();
+        logger.info('Notice bot stopped');
+    }
+}
+
 module.exports = {
-    launch
+    launch,
+    stop
 };
