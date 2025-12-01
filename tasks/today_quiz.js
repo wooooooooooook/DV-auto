@@ -43,7 +43,7 @@ async function run({ page, context }) {
         // Click the banner button to open the quiz popup
         const btn = page.locator('#btn_quiz_banner');
         if ((await btn.count()) > 0) {
-            if (await btn.first().isDisabled()) {
+            if (await btn.locator('.ico_finish').isVisible()) {
                 return { success: true, message: '오늘의 퀴즈는 이미 완료되었습니다. ' + href };
             }
             await btn.first().click().catch(() => { });
@@ -113,7 +113,7 @@ async function run({ page, context }) {
                 if (popupVisible) {
                     const shot = 'screenshot/today_quiz_result.png';
                     try {
-                        await page.screenshot({ path: shot, fullPage: true });
+                        await page.screenshot({ path: shot });
                     } catch (e) {
                         // ignore screenshot errors
                     }
