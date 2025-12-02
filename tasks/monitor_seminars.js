@@ -39,7 +39,7 @@ async function getTodaysSeminars(page, startHour, endHour) {
         const hour = parseInt(timeStr.split(':')[0], 10);
 
         if (hour >= startHour && hour < endHour) {
-          const href = await detail.locator('a').first().getAttribute('href');
+          const href = await detail.getAttribute('href');
           const fullUrl = `${BASE_URL}${href}`;
           const statusElement = detail.locator('.progress .ico_box');
           const statusText = (await statusElement.count()) > 0 ? await statusElement.innerText() : '상태없음';
@@ -149,7 +149,7 @@ async function monitorSeminars({ page, context }, periodName, startHour, endHour
     return true;
   } catch (e) {
     console.error(`[${periodName}] seminar monitoring task error`, e && e.stack ? e.stack : e);
-    await sendNotificationToChannel(
+    await sendTelegram(
       `❗ [${periodName}] 세미나 감시 작업 오류: ${e && e.message ? e.message : String(e)}`,
     ).catch(() => {});
     return false;
