@@ -63,21 +63,21 @@ async function monitorSeminars({ page, context }, periodName, startHour, endHour
     await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'load', timeout: 30000 }, 1);
 
     const initialSeminars = await getTodaysSeminars(page, startHour, endHour);
+    monitoringList = { ...initialSeminars }; // Track all seminars from the start
+
     for (const [url, { status, name }] of Object.entries(initialSeminars)) {
-      if (status === '입장하기') {
+      // If a seminar is already open, start its key message monitor immediately
+      if (status === '입장하기' || status === '입장가능') {
         console.log(`[${periodName}] Seminar already available: ${name}. Starting key message monitor.`);
         const newPage = await context.newPage();
-        // Do not await, let it run in the background
         keyMessageMonitor
           .monitor({ page: newPage, context }, url, name)
           .catch((e) => console.error(`Key message monitor failed for ${name}`, e));
-      } else {
-        monitoringList[url] = { status, name };
       }
     }
 
     if (Object.keys(monitoringList).length === 0) {
-      await sendTelegram(`[${periodName}] 감시할 세미나가 없습니다. 태스크를 종료합니다.`);
+      await sendTelegram(`[${periodName}] ${periodName}에 감시할 세미나가 없습니다.`);
       return true;
     }
 
@@ -112,36 +112,34 @@ async function monitorSeminars({ page, context }, periodName, startHour, endHour
 
       const currentSeminarsOnPage = await getTodaysSeminars(page, startHour, endHour);
 
-      const monitoredUrls = [...Object.keys(monitoringList)]; // Create a copy to iterate over
+      const monitoredUrls = [...Object.keys(monitoringList)];
       for (const url of monitoredUrls) {
         const monitoredInfo = monitoringList[url];
-        if (!monitoredInfo) continue;
 
+        // 1. Check if the seminar has disappeared from the page
         if (!currentSeminarsOnPage[url]) {
-          // Seminar disappeared from the list
           await sendNotificationToChannel(`[${monitoredInfo.name}] 세미나가 목록에서 사라졌습니다.`);
-          delete monitoringList[url];
-        } else {
-          // Seminar still exists, check status
-          const { status: newStatus, name: newName } = currentSeminarsOnPage[url];
-          if ((newStatus === '입장가능' || newStatus === '입장하기') && monitoredInfo.status === '신청완료') {
-            console.log(`[${periodName}] Seminar ready for entry: ${newName}. Starting key message monitor.`);
-            await sendNotificationToChannel(
-              `[${newName}] 세미나 입장이 시작되었습니다. 키 메시지 모니터링을 시작합니다.`,
-            );
-
-            const newPage = await context.newPage();
-            // Do not await, let it run in the background
-            keyMessageMonitor
-              .monitor({ page: newPage, context }, url, newName)
-              .catch((e) => console.error(`Key message monitor failed for ${newName}`, e));
-
-            delete monitoringList[url];
-          } else {
-            // Update status and name just in case
-            monitoringList[url] = { status: newStatus, name: newName };
-          }
+          delete monitoringList[url]; // Remove from monitoring
+          continue; // Move to the next seminar
         }
+
+        // 2. If it still exists, get its new state
+        const { status: newStatus, name: newName } = currentSeminarsOnPage[url];
+        const oldStatus = monitoredInfo.status;
+
+        // 3. Check for status change from '신청완료' to '입장가능'/'입장하기'
+        if ((newStatus === '입장가능' || newStatus === '입장하기') && oldStatus === '신청완료') {
+          console.log(`[${periodName}] Seminar ready for entry: ${newName}. Starting key message monitor.`);
+          await sendNotificationToChannel(`[${newName}] 세미나 입장이 시작되었습니다. 키 메시지 모니터링을 시작합니다.`);
+
+          const newPage = await context.newPage();
+          keyMessageMonitor
+            .monitor({ page: newPage, context }, url, newName)
+            .catch((e) => console.error(`Key message monitor failed for ${newName}`, e));
+        }
+
+        // 4. Always update the seminar's status and name in the monitoring list
+        monitoringList[url] = { status: newStatus, name: newName };
       }
     }
 

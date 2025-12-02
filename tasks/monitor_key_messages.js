@@ -1,4 +1,4 @@
-const { sendNotificationToChannel, safeGoto, getSeminarIdFromUrl } = require('../modules/utils');
+const { sendNotificationToChannel, safeGoto, getSeminarIdFromUrl, ensureLoggedIn } = require('../modules/utils');
 const storage = require('../storage');
 
 const KEY = 'key_message_seminars';
@@ -14,7 +14,7 @@ async function getKeyMessages(page) {
  * @param {string} seminarUrl - The URL of the seminar to monitor.
  * @param {string} seminarName - The name of the seminar.
  */
-async function monitor({ page, _context }, seminarUrl, seminarName) {
+async function monitor({ page, context }, seminarUrl, seminarName) {
   const seminarId = getSeminarIdFromUrl(seminarUrl);
   if (!seminarId) {
     console.error(`monitor_key_messages: Invalid seminar URL, cannot get seminarId: ${seminarUrl}`);
@@ -22,6 +22,8 @@ async function monitor({ page, _context }, seminarUrl, seminarName) {
   }
 
   console.log(`monitor_key_messages: Starting monitor for "${seminarName}" (ID: ${seminarId})`);
+
+  await ensureLoggedIn({ page, context });
 
   const intervalMs = 30 * 1000; // 30 seconds
   const durationMs = 2 * 60 * 60 * 1000; // 2 hours
