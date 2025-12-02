@@ -24,7 +24,10 @@ async function getTodaysSeminars(page, startHour, endHour) {
 
   for (let i = 0; i < count; i++) {
     const container = listConts.nth(i);
-    const seminarDay = await container.locator('.seminar_day').innerText();
+    const seminarDay = await container
+      .locator('.seminar_day .date')
+      .innerText()
+      .catch(() => '');
 
     if (seminarDay === todayString) {
       const seminarDetails = await container.locator('.list_detail');
