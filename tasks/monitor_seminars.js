@@ -84,7 +84,9 @@ async function monitorSeminars({ page, context }, periodName, startHour, endHour
     const initialSeminarNames = Object.values(monitoringList)
       .map((s) => `  - ${s.name} (${s.status})`)
       .join('\n');
-    await sendTelegram(`[${periodName}] 총 ${Object.keys(monitoringList).length}개의 세미나 감시를 시작합니다.\n${initialSeminarNames}`);
+    await sendTelegram(
+      `[${periodName}] 총 ${Object.keys(monitoringList).length}개의 세미나 감시를 시작합니다.\n${initialSeminarNames}`,
+    );
 
     // Monitoring loop
     while (Object.keys(monitoringList).length > 0) {
@@ -130,7 +132,9 @@ async function monitorSeminars({ page, context }, periodName, startHour, endHour
         // 3. Check for status change from '신청완료' to '입장가능'/'입장하기'
         if ((newStatus === '입장가능' || newStatus === '입장하기') && oldStatus === '신청완료') {
           console.log(`[${periodName}] Seminar ready for entry: ${newName}. Starting key message monitor.`);
-          await sendNotificationToChannel(`[${newName}] 세미나 입장이 시작되었습니다. 키 메시지 모니터링을 시작합니다.`);
+          await sendNotificationToChannel(
+            `[${newName}] 세미나 입장이 시작되었습니다. 키 메시지 모니터링을 시작합니다.`,
+          );
 
           const newPage = await context.newPage();
           keyMessageMonitor
@@ -147,9 +151,9 @@ async function monitorSeminars({ page, context }, periodName, startHour, endHour
     return true;
   } catch (e) {
     console.error(`[${periodName}] seminar monitoring task error`, e && e.stack ? e.stack : e);
-    await sendTelegram(
-      `❗ [${periodName}] 세미나 감시 작업 오류: ${e && e.message ? e.message : String(e)}`,
-    ).catch(() => {});
+    await sendTelegram(`❗ [${periodName}] 세미나 감시 작업 오류: ${e && e.message ? e.message : String(e)}`).catch(
+      () => {},
+    );
     return false;
   }
 }

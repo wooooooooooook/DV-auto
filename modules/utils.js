@@ -14,7 +14,7 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-async function sendTelegram(text, imagePath = null) {
+async function sendTelegram(text, imagePath = null, options = {}) {
   const bot = getBot('admin');
   if (!bot) {
     console.error('Admin bot is not initialized. Cannot send message.');
@@ -29,9 +29,9 @@ async function sendTelegram(text, imagePath = null) {
 
   try {
     if (imagePath) {
-      await bot.telegram.sendPhoto(CHAT_ID, { source: imagePath }, { caption: text, parse_mode: 'Markdown' });
+      await bot.telegram.sendPhoto(CHAT_ID, { source: imagePath }, { caption: text, ...options });
     } else {
-      await bot.telegram.sendMessage(CHAT_ID, text, { parse_mode: 'Markdown' });
+      await bot.telegram.sendMessage(CHAT_ID, text, options);
     }
   } catch (error) {
     console.error('Failed to send Telegram message:', error);
@@ -216,7 +216,7 @@ async function ensureLoggedIn({ page, context }) {
   }
 }
 
-async function sendNotificationToChannel(text, imagePath = null) {
+async function sendNotificationToChannel(text, imagePath = null, options = {}) {
   const bot = getBot('notice');
   if (!bot) {
     console.error('Notice bot is not initialized. Cannot send message.');
@@ -231,9 +231,9 @@ async function sendNotificationToChannel(text, imagePath = null) {
 
   try {
     if (imagePath) {
-      await bot.telegram.sendPhoto(CHANNEL_ID, { source: imagePath }, { caption: text, parse_mode: 'Markdown' });
+      await bot.telegram.sendPhoto(CHANNEL_ID, { source: imagePath }, { caption: text, ...options });
     } else {
-      await bot.telegram.sendMessage(CHANNEL_ID, text, { parse_mode: 'Markdown' });
+      await bot.telegram.sendMessage(CHANNEL_ID, text, options);
     }
   } catch (error) {
     console.error('Failed to send Telegram notification to channel:', error);
