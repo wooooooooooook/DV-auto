@@ -200,7 +200,8 @@ const broadcastTodayLinksTask = {
     timezone: TIMEZONE,
     run: async () => {
         const utils = require('./modules/utils');
-        const task = require('./tasks/today_links');
+        const todayLinks = require('./tasks/today_links');
+        const todaySeminarCheck = require('./tasks/today_seminar_check');
         const { chromium } = require('playwright');
 
         logger.info('broadcast_today_links_daily: running scheduled task');
@@ -210,13 +211,32 @@ const broadcastTodayLinksTask = {
 
         try {
             await utils.ensureLoggedIn({ page, context });
-            const result = await task.run({ page, context });
-            if (result && result.message) {
-                await utils.sendNotificationToChannel(result.message);
-                logger.info('broadcast_today_links_daily: successfully broadcasted links.');
+
+            const linksResult = await todayLinks.run({ page, context });
+            const seminarResult = await todaySeminarCheck.run({ page, context });
+
+            let finalMessage = '';
+            if (linksResult && linksResult.success && linksResult.message) {
+                finalMessage += linksResult.message;
+            } else if (linksResult && !linksResult.success) {
+                logger.warn(`broadcast_today_links_daily: today_links sub-task failed: ${linksResult.message}`);
+                // Still try to continue with the other task
+            }
+
+            if (seminarResult && seminarResult.success && seminarResult.message) {
+                if (finalMessage) finalMessage += '\n'; // Add a separator
+                finalMessage += seminarResult.message;
+            } else if (seminarResult && !seminarResult.success) {
+                logger.warn(`broadcast_today_links_daily: today_seminar_check sub-task failed: ${seminarResult.message}`);
+                 // Still try to send any message we have so far
+            }
+
+            if (finalMessage) {
+                await utils.sendNotificationToChannel(finalMessage);
+                logger.info('broadcast_today_links_daily: successfully broadcasted combined message.');
                 return { success: true, message: 'Broadcast successful.' };
             } else {
-                logger.warn('broadcast_today_links_daily: task ran, but no message was produced to broadcast.');
+                logger.warn('broadcast_today_links_daily: all sub-tasks ran, but no message was produced to broadcast.');
                 return { success: false, message: 'No message to broadcast.' };
             }
         } catch (e) {
