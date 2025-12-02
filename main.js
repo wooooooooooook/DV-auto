@@ -47,12 +47,14 @@ const scheduledTask = {
           const taskResult = await task.run({ page, context }); // Capture the result
           if (taskResult && taskResult.message) {
             await utils
-              .sendTelegram(taskResult.message, taskResult.imagePath)
+              .sendTelegram(taskResult.message, taskResult.imagePath, taskResult.options)
               .catch((e) => logger.error(`Failed to send Telegram message for ${name} task result:`, e));
           }
         } catch (err) {
           logger.error(`Error during ${name} task:`, err);
-          await utils.sendTelegram(`daily_routine 중 ${name} 작업 실패: ${err.message}`).catch(() => {});
+          await utils
+            .sendTelegram(`daily_routine 중 ${name} 작업 실패: ${utils.escapeMarkdown(err.message)}`)
+            .catch(() => {});
         }
       }
     } finally {
@@ -227,8 +229,12 @@ const broadcastTodayLinksTask = {
       const seminarResult = await todaySeminarCheck.run({ page, context });
 
       let finalMessage = '';
+      let messageOptions = {};
       if (linksResult && linksResult.success && linksResult.message) {
         finalMessage += linksResult.message;
+        if (linksResult.options) {
+          messageOptions = { ...messageOptions, ...linksResult.options };
+        }
       } else if (linksResult && !linksResult.success) {
         logger.warn(`broadcast_today_links_daily: today_links sub-task failed: ${linksResult.message}`);
         // Still try to continue with the other task
@@ -237,13 +243,16 @@ const broadcastTodayLinksTask = {
       if (seminarResult && seminarResult.success && seminarResult.message) {
         if (finalMessage) finalMessage += '\n'; // Add a separator
         finalMessage += seminarResult.message;
+        if (seminarResult.options) {
+          messageOptions = { ...messageOptions, ...seminarResult.options };
+        }
       } else if (seminarResult && !seminarResult.success) {
         logger.warn(`broadcast_today_links_daily: today_seminar_check sub-task failed: ${seminarResult.message}`);
         // Still try to send any message we have so far
       }
 
       if (finalMessage) {
-        await utils.sendNotificationToChannel(finalMessage);
+        await utils.sendNotificationToChannel(finalMessage, null, messageOptions);
         logger.info('broadcast_today_links_daily: successfully broadcasted combined message.');
         return { success: true, message: 'Broadcast successful.' };
       } else {
@@ -253,7 +262,7 @@ const broadcastTodayLinksTask = {
     } catch (e) {
       logger.error('broadcast_today_links_daily: scheduled task failed', e && e.stack ? e.stack : e);
       // Notify admin of failure
-      await utils.sendTelegram(`❗ Daily link broadcast failed: ${e.message}`).catch(() => {});
+      await utils.sendTelegram(`❗ Daily link broadcast failed: ${utils.escapeMarkdown(e.message)}`).catch(() => {});
       return { success: false, message: `Broadcast failed: ${e.message}` };
     } finally {
       try {

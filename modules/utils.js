@@ -14,6 +14,14 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// Function to escape MarkdownV2 special characters
+// https://core.telegram.org/bots/api#markdownv2-style
+function escapeMarkdown(text) {
+  if (typeof text !== 'string') return '';
+  // Escape all special characters for MarkdownV2
+  return text.replace(/([\\_*\[\]()~`>#+\-=|{}.!])/g, '\\$1');
+}
+
 async function sendTelegram(text, imagePath = null, options = {}) {
   const bot = getBot('admin');
   if (!bot) {
@@ -38,6 +46,7 @@ async function sendTelegram(text, imagePath = null, options = {}) {
     // To preserve original behavior of notifying about notification failures,
     // we can try to send a simplified plain text message about the failure.
     try {
+      // Here, we explicitly avoid any parsing. The error message itself might contain special chars.
       await bot.telegram.sendMessage(CHAT_ID, `Failed to send a complex Telegram message. Error: ${error.message}`);
     } catch (nestedError) {
       console.error('Failed to send the failure notification as well:', nestedError);

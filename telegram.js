@@ -7,6 +7,7 @@ const scheduler = require('./scheduler');
 const runner = require('./runner');
 const taskRegistry = require('./taskRegistry');
 const { inspect } = require('./modules/inspect');
+const { escapeMarkdown } = require('./modules/utils');
 
 const ADMIN_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const NOTICE_BOT_TOKEN = process.env.NOTICE_BOT_TOKEN;
@@ -64,7 +65,7 @@ if (adminBot) {
       await ctx.reply('Starting daily_routine...');
       const result = await runner.runTask(task);
       if (result && typeof result === 'object' && result.message) {
-        await ctx.reply(result.message);
+        await ctx.reply(result.message, result.options);
         if (result.imagePath) {
           await ctx.replyWithPhoto({ source: result.imagePath });
           // try to cleanup screenshot
@@ -78,7 +79,7 @@ if (adminBot) {
         await ctx.reply('daily_routine finished successfully.');
       }
     } catch (e) {
-      ctx.reply(`daily_routine failed: ${e && e.message ? e.message : e}`);
+      ctx.reply(`daily_routine failed: ${e && e.message ? escapeMarkdown(e.message) : e}`);
     }
   });
 
@@ -94,7 +95,7 @@ if (adminBot) {
       await ctx.reply('Starting today_quiz...');
       const result = await runner.runTask(task);
       if (result && typeof result === 'object' && result.message) {
-        await ctx.reply(result.message);
+        await ctx.reply(result.message, result.options);
         if (result.imagePath) {
           await ctx.replyWithPhoto({ source: result.imagePath });
           await fs.unlink(result.imagePath).catch(() => {});
@@ -107,7 +108,7 @@ if (adminBot) {
         await ctx.reply('today_quiz finished successfully.');
       }
     } catch (e) {
-      ctx.reply(`today_quiz failed: ${e && e.message ? e.message : e}`);
+      ctx.reply(`today_quiz failed: ${e && e.message ? escapeMarkdown(e.message) : e}`);
     }
   });
 
@@ -124,13 +125,13 @@ if (adminBot) {
       const result = await runner.runTask(task);
       if (result && result.message) {
         const { sendNotificationToChannel } = require('./modules/utils');
-        await sendNotificationToChannel(result.message);
+        await sendNotificationToChannel(result.message, null, result.options);
         await ctx.reply('Broadcast successful.');
       } else {
         await ctx.reply('Task ran, but no message was produced to broadcast.');
       }
     } catch (e) {
-      ctx.reply(`Broadcast failed: ${e && e.message ? e.message : e}`);
+      ctx.reply(`Broadcast failed: ${e && e.message ? escapeMarkdown(e.message) : e}`);
     }
   });
 
@@ -203,7 +204,7 @@ if (adminBot) {
       if (e.message && e.message.includes('Timeout')) {
         errorMessage = `Navigation timeout: The page at ${url} took too long to load or was unreachable.`;
       } else if (e.message) {
-        errorMessage += `\nDetails: ${e.message}`;
+        errorMessage += `\nDetails: ${escapeMarkdown(e.message)}`;
       }
       ctx.reply(errorMessage);
     } finally {
@@ -229,7 +230,7 @@ const seminarCheck5Days = async (ctx) => {
     await ctx.reply('5일간의 세미나를 확인합니다...');
     const result = await runner.runTask(task);
     if (result && typeof result === 'object' && result.message) {
-      await ctx.reply(result.message);
+      await ctx.reply(result.message, result.options);
       if (result.imagePath) {
         await ctx.replyWithPhoto({ source: result.imagePath });
         await fs.unlink(result.imagePath).catch(() => {});
@@ -242,7 +243,7 @@ const seminarCheck5Days = async (ctx) => {
       await ctx.reply('세미나 확인이 완료되었습니다.');
     }
   } catch (e) {
-    ctx.reply(`세미나 확인 중 오류 발생: ${e && e.message ? e.message : e}`);
+    ctx.reply(`세미나 확인 중 오류 발생: ${e && e.message ? escapeMarkdown(e.message) : e}`);
   }
 };
 
@@ -258,7 +259,7 @@ const seminarCheckToday = async (ctx) => {
     await ctx.reply('오늘의 세미나를 확인합니다...');
     const result = await runner.runTask(task);
     if (result && typeof result === 'object' && result.message) {
-      await ctx.reply(result.message);
+      await ctx.reply(result.message, result.options);
       if (result.imagePath) {
         await ctx.replyWithPhoto({ source: result.imagePath });
         await fs.unlink(result.imagePath).catch(() => {});
@@ -271,7 +272,7 @@ const seminarCheckToday = async (ctx) => {
       await ctx.reply('세미나 확인이 완료되었습니다.');
     }
   } catch (e) {
-    ctx.reply(`세미나 확인 중 오류 발생: ${e && e.message ? e.message : e}`);
+    ctx.reply(`세미나 확인 중 오류 발생: ${e && e.message ? escapeMarkdown(e.message) : e}`);
   }
 };
 
@@ -287,7 +288,7 @@ const todayLinks = async (ctx) => {
     await ctx.reply('오늘의 링크를 수집합니다...');
     const result = await runner.runTask(task);
     if (result && typeof result === 'object' && result.message) {
-      await ctx.reply(result.message);
+      await ctx.reply(result.message, result.options);
     } else if (typeof result === 'string') {
       await ctx.reply(result);
     } else if (result === true) {
@@ -296,7 +297,7 @@ const todayLinks = async (ctx) => {
       await ctx.reply('작업이 완료되었습니다.');
     }
   } catch (e) {
-    ctx.reply(`링크 수집 중 오류 발생: ${e && e.message ? e.message : e}`);
+    ctx.reply(`링크 수집 중 오류 발생: ${e && e.message ? escapeMarkdown(e.message) : e}`);
   }
 };
 

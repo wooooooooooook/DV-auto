@@ -1,4 +1,4 @@
-const { safeGoto } = require('../modules/utils');
+const { safeGoto, escapeMarkdown } = require('../modules/utils');
 
 const QUIZ_LIST_URL = 'https://www.doctorville.co.kr/product/medicineList';
 
@@ -34,14 +34,21 @@ async function run({ page, _context }) {
   try {
     const quizLink = await collectQuizLink(page);
 
-    let message = '✨ 출석체크: https://m.doctorville.co.kr/mypage/attendance\n';
+    let message = '✨ [출석체크](https://m.doctorville.co.kr/mypage/attendance)\n';
 
-    message += `✨ 오늘의 퀴즈 링크:\n${quizLink ? quizLink : '오늘은 퀴즈가 없습니다.'}\n`;
+    if (quizLink) {
+      message += `✨ [오늘의 퀴즈](${quizLink})\n`;
+    } else {
+      message += '✨ 오늘의 퀴즈는 없습니다.\n';
+    }
 
-    return { success: true, message };
+    return { success: true, message, options: { parse_mode: 'MarkdownV2' } };
   } catch (_e) {
     console.error('today_links task error', _e && _e.stack ? _e.stack : _e);
-    return { success: false, message: `today_links 작업 오류: ${_e && _e.message ? _e.message : String(_e)}` };
+    return {
+      success: false,
+      message: `today_links 작업 오류: ${_e && _e.message ? escapeMarkdown(String(_e)) : ''}`,
+    };
   }
 }
 
