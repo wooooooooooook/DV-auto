@@ -43,7 +43,7 @@ async function getTodaysSeminars(page, startHour, endHour) {
           const fullUrl = `${BASE_URL}${href}`;
           const statusElement = detail.locator('.progress .ico_box');
           const statusText = (await statusElement.count()) > 0 ? await statusElement.innerText() : '상태없음';
-          const seminarName = await detail.locator('strong').first().innerText();
+          const seminarName = await detail.locator('.list_tit .tit').first().innerText();
           seminars[fullUrl] = { status: statusText, name: seminarName };
         }
       }
@@ -64,7 +64,7 @@ async function monitorSeminars({ page, context }, periodName, startHour, endHour
 
     const initialSeminars = await getTodaysSeminars(page, startHour, endHour);
     for (const [url, { status, name }] of Object.entries(initialSeminars)) {
-      if (status === '입장가능' || status === '입장하기') {
+      if (status === '입장하기') {
         console.log(`[${periodName}] Seminar already available: ${name}. Starting key message monitor.`);
         const newPage = await context.newPage();
         // Do not await, let it run in the background
