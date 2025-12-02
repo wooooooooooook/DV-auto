@@ -1,71 +1,6 @@
-const { safeGoto, getSeminarIdFromUrl } = require('../modules/utils');
+const { safeGoto } = require('../modules/utils');
 
-const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const QUIZ_LIST_URL = 'https://www.doctorville.co.kr/product/medicineList';
-const BASE = 'https://www.doctorville.co.kr';
-
-const BASE_URL = 'https://www.doctorville.co.kr/'
-const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/'
-
-async function collectSeminarLinks(page) {
-    try {
-        await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'load', timeout: 30000 }, 1);
-        const listConts = await page.locator('.list_cont');
-        const count = await listConts.count();
-
-        const now = new Date();
-        const month = now.toLocaleDateString('en-US', { month: 'numeric', timeZone: 'Asia/Seoul' });
-        const day = now.toLocaleDateString('en-US', { day: 'numeric', timeZone: 'Asia/Seoul' });
-        const todayString = `${month}/${day}`;
-
-        const links = [];
-
-        for (let i = 0; i < count; i++) {
-            const container = listConts.nth(i);
-            const seminarDay = await container.locator('.seminar_day .date').innerText().catch(() => '');
-            if (seminarDay !== todayString) continue;
-
-            const details = container.locator('.list_detail');
-            const dcount = await details.count();
-            for (let j = 0; j < dcount; j++) {
-                const detail = details.nth(j);
-                const titleLocator = detail.locator('.list_tit .tit');
-                const title = await titleLocator.innerText().catch(() => '(no title)');
-                const titleHandle = await titleLocator.elementHandle().catch(() => null);
-
-                let href = null;
-                if (titleHandle) {
-                    href = await page.evaluate(el => {
-                        let cur = el;
-                        // Walk up a few levels to find the parent <a> tag
-                        for (let i = 0; i < 5 && cur; i++) {
-                            if (cur.tagName === 'A' && cur.href) return cur.href;
-                            cur = cur.parentElement;
-                        }
-                        return null;
-                    }, titleHandle).catch(() => null);
-                }
-
-                if (href) {
-                    const full = href.startsWith('http') ? href : (BASE + href);
-                    const seminarId = getSeminarIdFromUrl(full);
-                    let seminarLink = '';
-                    if (seminarId) {
-                        seminarLink = `${SEMINAR_DETAIL_PAGE}${seminarId}`;
-                    } else {
-                        seminarLink = full; // Fallback to original full URL if ID not found
-                    }
-                    links.push({ title: title.trim(), url: seminarLink });
-                }
-            }
-        }
-
-        return links;
-    } catch (e) {
-        console.error('collectSeminarLinks error', e && e.stack ? e.stack : e);
-        return [];
-    }
-}
 
 async function collectQuizLink(page) {
     try {
@@ -95,22 +30,11 @@ async function collectQuizLink(page) {
 
 async function run({ page, context }) {
     try {
-        const seminarLinks = await collectSeminarLinks(page);
         const quizLink = await collectQuizLink(page);
 
         let message = '✨ 출석체크: https://m.doctorville.co.kr/mypage/attendance\n';
 
         message += `✨ 오늘의 퀴즈 링크:\n${(quizLink) ? quizLink : '오늘은 퀴즈가 없습니다.'}\n`;
-
-        message += '\n';
-        if (seminarLinks && seminarLinks.length > 0) {
-            message += `✨ 오늘의 세미나 (${seminarLinks.length}):\n`;
-            seminarLinks.forEach((s, i) => {
-                message += `${i + 1}. ${s.title}\n${s.url}\n`;
-            });
-        } else {
-            message += '✨ 오늘은 세미나가 없습니다.\n';
-        }
 
         return { success: true, message };
     } catch (e) {

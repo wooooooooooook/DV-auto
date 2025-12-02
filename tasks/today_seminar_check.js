@@ -73,8 +73,7 @@ async function run({ page, context }) {
         }
     } catch (e) {
         console.error('seminar check task error', e && e.stack ? e.stack : e);
-        // Notify admin about task error but still return result to caller
-        await sendTelegram(`❗ 세미나 확인 작업 오류: ${e && e.message ? e.message : String(e)}`).catch(() => { });
+        // Return result to caller, do not send telegram message from here
         return { success: false, message: `세미나 확인 작업 오류: ${e && e.message ? e.message : String(e)}` };
     }
 }
