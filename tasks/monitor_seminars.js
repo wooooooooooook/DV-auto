@@ -1,4 +1,4 @@
-const { safeGoto, sendNotificationToChannel } = require('../modules/utils');
+const { safeGoto, sendNotificationToChannel, sendTelegram } = require('../modules/utils');
 const keyMessageMonitor = require('./monitor_key_messages');
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
@@ -74,12 +74,24 @@ async function monitorSeminars({ page, context }, periodName, startHour, endHour
     }
 
     if (Object.keys(monitoringList).length === 0) {
-      // await sendNotificationToChannel(`[${periodName}] 감시할 세미나가 없습니다. 태스크를 종료합니다.`);
+      await sendTelegram(`[${periodName}] 감시할 세미나가 없습니다. 태스크를 종료합니다.`);
       return true;
     }
 
+    const initialSeminarNames = Object.values(monitoringList)
+      .map((s) => `  - ${s.name} (${s.status})`)
+      .join('\n');
+    await sendTelegram(`[${periodName}] 총 ${Object.keys(monitoringList).length}개의 세미나 감시를 시작합니다.\n${initialSeminarNames}`);
+
     // Monitoring loop
     while (Object.keys(monitoringList).length > 0) {
+      const statusMessage =
+        `[${periodName}] 현재 ${Object.keys(monitoringList).length}개의 세미나를 감시중입니다.\n` +
+        Object.values(monitoringList)
+          .map((s) => `  - ${s.name} (${s.status})`)
+          .join('\n');
+      await sendTelegram(statusMessage);
+
       const currentTime = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
       if (currentTime.getHours() >= endHour) {
         const remainingSeminars = Object.values(monitoringList).map((s) => s.name);
