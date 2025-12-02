@@ -14,51 +14,62 @@ const TIMEZONE = process.env.SCHEDULE_TZ || 'Asia/Seoul';
 
 // Create a single composite scheduled task that will run login -> attendance -> apply_seminar
 const scheduledTask = {
-    name: 'daily_routine',
-    schedule: CRON_EXPR,
-    timezone: TIMEZONE,
-    run: async () => {
-        const { chromium } = require('playwright');
-        const utils = require('./modules/utils');
-        const attendanceTask = require('./tasks/attendance');
-        const applySeminarTask = require('./tasks/apply_seminar');
-        const todaySeminarCheckTask = require('./tasks/today_seminar_check');
-        const todayQuizTask = require('./tasks/today_quiz');
+  name: 'daily_routine',
+  schedule: CRON_EXPR,
+  timezone: TIMEZONE,
+  run: async () => {
+    const { chromium } = require('playwright');
+    const utils = require('./modules/utils');
+    const attendanceTask = require('./tasks/attendance');
+    const applySeminarTask = require('./tasks/apply_seminar');
+    const todaySeminarCheckTask = require('./tasks/today_seminar_check');
+    const todayQuizTask = require('./tasks/today_quiz');
 
-        logger.info('daily_routine: launching browser to perform daily tasks');
-        const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
-        const context = await browser.newContext({
-            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36'
-        });
-        const page = await context.newPage();
+    logger.info('daily_routine: launching browser to perform daily tasks');
+    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
+    const context = await browser.newContext({
+      userAgent:
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
+    });
+    const page = await context.newPage();
 
+    try {
+      const tasks = [
+        { name: 'attendance', task: attendanceTask },
+        { name: 'apply_seminar', task: applySeminarTask },
+        { name: 'today_seminar_check', task: todaySeminarCheckTask },
+        { name: 'today_quiz', task: todayQuizTask },
+      ];
+      await utils.sendTelegram('🕗 데일리 루틴 작업을 시작합니다.(출석체크, 세미나등록, 브랜드퀴즈)').catch(() => {});
+      for (const { name, task } of tasks) {
         try {
-            const tasks = [
-                { name: 'attendance', task: attendanceTask },
-                { name: 'apply_seminar', task: applySeminarTask },
-                { name: 'today_seminar_check', task: todaySeminarCheckTask },
-                { name: 'today_quiz', task: todayQuizTask }
-            ];
-            await utils.sendTelegram('🕗 데일리 루틴 작업을 시작합니다.(출석체크, 세미나등록, 브랜드퀴즈)').catch(() => { });
-            for (const { name, task } of tasks) {
-                try {
-                    await utils.ensureLoggedIn({ page, context });
-                    const taskResult = await task.run({ page, context }); // Capture the result
-                    if (taskResult && taskResult.message) {
-                        await utils.sendTelegram(taskResult.message, taskResult.imagePath).catch((e) => logger.error(`Failed to send Telegram message for ${name} task result:`, e));
-                    }
-                } catch (err) {
-                    logger.error(`Error during ${name} task:`, err);
-                    await utils.sendTelegram(`daily_routine 중 ${name} 작업 실패: ${err.message}`).catch(() => { });
-                }
-            }
-        } finally {
-            await utils.sendTelegram('🕗 데일리 루틴 작업이 종료되었습니다.').catch(() => { });
-            try { await context.close(); } catch (e) { }
-            try { await browser.close(); } catch (e) { }
+          await utils.ensureLoggedIn({ page, context });
+          const taskResult = await task.run({ page, context }); // Capture the result
+          if (taskResult && taskResult.message) {
+            await utils
+              .sendTelegram(taskResult.message, taskResult.imagePath)
+              .catch((e) => logger.error(`Failed to send Telegram message for ${name} task result:`, e));
+          }
+        } catch (err) {
+          logger.error(`Error during ${name} task:`, err);
+          await utils.sendTelegram(`daily_routine 중 ${name} 작업 실패: ${err.message}`).catch(() => {});
         }
-        return true;
+      }
+    } finally {
+      await utils.sendTelegram('🕗 데일리 루틴 작업이 종료되었습니다.').catch(() => {});
+      try {
+        await context.close();
+      } catch (_e) {
+        // ignore
+      }
+      try {
+        await browser.close();
+      } catch (_e) {
+        // ignore
+      }
     }
+    return true;
+  },
 };
 
 // Register the scheduled task. The process will keep running so cron can trigger jobs.
@@ -68,187 +79,195 @@ logger.info('Scheduled `daily_routine` at', CRON_EXPR, 'timezone=', TIMEZONE);
 
 // --- Register individual tasks to be runnable from Telegram ---
 const todaySeminarCheckTask = {
-    name: 'today_seminar_check',
-    run: async () => {
-        const { chromium } = require('playwright');
-        const utils = require('./modules/utils');
-        const task = require('./tasks/today_seminar_check');
-        const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
-        const context = await browser.newContext();
-        const page = await context.newPage();
-        let _res;
-        try {
-            await utils.ensureLoggedIn({ page, context });
-            _res = await task.run({ page, context });
-        } finally {
-            await browser.close();
-        }
-        return _res;
+  name: 'today_seminar_check',
+  run: async () => {
+    const { chromium } = require('playwright');
+    const utils = require('./modules/utils');
+    const task = require('./tasks/today_seminar_check');
+    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    let _res;
+    try {
+      await utils.ensureLoggedIn({ page, context });
+      _res = await task.run({ page, context });
+    } finally {
+      await browser.close();
     }
+    return _res;
+  },
 };
 taskRegistry.registerTask(todaySeminarCheckTask);
 
 const todayQuizTask = {
-    name: 'today_quiz',
-    run: async () => {
-        const { chromium } = require('playwright');
-        const utils = require('./modules/utils');
-        const task = require('./tasks/today_quiz');
-        const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
-        const context = await browser.newContext();
-        const page = await context.newPage();
-        let _res;
-        try {
-            await utils.ensureLoggedIn({ page, context });
-            _res = await task.run({ page, context });
-        } finally {
-            await browser.close();
-        }
-        return _res;
+  name: 'today_quiz',
+  run: async () => {
+    const { chromium } = require('playwright');
+    const utils = require('./modules/utils');
+    const task = require('./tasks/today_quiz');
+    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    let _res;
+    try {
+      await utils.ensureLoggedIn({ page, context });
+      _res = await task.run({ page, context });
+    } finally {
+      await browser.close();
     }
+    return _res;
+  },
 };
 taskRegistry.registerTask(todayQuizTask);
 
 const fiveDaysSeminarCheckTask = {
-    name: '5days_seminar_check',
-    run: async () => {
-        const { chromium } = require('playwright');
-        const utils = require('./modules/utils');
-        const task = require('./tasks/5days_seminar_check');
-        const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
-        const context = await browser.newContext();
-        const page = await context.newPage();
-        let _res;
-        try {
-            await utils.ensureLoggedIn({ page, context });
-            _res = await task.run({ page, context });
-        } finally {
-            await browser.close();
-        }
-        return _res;
+  name: '5days_seminar_check',
+  run: async () => {
+    const { chromium } = require('playwright');
+    const utils = require('./modules/utils');
+    const task = require('./tasks/5days_seminar_check');
+    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    let _res;
+    try {
+      await utils.ensureLoggedIn({ page, context });
+      _res = await task.run({ page, context });
+    } finally {
+      await browser.close();
     }
+    return _res;
+  },
 };
 taskRegistry.registerTask(fiveDaysSeminarCheckTask);
 
 const todayLinksTask = {
-    name: 'today_links',
-    run: async () => {
-        const { chromium } = require('playwright');
-        const utils = require('./modules/utils');
-        const task = require('./tasks/today_links');
-        const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
-        const context = await browser.newContext();
-        const page = await context.newPage();
-        let _res;
-        try {
-            await utils.ensureLoggedIn({ page, context });
-            _res = await task.run({ page, context });
-        } finally {
-            await browser.close();
-        }
-        return _res;
+  name: 'today_links',
+  run: async () => {
+    const { chromium } = require('playwright');
+    const utils = require('./modules/utils');
+    const task = require('./tasks/today_links');
+    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    let _res;
+    try {
+      await utils.ensureLoggedIn({ page, context });
+      _res = await task.run({ page, context });
+    } finally {
+      await browser.close();
     }
+    return _res;
+  },
 };
 taskRegistry.registerTask(todayLinksTask);
 
 const monitorLunchSeminarsTask = {
-    name: 'monitor_lunch_seminars',
-    run: async () => {
-        const { chromium } = require('playwright');
-        const utils = require('./modules/utils');
-        const task = require('./tasks/monitor_lunch_seminars');
-        const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
-        const context = await browser.newContext();
-        const page = await context.newPage();
-        let _res;
-        try {
-            await utils.ensureLoggedIn({ page, context });
-            _res = await task.run({ page, context });
-        } finally {
-            await browser.close();
-        }
-        return _res;
+  name: 'monitor_lunch_seminars',
+  run: async () => {
+    const { chromium } = require('playwright');
+    const utils = require('./modules/utils');
+    const task = require('./tasks/monitor_lunch_seminars');
+    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    let _res;
+    try {
+      await utils.ensureLoggedIn({ page, context });
+      _res = await task.run({ page, context });
+    } finally {
+      await browser.close();
     }
+    return _res;
+  },
 };
 taskRegistry.registerTask(monitorLunchSeminarsTask);
 
 const monitorDinnerSeminarsTask = {
-    name: 'monitor_dinner_seminars',
-    run: async () => {
-        const { chromium } = require('playwright');
-        const utils = require('./modules/utils');
-        const task = require('./tasks/monitor_dinner_seminars');
-        const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
-        const context = await browser.newContext();
-        const page = await context.newPage();
-        let _res;
-        try {
-            await utils.ensureLoggedIn({ page, context });
-            _res = await task.run({ page, context });
-        } finally {
-            await browser.close();
-        }
-        return _res;
+  name: 'monitor_dinner_seminars',
+  run: async () => {
+    const { chromium } = require('playwright');
+    const utils = require('./modules/utils');
+    const task = require('./tasks/monitor_dinner_seminars');
+    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    let _res;
+    try {
+      await utils.ensureLoggedIn({ page, context });
+      _res = await task.run({ page, context });
+    } finally {
+      await browser.close();
     }
+    return _res;
+  },
 };
 taskRegistry.registerTask(monitorDinnerSeminarsTask);
 
 // Schedule the daily today_links broadcast
 const broadcastTodayLinksTask = {
-    name: 'broadcast_today_links_daily',
-    schedule: '0 8 * * *', // Every day at 8:00
-    timezone: TIMEZONE,
-    run: async () => {
-        const utils = require('./modules/utils');
-        const todayLinks = require('./tasks/today_links');
-        const todaySeminarCheck = require('./tasks/today_seminar_check');
-        const { chromium } = require('playwright');
+  name: 'broadcast_today_links_daily',
+  schedule: '0 8 * * *', // Every day at 8:00
+  timezone: TIMEZONE,
+  run: async () => {
+    const utils = require('./modules/utils');
+    const todayLinks = require('./tasks/today_links');
+    const todaySeminarCheck = require('./tasks/today_seminar_check');
+    const { chromium } = require('playwright');
 
-        logger.info('broadcast_today_links_daily: running scheduled task');
-        const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
-        const context = await browser.newContext();
-        const page = await context.newPage();
+    logger.info('broadcast_today_links_daily: running scheduled task');
+    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
+    const context = await browser.newContext();
+    const page = await context.newPage();
 
-        try {
-            await utils.ensureLoggedIn({ page, context });
+    try {
+      await utils.ensureLoggedIn({ page, context });
 
-            const linksResult = await todayLinks.run({ page, context });
-            const seminarResult = await todaySeminarCheck.run({ page, context });
+      const linksResult = await todayLinks.run({ page, context });
+      const seminarResult = await todaySeminarCheck.run({ page, context });
 
-            let finalMessage = '';
-            if (linksResult && linksResult.success && linksResult.message) {
-                finalMessage += linksResult.message;
-            } else if (linksResult && !linksResult.success) {
-                logger.warn(`broadcast_today_links_daily: today_links sub-task failed: ${linksResult.message}`);
-                // Still try to continue with the other task
-            }
+      let finalMessage = '';
+      if (linksResult && linksResult.success && linksResult.message) {
+        finalMessage += linksResult.message;
+      } else if (linksResult && !linksResult.success) {
+        logger.warn(`broadcast_today_links_daily: today_links sub-task failed: ${linksResult.message}`);
+        // Still try to continue with the other task
+      }
 
-            if (seminarResult && seminarResult.success && seminarResult.message) {
-                if (finalMessage) finalMessage += '\n'; // Add a separator
-                finalMessage += seminarResult.message;
-            } else if (seminarResult && !seminarResult.success) {
-                logger.warn(`broadcast_today_links_daily: today_seminar_check sub-task failed: ${seminarResult.message}`);
-                 // Still try to send any message we have so far
-            }
+      if (seminarResult && seminarResult.success && seminarResult.message) {
+        if (finalMessage) finalMessage += '\n'; // Add a separator
+        finalMessage += seminarResult.message;
+      } else if (seminarResult && !seminarResult.success) {
+        logger.warn(`broadcast_today_links_daily: today_seminar_check sub-task failed: ${seminarResult.message}`);
+        // Still try to send any message we have so far
+      }
 
-            if (finalMessage) {
-                await utils.sendNotificationToChannel(finalMessage);
-                logger.info('broadcast_today_links_daily: successfully broadcasted combined message.');
-                return { success: true, message: 'Broadcast successful.' };
-            } else {
-                logger.warn('broadcast_today_links_daily: all sub-tasks ran, but no message was produced to broadcast.');
-                return { success: false, message: 'No message to broadcast.' };
-            }
-        } catch (e) {
-            logger.error('broadcast_today_links_daily: scheduled task failed', e && e.stack ? e.stack : e);
-            // Notify admin of failure
-            await utils.sendTelegram(`❗ Daily link broadcast failed: ${e.message}`).catch(() => { });
-            return { success: false, message: `Broadcast failed: ${e.message}` };
-        } finally {
-            try { await context.close(); } catch (e) { }
-            try { await browser.close(); } catch (e) { }
-        }
+      if (finalMessage) {
+        await utils.sendNotificationToChannel(finalMessage);
+        logger.info('broadcast_today_links_daily: successfully broadcasted combined message.');
+        return { success: true, message: 'Broadcast successful.' };
+      } else {
+        logger.warn('broadcast_today_links_daily: all sub-tasks ran, but no message was produced to broadcast.');
+        return { success: false, message: 'No message to broadcast.' };
+      }
+    } catch (e) {
+      logger.error('broadcast_today_links_daily: scheduled task failed', e && e.stack ? e.stack : e);
+      // Notify admin of failure
+      await utils.sendTelegram(`❗ Daily link broadcast failed: ${e.message}`).catch(() => {});
+      return { success: false, message: `Broadcast failed: ${e.message}` };
+    } finally {
+      try {
+        await context.close();
+      } catch (_e) {
+        // ignore
+      }
+      try {
+        await browser.close();
+      } catch (_e) {
+        // ignore
+      }
     }
+  },
 };
 scheduler.scheduleTaskCron(broadcastTodayLinksTask);
 taskRegistry.registerTask(broadcastTodayLinksTask); // Also register it to be runnable
@@ -256,22 +275,21 @@ logger.info('Scheduled `broadcast_today_links_daily` at 08:00 timezone=', TIMEZO
 
 // Schedule the lunch monitoring task
 scheduler.scheduleTaskCron({
-    name: 'monitor_lunch_seminars',
-    schedule: '0 11 * * *', // Every day at 11:00
-    timezone: TIMEZONE,
-    run: monitorLunchSeminarsTask.run
+  name: 'monitor_lunch_seminars',
+  schedule: '0 11 * * *', // Every day at 11:00
+  timezone: TIMEZONE,
+  run: monitorLunchSeminarsTask.run,
 });
 logger.info('Scheduled `monitor_lunch_seminars` at 11:00 timezone=', TIMEZONE);
 
 // Schedule the dinner monitoring task
 scheduler.scheduleTaskCron({
-    name: 'monitor_dinner_seminars',
-    schedule: '0 17 * * *', // Every day at 17:00
-    timezone: TIMEZONE,
-    run: monitorDinnerSeminarsTask.run
+  name: 'monitor_dinner_seminars',
+  schedule: '0 17 * * *', // Every day at 17:00
+  timezone: TIMEZONE,
+  run: monitorDinnerSeminarsTask.run,
 });
 logger.info('Scheduled `monitor_dinner_seminars` at 17:00 timezone=', TIMEZONE);
-
 
 // Guidance: to add more scheduled jobs, create more task objects like `scheduledTask` above
 // and call `scheduler.scheduleTaskCron(yourTask)`. Tasks should export `run` async function or be
@@ -283,31 +301,30 @@ process.stdin.resume();
 
 // --- Auto-resume logic on startup ---
 function checkAndResumeTasks() {
-    const runner = require('./runner');
-    const now = new Date(new Date().toLocaleString('en-US', { timeZone: TIMEZONE }));
-    const currentHour = now.getHours();
+  const runner = require('./runner');
+  const now = new Date(new Date().toLocaleString('en-US', { timeZone: TIMEZONE }));
+  const currentHour = now.getHours();
 
-    logger.info(`Startup check: current hour is ${currentHour} in ${TIMEZONE}`);
+  logger.info(`Startup check: current hour is ${currentHour} in ${TIMEZONE}`);
 
-    // Check for lunch monitoring window (11 AM to 2 PM)
-    if (currentHour >= 11 && currentHour < 14) {
-        logger.info('Inside lunch monitoring window, attempting to resume task.');
-        runner.runTask(monitorLunchSeminarsTask).catch(err => {
-            logger.error('Failed to auto-resume lunch monitoring task:', err);
-        });
-    }
+  // Check for lunch monitoring window (11 AM to 2 PM)
+  if (currentHour >= 11 && currentHour < 14) {
+    logger.info('Inside lunch monitoring window, attempting to resume task.');
+    runner.runTask(monitorLunchSeminarsTask).catch((err) => {
+      logger.error('Failed to auto-resume lunch monitoring task:', err);
+    });
+  }
 
-    // Check for dinner monitoring window (5 PM to 9 PM)
-    if (currentHour >= 17 && currentHour < 21) {
-        logger.info('Inside dinner monitoring window, attempting to resume task.');
-        runner.runTask(monitorDinnerSeminarsTask).catch(err => {
-            logger.error('Failed to auto-resume dinner monitoring task:', err);
-        });
-    }
+  // Check for dinner monitoring window (5 PM to 9 PM)
+  if (currentHour >= 17 && currentHour < 21) {
+    logger.info('Inside dinner monitoring window, attempting to resume task.');
+    runner.runTask(monitorDinnerSeminarsTask).catch((err) => {
+      logger.error('Failed to auto-resume dinner monitoring task:', err);
+    });
+  }
 }
 
 checkAndResumeTasks();
-
 
 // Launch the Telegram bot
 telegram.launch();

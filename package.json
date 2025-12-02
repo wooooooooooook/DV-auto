@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "update": "git pull && cp deploy/doctorville-auto.service /etc/systemd/system/ && systemctl daemon-reload && systemctl restart doctorville-auto.service"
+    "update": "git pull && cp deploy/doctorville-auto.service /etc/systemd/system/ && systemctl daemon-reload && systemctl restart doctorville-auto.service",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
   },
   "keywords": [],
   "author": "",
@@ -16,5 +18,11 @@
     "playwright": "^1.57.0",
     "telegraf": "^4.16.3",
     "undici": "^7.16.0"
+  },
+  "devDependencies": {
+    "eslint": "^9.39.1",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.4",
+    "prettier": "^3.7.3"
   }
 }
