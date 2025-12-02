@@ -7,6 +7,7 @@ on:
 
 jobs:
   run-macro:
+    if: secrets.RUN_WORKFLOW == 'true'
     runs-on: ubuntu-latest
 
     steps:
