@@ -1,10 +1,11 @@
-const { safeGoto, getSeminarIdFromUrl } = require('../modules/utils');
+import type { PlaywrightRunArgs } from '../types';
+import { safeGoto, getSeminarIdFromUrl } from '../modules/utils';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const BASE_URL = 'https://www.doctorville.co.kr/';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
 
-async function run({ page, _context }) {
+async function run({ page }: PlaywrightRunArgs) {
   try {
     await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'load', timeout: 30000 }, 1);
 
@@ -74,10 +75,11 @@ async function run({ page, _context }) {
       return { success: true, message: '오늘의 세미나 리스트: 오늘은 세미나가 없습니다.' };
     }
   } catch (_e) {
-    console.error('seminar check task error', _e && _e.stack ? _e.stack : _e);
+    console.error('seminar check task error', _e && typeof _e === 'object' && 'stack' in _e ? (_e as Error).stack : _e);
     // Return result to caller, do not send telegram message from here
-    return { success: false, message: `세미나 확인 작업 오류: ${_e && _e.message ? _e.message : String(_e)}` };
+    const message = _e instanceof Error ? _e.message : String(_e);
+    return { success: false, message: `세미나 확인 작업 오류: ${message}` };
   }
 }
 
-module.exports = { run };
+export { run };

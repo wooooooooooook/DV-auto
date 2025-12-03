@@ -1,10 +1,11 @@
-const { safeGoto, sendTelegram, getSeminarIdFromUrl } = require('../modules/utils');
+import type { PlaywrightRunArgs } from '../types';
+import { safeGoto, sendTelegram, getSeminarIdFromUrl } from '../modules/utils';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const BASE_URL = 'https://www.doctorville.co.kr/';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
 
-async function run({ page, _context }) {
+async function run({ page }: PlaywrightRunArgs) {
   try {
     await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'load', timeout: 30000 }, 1);
 
@@ -68,12 +69,13 @@ async function run({ page, _context }) {
     }
 
     return { success: true, message };
-  } catch (_e) {
-    console.error('5days seminar check task error', _e && _e.stack ? _e.stack : _e);
+  } catch (error) {
+    console.error('5days seminar check task error', error && typeof error === 'object' && 'stack' in error ? (error as Error).stack : error);
     // Notify admin about the error, but return the error to caller
-    await sendTelegram(`❗ 5일 세미나 확인 작업 오류: ${_e && _e.message ? _e.message : String(_e)}`).catch(() => {});
-    return { success: false, message: `5일 세미나 확인 작업 오류: ${_e && _e.message ? _e.message : String(_e)}` };
+    const message = error instanceof Error ? error.message : String(error);
+    await sendTelegram(`❗ 5일 세미나 확인 작업 오류: ${message}`).catch(() => {});
+    return { success: false, message: `5일 세미나 확인 작업 오류: ${message}` };
   }
 }
 
-module.exports = { run };
+export { run };

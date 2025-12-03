@@ -1,19 +1,22 @@
-const { safeGoto, sendNotificationToChannel, sendTelegram, getSeminarIdFromUrl } = require('../modules/utils');
-const keyMessageMonitor = require('./monitor_key_messages');
+import type { BrowserContext, Page } from 'playwright';
+import { safeGoto, sendNotificationToChannel, sendTelegram, getSeminarIdFromUrl } from '../modules/utils';
+import * as keyMessageMonitor from './monitor_key_messages';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const BASE_URL = 'https://www.doctorville.co.kr';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
 
 // Helper function for random delay
-const randomDelay = () => {
+const randomDelay = (): Promise<void> => {
   const delay = Math.floor(Math.random() * (10 - 5 + 1) + 5) * 60 * 1000; // 5 to 10 minutes in ms
   return new Promise((resolve) => setTimeout(resolve, delay));
 };
 
 // Helper function to get today's seminars within a specific time range
-async function getTodaysSeminars(page, startHour, endHour) {
-  const seminars = {}; // href -> { status, name }
+type SeminarInfo = { status: string; name: string; seminarId: string | null };
+
+async function getTodaysSeminars(page: Page, startHour: number, endHour: number): Promise<Record<string, SeminarInfo>> {
+  const seminars: Record<string, SeminarInfo> = {};
 
   const container = await page.locator('.list_cont').first();
   const seminarDay = await container
@@ -56,15 +59,15 @@ async function getTodaysSeminars(page, startHour, endHour) {
   return seminars;
 }
 
-async function monitorSeminars({ page, context }, periodName, startHour, endHour) {
-  let monitoringList = {}; // href -> {status, name}
+async function monitorSeminars({ page, context }: { page: Page; context: BrowserContext }, periodName: string, startHour: number, endHour: number) {
+  let monitoringList: Record<string, { status: string; name: string; seminarId: string | null }> = {};
 
   try {
     // Initial population of the monitoring list
     await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'load', timeout: 30000 }, 1);
 
     const initialSeminars = await getTodaysSeminars(page, startHour, endHour);
-    monitoringList = { ...initialSeminars }; // Track all seminars from the start
+    monitoringList = { ...initialSeminars } as Record<string, { status: string; name: string; seminarId: string | null }>; // Track all seminars from the start
 
     for (const [url, { status, name }] of Object.entries(initialSeminars)) {
       // If a seminar is already open, start its key message monitor immediately
@@ -154,12 +157,16 @@ async function monitorSeminars({ page, context }, periodName, startHour, endHour
     await sendTelegram(`[${periodName}] 세미나 감시를 종료합니다.`);
     return true;
   } catch (e) {
-    console.error(`[${periodName}] seminar monitoring task error`, e && e.stack ? e.stack : e);
-    await sendTelegram(`❗ [${periodName}] 세미나 감시 작업 오류: ${e && e.message ? e.message : String(e)}`).catch(
+    console.error(
+      `[${periodName}] seminar monitoring task error`,
+      e && typeof e === 'object' && 'stack' in e ? (e as Error).stack : e,
+    );
+    const message = e instanceof Error ? e.message : String(e);
+    await sendTelegram(`❗ [${periodName}] 세미나 감시 작업 오류: ${message}`).catch(
       () => {},
     );
     return false;
   }
 }
 
-module.exports = { monitorSeminars };
+export { monitorSeminars };

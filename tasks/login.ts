@@ -1,9 +1,10 @@
-const { safeGoto, saveCookies, saveLocalStorage, sendTelegram } = require('../modules/utils');
+import type { Page, BrowserContext } from 'playwright';
+import { safeGoto, saveCookies, saveLocalStorage, sendTelegram } from '../modules/utils';
 
 const LOGIN_URL = 'https://mims-account.mcircle.co.kr/login?cb=https://www.doctorville.co.kr/mims/directLogin';
 const TARGET_PAGE = 'https://www.doctorville.co.kr/main';
 
-async function run({ page, context }) {
+async function run({ page, context }: { page: Page; context: BrowserContext }) {
   const { DV_USER, DV_PASS } = process.env;
 
   // Navigate to login
@@ -40,13 +41,14 @@ async function run({ page, context }) {
     await saveCookies(context);
     await saveLocalStorage(page).catch(() => {});
     return { success: true, message: '로그인 성공했습니다.' };
-  } catch (_e) {
-    console.error('login task error', _e && _e.stack ? _e.stack : _e);
-    await sendTelegram(`❗ 로그인 작업 중 오류: ${_e && _e.message ? _e.message : String(_e)}`).catch((err) =>
+  } catch (error) {
+    console.error('login task error', error && typeof error === 'object' && 'stack' in error ? (error as Error).stack : error);
+    const message = error instanceof Error ? error.message : String(error);
+    await sendTelegram(`❗ 로그인 작업 중 오류: ${message}`).catch((err) =>
       console.error('Failed to send Telegram message:', err),
     );
-    return { success: false, message: `로그인 작업 중 오류: ${_e && _e.message ? _e.message : String(_e)}` };
+    return { success: false, message: `로그인 작업 중 오류: ${message}` };
   }
 }
 
-module.exports = { run };
+export { run };

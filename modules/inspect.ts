@@ -1,29 +1,49 @@
-const playwright = require('playwright');
-const fs = require('fs/promises');
-const path = require('path');
-const { safeGoto, loadCookies, loadLocalStorage } = require('./utils');
+import { chromium } from 'playwright';
+import fs from 'fs/promises';
+import path from 'path';
+import { safeGoto, loadCookies, loadLocalStorage } from './utils';
 
-async function inspect(url, selector) {
-  const browser = await playwright.chromium.launch();
+interface InspectElementData {
+  innerText: string;
+  id: string;
+  className: string;
+  attributes: Record<string, string>;
+}
+
+interface InspectResult {
+  count: number;
+  elements: InspectElementData[];
+  screenshotPath: string;
+  warnings: string[];
+}
+
+async function inspect(url: string, selector: string): Promise<InspectResult> {
+  const browser = await chromium.launch();
   const context = await browser.newContext();
   const page = await context.newPage();
-  let screenshotPath = null;
-  const warnings = [];
+  let screenshotPath: string | null = null;
+  const warnings: string[] = [];
 
   try {
-    await loadCookies(context).catch((err) => warnings.push(`Failed to load cookies: ${err.message}`));
-    await loadLocalStorage(page, url).catch((err) => warnings.push(`Failed to load local storage: ${err.message}`));
+    await loadCookies(context).catch((err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      warnings.push(`Failed to load cookies: ${message}`);
+    });
+    await loadLocalStorage(page, url).catch((err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      warnings.push(`Failed to load local storage: ${message}`);
+    });
 
     await safeGoto(page, url, { waitUntil: 'load', timeout: 30000 });
 
-    const screenshotDir = path.join(__dirname, '..', 'screenshot');
+    const screenshotDir = path.join(process.cwd(), 'screenshot');
     await fs.mkdir(screenshotDir, { recursive: true });
 
     screenshotPath = path.join(screenshotDir, `inspect-${Date.now()}.png`);
     await page.screenshot({ path: screenshotPath, fullPage: false });
 
     const parts = selector.split('>>').map((s) => s.trim());
-    let locator;
+    let locator = null as ReturnType<typeof page.locator> | null;
     let isFirst = true;
 
     for (const part of parts) {
@@ -51,7 +71,6 @@ async function inspect(url, selector) {
         const index = parseInt(nthMatch[1], 10);
         locator = locator.nth(index);
       } else {
-        // Fallback for old syntax without locator() or nth()
         if (isFirst) {
           locator = page.locator(part);
           isFirst = false;
@@ -68,34 +87,33 @@ async function inspect(url, selector) {
 
     const elements = await locator.all();
 
-    const elementsData = await Promise.all(
-      elements.map((el) => {
-        return el.evaluate((element) => {
-          const attributes = {};
-          for (const attr of element.attributes) {
+    const elementsData: InspectElementData[] = await Promise.all(
+      elements.map((el) =>
+        el.evaluate((element) => {
+          const node = element as HTMLElement;
+          const attributes: Record<string, string> = {};
+          for (const attr of node.attributes) {
             attributes[attr.name] = attr.value;
           }
           return {
-            innerText: element.innerText,
-            id: element.id,
-            className: element.className,
-            attributes: attributes,
+            innerText: (node.innerText || '').toString(),
+            id: node.id,
+            className: node.className,
+            attributes,
           };
-        });
-      }),
+        }),
+      ),
     );
 
     return {
       count: elements.length,
       elements: elementsData,
-      screenshotPath: screenshotPath,
-      warnings: warnings,
+      screenshotPath: screenshotPath || '',
+      warnings,
     };
   } finally {
     await browser.close();
   }
 }
 
-module.exports = {
-  inspect,
-};
+export { inspect, InspectResult };

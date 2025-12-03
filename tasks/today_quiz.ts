@@ -1,9 +1,10 @@
-const { safeGoto, sendTelegram } = require('../modules/utils');
-const path = require('path');
+import type { PlaywrightRunArgs } from '../types';
+import { safeGoto, sendTelegram } from '../modules/utils';
+import quizMapping from '../data/quiz.json';
 
 const QUIZ_LIST_URL = 'https://www.doctorville.co.kr/product/medicineList';
 
-async function run({ page, _context }) {
+async function run({ page }: PlaywrightRunArgs) {
   try {
     await safeGoto(page, QUIZ_LIST_URL, { waitUntil: 'load', timeout: 30000 }, 2);
 
@@ -21,9 +22,10 @@ async function run({ page, _context }) {
       if (!handle) return null;
       try {
         return await page.evaluate((el) => {
-          let cur = el;
+          let cur: Element | null = el;
           while (cur && cur.nodeType === 1) {
-            if (cur.tagName === 'A' && cur.href) return cur.href;
+            const anchor = cur as HTMLAnchorElement;
+            if (anchor.tagName === 'A' && anchor.href) return anchor.href;
             cur = cur.parentElement;
           }
           return null;
@@ -74,13 +76,7 @@ async function run({ page, _context }) {
     }
 
     // Load mapping from data/quiz.json
-    let mapping = {};
-    try {
-      mapping = require(path.join(__dirname, '..', 'data', 'quiz.json'));
-    } catch (_e) {
-      mapping = {};
-    }
-
+    const mapping = quizMapping as Record<string, Array<string | number>>;
     const answers = mapping[productTitle];
     if (!answers || !Array.isArray(answers) || answers.length === 0) {
       return { success: true, message: `정답이 등록되지 않았습니다. 직접 퀴즈를 풀어주세요. ${href}` };
@@ -152,10 +148,11 @@ async function run({ page, _context }) {
     // Fallback
     return { success: false, message: `퀴즈 제출을 실패했습니다. (제품: ${productTitle}), ${href}`, imagePath: shot };
   } catch (_e) {
-    console.error('today_quiz task error', _e && _e.stack ? _e.stack : _e);
-    await sendTelegram(`❗ 오늘의 퀴즈 작업 오류: ${_e && _e.message ? _e.message : String(_e)}`).catch(() => {});
-    return { success: false, message: `오늘의 퀴즈 작업 오류: ${_e && _e.message ? _e.message : String(_e)}` };
+    console.error('today_quiz task error', _e && typeof _e === 'object' && 'stack' in _e ? (_e as Error).stack : _e);
+    const message = _e instanceof Error ? _e.message : String(_e);
+    await sendTelegram(`❗ 오늘의 퀴즈 작업 오류: ${message}`).catch(() => {});
+    return { success: false, message: `오늘의 퀴즈 작업 오류: ${message}` };
   }
 }
 
-module.exports = { run };
+export { run };

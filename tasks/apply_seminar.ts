@@ -1,11 +1,12 @@
-const { safeGoto, sendTelegram } = require('../modules/utils');
-const path = require('path');
-const fs = require('fs').promises; // Use promises version for unlink
+import path from 'path';
+import fs from 'fs/promises';
+import type { PlaywrightRunArgs } from '../types';
+import { safeGoto, sendTelegram } from '../modules/utils';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 
-async function run({ page, _context }) {
-  let screenshotPath = null;
+async function run({ page }: PlaywrightRunArgs) {
+  let screenshotPath: string | null = null;
   try {
     await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'load', timeout: 30000 }, 1);
 
@@ -52,31 +53,32 @@ async function run({ page, _context }) {
       message += `\n (${failedToApplyCount}개는 마감 등의 사유로 신청 실패)`;
     }
 
-    const baseScreenshotDir = path.join(__dirname, '..', 'screenshot');
+    const baseScreenshotDir = path.join(process.cwd(), 'screenshot');
     await fs.mkdir(baseScreenshotDir, { recursive: true });
     screenshotPath = path.join(baseScreenshotDir, `apply_seminar_result.png`);
     await page.screenshot({ path: screenshotPath, fullPage: false });
 
     return { success: true, message: message, imagePath: screenshotPath };
-  } catch (_e) {
-    console.error('seminar task error', _e && _e.stack ? _e.stack : _e);
+  } catch (error) {
+    console.error('seminar task error', error && typeof error === 'object' && 'stack' in error ? (error as Error).stack : error);
     if (!screenshotPath) {
-      const baseScreenshotDir = path.join(__dirname, '..', 'screenshot');
+      const baseScreenshotDir = path.join(process.cwd(), 'screenshot');
       await fs.mkdir(baseScreenshotDir, { recursive: true });
       screenshotPath = path.join(baseScreenshotDir, `apply_seminar_error.png`);
       await page
         .screenshot({ path: screenshotPath, fullPage: false })
-        .catch((err) => console.error('Failed to capture error screenshot:', err));
+        .catch((err: unknown) => console.error('Failed to capture error screenshot:', err));
     }
-    await sendTelegram(`❗ 세미나 신청 작업 오류: ${_e && _e.message ? _e.message : String(_e)}`, screenshotPath).catch(
+    const message = error instanceof Error ? error.message : String(error);
+    await sendTelegram(`❗ 세미나 신청 작업 오류: ${message}`, screenshotPath).catch(
       () => {},
     );
     return {
       success: false,
-      message: `세미나 신청 작업 오류: ${_e && _e.message ? _e.message : String(_e)}`,
+      message: `세미나 신청 작업 오류: ${message}`,
       imagePath: screenshotPath,
     };
   }
 }
 
-module.exports = { run };
+export { run };

@@ -1,12 +1,15 @@
-const cron = require('node-cron');
-const logger = require('./logger');
-const runner = require('./runner');
+import cron from 'node-cron';
+import * as logger from './logger';
+import * as runner from './runner';
+import type { Task } from './types';
 
-const scheduledTasks = [];
+type ScheduledTask = Task & { job: cron.ScheduledTask };
 
-function scheduleTaskCron(task) {
+const scheduledTasks: ScheduledTask[] = [];
+
+function scheduleTaskCron(task: Task): cron.ScheduledTask {
   if (!task || !task.schedule) throw new Error('task.schedule is required for cron scheduling');
-  const opts = { scheduled: true };
+  const opts: cron.ScheduleOptions = { scheduled: true };
   // Allow explicit timezone on the task, or fall back to process TZ env
   if (task.timezone) opts.timezone = task.timezone;
   else if (process.env.TZ) opts.timezone = process.env.TZ;
@@ -25,11 +28,12 @@ function scheduleTaskCron(task) {
     opts,
   );
 
-  scheduledTasks.push({ ...task, job });
+  scheduledTasks.push({ ...(task as Task), job });
   return job;
 }
 
-module.exports = {
-  scheduleTaskCron,
-  getScheduledTasks: () => scheduledTasks,
-};
+function getScheduledTasks(): ScheduledTask[] {
+  return scheduledTasks;
+}
+
+export { scheduleTaskCron, getScheduledTasks };

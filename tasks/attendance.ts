@@ -1,14 +1,15 @@
-const { safeGoto, sendTelegram } = require('../modules/utils');
-const path = require('path');
-const fs = require('fs').promises; // Use promises version for unlink
+import path from 'path';
+import fs from 'fs/promises';
+import type { PlaywrightRunArgs } from '../types';
+import { safeGoto, sendTelegram } from '../modules/utils';
 
-async function run({ page, _context }) {
-  let screenshotPath = null;
+async function run({ page }: PlaywrightRunArgs) {
+  let screenshotPath: string | null = null;
   try {
     const ATTENDANCE_PAGE = 'https://www.doctorville.co.kr/event/attend';
     await safeGoto(page, ATTENDANCE_PAGE, { waitUntil: 'load', timeout: 30000 }, 1);
 
-    const baseScreenshotDir = path.join(__dirname, '..', 'screenshot');
+    const baseScreenshotDir = path.join(process.cwd(), 'screenshot');
     await fs.mkdir(baseScreenshotDir, { recursive: true });
     screenshotPath = path.join(baseScreenshotDir, `attendance_result.png`);
 
@@ -32,26 +33,27 @@ async function run({ page, _context }) {
     const html = await page.locator('.tit_box').first().innerHTML();
     console.log('tit_box innerHTML:', html);
     return { success: false, message: '출석체크 버튼을 찾지 못함!', imagePath: screenshotPath };
-  } catch (_e) {
-    console.error('attendance task error', _e && _e.stack ? _e.stack : _e);
+  } catch (error) {
+    console.error('attendance task error', error && typeof error === 'object' && 'stack' in error ? (error as Error).stack : error);
     // On error, still try to capture a screenshot if it's not already set
     if (!screenshotPath) {
-      const baseScreenshotDir = path.join(__dirname, '..', 'screenshot');
+      const baseScreenshotDir = path.join(process.cwd(), 'screenshot');
       await fs.mkdir(baseScreenshotDir, { recursive: true });
       screenshotPath = path.join(baseScreenshotDir, `attendance_error.png`);
       await page
         .screenshot({ path: screenshotPath, fullPage: false })
-        .catch((err) => console.error('Failed to capture error screenshot:', err));
+        .catch((err: unknown) => console.error('Failed to capture error screenshot:', err));
     }
-    await sendTelegram(`❗ 출석체크 작업 오류: ${_e && _e.message ? _e.message : String(_e)}`, screenshotPath).catch(
+    const message = error instanceof Error ? error.message : String(error);
+    await sendTelegram(`❗ 출석체크 작업 오류: ${message}`, screenshotPath).catch(
       () => {},
     );
     return {
       success: false,
-      message: `출석체크 작업 오류: ${_e && _e.message ? _e.message : String(_e)}`,
+      message: `출석체크 작업 오류: ${message}`,
       imagePath: screenshotPath,
     };
   }
 }
 
-module.exports = { run };
+export { run };

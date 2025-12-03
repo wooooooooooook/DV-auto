@@ -2,11 +2,14 @@
   "name": "doctorville-auto",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "dist/main.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "restart": "systemctl restart doctorville-auto.service",
-    "update": "git pull && cp deploy/doctorville-auto.service /etc/systemd/system/ && systemctl daemon-reload && systemctl restart doctorville-auto.service",
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "dev": "ts-node main.ts",
+    "restart": "npm run build && systemctl restart doctorville-auto.service",
+    "update": "git pull && npm ci && npm run build && cp deploy/doctorville-auto.service /etc/systemd/system/ && systemctl daemon-reload && systemctl restart doctorville-auto.service",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix"
   },
@@ -25,6 +28,12 @@
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.4",
     "globals": "^16.5.0",
-    "prettier": "^3.7.3"
+    "prettier": "^3.7.3",
+    "@types/node": "^22.9.0",
+    "@typescript-eslint/eslint-plugin": "^8.15.0",
+    "@typescript-eslint/parser": "^8.15.0",
+    "typescript-eslint": "^8.15.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.3"
   }
 }

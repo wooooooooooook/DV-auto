@@ -7,7 +7,7 @@ on:
 
 jobs:
   run-macro:
-    if: secrets.RUN_WORKFLOW == 'true'
+    if: ${{ secrets.RUN_WORKFLOW == 'true' }}
     runs-on: ubuntu-latest
 
     steps:
@@ -26,14 +26,14 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('**/package-lock.json') }}-${{ matrix.node-version }}
+          # matrix.node-version이 없으니 runner.os + hashFiles + node-version 문자열로 대체
+          key: ${{ runner.os }}-playwright-${{ hashFiles('**/package-lock.json') }}-node20
           restore-keys: |
             ${{ runner.os }}-playwright-${{ hashFiles('**/package-lock.json') }}
             ${{ runner.os }}-playwright-
 
       - name: Install Playwright Browsers
         run: npx playwright install --with-deps
-
 
       - name: Run macro.js
         run: node macro.js
