@@ -1,20 +1,22 @@
-const { sendNotificationToChannel, safeGoto, getSeminarIdFromUrl, ensureLoggedIn } = require('../modules/utils');
-const storage = require('../storage');
+import type { BrowserContext, Page } from 'playwright';
+import { sendNotificationToChannel, safeGoto, getSeminarIdFromUrl, ensureLoggedIn, sleep } from '../modules/utils';
+import * as storage from '../services/storage';
 
 const KEY = 'key_message_seminars';
 
-async function getKeyMessages(page) {
+async function getKeyMessages(page: Page): Promise<string[]> {
   const messages = await page.locator('.key_message .txt').allInnerTexts();
   return messages.map((m) => m.trim()).filter((m) => m.length > 0);
 }
 
 /**
  * Monitors a single seminar for key messages.
- * @param {{ page: import('playwright').Page, context: import('playwright').BrowserContext }} browserObjects
- * @param {string} seminarUrl - The URL of the seminar to monitor.
- * @param {string} seminarName - The name of the seminar.
  */
-async function monitor({ page, context }, seminarUrl, seminarName) {
+async function monitor(
+  { page, context }: { page: Page; context: BrowserContext },
+  seminarUrl: string,
+  seminarName: string,
+): Promise<void> {
   const seminarId = getSeminarIdFromUrl(seminarUrl);
   if (!seminarId) {
     console.error(`monitor_key_messages: Invalid seminar URL, cannot get seminarId: ${seminarUrl}`);
@@ -37,9 +39,9 @@ async function monitor({ page, context }, seminarUrl, seminarName) {
 
       const newMessages = await getKeyMessages(page);
 
-      const allStoredMessages = storage.get(KEY, {});
-      const seminarData = allStoredMessages[seminarId] || { name: seminarName, messages: [] };
-      const oldMessages = seminarData.messages;
+      const allStoredMessages = storage.get<Record<string, { name: string; messages: string[] }>>(KEY, {}) || {};
+      const seminarData = allStoredMessages[seminarId] || { name: seminarName, messages: [] as string[] };
+      const oldMessages: string[] = seminarData.messages;
 
       if (newMessages.length > 0) {
         const newMessagesStr = JSON.stringify(newMessages);
@@ -70,14 +72,17 @@ async function monitor({ page, context }, seminarUrl, seminarName) {
       }
     } catch (e) {
       // If page is closed or navigation fails, it might mean the seminar has ended.
-      if (e.message.includes('Target page, context or browser has been closed')) {
+      if (e instanceof Error && e.message.includes('Target page, context or browser has been closed')) {
         console.log(`monitor_key_messages: [${seminarName}] Page closed, ending monitoring.`);
         break;
       }
-      console.error(`monitor_key_messages: [${seminarName}] Error during check`, e && e.stack ? e.stack : e);
+      console.error(
+        `monitor_key_messages: [${seminarName}] Error during check`,
+        e && typeof e === 'object' && 'stack' in e ? (e as Error).stack : e,
+      );
     }
 
-    await new Promise((r) => setTimeout(r, intervalMs));
+    await sleep(intervalMs);
   }
 
   console.log(
@@ -85,4 +90,4 @@ async function monitor({ page, context }, seminarUrl, seminarName) {
   );
 }
 
-module.exports = { monitor, getKeyMessages };
+export { monitor, getKeyMessages };

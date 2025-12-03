@@ -7,7 +7,7 @@ Type=simple
 # WorkingDirectory should be the absolute path to your project directory
 WorkingDirectory=/root/doctorville-auto
 # Use /usr/bin/env to find node in PATH
-ExecStart=/usr/bin/env node main.js
+ExecStart=/usr/bin/env node dist/core/main.js
 Restart=on-failure
 RestartSec=5
 # Point to an EnvironmentFile that contains your secrets (one per line: VAR=val)

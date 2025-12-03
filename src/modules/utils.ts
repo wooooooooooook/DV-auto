@@ -1,0 +1,280 @@
+import fs from 'fs';
+import path from 'path';
+import type { BrowserContext, Page } from 'playwright';
+import { getBot } from '../services/bot_instance';
+
+const COOKIE_FILE = path.join(process.cwd(), 'cookies.json');
+const LOCALSTORAGE_FILE = path.join(process.cwd(), 'localstorage.json');
+
+function maskToken(token?: string | null): string {
+  if (!token) return '';
+  return token.length > 10 ? `${token.slice(0, 6)}...${token.slice(-4)}` : token;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Function to escape MarkdownV2 special characters
+// https://core.telegram.org/bots/api#markdownv2-style
+function escapeMarkdown(text: string): string {
+  if (typeof text !== 'string') return '';
+  return text.replace(/([\\_*\\[\\]()~`>#+\\-=|{}.!])/g, '\\$1');
+}
+
+async function sendTelegram(
+  text: string,
+  imagePath: string | null = null,
+  options: Record<string, unknown> = {},
+): Promise<void> {
+  const bot = getBot('admin');
+  if (!bot) {
+    console.error('Admin bot is not initialized. Cannot send message.');
+    return;
+  }
+
+  const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+  if (!CHAT_ID) {
+    console.error('TELEGRAM_CHAT_ID is not set.');
+    return;
+  }
+
+  try {
+    if (imagePath) {
+      await bot.telegram.sendPhoto(CHAT_ID, { source: imagePath }, { caption: text, ...(options as any) });
+    } else {
+      await bot.telegram.sendMessage(CHAT_ID, text, options as any);
+    }
+  } catch (error) {
+    console.error('Failed to send Telegram message:', error);
+    try {
+      const message = error instanceof Error ? error.message : String(error);
+      await bot.telegram.sendMessage(CHAT_ID, `Failed to send a complex Telegram message. Error: ${message}`);
+    } catch (nestedError) {
+      console.error('Failed to send the failure notification as well:', nestedError);
+    }
+  }
+}
+
+async function sendNotificationToChannel(
+  text: string,
+  imagePath: string | null = null,
+  options: Record<string, unknown> = {},
+): Promise<void> {
+  const bot = getBot('notice');
+  if (!bot) {
+    console.error('Notice bot is not initialized. Cannot send message.');
+    return;
+  }
+
+  const CHANNEL_ID = process.env.NOTICE_CHANNEL_ID;
+  if (!CHANNEL_ID) {
+    console.error('NOTICE_CHANNEL_ID is not set.');
+    return;
+  }
+
+  try {
+    if (imagePath) {
+      await bot.telegram.sendPhoto(CHANNEL_ID, { source: imagePath }, { caption: text, ...(options as any) });
+    } else {
+      await bot.telegram.sendMessage(CHANNEL_ID, text, options as any);
+    }
+  } catch (error) {
+    console.error('Failed to send Telegram notification to channel:', error);
+    try {
+      const message = error instanceof Error ? error.message : String(error);
+      await bot.telegram.sendMessage(CHANNEL_ID, `Failed to send a complex message. Error: ${message}`);
+    } catch (nestedError) {
+      console.error('Failed to send the failure notification as well:', nestedError);
+    }
+  }
+}
+
+async function saveCookies(context: BrowserContext): Promise<void> {
+  try {
+    const cookies = await context.cookies();
+    fs.writeFileSync(COOKIE_FILE, JSON.stringify(cookies, null, 2));
+  } catch (_e) {
+    console.warn('쿠키 저장 실패:', _e && (typeof _e === 'object' && 'message' in _e ? (_e as Error).message : _e));
+  }
+}
+
+async function saveLocalStorage(page: Page): Promise<void> {
+  try {
+    const url = page.url();
+    if (!url || url === 'about:blank') return;
+    const origin = new URL(url).origin;
+    const data = await page.evaluate(() => {
+      const out: Record<string, string | null> = {};
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key) out[key] = localStorage.getItem(key);
+      }
+      return out;
+    });
+
+    let all: Record<string, unknown> = {};
+    if (fs.existsSync(LOCALSTORAGE_FILE)) {
+      try {
+        all = JSON.parse(fs.readFileSync(LOCALSTORAGE_FILE, 'utf8'));
+      } catch (_e) {
+        all = {};
+      }
+    }
+    all[origin] = data;
+    fs.writeFileSync(LOCALSTORAGE_FILE, JSON.stringify(all, null, 2));
+  } catch (_e) {
+    console.warn('localStorage 저장 실패:', _e && (typeof _e === 'object' && 'message' in _e ? (_e as Error).message : _e));
+  }
+}
+
+async function loadCookies(context: BrowserContext): Promise<boolean> {
+  try {
+    if (fs.existsSync(COOKIE_FILE)) {
+      const cookies = JSON.parse(fs.readFileSync(COOKIE_FILE, 'utf8'));
+      await context.addCookies(cookies);
+      return true;
+    }
+  } catch (_e) {
+    console.warn('쿠키 로드 실패:', _e && (typeof _e === 'object' && 'message' in _e ? (_e as Error).message : _e));
+  }
+  return false;
+}
+
+async function loadLocalStorage(page: Page, targetUrl: string): Promise<boolean> {
+  try {
+    if (!fs.existsSync(LOCALSTORAGE_FILE)) return false;
+    const all = JSON.parse(fs.readFileSync(LOCALSTORAGE_FILE, 'utf8'));
+    const origin = new URL(targetUrl).origin;
+    const data = all[origin];
+    if (!data) return false;
+
+    try {
+      const cur = page.url();
+      if (!cur || !cur.startsWith(origin)) {
+        await page.goto(origin, { waitUntil: 'domcontentloaded', timeout: 8000 }).catch(() => {});
+      }
+    } catch (_e) {
+      // ignore navigation errors, we'll still try to set items
+    }
+
+    await page.evaluate((store) => {
+      try {
+        Object.entries(store as Record<string, string | null>).forEach(([k, v]) => localStorage.setItem(k, v as string));
+      } catch (_e) {
+        /* ignore */
+      }
+    }, data);
+    return true;
+  } catch (_e) {
+    console.warn('localStorage 로드 실패:', _e && (typeof _e === 'object' && 'message' in _e ? (_e as Error).message : _e));
+  }
+  return false;
+}
+
+async function safeGoto(page: Page, url: string, options: Parameters<Page['goto']>[1] = {}, retries = 2) {
+  let attempt = 0;
+  const originalUrl = url;
+
+  function isAbsolute(u: string): boolean {
+    return /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(u) || u.startsWith('about:') || u.startsWith('data:');
+  }
+
+  let resolvedUrl = url;
+  try {
+    if (typeof url === 'string' && !isAbsolute(url)) {
+      const current = page && typeof page.url === 'function' ? page.url() : null;
+      if (current && current !== 'about:blank') {
+        resolvedUrl = new URL(url, current).toString();
+      } else if (process.env.BASE_URL) {
+        resolvedUrl = new URL(url, process.env.BASE_URL).toString();
+      } else {
+        console.warn('safeGoto: relative URL provided but no current page URL and BASE_URL not set:', url);
+      }
+    }
+  } catch (_e) {
+    console.error('safeGoto: URL resolution error for', url, _e && (typeof _e === 'object' && 'stack' in _e ? (_e as Error).stack : _e));
+  }
+
+  while (true) {
+    attempt += 1;
+    console.debug(`safeGoto: attempt ${attempt} -> ${resolvedUrl}`);
+    try {
+      return await page.goto(resolvedUrl, options);
+    } catch (err) {
+      const meta = {
+        originalUrl,
+        resolvedUrl,
+        attempt,
+        name: err && typeof err === 'object' && 'name' in err ? (err as Error).name : undefined,
+        code: err && typeof err === 'object' && 'code' in err ? (err as { code?: string }).code : undefined,
+        message: err && typeof err === 'object' && 'message' in err ? (err as Error).message : undefined,
+      };
+      console.error('safeGoto error:', meta, err && (typeof err === 'object' && 'stack' in err ? (err as Error).stack : err));
+      try {
+        const errName = err && typeof err === 'object' && 'name' in err ? (err as Error).name : String(err);
+        const errCode = err && typeof err === 'object' && 'code' in err ? (err as { code?: string }).code : '';
+        await sendTelegram(`❗ safeGoto failed (${resolvedUrl}) attempt ${attempt}: ${errName}${errCode ? ` (${errCode})` : ''}`);
+      } catch (notifyErr) {
+        console.error('notify failed', notifyErr && (typeof notifyErr === 'object' && 'stack' in notifyErr ? (notifyErr as Error).stack : notifyErr));
+      }
+      if (attempt > retries) {
+        const errMessage =
+          err && typeof err === 'object' && 'message' in err ? (err as Error).message : String(err);
+        throw new Error(`safeGoto failed after ${attempt} attempts for ${resolvedUrl}: ${errMessage}`);
+      }
+      await sleep(1000 * attempt);
+    }
+  }
+}
+
+const LOGIN_URL = 'https://mims-account.mcircle.co.kr/login?cb=https://www.doctorville.co.kr/mims/directLogin';
+async function ensureLoggedIn({ page, context }: { page: Page; context: BrowserContext }): Promise<void> {
+  if (page.url() === 'about:blank' || !page.url()) {
+    console.log('Current page is blank or empty, navigating to LOGIN_URL for login check.');
+    await safeGoto(page, LOGIN_URL);
+  }
+
+  try {
+    await loadCookies(context).catch(() => {});
+  } catch (_e) {
+    /* ignore */
+  }
+  try {
+    await loadLocalStorage(page, LOGIN_URL).catch(() => {});
+  } catch (_e) {
+    /* ignore */
+  }
+
+  const loginButtonCount = await page.locator(':text("로그인")').count();
+  if (loginButtonCount > 0) {
+    console.log('로그인이 필요합니다. login 태스크를 실행합니다.');
+    const loginTask = require('../tasks/login') as { run: ({ page, context }: { page: Page; context: BrowserContext }) => Promise<void> };
+    await loginTask.run({ page, context });
+  }
+}
+
+function getSeminarIdFromUrl(url: string): string | null {
+  try {
+    const urlObj = new URL(url);
+    return urlObj.searchParams.get('seminarId');
+  } catch (_e) {
+    console.error('Failed to extract seminarId from URL:', url, _e);
+    return null;
+  }
+}
+
+export {
+  sendTelegram,
+  sendNotificationToChannel,
+  saveCookies,
+  loadCookies,
+  saveLocalStorage,
+  loadLocalStorage,
+  safeGoto,
+  sleep,
+  maskToken,
+  ensureLoggedIn,
+  getSeminarIdFromUrl,
+  escapeMarkdown,
+};

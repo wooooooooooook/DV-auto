@@ -1,19 +1,23 @@
 import globals from 'globals';
 import pluginJs from '@eslint/js';
+import tseslint from 'typescript-eslint';
 import prettier from 'eslint-config-prettier';
 import pluginPrettier from 'eslint-plugin-prettier';
 
-export default [
+export default tseslint.config(
   {
-    ignores: ['node_modules/'],
+    ignores: ['node_modules/', 'dist/'],
   },
   pluginJs.configs.recommended,
   prettier,
+  ...tseslint.configs.recommended,
   {
-    files: ['**/*.js'],
+    files: ['**/*.ts'],
     languageOptions: {
-      ecmaVersion: 'latest',
-      sourceType: 'commonjs',
+      parserOptions: {
+        sourceType: 'commonjs',
+        ecmaVersion: 'latest',
+      },
       globals: {
         ...globals.node,
         localStorage: 'readonly',
@@ -24,7 +28,7 @@ export default [
     },
     rules: {
       'prettier/prettier': 'error',
-      'no-unused-vars': [
+      '@typescript-eslint/no-unused-vars': [
         'error',
         {
           argsIgnorePattern: '^_',
@@ -45,4 +49,4 @@ export default [
       },
     },
   },
-];
+);

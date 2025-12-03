@@ -7,7 +7,7 @@ on:
 
 jobs:
   run-macro:
-    if: secrets.RUN_WORKFLOW == 'true'
+    if: ${{ secrets.RUN_WORKFLOW == 'true' }}
     runs-on: ubuntu-latest
 
     steps:
@@ -18,25 +18,31 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Enable Corepack (pnpm)
+        run: corepack enable
+
       - name: Install dependencies
-        run: npm install
+        run: pnpm install --frozen-lockfile
 
       - name: Cache Playwright Browsers
         id: cache-playwright-browsers
         uses: actions/cache@v3
         with:
           path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('**/package-lock.json') }}-${{ matrix.node-version }}
+          # matrix.node-version이 없으니 runner.os + hashFiles + node-version 문자열로 대체
+          key: ${{ runner.os }}-playwright-${{ hashFiles('**/pnpm-lock.yaml') }}-node20
           restore-keys: |
-            ${{ runner.os }}-playwright-${{ hashFiles('**/package-lock.json') }}
+            ${{ runner.os }}-playwright-${{ hashFiles('**/pnpm-lock.yaml') }}
             ${{ runner.os }}-playwright-
 
       - name: Install Playwright Browsers
-        run: npx playwright install --with-deps
+        run: pnpm exec playwright install --with-deps
 
+      - name: Build
+        run: pnpm run build
 
       - name: Run macro.js
-        run: node macro.js
+        run: node dist/services/macro.js
         env:
           DV_USER: ${{ secrets.DV_USER }}
           DV_PASS: ${{ secrets.DV_PASS }}

@@ -1,27 +1,28 @@
-const storage = require('./storage');
-const logger = require('./logger');
-const utils = require('./modules/utils');
+import * as storage from '../services/storage';
+import * as logger from '../services/logger';
+import * as utils from '../modules/utils';
+import type { Task, TaskContext, TaskResult } from '../types';
 
 // Acquire a simple process-level lock for a task (not distributed)
-function _acquireLock(name, ttlMs = 60 * 1000) {
+function acquireLock(name: string, ttlMs = 60 * 1000): boolean {
   const key = `lock:${name}`;
   const now = Date.now();
-  const current = storage.get(key);
+  const current = storage.get<{ ts?: number }>(key);
   if (current && current.ts && now - current.ts < ttlMs) return false;
   storage.set(key, { owner: process.pid, ts: now });
   return true;
 }
 
-function _releaseLock(name) {
+function releaseLock(name: string): void {
   const key = `lock:${name}`;
-  const cur = storage.get(key);
+  const cur = storage.get<{ owner?: number }>(key);
   if (!cur || cur.owner === process.pid) storage.deleteKey(key);
 }
 
-async function runTask(task, ctx = {}) {
+async function runTask(task: Task, ctx: TaskContext = {}): Promise<TaskResult | boolean | string | void> {
   const name = task && task.name ? task.name : task && task.run ? '(unnamed)' : 'unknown';
   logger.info('runTask start', name);
-  const locked = _acquireLock(name, task.lockTtlMs || 60 * 1000);
+  const locked = acquireLock(name, task.lockTtlMs || 60 * 1000);
   if (!locked) {
     logger.warn('task is locked, skipping', name);
     return false;
@@ -41,26 +42,29 @@ async function runTask(task, ctx = {}) {
     try {
       if (shouldNotify) {
         // Determine whether the task outcome is successful
-        const ok = res === true || (res && (res.success === undefined || res.success === true));
+        const ok = res === true || (res && (res as TaskResult).success !== false);
         if (ok) {
           let msg = `${name} 작업이 완료되었습니다.`;
-          if (res && typeof res === 'object' && res.message) msg += `\n\n${res.message}`;
-          const imagePath = res && typeof res === 'object' ? res.imagePath : null;
+          if (res && typeof res === 'object' && (res as TaskResult).message) {
+            msg += `\n\n${(res as TaskResult).message}`;
+          }
+          const imagePath = res && typeof res === 'object' ? (res as TaskResult).imagePath : null;
           await utils.sendTelegram(msg, imagePath).catch(() => {});
         }
       }
     } catch (e) {
-      logger.warn('notify admin on success failed', e && e.stack ? e.stack : e);
+      logger.warn('notify admin on success failed', e && (typeof e === 'object' && 'stack' in e ? (e as Error).stack : e));
     }
 
     return res;
   } catch (e) {
-    storage.set(`lastRun:${name}`, { ts: Date.now(), ok: false, error: String(e && e.message ? e.message : e) });
-    logger.error('runTask error', name, e && e.stack ? e.stack : e);
-    throw e;
+    const errorMessage = e && typeof e === 'object' && 'message' in e ? (e as Error).message : String(e);
+    storage.set(`lastRun:${name}`, { ts: Date.now(), ok: false, error: errorMessage });
+    logger.error('runTask error', name, e && (typeof e === 'object' && 'stack' in e ? (e as Error).stack : e));
+    throw e instanceof Error ? e : new Error(String(e));
   } finally {
-    _releaseLock(name);
+    releaseLock(name);
   }
 }
 
-module.exports = { runTask };
+export { runTask };
