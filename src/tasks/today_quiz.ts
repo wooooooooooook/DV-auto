@@ -48,6 +48,8 @@ async function run({ page }: PlaywrightRunArgs) {
       if (await btn.locator('.ico_finish').isVisible()) {
         const shot = 'screenshot/today_quiz_completed.png';
         try {
+          await btn.first().scrollIntoViewIfNeeded().catch(() => {});
+          await page.waitForTimeout(200);
           await page.screenshot({ path: shot });
         } catch (_e) {
           // ignore screenshot errors
