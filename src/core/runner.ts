@@ -53,7 +53,10 @@ async function runTask(task: Task, ctx: TaskContext = {}): Promise<TaskResult | 
         }
       }
     } catch (e) {
-      logger.warn('notify admin on success failed', e && (typeof e === 'object' && 'stack' in e ? (e as Error).stack : e));
+      logger.warn(
+        'notify admin on success failed',
+        e && (typeof e === 'object' && 'stack' in e ? (e as Error).stack : e),
+      );
     }
 
     return res;

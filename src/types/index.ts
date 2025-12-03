@@ -22,7 +22,10 @@ export interface TaskResult {
 
 export interface Task {
   name: string;
-  run: (ctx: TaskContext, options?: Record<string, unknown>) => Promise<TaskResult | boolean | string | void> | TaskResult | boolean | string | void;
+  run: (
+    ctx: TaskContext,
+    options?: Record<string, unknown>,
+  ) => Promise<TaskResult | boolean | string | void> | TaskResult | boolean | string | void;
   schedule?: string;
   timezone?: string;
   lockTtlMs?: number;

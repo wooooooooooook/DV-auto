@@ -64,7 +64,9 @@ const scheduledTask: Task = {
         } catch (err) {
           logger.error(`Error during ${name} task:`, err);
           const message = err instanceof Error ? err.message : String(err);
-          await utils.sendTelegram(`daily_routine 중 ${name} 작업 실패: ${utils.escapeMarkdown(message)}`).catch(() => {});
+          await utils
+            .sendTelegram(`daily_routine 중 ${name} 작업 실패: ${utils.escapeMarkdown(message)}`)
+            .catch(() => {});
         }
       }
     } finally {
@@ -183,7 +185,11 @@ const broadcastTodayLinksTask: Task = {
       await utils.ensureLoggedIn({ page, context });
 
       const linksResult = await todayLinksTaskModule.run({ page, context });
-      if (linksResult && (linksResult as { success?: boolean }).success !== false && (linksResult as { message?: string }).message) {
+      if (
+        linksResult &&
+        (linksResult as { success?: boolean }).success !== false &&
+        (linksResult as { message?: string }).message
+      ) {
         const messageOptions = (linksResult as { options?: Record<string, unknown> }).options ?? {};
         await utils.sendNotificationToChannel((linksResult as { message: string }).message, null, messageOptions);
         logger.info('broadcast_today_links_daily: successfully broadcasted message from today_links.');
@@ -194,7 +200,10 @@ const broadcastTodayLinksTask: Task = {
       return { success: false, message: 'No message to broadcast.' };
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      logger.error('broadcast_today_links_daily: scheduled task failed', e && (typeof e === 'object' && 'stack' in e ? (e as Error).stack : e));
+      logger.error(
+        'broadcast_today_links_daily: scheduled task failed',
+        e && (typeof e === 'object' && 'stack' in e ? (e as Error).stack : e),
+      );
       await utils.sendTelegram(`❗ Daily link broadcast failed: ${utils.escapeMarkdown(message)}`).catch(() => {});
       return { success: false, message: `Broadcast failed: ${message}` };
     } finally {

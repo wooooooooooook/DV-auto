@@ -24,7 +24,7 @@ function writeState(obj: StorageState): void {
     ensureDir();
     fs.writeFileSync(STATE_FILE, JSON.stringify(obj, null, 2));
   } catch (_e) {
-    console.warn('storage write failed', _e && (typeof _e === 'object' && 'message' in _e) ? (_e as Error).message : _e);
+    console.warn('storage write failed', _e && typeof _e === 'object' && 'message' in _e ? (_e as Error).message : _e);
   }
 }
 

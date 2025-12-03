@@ -59,7 +59,12 @@ async function getTodaysSeminars(page: Page, startHour: number, endHour: number)
   return seminars;
 }
 
-async function monitorSeminars({ page, context }: { page: Page; context: BrowserContext }, periodName: string, startHour: number, endHour: number) {
+async function monitorSeminars(
+  { page, context }: { page: Page; context: BrowserContext },
+  periodName: string,
+  startHour: number,
+  endHour: number,
+) {
   let monitoringList: Record<string, { status: string; name: string; seminarId: string | null }> = {};
 
   try {
@@ -67,7 +72,10 @@ async function monitorSeminars({ page, context }: { page: Page; context: Browser
     await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'load', timeout: 30000 }, 1);
 
     const initialSeminars = await getTodaysSeminars(page, startHour, endHour);
-    monitoringList = { ...initialSeminars } as Record<string, { status: string; name: string; seminarId: string | null }>; // Track all seminars from the start
+    monitoringList = { ...initialSeminars } as Record<
+      string,
+      { status: string; name: string; seminarId: string | null }
+    >; // Track all seminars from the start
 
     for (const [url, { status, name }] of Object.entries(initialSeminars)) {
       // If a seminar is already open, start its key message monitor immediately
@@ -162,9 +170,7 @@ async function monitorSeminars({ page, context }: { page: Page; context: Browser
       e && typeof e === 'object' && 'stack' in e ? (e as Error).stack : e,
     );
     const message = e instanceof Error ? e.message : String(e);
-    await sendTelegram(`❗ [${periodName}] 세미나 감시 작업 오류: ${message}`).catch(
-      () => {},
-    );
+    await sendTelegram(`❗ [${periodName}] 세미나 감시 작업 오류: ${message}`).catch(() => {});
     return false;
   }
 }

@@ -101,7 +101,10 @@ async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Prom
     return '오늘의 세미나 리스트: 오늘은 세미나가 없습니다.';
   } catch (_e) {
     const message = _e instanceof Error ? _e.message : String(_e);
-    console.error('collectTodaySeminarMessage error', _e && typeof _e === 'object' && 'stack' in _e ? (_e as Error).stack : _e);
+    console.error(
+      'collectTodaySeminarMessage error',
+      _e && typeof _e === 'object' && 'stack' in _e ? (_e as Error).stack : _e,
+    );
     return `오늘의 세미나 확인 실패: ${message}`;
   }
 }

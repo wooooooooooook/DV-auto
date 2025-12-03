@@ -42,7 +42,10 @@ async function run({ page, context }: { page: Page; context: BrowserContext }) {
     await saveLocalStorage(page).catch(() => {});
     return { success: true, message: '로그인 성공했습니다.' };
   } catch (error) {
-    console.error('login task error', error && typeof error === 'object' && 'stack' in error ? (error as Error).stack : error);
+    console.error(
+      'login task error',
+      error && typeof error === 'object' && 'stack' in error ? (error as Error).stack : error,
+    );
     const message = error instanceof Error ? error.message : String(error);
     await sendTelegram(`❗ 로그인 작업 중 오류: ${message}`).catch((err) =>
       console.error('Failed to send Telegram message:', err),

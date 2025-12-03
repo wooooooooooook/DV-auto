@@ -34,7 +34,10 @@ async function run({ page }: PlaywrightRunArgs) {
     console.log('tit_box innerHTML:', html);
     return { success: false, message: '출석체크 버튼을 찾지 못함!', imagePath: screenshotPath };
   } catch (error) {
-    console.error('attendance task error', error && typeof error === 'object' && 'stack' in error ? (error as Error).stack : error);
+    console.error(
+      'attendance task error',
+      error && typeof error === 'object' && 'stack' in error ? (error as Error).stack : error,
+    );
     // On error, still try to capture a screenshot if it's not already set
     if (!screenshotPath) {
       const baseScreenshotDir = path.join(process.cwd(), 'screenshot');
@@ -45,9 +48,7 @@ async function run({ page }: PlaywrightRunArgs) {
         .catch((err: unknown) => console.error('Failed to capture error screenshot:', err));
     }
     const message = error instanceof Error ? error.message : String(error);
-    await sendTelegram(`❗ 출석체크 작업 오류: ${message}`, screenshotPath).catch(
-      () => {},
-    );
+    await sendTelegram(`❗ 출석체크 작업 오류: ${message}`, screenshotPath).catch(() => {});
     return {
       success: false,
       message: `출석체크 작업 오류: ${message}`,

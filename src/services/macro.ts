@@ -61,7 +61,12 @@ async function main(): Promise<void> {
         console.log(`macro.ts: Running ${name} task.`);
         await utils.ensureLoggedIn({ page, context });
         const taskResult = await task.run({ page, context });
-        if (taskResult && typeof taskResult === 'object' && (taskResult as { message?: string }).message && TELEGRAM_ENABLED) {
+        if (
+          taskResult &&
+          typeof taskResult === 'object' &&
+          (taskResult as { message?: string }).message &&
+          TELEGRAM_ENABLED
+        ) {
           await utils
             .sendTelegram(
               (taskResult as { message: string }).message,
@@ -71,7 +76,9 @@ async function main(): Promise<void> {
               console.error(`macro.ts: Failed to send Telegram message for ${name} task result:`, sendErr);
             });
         } else if (taskResult && typeof taskResult === 'object' && (taskResult as { message?: string }).message) {
-          console.log(`macro.ts: Telegram is disabled, but ${name} task produced a message: ${(taskResult as { message: string }).message}`);
+          console.log(
+            `macro.ts: Telegram is disabled, but ${name} task produced a message: ${(taskResult as { message: string }).message}`,
+          );
         } else {
           console.log(`macro.ts: ${name} task completed successfully.`);
         }

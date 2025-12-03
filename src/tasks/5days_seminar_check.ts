@@ -70,7 +70,10 @@ async function run({ page }: PlaywrightRunArgs) {
 
     return { success: true, message };
   } catch (error) {
-    console.error('5days seminar check task error', error && typeof error === 'object' && 'stack' in error ? (error as Error).stack : error);
+    console.error(
+      '5days seminar check task error',
+      error && typeof error === 'object' && 'stack' in error ? (error as Error).stack : error,
+    );
     // Notify admin about the error, but return the error to caller
     const message = error instanceof Error ? error.message : String(error);
     await sendTelegram(`❗ 5일 세미나 확인 작업 오류: ${message}`).catch(() => {});
