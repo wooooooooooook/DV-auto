@@ -101,13 +101,12 @@ async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Prom
     }
 
     if (lunchSeminars.length > 0 || dinnerSeminars.length > 0) {
-      let message = `오늘의 세미나 리스트: 점심 ${lunchSeminars.length}개, 저녁 ${dinnerSeminars.length}개\n`;
+      let message = `오늘의 세미나 리스트:\n`;
 
       if (lunchSeminars.length > 0) {
         message += `\n🍴[점심 세미나]\n`;
         message += lunchSeminars.join('\n');
       }
-      message += '\n';
       if (dinnerSeminars.length > 0) {
         message += `\n🍴[저녁 세미나]\n`;
         message += dinnerSeminars.join('\n');
@@ -143,8 +142,8 @@ async function run({ page }: PlaywrightRunArgs) {
         quizMessage += `\n${quizInfo.productTitle}${answerNote}`;
       }
     }
+    message += `✨ 오늘의 퀴즈 링크:${quizMessage}\n`;
 
-    message += `✨ 오늘의 퀴즈 링크:\n${quizMessage}\n`;
     if (seminarMessage) {
       message += `\n${seminarMessage}`;
     }
