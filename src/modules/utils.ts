@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import type { BrowserContext, Page } from 'playwright';
-import { getBot } from '../bot_instance';
+import { getBot } from '../services/bot_instance';
 
 const COOKIE_FILE = path.join(process.cwd(), 'cookies.json');
 const LOCALSTORAGE_FILE = path.join(process.cwd(), 'localstorage.json');

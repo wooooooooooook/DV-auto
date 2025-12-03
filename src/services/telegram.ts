@@ -3,11 +3,11 @@ import fs from 'fs/promises';
 import https from 'https';
 import { setBot } from './bot_instance';
 import * as logger from './logger';
-import * as scheduler from './scheduler';
-import * as runner from './runner';
-import * as taskRegistry from './taskRegistry';
-import { inspect } from './modules/inspect';
-import { escapeMarkdown, sendNotificationToChannel } from './modules/utils';
+import * as scheduler from '../core/scheduler';
+import * as runner from '../core/runner';
+import * as taskRegistry from '../core/taskRegistry';
+import { inspect } from '../modules/inspect';
+import { escapeMarkdown, sendNotificationToChannel } from '../modules/utils';
 
 const ADMIN_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const NOTICE_BOT_TOKEN = process.env.NOTICE_BOT_TOKEN;

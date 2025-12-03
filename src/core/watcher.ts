@@ -1,6 +1,6 @@
 import type { BrowserContext } from 'playwright';
-import * as logger from './logger';
-import { sleep } from './modules/utils';
+import * as logger from '../services/logger';
+import { sleep } from '../modules/utils';
 
 interface MonitorTaskModule {
   run: (ctx: { page: any; context: BrowserContext }, options?: Record<string, unknown>) => Promise<unknown> | unknown;

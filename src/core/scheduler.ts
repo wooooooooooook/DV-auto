@@ -1,7 +1,7 @@
 import cron from 'node-cron';
-import * as logger from './logger';
+import * as logger from '../services/logger';
 import * as runner from './runner';
-import type { Task } from './types';
+import type { Task } from '../types';
 
 type ScheduledTask = Task & { job: cron.ScheduledTask };
 

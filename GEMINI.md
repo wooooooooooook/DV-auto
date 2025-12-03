@@ -14,30 +14,28 @@ The primary purpose of this tool is to automate daily routines on the Doctorvill
 *   **dotenv:** Used for managing environment variables.
 
 **Architecture:**
-*   `main.js`: The main entry point of the application. It initializes the scheduler, registers tasks, and starts the Telegram bot.
-*   `scheduler.js`: Manages the cron-style scheduled jobs.
-*   `taskRegistry.js`: Holds a registry of all available tasks that can be run either on a schedule or on-demand.
-*   `runner.js`: Responsible for executing the individual tasks.
-*   `telegram.js`: Implements the Telegram bot, defining commands and handling user interactions.
-*   `tasks/`: This directory contains the individual automation scripts for specific actions on the website (e.g., `login.js`, `attendance.js`).
-*   `modules/`: Contains shared utility modules, such as `utils.js`.
-*   `.env.example`: An example file for the required environment variables.
+*   `src/core/`: Runtime orchestration (`main.ts`, `scheduler.ts`, `taskRegistry.ts`, `runner.ts`, `watcher.ts`).
+*   `src/services/`: Cross-cutting services (`telegram.ts`, `logger.ts`, `storage.ts`, `bot_instance.ts`, `macro.ts`).
+*   `src/tasks/`: Automation steps (Playwright tasks like `login.ts`, `attendance.ts`).
+*   `src/modules/`: Shared utilities (`utils.ts`, `inspect.ts`).
+*   `src/types/`: Shared TypeScript types.
+*   `data/`, `deploy/`, `screenshot/`: runtime data, systemd unit, screenshots.
 
 ## Building and Running
 
 ### Prerequisites
 *   Node.js
-*   npm
+*   pnpm (via Corepack: `corepack enable`)
 
 ### Installation
 1.  Clone the repository.
 2.  Install the dependencies:
     ```bash
-    npm install
+    pnpm install
     ```
 3.  Install Playwright's browsers:
     ```bash
-    npx playwright install
+    pnpm exec playwright install
     ```
 
 ### Configuration
@@ -55,9 +53,10 @@ The primary purpose of this tool is to automate daily routines on the Doctorvill
     *   Other optional variables like `HEADLESS`, `DAILY_CRON`, `SCHEDULE_TZ`.
 
 ### Running the Application
-To run the application in the foreground:
+Build then run the compiled entrypoint:
 ```bash
-node main.js
+pnpm run build
+node dist/core/main.js
 ```
 
 ### Running as a Service (Systemd)
@@ -83,7 +82,7 @@ To set it up:
 
 The `package.json` also includes an `update` script to automate pulling the latest code and restarting the service:
 ```bash
-npm run update
+pnpm run update
 ```
 
 ## Development Conventions

@@ -9,10 +9,10 @@
 - Persistent/sample data is under `data/` (`state.json`, `quiz.json`); screenshots land in `screenshot/`. Deployment config is in `deploy/doctorville-auto.service`. CI cron is `.github/workflows/cron.yml`.
 
 ## Build, Test, and Development Commands
-- Install deps: `npm install`, then `npx playwright install` for browser binaries.
-- Lint: `npm run lint` (ESLint + Prettier). Auto-fix: `npm run lint:fix`.
-- Host service control: `npm run restart` to reload the `doctorville-auto` systemd unit; `npm run update` pulls main, installs the unit, and restarts. Use only on the target host with proper privileges.
-- There is no automated test suite (`npm test` exits intentionally).
+- Install deps: `pnpm install`, then `pnpm exec playwright install` for browser binaries.
+- Lint: `pnpm run lint` (ESLint + Prettier). Auto-fix: `pnpm run lint:fix`.
+- Host service control: `pnpm run restart` to reload the `doctorville-auto` systemd unit; `pnpm run update` pulls main, installs the unit, and restarts. Use only on the target host with proper privileges.
+- There is no automated test suite (`pnpm test` exits intentionally).
 
 ## Coding Style & Naming Conventions
 - JavaScript (CommonJS). ESLint config in `eslint.config.js` with Prettier; formatting is 2 spaces, width 120, single quotes, trailing commas.
@@ -21,7 +21,7 @@
 
 ## Testing Guidelines
 - No unit tests yet; favor lightweight Playwright verification in headless mode and log assertions via `logger.js`.
-- If you add tests, colocate them near features (e.g., `tasks/__tests__/foo.test.js`) and wire `npm test` accordingly.
+- If you add tests, colocate them near features (e.g., `tasks/__tests__/foo.test.js`) and wire `pnpm test` accordingly.
 - For manual checks, run individual tasks via `runner.js` or import the task and call `run()` with a Playwright context.
 
 ## Environment, Security & Configuration Tips
@@ -32,4 +32,4 @@
 ## Commit & Pull Request Guidelines
 - Follow existing history: `feat: ...`, `fix: ...`, `chore: ...`, `update ...`; use imperative phrasing.
 - Pull requests should list purpose, key changes, new env vars, manual test commands/results, and screenshots/log snippets for UI-visible behavior.
-- Reference related issues and mention deployment steps (e.g., rerun `npm run update` or rotate secrets) when relevant.
+- Reference related issues and mention deployment steps (e.g., rerun `pnpm run update` or rotate secrets) when relevant.

@@ -1,11 +1,11 @@
 import dns from 'dns';
 import dotenv from 'dotenv';
 import { chromium, type Browser, type BrowserContext } from 'playwright';
-import * as utils from './modules/utils';
-import * as attendanceTask from './tasks/attendance';
-import * as applySeminarTask from './tasks/apply_seminar';
-import * as todayQuizTask from './tasks/today_quiz';
-import * as todayLinksTask from './tasks/today_links';
+import * as utils from '../modules/utils';
+import * as attendanceTask from '../tasks/attendance';
+import * as applySeminarTask from '../tasks/apply_seminar';
+import * as todayQuizTask from '../tasks/today_quiz';
+import * as todayLinksTask from '../tasks/today_links';
 import * as telegram from './telegram';
 
 dns.setDefaultResultOrder('ipv4first');

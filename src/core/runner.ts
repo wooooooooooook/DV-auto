@@ -1,7 +1,7 @@
-import * as storage from './storage';
-import * as logger from './logger';
-import * as utils from './modules/utils';
-import type { Task, TaskContext, TaskResult } from './types';
+import * as storage from '../services/storage';
+import * as logger from '../services/logger';
+import * as utils from '../modules/utils';
+import type { Task, TaskContext, TaskResult } from '../types';
 
 // Acquire a simple process-level lock for a task (not distributed)
 function acquireLock(name: string, ttlMs = 60 * 1000): boolean {

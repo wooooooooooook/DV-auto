@@ -1,6 +1,6 @@
 import type { BrowserContext, Page } from 'playwright';
 import { sendNotificationToChannel, safeGoto, getSeminarIdFromUrl, ensureLoggedIn, sleep } from '../modules/utils';
-import * as storage from '../storage';
+import * as storage from '../services/storage';
 
 const KEY = 'key_message_seminars';
 

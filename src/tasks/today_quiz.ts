@@ -1,6 +1,6 @@
-import type { PlaywrightRunArgs } from '../types';
+import quizMapping from '../../data/quiz.json';
 import { safeGoto, sendTelegram } from '../modules/utils';
-import quizMapping from '../data/quiz.json';
+import type { PlaywrightRunArgs } from '../types';
 
 const QUIZ_LIST_URL = 'https://www.doctorville.co.kr/product/medicineList';
 

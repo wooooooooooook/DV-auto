@@ -70,7 +70,7 @@ GitHub Actions를 사용하지 않고 로컬 환경에서 직접 스크립트를
 
 ### 사전 요구사항
 이 스크립트를 로컬에서 사용하려면 컴퓨터에 아래 프로그램들이 설치되어 있어야 합니다.
--   [Node.js](https://nodejs.org/ko/) (npm은 Node.js 설치 시 함께 설치됩니다)
+-   [Node.js](https://nodejs.org/ko/) (Corepack 활성화로 pnpm 사용 권장: `corepack enable`)
 
 ### 1. 프로젝트 다운로드 및 설치
 먼저, 프로젝트 파일을 컴퓨터로 다운로드하고 필요한 라이브러리를 설치합니다.
@@ -83,7 +83,7 @@ git clone https://github.com/seia-soto/doctorville-auto.git
 cd doctorville-auto
 
 # 3. 필요한 라이브러리를 설치합니다.
-npm install
+pnpm install
 
 # 4. 자동화에 필요한 웹 브라우저 드라이버를 설치합니다.
 npx playwright install
@@ -121,19 +121,21 @@ HEADLESS=true # 브라우저를 화면 없이 실행할지 여부를 설정 (tru
 모든 설정이 완료되었다면, 터미널에서 아래 명령어를 입력하여 매크로를 실행할 수 있습니다.
 
 ```bash
-node main.js
+pnpm run build   # TypeScript를 dist/로 컴파일
+pnpm start       # dist/core/main.js 실행
+# 개발 중 즉시 실행하려면:
+pnpm run dev     # ts-node src/core/main.ts
 ```
 
 스크립트가 실행되면 터미널에 작업 진행 상황이 출력됩니다.
 ```
-main.js: Starting daily routine.
-main.js: Running attendance task.
-main.js: attendance task completed successfully.
-main.js: Running apply_seminar task.
-main.js: apply_seminar task completed successfully.
-main.js: Running today_links task.
-main.js: today_links task completed successfully.
-main.js: Daily routine finished.
+[info] 2024-xx-xxTxx:xx:xx.xxxZ Scheduled `daily_routine` at 1 8 * * * timezone= Asia/Seoul
+[info] 2024-xx-xxTxx:xx:xx.xxxZ daily_routine: launching browser to perform daily tasks
+[info] 2024-xx-xxTxx:xx:xx.xxxZ runTask start attendance
+[info] 2024-xx-xxTxx:xx:xx.xxxZ runTask start apply_seminar
+[info] 2024-xx-xxTxx:xx:xx.xxxZ runTask start today_links
+[info] 2024-xx-xxTxx:xx:xx.xxxZ runTask start today_quiz
+[info] 2024-xx-xxTxx:xx:xx.xxxZ daily_routine ... finished
 ```
 
 오류가 발생하고 텔레그램 설정이 완료된 경우, 해당 봇을 통해 에러 메시지 알림을 받게 됩니다.
