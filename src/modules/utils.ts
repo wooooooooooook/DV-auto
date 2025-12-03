@@ -86,6 +86,27 @@ async function sendNotificationToChannel(
     }
   } catch (error) {
     console.error('Failed to send Telegram notification to channel:', error);
+
+    const parseMode = (options as SendMessageOptions | SendPhotoOptions).parse_mode;
+    if (parseMode === 'MarkdownV2') {
+      try {
+        const escapedText = escapeMarkdown(text);
+        if (imagePath) {
+          const fallbackPhotoOptions: SendPhotoOptions = { ...options, caption: escapedText } as SendPhotoOptions;
+          await bot.telegram.sendPhoto(CHANNEL_ID, { source: imagePath }, fallbackPhotoOptions);
+        } else {
+          await bot.telegram.sendMessage(
+            CHANNEL_ID,
+            escapedText,
+            { ...(options as SendMessageOptions), parse_mode: 'MarkdownV2' } as SendMessageOptions,
+          );
+        }
+        return;
+      } catch (fallbackError) {
+        console.error('Failed to send escaped Telegram notification to channel:', fallbackError);
+      }
+    }
+
     try {
       const message = error instanceof Error ? error.message : String(error);
       await bot.telegram.sendMessage(CHANNEL_ID, `Failed to send a complex message. Error: ${message}`);
