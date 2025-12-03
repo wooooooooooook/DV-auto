@@ -1,4 +1,4 @@
-import { Telegraf } from 'telegraf';
+import { Telegraf, type Context } from 'telegraf';
 import fs from 'fs/promises';
 import https from 'https';
 import { setBot } from './bot_instance';
@@ -65,10 +65,13 @@ if (adminBot) {
       await ctx.reply('Starting daily_routine...');
       const result = await runner.runTask(task);
       if (result && typeof result === 'object' && (result as { message?: string }).message) {
-        await ctx.reply((result as { message: string }).message, (result as { options?: Record<string, unknown> }).options);
+        await ctx.reply(
+          (result as { message: string }).message,
+          (result as { options?: Record<string, unknown> }).options,
+        );
         if ((result as { imagePath?: string }).imagePath) {
           await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-          await fs.unlink((result as { imagePath: string }).imagePath).catch(() => { });
+          await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
         }
       } else if (typeof result === 'string') {
         await ctx.reply(result);
@@ -95,10 +98,13 @@ if (adminBot) {
       await ctx.reply('Starting today_quiz...');
       const result = await runner.runTask(task);
       if (result && typeof result === 'object' && (result as { message?: string }).message) {
-        await ctx.reply((result as { message: string }).message, (result as { options?: Record<string, unknown> }).options);
+        await ctx.reply(
+          (result as { message: string }).message,
+          (result as { options?: Record<string, unknown> }).options,
+        );
         if ((result as { imagePath?: string }).imagePath) {
           await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-          await fs.unlink((result as { imagePath: string }).imagePath).catch(() => { });
+          await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
         }
       } else if (typeof result === 'string') {
         await ctx.reply(result);
@@ -125,7 +131,11 @@ if (adminBot) {
       await ctx.reply('Running today_links and broadcasting to channel...');
       const result = await runner.runTask(task);
       if (result && (result as { message?: string }).message) {
-        await sendNotificationToChannel((result as { message: string }).message, null, (result as { options?: Record<string, unknown> }).options);
+        await sendNotificationToChannel(
+          (result as { message: string }).message,
+          null,
+          (result as { options?: Record<string, unknown> }).options,
+        );
         await ctx.reply('Broadcast successful.');
       } else {
         await ctx.reply('Task ran, but no message was produced to broadcast.');
@@ -166,10 +176,13 @@ if (adminBot) {
       await ctx.reply('Starting monitor_lunch_seminars...');
       const result = await runner.runTask(task);
       if (result && typeof result === 'object' && (result as { message?: string }).message) {
-        await ctx.reply((result as { message: string }).message, (result as { options?: Record<string, unknown> }).options);
+        await ctx.reply(
+          (result as { message: string }).message,
+          (result as { options?: Record<string, unknown> }).options,
+        );
         if ((result as { imagePath?: string }).imagePath) {
           await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-          await fs.unlink((result as { imagePath: string }).imagePath).catch(() => { });
+          await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
         }
       } else if (typeof result === 'string') {
         await ctx.reply(result);
@@ -196,10 +209,13 @@ if (adminBot) {
       await ctx.reply('Starting monitor_dinner_seminars...');
       const result = await runner.runTask(task);
       if (result && typeof result === 'object' && (result as { message?: string }).message) {
-        await ctx.reply((result as { message: string }).message, (result as { options?: Record<string, unknown> }).options);
+        await ctx.reply(
+          (result as { message: string }).message,
+          (result as { options?: Record<string, unknown> }).options,
+        );
         if ((result as { imagePath?: string }).imagePath) {
           await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-          await fs.unlink((result as { imagePath: string }).imagePath).catch(() => { });
+          await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
         }
       } else if (typeof result === 'string') {
         await ctx.reply(result);
@@ -280,7 +296,7 @@ if (adminBot) {
 }
 
 // --- Shared Commands ---
-const seminarCheck5Days = async (ctx: any) => {
+const seminarCheck5Days = async (ctx: Context) => {
   logger.info('User requested to run 5days_seminar_check now', { from: ctx.from?.username });
   const task = taskRegistry.getByName('5days_seminar_check');
   if (!task) {
@@ -292,10 +308,13 @@ const seminarCheck5Days = async (ctx: any) => {
     await ctx.reply('5일간의 세미나를 확인합니다...');
     const result = await runner.runTask(task);
     if (result && typeof result === 'object' && (result as { message?: string }).message) {
-      await ctx.reply((result as { message: string }).message, (result as { options?: Record<string, unknown> }).options);
+      await ctx.reply(
+        (result as { message: string }).message,
+        (result as { options?: Record<string, unknown> }).options,
+      );
       if ((result as { imagePath?: string }).imagePath) {
         await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-        await fs.unlink((result as { imagePath: string }).imagePath).catch(() => { });
+        await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
       }
     } else if (typeof result === 'string') {
       await ctx.reply(result);
@@ -310,7 +329,7 @@ const seminarCheck5Days = async (ctx: any) => {
   }
 };
 
-const todayLinks = async (ctx: any) => {
+const todayLinks = async (ctx: Context) => {
   logger.info('User requested to run today_links now', { from: ctx.from?.username });
   const task = taskRegistry.getByName('today_links');
   if (!task) {
@@ -322,7 +341,10 @@ const todayLinks = async (ctx: any) => {
     await ctx.reply('오늘의 링크를 수집합니다...');
     const result = await runner.runTask(task);
     if (result && typeof result === 'object' && (result as { message?: string }).message) {
-      await ctx.reply((result as { message: string }).message, (result as { options?: Record<string, unknown> }).options);
+      await ctx.reply(
+        (result as { message: string }).message,
+        (result as { options?: Record<string, unknown> }).options,
+      );
     } else if (typeof result === 'string') {
       await ctx.reply(result);
     } else if (result === true) {

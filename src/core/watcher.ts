@@ -1,9 +1,9 @@
-import type { BrowserContext } from 'playwright';
+import type { BrowserContext, Page } from 'playwright';
 import * as logger from '../services/logger';
 import { sleep } from '../modules/utils';
 
 interface MonitorTaskModule {
-  run: (ctx: { page: any; context: BrowserContext }, options?: Record<string, unknown>) => Promise<unknown> | unknown;
+  run: (ctx: { page: Page; context: BrowserContext }, options?: Record<string, unknown>) => Promise<unknown> | unknown;
 }
 
 /**
@@ -48,7 +48,10 @@ async function startMonitor(
       await oneRun();
       logger.info('watcher: run completed, restarting because persistent=true');
     } catch (_e) {
-      logger.error('watcher: error during monitor run', _e && (typeof _e === 'object' && 'stack' in _e ? (_e as Error).stack : _e));
+      logger.error(
+        'watcher: error during monitor run',
+        _e && (typeof _e === 'object' && 'stack' in _e ? (_e as Error).stack : _e),
+      );
     }
     await sleep(restartDelayMs);
   }

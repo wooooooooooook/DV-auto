@@ -1,10 +1,13 @@
 import fs from 'fs';
 import path from 'path';
+import type { Telegraf } from 'telegraf';
 import type { BrowserContext, Page } from 'playwright';
 import { getBot } from '../services/bot_instance';
 
 const COOKIE_FILE = path.join(process.cwd(), 'cookies.json');
 const LOCALSTORAGE_FILE = path.join(process.cwd(), 'localstorage.json');
+type SendMessageOptions = Parameters<Telegraf['telegram']['sendMessage']>[2];
+type SendPhotoOptions = Parameters<Telegraf['telegram']['sendPhoto']>[2];
 
 function maskToken(token?: string | null): string {
   if (!token) return '';
@@ -25,7 +28,7 @@ function escapeMarkdown(text: string): string {
 async function sendTelegram(
   text: string,
   imagePath: string | null = null,
-  options: Record<string, unknown> = {},
+  options: SendMessageOptions | SendPhotoOptions = {},
 ): Promise<void> {
   const bot = getBot('admin');
   if (!bot) {
@@ -41,9 +44,10 @@ async function sendTelegram(
 
   try {
     if (imagePath) {
-      await bot.telegram.sendPhoto(CHAT_ID, { source: imagePath }, { caption: text, ...(options as any) });
+      const photoOptions: SendPhotoOptions = { caption: text, ...(options as SendPhotoOptions) };
+      await bot.telegram.sendPhoto(CHAT_ID, { source: imagePath }, photoOptions);
     } else {
-      await bot.telegram.sendMessage(CHAT_ID, text, options as any);
+      await bot.telegram.sendMessage(CHAT_ID, text, options as SendMessageOptions);
     }
   } catch (error) {
     console.error('Failed to send Telegram message:', error);
@@ -59,7 +63,7 @@ async function sendTelegram(
 async function sendNotificationToChannel(
   text: string,
   imagePath: string | null = null,
-  options: Record<string, unknown> = {},
+  options: SendMessageOptions | SendPhotoOptions = {},
 ): Promise<void> {
   const bot = getBot('notice');
   if (!bot) {
@@ -75,9 +79,10 @@ async function sendNotificationToChannel(
 
   try {
     if (imagePath) {
-      await bot.telegram.sendPhoto(CHANNEL_ID, { source: imagePath }, { caption: text, ...(options as any) });
+      const photoOptions: SendPhotoOptions = { caption: text, ...(options as SendPhotoOptions) };
+      await bot.telegram.sendPhoto(CHANNEL_ID, { source: imagePath }, photoOptions);
     } else {
-      await bot.telegram.sendMessage(CHANNEL_ID, text, options as any);
+      await bot.telegram.sendMessage(CHANNEL_ID, text, options as SendMessageOptions);
     }
   } catch (error) {
     console.error('Failed to send Telegram notification to channel:', error);
@@ -124,7 +129,10 @@ async function saveLocalStorage(page: Page): Promise<void> {
     all[origin] = data;
     fs.writeFileSync(LOCALSTORAGE_FILE, JSON.stringify(all, null, 2));
   } catch (_e) {
-    console.warn('localStorage 저장 실패:', _e && (typeof _e === 'object' && 'message' in _e ? (_e as Error).message : _e));
+    console.warn(
+      'localStorage 저장 실패:',
+      _e && (typeof _e === 'object' && 'message' in _e ? (_e as Error).message : _e),
+    );
   }
 }
 
@@ -160,14 +168,19 @@ async function loadLocalStorage(page: Page, targetUrl: string): Promise<boolean>
 
     await page.evaluate((store) => {
       try {
-        Object.entries(store as Record<string, string | null>).forEach(([k, v]) => localStorage.setItem(k, v as string));
+        Object.entries(store as Record<string, string | null>).forEach(([k, v]) =>
+          localStorage.setItem(k, v as string),
+        );
       } catch (_e) {
         /* ignore */
       }
     }, data);
     return true;
   } catch (_e) {
-    console.warn('localStorage 로드 실패:', _e && (typeof _e === 'object' && 'message' in _e ? (_e as Error).message : _e));
+    console.warn(
+      'localStorage 로드 실패:',
+      _e && (typeof _e === 'object' && 'message' in _e ? (_e as Error).message : _e),
+    );
   }
   return false;
 }
@@ -193,7 +206,11 @@ async function safeGoto(page: Page, url: string, options: Parameters<Page['goto'
       }
     }
   } catch (_e) {
-    console.error('safeGoto: URL resolution error for', url, _e && (typeof _e === 'object' && 'stack' in _e ? (_e as Error).stack : _e));
+    console.error(
+      'safeGoto: URL resolution error for',
+      url,
+      _e && (typeof _e === 'object' && 'stack' in _e ? (_e as Error).stack : _e),
+    );
   }
 
   while (true) {
@@ -210,17 +227,25 @@ async function safeGoto(page: Page, url: string, options: Parameters<Page['goto'
         code: err && typeof err === 'object' && 'code' in err ? (err as { code?: string }).code : undefined,
         message: err && typeof err === 'object' && 'message' in err ? (err as Error).message : undefined,
       };
-      console.error('safeGoto error:', meta, err && (typeof err === 'object' && 'stack' in err ? (err as Error).stack : err));
+      console.error(
+        'safeGoto error:',
+        meta,
+        err && (typeof err === 'object' && 'stack' in err ? (err as Error).stack : err),
+      );
       try {
         const errName = err && typeof err === 'object' && 'name' in err ? (err as Error).name : String(err);
         const errCode = err && typeof err === 'object' && 'code' in err ? (err as { code?: string }).code : '';
-        await sendTelegram(`❗ safeGoto failed (${resolvedUrl}) attempt ${attempt}: ${errName}${errCode ? ` (${errCode})` : ''}`);
+        await sendTelegram(
+          `❗ safeGoto failed (${resolvedUrl}) attempt ${attempt}: ${errName}${errCode ? ` (${errCode})` : ''}`,
+        );
       } catch (notifyErr) {
-        console.error('notify failed', notifyErr && (typeof notifyErr === 'object' && 'stack' in notifyErr ? (notifyErr as Error).stack : notifyErr));
+        console.error(
+          'notify failed',
+          notifyErr && (typeof notifyErr === 'object' && 'stack' in notifyErr ? (notifyErr as Error).stack : notifyErr),
+        );
       }
       if (attempt > retries) {
-        const errMessage =
-          err && typeof err === 'object' && 'message' in err ? (err as Error).message : String(err);
+        const errMessage = err && typeof err === 'object' && 'message' in err ? (err as Error).message : String(err);
         throw new Error(`safeGoto failed after ${attempt} attempts for ${resolvedUrl}: ${errMessage}`);
       }
       await sleep(1000 * attempt);
@@ -249,7 +274,7 @@ async function ensureLoggedIn({ page, context }: { page: Page; context: BrowserC
   const loginButtonCount = await page.locator(':text("로그인")').count();
   if (loginButtonCount > 0) {
     console.log('로그인이 필요합니다. login 태스크를 실행합니다.');
-    const loginTask = require('../tasks/login') as { run: ({ page, context }: { page: Page; context: BrowserContext }) => Promise<void> };
+    const loginTask = await import('../tasks/login');
     await loginTask.run({ page, context });
   }
 }
