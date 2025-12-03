@@ -2,7 +2,7 @@
 
 # 닥터빌(Doctorville) 자동화 매크로
 
-이 프로젝트는 닥터빌 웹사이트의 일일 작업을 자동으로 수행해주는 Node.js 기반의 스크립트입니다. GitHub Actions를 활용하여 클라우드 환경에서 정해진 시간에 닥터빌의 출석 체크, 세미나 신청, 오늘의 세미나 확인 등의 작업을 자동으로 처리할 수 있습니다.
+이 프로젝트는 **데일리 루틴(`daily_routine`) 매크로만 자동 실행**하도록 고정되어 있습니다. 개발자가 아니어도 GitHub Actions(무료 클라우드 실행 도구)만 켜두면 정해진 시각에 출석 체크와 세미나 확인이 자동으로 수행됩니다. 다른 매크로는 실행하지 않습니다.
 
 ## 주요 기능
 -   출석 체크 자동화
@@ -10,39 +10,35 @@
 -   오늘의 세미나 목록 확인 및 텔레그램 알림
 -   오늘의 브랜드 퀴즈 알림
 
-## 🚀 권장 설정: GitHub Actions를 이용한 자동화
+## 🚀 5분 설정 가이드 (데일리 루틴 자동 실행 전용)
 
-이 프로젝트는 GitHub Actions를 통해 클라우드에서 자동으로 매크로를 실행하도록 설정하는 것을 권장합니다. 한 번 설정해두면 서버 없이도 매일 정해진 시간에 닥터빌 작업을 자동으로 처리할 수 있습니다.
+데일리 루틴만 돌도록 이미 고정되어 있으니 추가 매크로를 신경 쓸 필요가 없습니다.
 
-### 1. 저장소 Fork
+### 1) 내 깃허브에 복사하기 (Fork)
+- 저장소 오른쪽 위 **Fork** 버튼을 눌러 내 계정에 복사합니다.
 
-먼저 이 저장소를 본인의 GitHub 계정으로 Fork(포크)합니다. GitHub 페이지 오른쪽 상단의 `Fork` 버튼을 클릭하세요.
+### 2) 아이디·비밀번호 넣기 (Secrets)
+- 내 계정으로 복사된 저장소에서 **Settings → Secrets and variables → Actions**로 이동합니다.
+- **New repository secret**을 눌러 아래 2개를 입력합니다.
+  - `DV_USER`: 닥터빌 로그인 아이디
+  - `DV_PASS`: 닥터빌 로그인 비밀번호
+- 텔레그램 알림이 필요하면 추가로 입력합니다. (선택)
+  - `TELEGRAM_BOT_TOKEN`: 텔레그램 봇 토큰
+  - `TELEGRAM_CHAT_ID`: 알림을 받을 채팅 ID
 
-### 2. GitHub Secrets 설정
+### 3) 실행 허용 (Repository variable)
+- 같은 화면에서 **Variables** 탭을 선택하고 **New repository variable**을 눌러 아래 값을 넣습니다.
+  - `ENABLE_MACRO`: `true` (이 값이 없거나 `true`가 아니면 워크플로가 실행되지 않습니다.)
 
-포크한 저장소에서 매크로 실행에 필요한 환경 변수들을 GitHub Secrets로 설정해야 합니다. 이 Secrets들은 `.env` 파일과 동일한 역할을 하지만, GitHub 환경에서 안전하게 관리됩니다.
+### 4) 바로 켜보기
+- 저장소의 **Actions → Run Macro**로 이동해 **Run workflow** 버튼을 눌러 한 번 실행해 봅니다.
+- 실행 후 같은 화면에서 로그를 눌러 "출석 체크, 세미나 신청" 등이 정상적으로 돌았는지 확인합니다.
 
-1.  본인의 포크한 저장소로 이동합니다.
-2.  상단 메뉴에서 `Settings` 탭을 클릭합니다.
-3.  왼쪽 사이드바에서 `Secrets and variables` > `Actions`를 클릭합니다.
-4.  `New repository secret` 버튼을 클릭하여 아래 Secrets들을 추가합니다:
+### 5) 매일 자동 실행 확인
+- 기본 스케줄: `0 2 * * *` (UTC) → 한국 시간 11:00에 실행됩니다. (`.github/workflows/daily_routine.yml`의 `cron` 항목)
+- 시간대를 조정하려면 위 파일의 `cron` 값을 직접 수정합니다. 별도의 환경 변수로 스케줄을 바꾸는 옵션은 없습니다.
 
-    *   `DV_USER`: 닥터빌 로그인 아이디 (필수)
-    *   `DV_PASS`: 닥터빌 로그인 비밀번호 (필수)
-    *   `TELEGRAM_BOT_TOKEN`: 텔레그램 봇 토큰 (선택 사항)
-    *   `TELEGRAM_CHAT_ID`: 텔레그램 알림을 받을 채팅 ID (선택 사항)
-
-    **⚠️ 중요:** `DV_USER`와 `DV_PASS`는 반드시 설정해야 합니다. 텔레그램 알림 기능을 사용하려면 `TELEGRAM_BOT_TOKEN`과 `TELEGRAM_CHAT_ID`를 함께 설정해야 합니다. 텔레그램 봇 토큰 및 채팅 ID를 얻는 방법은 아래 "텔레그램 봇 및 채팅 ID 설정 (선택 사항)" 섹션을 참고하세요.
-
-### 3. 워크플로우 실행 확인 및 스케줄 조정
-
-Secrets 설정이 완료되면, GitHub Actions 워크플로우가 자동으로 활성화됩니다.
-
-*   **스케줄:** 기본적으로 매일 UTC 자정(한국 시간 오전 9시)에 실행되도록 설정되어 있습니다. `.github/workflows/cron.yml` 파일에서 `cron: '0 0 * * *'` 부분을 수정하여 스케줄을 변경할 수 있습니다. (UTC 시간 기준, 한국 시간 -9시간)
-*   **수동 실행:** GitHub 저장소의 `Actions` 탭으로 이동하여 `Run Macro` 워크플로우를 선택한 후 `Run workflow` 버튼을 클릭하여 수동으로 실행할 수도 있습니다.
-*   **로그 확인:** `Actions` 탭에서 워크플로우 실행 결과를 클릭하여 자세한 로그를 확인할 수 있습니다.
-
-이제 GitHub Actions를 통해 닥터빌 매크로를 자동으로 실행하고, 설정한 텔레그램 봇으로 알림을 받을 수 있습니다.
+이렇게 설정하면 서버 없이도 GitHub Actions가 매일 알아서 **데일리 루틴만** 실행합니다. 로그인 정보만 챙겨 넣으면 끝입니다.
 
 ## 🤖 텔레그램 봇 및 채팅 ID 설정 (선택 사항)
 
@@ -129,7 +125,7 @@ pnpm run dev     # ts-node src/core/main.ts
 
 스크립트가 실행되면 터미널에 작업 진행 상황이 출력됩니다.
 ```
-[info] 2024-xx-xxTxx:xx:xx.xxxZ Scheduled `daily_routine` at 1 8 * * * timezone= Asia/Seoul
+[info] 2024-xx-xxTxx:xx:xx.xxxZ Scheduled `daily_routine` at 0 2 * * * timezone= Asia/Seoul
 [info] 2024-xx-xxTxx:xx:xx.xxxZ daily_routine: launching browser to perform daily tasks
 [info] 2024-xx-xxTxx:xx:xx.xxxZ runTask start attendance
 [info] 2024-xx-xxTxx:xx:xx.xxxZ runTask start apply_seminar
