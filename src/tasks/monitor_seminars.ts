@@ -1,6 +1,6 @@
 import type { BrowserContext, Page } from 'playwright';
-import { safeGoto, sendNotificationToChannel, sendTelegram, getSeminarIdFromUrl } from '../modules/utils';
-import * as keyMessageMonitor from './monitor_key_messages';
+import { safeGoto, sendNotificationToChannel, sendTelegram, getSeminarIdFromUrl, escapeMarkdown } from '../modules/utils';
+// import * as keyMessageMonitor from './monitor_key_messages';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const BASE_URL = 'https://www.doctorville.co.kr';
@@ -8,7 +8,9 @@ const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
 
 // Helper function for random delay
 const randomDelay = (): Promise<void> => {
-  const delay = Math.floor(Math.random() * (10 - 5 + 1) + 5) * 60 * 1000; // 5 to 10 minutes in ms
+  const minMs = 60 * 1000; // 1 minute
+  const maxMs = 3 * 60 * 1000; // 3 minutes
+  const delay = Math.floor(Math.random() * (maxMs - minMs + 1) + minMs); // 1 to 3 minutes in ms
   return new Promise((resolve) => setTimeout(resolve, delay));
 };
 
@@ -77,15 +79,20 @@ async function monitorSeminars(
       { status: string; name: string; seminarId: string | null }
     >; // Track all seminars from the start
 
-    for (const [url, { status, name }] of Object.entries(initialSeminars)) {
+    for (const [url, { status, name, seminarId }] of Object.entries(initialSeminars)) {
       // If a seminar is already open, start its key message monitor immediately
       if (status === '입장하기') {
-        console.log(`[${periodName}] Seminar already available: ${name}. Starting key message monitor.`);
-        await sendTelegram(`[${periodName}] Seminar already available: ${name}. Starting key message monitor.`);
-        const newPage = await context.newPage();
-        keyMessageMonitor
-          .monitor({ page: newPage, context }, url, name)
-          .catch((e) => console.error(`Key message monitor failed for ${name}`, e));
+        console.log(`[${periodName}] Seminar already available: ${name}`);
+        await sendTelegram(`[${periodName}] Seminar already available: ${name}`);
+        const targetUrl = seminarId ? `${SEMINAR_DETAIL_PAGE}${seminarId}` : url;
+        const messagePrefix = escapeMarkdown(`${name} 세미나 입장이 시작되었습니다.`);
+        await sendNotificationToChannel(`${messagePrefix} [바로가기](${escapeMarkdown(targetUrl)})`, null, {
+          parse_mode: 'MarkdownV2',
+        });
+        // const newPage = await context.newPage();
+        // keyMessageMonitor
+        //   .monitor({ page: newPage, context }, url, name)
+        //   .catch((e) => console.error(`Key message monitor failed for ${name}`, e));
       }
     }
 
@@ -103,12 +110,12 @@ async function monitorSeminars(
 
     // Monitoring loop
     while (Object.keys(monitoringList).length > 0) {
-      const statusMessage =
-        `[${periodName}] 현재 ${Object.keys(monitoringList).length}개의 세미나를 감시중입니다.\n` +
-        Object.values(monitoringList)
-          .map((s) => `  - ${s.name} (${s.status})`)
-          .join('\n');
-      await sendTelegram(statusMessage);
+      // const statusMessage =
+      //   `[${periodName}] 현재 ${Object.keys(monitoringList).length}개의 세미나를 감시중입니다.\n` +
+      //   Object.values(monitoringList)
+      //     .map((s) => `  - ${s.name} (${s.status})`)
+      //     .join('\n');
+      // await sendTelegram(statusMessage);
 
       const currentTime = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
       if (currentTime.getHours() >= endHour) {
@@ -133,9 +140,11 @@ async function monitorSeminars(
 
         // 1. Check if the seminar has disappeared from the page
         if (!currentSeminarsOnPage[url]) {
-          await sendNotificationToChannel(
-            `[${monitoredInfo.name}] 세미나가 종료되었습니다. 설문 입장해주세요. ${monitoredInfo.seminarId ? `${SEMINAR_DETAIL_PAGE}${monitoredInfo.seminarId}` : url}`,
-          );
+          const targetUrl = monitoredInfo.seminarId ? `${SEMINAR_DETAIL_PAGE}${monitoredInfo.seminarId}` : url;
+          const messagePrefix = escapeMarkdown(`${monitoredInfo.name} 세미나가 종료되었습니다. 설문 입장해주세요.`);
+          await sendNotificationToChannel(`${messagePrefix} [바로가기](${escapeMarkdown(targetUrl)})`, null, {
+            parse_mode: 'MarkdownV2',
+          });
           delete monitoringList[url]; // Remove from monitoring
           continue; // Move to the next seminar
         }
@@ -147,14 +156,16 @@ async function monitorSeminars(
         // 3. Check for status change from '신청완료' to '입장하기'
         if (newStatus === '입장하기' && oldStatus === '신청완료') {
           console.log(`[${periodName}] Seminar ready for entry: ${newName}. Starting key message monitor.`);
-          await sendNotificationToChannel(
-            `[${newName}] 세미나 입장이 시작되었습니다. ${newSeminarId ? `${SEMINAR_DETAIL_PAGE}${newSeminarId}` : url}`,
-          );
+          const targetUrl = newSeminarId ? `${SEMINAR_DETAIL_PAGE}${newSeminarId}` : url;
+          const messagePrefix = escapeMarkdown(`${newName} 세미나 입장이 시작되었습니다.`);
+          await sendNotificationToChannel(`${messagePrefix} [바로가기](${escapeMarkdown(targetUrl)})`, null, {
+            parse_mode: 'MarkdownV2',
+          });
 
-          const newPage = await context.newPage();
-          keyMessageMonitor
-            .monitor({ page: newPage, context }, url, newName)
-            .catch((e) => console.error(`Key message monitor failed for ${newName}`, e));
+          // const newPage = await context.newPage();
+          // keyMessageMonitor
+          //   .monitor({ page: newPage, context }, url, newName)
+          //   .catch((e) => console.error(`Key message monitor failed for ${newName}`, e));
         }
 
         // 4. Always update the seminar's status and name in the monitoring list
@@ -170,7 +181,7 @@ async function monitorSeminars(
       e && typeof e === 'object' && 'stack' in e ? (e as Error).stack : e,
     );
     const message = e instanceof Error ? e.message : String(e);
-    await sendTelegram(`❗ [${periodName}] 세미나 감시 작업 오류: ${message}`).catch(() => {});
+    await sendTelegram(`❗ [${periodName}] 세미나 감시 작업 오류: ${message}`).catch(() => { });
     return false;
   }
 }
