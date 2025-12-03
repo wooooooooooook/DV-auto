@@ -135,17 +135,17 @@ async function run({ page }: PlaywrightRunArgs) {
 
     let quizMessage = '오늘은 퀴즈가 없습니다.';
     if (quizInfo?.link) {
-      quizMessage = quizInfo.link;
       if (quizInfo.productTitle) {
         const answersText = quizInfo.answers?.map(String).join('');
-        const answerNote = answersText ? `, 정답 정보: ${answersText}` : ' (저장된 정답이 없습니다. 댓글로 알려주세요.)';
-        quizMessage += `\n${quizInfo.productTitle}${answerNote}`;
+        const answerNote = answersText ? `, 정답: ${answersText}` : ' (저장된 정답이 없습니다. 댓글로 알려주세요.)';
+        quizMessage = `${quizInfo.productTitle}${answerNote}`;
       }
+      quizMessage += `\n${quizInfo.link}`;
     }
-    message += `✨ 오늘의 퀴즈 링크:${quizMessage}\n`;
+    message += `✏️ 오늘의 퀴즈:${quizMessage}\n`;
 
     if (seminarMessage) {
-      message += `\n${seminarMessage}`;
+      message += `\n📖${seminarMessage}`;
     }
 
     return { success: true, message, options };

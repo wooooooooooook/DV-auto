@@ -4,6 +4,7 @@ import type { PlaywrightRunArgs } from '../types';
 import { safeGoto, sendTelegram } from '../modules/utils';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
+const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
 
 async function run({ page }: PlaywrightRunArgs) {
   let screenshotPath: string | null = null;
@@ -14,6 +15,8 @@ async function run({ page }: PlaywrightRunArgs) {
     // totalCount can be different from items.length if some seminars are not applyable
     const totalSeminarsAvailable = await totalSeminarLinks.count();
     console.log('Total seminar links found:', totalSeminarsAvailable);
+
+    const closedCount = await page.locator('.ico_finish').count();
 
     const applyLocator = page.locator('a:has(.ico_apply)');
     const items = await applyLocator.evaluateAll((nodes) =>
@@ -52,12 +55,15 @@ async function run({ page }: PlaywrightRunArgs) {
     if (failedToApplyCount > 0) {
       message += `\n (${failedToApplyCount}개는 마감 등의 사유로 신청 실패)`;
     }
+    if (closedCount > 0) {
+      message += `\n ${closedCount}개는 신청 마감되어 신청하지 못했습니다.`;
+    }
 
     const baseScreenshotDir = path.join(process.cwd(), 'screenshot');
     await fs.mkdir(baseScreenshotDir, { recursive: true });
     screenshotPath = path.join(baseScreenshotDir, `apply_seminar_result.png`);
     await page.screenshot({ path: screenshotPath, fullPage: false });
-
+    message += `\n${SEMINAR_DETAIL_PAGE}`;
     return { success: true, message: message, imagePath: screenshotPath };
   } catch (error) {
     console.error(
@@ -73,7 +79,7 @@ async function run({ page }: PlaywrightRunArgs) {
         .catch((err: unknown) => console.error('Failed to capture error screenshot:', err));
     }
     const message = error instanceof Error ? error.message : String(error);
-    await sendTelegram(`❗ 세미나 신청 작업 오류: ${message}`, screenshotPath).catch(() => {});
+    await sendTelegram(`❗ 세미나 신청 작업 오류: ${message}`, screenshotPath).catch(() => { });
     return {
       success: false,
       message: `세미나 신청 작업 오류: ${message}`,
