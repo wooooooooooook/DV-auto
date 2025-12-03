@@ -2,22 +2,31 @@ import quizMapping from '../../data/quiz.json';
 import type { PlaywrightRunArgs } from '../types';
 import { safeGoto, getSeminarIdFromUrl } from '../modules/utils';
 
-const QUIZ_LIST_URL = 'https://www.doctorville.co.kr/product/medicineList';
+const QUIZ_LIST_URLS = [
+  'https://www.doctorville.co.kr/product/medicineList',
+  'https://www.doctorville.co.kr/product/instrumentList',
+];
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const BASE_URL = 'https://www.doctorville.co.kr/';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
 
 type QuizInfo = { link: string; productTitle?: string; answers?: Array<string | number> };
 
-async function collectQuizInfo(page: PlaywrightRunArgs['page']): Promise<QuizInfo | null> {
-  try {
-    await safeGoto(page, QUIZ_LIST_URL, { waitUntil: 'load', timeout: 30000 }, 1);
-    const quizBgCount = await page.locator('.quiz_bg').count();
-    if (!quizBgCount) return null;
+async function findQuizHref(page: PlaywrightRunArgs['page']): Promise<string | null> {
+  for (const url of QUIZ_LIST_URLS) {
+    console.log(`[today_links] 퀴즈 목록 확인: ${url}`);
+    await safeGoto(page, url, { waitUntil: 'load', timeout: 30000 }, 1);
 
     const quizBg = page.locator('.product_list .quiz_bg').first();
+    const quizBgCount = await quizBg.count();
+    if (!quizBgCount) {
+      console.log(`[today_links] 퀴즈 항목을 찾지 못했습니다. 다음 경로를 확인합니다: ${url}`);
+      continue;
+    }
+
     const handle = await quizBg.elementHandle();
-    if (!handle) return null;
+    if (!handle) continue;
+
     const href = await page
       .evaluate((el) => {
         let cur: Element | null = el;
@@ -29,6 +38,21 @@ async function collectQuizInfo(page: PlaywrightRunArgs['page']): Promise<QuizInf
         return null;
       }, handle)
       .catch(() => null);
+
+    if (!href) {
+      console.log(`[today_links] 퀴즈 링크를 찾지 못했습니다. 다음 경로를 확인합니다: ${url}`);
+      continue;
+    }
+
+    return href;
+  }
+
+  return null;
+}
+
+async function collectQuizInfo(page: PlaywrightRunArgs['page']): Promise<QuizInfo | null> {
+  try {
+    const href = await findQuizHref(page);
 
     if (!href) return null;
 

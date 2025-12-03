@@ -2,21 +2,23 @@ import quizMapping from '../../data/quiz.json';
 import { safeGoto, sendTelegram } from '../modules/utils';
 import type { PlaywrightRunArgs } from '../types';
 
-const QUIZ_LIST_URL = 'https://www.doctorville.co.kr/product/medicineList';
+const QUIZ_LIST_URLS = [
+  'https://www.doctorville.co.kr/product/medicineList',
+  'https://www.doctorville.co.kr/product/instrumentList',
+];
 
-async function run({ page }: PlaywrightRunArgs) {
-  try {
-    await safeGoto(page, QUIZ_LIST_URL, { waitUntil: 'load', timeout: 30000 }, 2);
-
-    // Find the first .quiz_bg element
-    const quizBgCount = await page.locator('.quiz_bg').count();
-    if (!quizBgCount) {
-      return { success: true, message: '오늘의 퀴즈가 없습니다.' };
-    }
+async function findQuizHref(page: PlaywrightRunArgs['page']) {
+  for (const url of QUIZ_LIST_URLS) {
+    console.log(`[today_quiz] 퀴즈 목록 경로 확인: ${url}`);
+    await safeGoto(page, url, { waitUntil: 'load', timeout: 30000 }, 2);
 
     const quizBg = page.locator('.product_list .quiz_bg').first();
+    const quizBgCount = await quizBg.count();
+    if (!quizBgCount) {
+      console.log(`[today_quiz] 퀴즈 항목을 찾지 못했습니다. 다음 경로를 확인합니다: ${url}`);
+      continue;
+    }
 
-    // Get nearest anchor href by traversing up from the element
     const href = await (async () => {
       const handle = await quizBg.elementHandle();
       if (!handle) return null;
@@ -34,6 +36,21 @@ async function run({ page }: PlaywrightRunArgs) {
         return null;
       }
     })();
+
+    if (!href) {
+      console.log(`[today_quiz] 퀴즈 링크를 찾지 못했습니다. 다음 경로를 확인합니다: ${url}`);
+      continue;
+    }
+
+    return href;
+  }
+
+  return null;
+}
+
+async function run({ page }: PlaywrightRunArgs) {
+  try {
+    const href = await findQuizHref(page);
 
     if (!href) {
       return { success: true, message: '오늘의 퀴즈가 없습니다.' };
