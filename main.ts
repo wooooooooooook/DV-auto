@@ -8,7 +8,6 @@ import * as taskRegistry from './taskRegistry';
 import * as utils from './modules/utils';
 import * as attendanceTask from './tasks/attendance';
 import * as applySeminarTask from './tasks/apply_seminar';
-import * as todaySeminarCheckTaskModule from './tasks/today_seminar_check';
 import * as todayQuizTaskModule from './tasks/today_quiz';
 import * as fiveDaysSeminarTaskModule from './tasks/5days_seminar_check';
 import * as todayLinksTaskModule from './tasks/today_links';
@@ -45,8 +44,8 @@ const scheduledTask: Task = {
       const tasks = [
         { name: 'attendance', task: attendanceTask },
         { name: 'apply_seminar', task: applySeminarTask },
-        { name: 'today_seminar_check', task: todaySeminarCheckTaskModule },
         { name: 'today_quiz', task: todayQuizTaskModule },
+        { name: 'today_links', task: todayLinksTaskModule },
       ];
       await utils.sendTelegram('🕗 데일리 루틴 작업을 시작합니다.(출석체크, 세미나등록, 브랜드퀴즈)').catch(() => {});
       for (const { name, task } of tasks) {
@@ -90,22 +89,6 @@ taskRegistry.registerTask(scheduledTask);
 logger.info('Scheduled `daily_routine` at', CRON_EXPR, 'timezone=', TIMEZONE);
 
 // --- Register individual tasks to be runnable from Telegram ---
-const todaySeminarCheckTask: Task = {
-  name: 'today_seminar_check',
-  run: async () => {
-    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    try {
-      await utils.ensureLoggedIn({ page, context });
-      return await todaySeminarCheckTaskModule.run({ page, context });
-    } finally {
-      await browser.close();
-    }
-  },
-};
-taskRegistry.registerTask(todaySeminarCheckTask);
-
 const todayQuizTask: Task = {
   name: 'today_quiz',
   run: async () => {
@@ -200,39 +183,15 @@ const broadcastTodayLinksTask: Task = {
       await utils.ensureLoggedIn({ page, context });
 
       const linksResult = await todayLinksTaskModule.run({ page, context });
-      const seminarResult = await todaySeminarCheckTaskModule.run({ page, context });
-
-      let finalMessage = '';
-      let messageOptions: Record<string, unknown> = {};
-      if (linksResult && (linksResult as { success?: boolean }).success && (linksResult as { message?: string }).message) {
-        finalMessage += (linksResult as { message: string }).message;
-        const linksOptions = (linksResult as { options?: Record<string, unknown> }).options;
-        if (linksOptions) {
-          messageOptions = { ...messageOptions, ...linksOptions };
-        }
-      } else if (linksResult && !(linksResult as { success?: boolean }).success) {
-        logger.warn(`broadcast_today_links_daily: today_links sub-task failed: ${(linksResult as { message?: string }).message}`);
-      }
-
-      if (seminarResult && (seminarResult as { success?: boolean }).success && (seminarResult as { message?: string }).message) {
-        if (finalMessage) finalMessage += '\n';
-        finalMessage += (seminarResult as { message: string }).message;
-        const seminarOptions = (seminarResult as { options?: Record<string, unknown> }).options;
-        if (seminarOptions) {
-          messageOptions = { ...messageOptions, ...seminarOptions };
-        }
-      } else if (seminarResult && !(seminarResult as { success?: boolean }).success) {
-        logger.warn(`broadcast_today_links_daily: today_seminar_check sub-task failed: ${(seminarResult as { message?: string }).message}`);
-      }
-
-      if (finalMessage) {
-        await utils.sendNotificationToChannel(finalMessage, null, messageOptions);
-        logger.info('broadcast_today_links_daily: successfully broadcasted combined message.');
+      if (linksResult && (linksResult as { success?: boolean }).success !== false && (linksResult as { message?: string }).message) {
+        const messageOptions = (linksResult as { options?: Record<string, unknown> }).options ?? {};
+        await utils.sendNotificationToChannel((linksResult as { message: string }).message, null, messageOptions);
+        logger.info('broadcast_today_links_daily: successfully broadcasted message from today_links.');
         return { success: true, message: 'Broadcast successful.' };
-      } else {
-        logger.warn('broadcast_today_links_daily: all sub-tasks ran, but no message was produced to broadcast.');
-        return { success: false, message: 'No message to broadcast.' };
       }
+
+      logger.warn('broadcast_today_links_daily: all sub-tasks ran, but no message was produced to broadcast.');
+      return { success: false, message: 'No message to broadcast.' };
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       logger.error('broadcast_today_links_daily: scheduled task failed', e && (typeof e === 'object' && 'stack' in e ? (e as Error).stack : e));

@@ -131,8 +131,8 @@ main.js: Running attendance task.
 main.js: attendance task completed successfully.
 main.js: Running apply_seminar task.
 main.js: apply_seminar task completed successfully.
-main.js: Running today_seminar_check task.
-main.js: today_seminar_check task completed successfully.
+main.js: Running today_links task.
+main.js: today_links task completed successfully.
 main.js: Daily routine finished.
 ```
 

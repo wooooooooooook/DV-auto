@@ -68,7 +68,7 @@ if (adminBot) {
         await ctx.reply((result as { message: string }).message, (result as { options?: Record<string, unknown> }).options);
         if ((result as { imagePath?: string }).imagePath) {
           await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-          await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
+          await fs.unlink((result as { imagePath: string }).imagePath).catch(() => { });
         }
       } else if (typeof result === 'string') {
         await ctx.reply(result);
@@ -98,7 +98,7 @@ if (adminBot) {
         await ctx.reply((result as { message: string }).message, (result as { options?: Record<string, unknown> }).options);
         if ((result as { imagePath?: string }).imagePath) {
           await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-          await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
+          await fs.unlink((result as { imagePath: string }).imagePath).catch(() => { });
         }
       } else if (typeof result === 'string') {
         await ctx.reply(result);
@@ -145,8 +145,7 @@ if (adminBot) {
 - /broadcast_today_links: 즉시 오늘의 링크를 채널에 공지합니다.
 - /inspect <url> <selector>: 지정한 URL에서 셀렉터에 해당하는 요소를 검사하고 스크린샷을 전송합니다.
 - /5days_seminar_check: 향후 5일간의 세미나 일정을 확인합니다.
-- /today_seminar_check: 오늘의 세미나를 확인합니다.
-- /today_links: 오늘의 세미나 링크들과 오늘의 퀴즈 링크를 가져옵니다.
+- /today_links: 오늘의 세미나와 퀴즈 링크, 출석 링크를 한 번에 가져옵니다.
 - /broadcast_today_links: 오늘의 링크를 채널에 공지합니다.
 - /monitor_lunch_seminar_now: 즉시 점심 세미나 모니터링을 시작합니다.
 - /monitor_dinner_seminar_now: 즉시 저녁 세미나 모니터링을 시작합니다.
@@ -170,7 +169,7 @@ if (adminBot) {
         await ctx.reply((result as { message: string }).message, (result as { options?: Record<string, unknown> }).options);
         if ((result as { imagePath?: string }).imagePath) {
           await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-          await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
+          await fs.unlink((result as { imagePath: string }).imagePath).catch(() => { });
         }
       } else if (typeof result === 'string') {
         await ctx.reply(result);
@@ -200,7 +199,7 @@ if (adminBot) {
         await ctx.reply((result as { message: string }).message, (result as { options?: Record<string, unknown> }).options);
         if ((result as { imagePath?: string }).imagePath) {
           await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-          await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
+          await fs.unlink((result as { imagePath: string }).imagePath).catch(() => { });
         }
       } else if (typeof result === 'string') {
         await ctx.reply(result);
@@ -296,37 +295,7 @@ const seminarCheck5Days = async (ctx: any) => {
       await ctx.reply((result as { message: string }).message, (result as { options?: Record<string, unknown> }).options);
       if ((result as { imagePath?: string }).imagePath) {
         await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-        await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
-      }
-    } else if (typeof result === 'string') {
-      await ctx.reply(result);
-    } else if (result === true) {
-      await ctx.reply('세미나 확인이 완료되었습니다.');
-    } else {
-      await ctx.reply('세미나 확인이 완료되었습니다.');
-    }
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    ctx.reply(`세미나 확인 중 오류 발생: ${escapeMarkdown(message)}`);
-  }
-};
-
-const seminarCheckToday = async (ctx: any) => {
-  logger.info('User requested to run today_seminar_check now', { from: ctx.from?.username });
-  const task = taskRegistry.getByName('today_seminar_check');
-  if (!task) {
-    logger.error('today_seminar_check task not found, cannot run');
-    return ctx.reply('today_seminar_check task not found!');
-  }
-
-  try {
-    await ctx.reply('오늘의 세미나를 확인합니다...');
-    const result = await runner.runTask(task);
-    if (result && typeof result === 'object' && (result as { message?: string }).message) {
-      await ctx.reply((result as { message: string }).message, (result as { options?: Record<string, unknown> }).options);
-      if ((result as { imagePath?: string }).imagePath) {
-        await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-        await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
+        await fs.unlink((result as { imagePath: string }).imagePath).catch(() => { });
       }
     } else if (typeof result === 'string') {
       await ctx.reply(result);
@@ -369,12 +338,11 @@ const todayLinks = async (ctx: any) => {
 
 if (adminBot) {
   adminBot.command('5days_seminar_check', seminarCheck5Days);
-  adminBot.command('today_seminar_check', seminarCheckToday);
   adminBot.command('today_links', todayLinks);
 }
+
 if (noticeBot) {
   noticeBot.command('5days_seminar_check', seminarCheck5Days);
-  noticeBot.command('today_seminar_check', seminarCheckToday);
   noticeBot.command('today_links', todayLinks);
 }
 
@@ -384,8 +352,7 @@ if (noticeBot) {
     const message = `사용 가능한 명령어:
 
 - /5days_seminar_check: 향후 5일간의 세미나 일정을 확인합니다.
-- /today_seminar_check: 오늘의 세미나를 확인합니다.
-- /today_links: 오늘의 세미나 링크들과 오늘의 퀴즈 링크를 가져옵니다.`;
+- /today_links: 오늘의 세미나와 퀴즈 링크, 출석 링크를 한 번에 가져옵니다.`;
     ctx.reply(message);
   });
 }

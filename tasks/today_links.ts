@@ -1,7 +1,10 @@
 import type { PlaywrightRunArgs } from '../types';
-import { safeGoto } from '../modules/utils';
+import { safeGoto, getSeminarIdFromUrl } from '../modules/utils';
 
 const QUIZ_LIST_URL = 'https://www.doctorville.co.kr/product/medicineList';
+const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
+const BASE_URL = 'https://www.doctorville.co.kr/';
+const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
 
 async function collectQuizLink(page: PlaywrightRunArgs['page']): Promise<string | null> {
   try {
@@ -32,15 +35,92 @@ async function collectQuizLink(page: PlaywrightRunArgs['page']): Promise<string 
   }
 }
 
+async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Promise<string> {
+  try {
+    await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'load', timeout: 30000 }, 1);
+
+    const listConts = await page.locator('.list_cont');
+    const count = await listConts.count();
+
+    const now = new Date();
+    const month = now.toLocaleDateString('en-US', { month: 'numeric', timeZone: 'Asia/Seoul' });
+    const day = now.toLocaleDateString('en-US', { day: 'numeric', timeZone: 'Asia/Seoul' });
+    const todayString = `${month}/${day}`;
+
+    const lunchSeminars: string[] = [];
+    const dinnerSeminars: string[] = [];
+
+    for (let i = 0; i < count; i++) {
+      const container = listConts.nth(i);
+      const seminarDay = await container
+        .locator('.seminar_day .date')
+        .innerText()
+        .catch(() => '');
+      if (seminarDay !== todayString) continue;
+
+      const seminarDetails = await container.locator('.list_detail');
+      const dcount = await seminarDetails.count();
+
+      for (let j = 0; j < dcount; j++) {
+        const detail = seminarDetails.nth(j);
+        const timeElem = detail.locator('.txt_num.time').first();
+        const timeRaw = await timeElem.innerText();
+        const time = timeRaw.replace(/\n/g, '').trim();
+        const title = await detail.locator('.list_tit .tit').innerText();
+        const classAttr = (await timeElem.getAttribute('class')) || '';
+        const href = await detail.getAttribute('href');
+        if (!href) continue;
+        const fullUrl = new URL(href, BASE_URL).toString();
+        const seminarId = getSeminarIdFromUrl(fullUrl);
+        const seminarLink = seminarId ? `${SEMINAR_DETAIL_PAGE}${seminarId}` : fullUrl;
+        const seminarInfo = ` ${time}. ${title} ${seminarLink}`;
+
+        // If the time element has the `night_time` class treat as dinner, otherwise lunch
+        if (classAttr.includes('night_time')) {
+          dinnerSeminars.push(seminarInfo);
+        } else {
+          lunchSeminars.push(seminarInfo);
+        }
+      }
+    }
+
+    if (lunchSeminars.length > 0 || dinnerSeminars.length > 0) {
+      let message = `오늘의 세미나 리스트: 점심 ${lunchSeminars.length}개, 저녁 ${dinnerSeminars.length}개\n`;
+
+      if (lunchSeminars.length > 0) {
+        message += `\n🍴[점심 세미나]\n`;
+        message += lunchSeminars.join('\n');
+      }
+      message += '\n';
+      if (dinnerSeminars.length > 0) {
+        message += `\n🍴[저녁 세미나]\n`;
+        message += dinnerSeminars.join('\n');
+      }
+      return message;
+    }
+    return '오늘의 세미나 리스트: 오늘은 세미나가 없습니다.';
+  } catch (_e) {
+    const message = _e instanceof Error ? _e.message : String(_e);
+    console.error('collectTodaySeminarMessage error', _e && typeof _e === 'object' && 'stack' in _e ? (_e as Error).stack : _e);
+    return `오늘의 세미나 확인 실패: ${message}`;
+  }
+}
+
 async function run({ page }: PlaywrightRunArgs) {
   try {
     const quizLink = await collectQuizLink(page);
+    const seminarMessage = await collectTodaySeminarMessage(page);
+
+    const options: Record<string, unknown> = {};
 
     let message = '✨ 출석체크: https://m.doctorville.co.kr/mypage/attendance\n';
 
     message += `✨ 오늘의 퀴즈 링크:\n${quizLink ? quizLink : '오늘은 퀴즈가 없습니다.'}\n`;
+    if (seminarMessage) {
+      message += `\n${seminarMessage}`;
+    }
 
-    return { success: true, message };
+    return { success: true, message, options };
   } catch (_e) {
     console.error('today_links task error', _e && typeof _e === 'object' && 'stack' in _e ? (_e as Error).stack : _e);
     const message = _e instanceof Error ? _e.message : String(_e);

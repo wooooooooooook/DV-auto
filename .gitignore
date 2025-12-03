@@ -5,3 +5,4 @@ data/state.json
 cookies.json
 localstorage.json
 dist/
+.memo/
