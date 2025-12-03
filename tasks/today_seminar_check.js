@@ -1,4 +1,4 @@
-const { safeGoto, getSeminarIdFromUrl, escapeMarkdown } = require('../modules/utils');
+const { safeGoto, getSeminarIdFromUrl } = require('../modules/utils');
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const BASE_URL = 'https://www.doctorville.co.kr/';
@@ -46,7 +46,7 @@ async function run({ page, _context }) {
         } else {
           seminarLink = fullUrl; // Fallback to original full URL if ID not found
         }
-        const seminarInfo = ` ${time}. ${escapeMarkdown(title)} [링크](${seminarLink})`;
+        const seminarInfo = ` ${time}. ${title} ${seminarLink}`;
 
         // If the time element has the `night_time` class treat as dinner, otherwise lunch
         if (classAttr.includes('night_time')) {
@@ -58,25 +58,25 @@ async function run({ page, _context }) {
     }
 
     if (lunchSeminars.length > 0 || dinnerSeminars.length > 0) {
-      let message = `*오늘의 세미나 리스트: 점심 ${lunchSeminars.length}개, 저녁 ${dinnerSeminars.length}개*\n`;
+      let message = `오늘의 세미나 리스트: 점심 ${lunchSeminars.length}개, 저녁 ${dinnerSeminars.length}개\n`;
 
       if (lunchSeminars.length > 0) {
-        message += `\n🍴 *점심 세미나*\n`;
+        message += `\n🍴[점심 세미나]\n`;
         message += lunchSeminars.join('\n');
       }
 
       if (dinnerSeminars.length > 0) {
-        message += `\n🍴 *저녁 세미나*\n`;
+        message += `\n🍴[저녁 세미나]\n`;
         message += dinnerSeminars.join('\n');
       }
-      return { success: true, message, options: { parse_mode: 'MarkdownV2' } };
+      return { success: true, message };
     } else {
       return { success: true, message: '오늘의 세미나 리스트: 오늘은 세미나가 없습니다.' };
     }
   } catch (_e) {
     console.error('seminar check task error', _e && _e.stack ? _e.stack : _e);
     // Return result to caller, do not send telegram message from here
-    return { success: false, message: `세미나 확인 작업 오류: ${_e && _e.message ? escapeMarkdown(String(_e)) : ''}` };
+    return { success: false, message: `세미나 확인 작업 오류: ${_e && _e.message ? _e.message : String(_e)}` };
   }
 }
 
