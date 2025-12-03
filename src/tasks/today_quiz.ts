@@ -46,7 +46,13 @@ async function run({ page }: PlaywrightRunArgs) {
     const btn = page.locator('#btn_quiz_banner');
     if ((await btn.count()) > 0) {
       if (await btn.locator('.ico_finish').isVisible()) {
-        return { success: true, message: '오늘의 퀴즈는 이미 완료되었습니다. ' + href };
+        const shot = 'screenshot/today_quiz_completed.png';
+        try {
+          await page.screenshot({ path: shot });
+        } catch (_e) {
+          // ignore screenshot errors
+        }
+        return { success: true, message: '오늘의 퀴즈는 이미 완료되었습니다. ' + href, imagePath: shot };
       }
       await btn
         .first()

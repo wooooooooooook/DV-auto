@@ -1,3 +1,4 @@
+import quizMapping from '../../data/quiz.json';
 import type { PlaywrightRunArgs } from '../types';
 import { safeGoto, getSeminarIdFromUrl } from '../modules/utils';
 
@@ -6,7 +7,9 @@ const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const BASE_URL = 'https://www.doctorville.co.kr/';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
 
-async function collectQuizLink(page: PlaywrightRunArgs['page']): Promise<string | null> {
+type QuizInfo = { link: string; productTitle?: string; answers?: Array<string | number> };
+
+async function collectQuizInfo(page: PlaywrightRunArgs['page']): Promise<QuizInfo | null> {
   try {
     await safeGoto(page, QUIZ_LIST_URL, { waitUntil: 'load', timeout: 30000 }, 1);
     const quizBgCount = await page.locator('.quiz_bg').count();
@@ -28,9 +31,22 @@ async function collectQuizLink(page: PlaywrightRunArgs['page']): Promise<string 
       .catch(() => null);
 
     if (!href) return null;
-    return href;
+
+    await safeGoto(page, href, { waitUntil: 'load', timeout: 30000 }, 1);
+
+    const titleElem = page.locator('#product_title');
+    const productTitle =
+      (await titleElem.count()) > 0 ? (await titleElem.first().innerText().catch(() => '')).trim() : '';
+    const mapping = quizMapping as Record<string, Array<string | number>>;
+    const answers = productTitle && mapping[productTitle];
+
+    return {
+      link: href,
+      productTitle: productTitle || undefined,
+      answers: Array.isArray(answers) && answers.length > 0 ? answers : undefined,
+    };
   } catch (_e) {
-    console.error('collectQuizLink error', _e && typeof _e === 'object' && 'stack' in _e ? (_e as Error).stack : _e);
+    console.error('collectQuizInfo error', _e && typeof _e === 'object' && 'stack' in _e ? (_e as Error).stack : _e);
     return null;
   }
 }
@@ -111,14 +127,24 @@ async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Prom
 
 async function run({ page }: PlaywrightRunArgs) {
   try {
-    const quizLink = await collectQuizLink(page);
+    const quizInfo = await collectQuizInfo(page);
     const seminarMessage = await collectTodaySeminarMessage(page);
 
     const options: Record<string, unknown> = {};
 
     let message = '✨ 출석체크: https://m.doctorville.co.kr/mypage/attendance\n';
 
-    message += `✨ 오늘의 퀴즈 링크:\n${quizLink ? quizLink : '오늘은 퀴즈가 없습니다.'}\n`;
+    let quizMessage = '오늘은 퀴즈가 없습니다.';
+    if (quizInfo?.link) {
+      quizMessage = quizInfo.link;
+      if (quizInfo.productTitle) {
+        const answersText = quizInfo.answers?.map(String).join('');
+        const answerNote = answersText ? `, 정답 정보: ${answersText}` : ' (저장된 정답이 없습니다. 댓글로 알려주세요.)';
+        quizMessage += `\n${quizInfo.productTitle}${answerNote}`;
+      }
+    }
+
+    message += `✨ 오늘의 퀴즈 링크:\n${quizMessage}\n`;
     if (seminarMessage) {
       message += `\n${seminarMessage}`;
     }
