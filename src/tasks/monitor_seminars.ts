@@ -141,8 +141,8 @@ async function monitorSeminars(
         // 1. Check if the seminar has disappeared from the page
         if (!currentSeminarsOnPage[url]) {
           const targetUrl = monitoredInfo.seminarId ? `${SEMINAR_DETAIL_PAGE}${monitoredInfo.seminarId}` : url;
-          const messagePrefix = escapeMarkdown(`${monitoredInfo.name} 세미나가 종료되었습니다. 설문 입장해주세요.`);
-          await sendNotificationToChannel(`${messagePrefix} [바로가기](${escapeMarkdown(targetUrl)})`, null, {
+          const messagePrefix = `${monitoredInfo.name} 세미나가 종료되었습니다. 설문 입장해주세요.`;
+          await sendNotificationToChannel(`${messagePrefix} [바로가기](${targetUrl})`, null, {
             parse_mode: 'MarkdownV2',
           });
           delete monitoringList[url]; // Remove from monitoring
