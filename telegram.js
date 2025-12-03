@@ -148,9 +148,69 @@ if (adminBot) {
 - /today_seminar_check: 오늘의 세미나를 확인합니다.
 - /today_links: 오늘의 세미나 링크들과 오늘의 퀴즈 링크를 가져옵니다.
 - /broadcast_today_links: 오늘의 링크를 채널에 공지합니다.
+- /monitor_lunch_seminar_now: 즉시 점심 세미나 모니터링을 시작합니다.
+- /monitor_dinner_seminar_now: 즉시 저녁 세미나 모니터링을 시작합니다.
 
 명령어 사용 예: /inspect https://example.com "div.article"`;
     ctx.reply(message);
+  });
+
+  adminBot.command('monitor_lunch_seminar_now', async (ctx) => {
+    logger.info('User requested to run monitor_lunch_seminars now', { from: ctx.from.username });
+    const task = taskRegistry.getByName('monitor_lunch_seminars');
+    if (!task) {
+      logger.error('monitor_lunch_seminars task not found, cannot run');
+      return ctx.reply('monitor_lunch_seminars task not found!');
+    }
+
+    try {
+      await ctx.reply('Starting monitor_lunch_seminars...');
+      const result = await runner.runTask(task);
+      if (result && typeof result === 'object' && result.message) {
+        await ctx.reply(result.message, result.options);
+        if (result.imagePath) {
+          await ctx.replyWithPhoto({ source: result.imagePath });
+          await fs.unlink(result.imagePath).catch(() => {});
+        }
+      } else if (typeof result === 'string') {
+        await ctx.reply(result);
+      } else if (result === true) {
+        await ctx.reply('monitor_lunch_seminars finished successfully.');
+      } else {
+        await ctx.reply('monitor_lunch_seminars finished successfully.');
+      }
+    } catch (e) {
+      ctx.reply(`monitor_lunch_seminars failed: ${e && e.message ? escapeMarkdown(e.message) : e}`);
+    }
+  });
+
+  adminBot.command('monitor_dinner_seminar_now', async (ctx) => {
+    logger.info('User requested to run monitor_dinner_seminars now', { from: ctx.from.username });
+    const task = taskRegistry.getByName('monitor_dinner_seminars');
+    if (!task) {
+      logger.error('monitor_dinner_seminars task not found, cannot run');
+      return ctx.reply('monitor_dinner_seminars task not found!');
+    }
+
+    try {
+      await ctx.reply('Starting monitor_dinner_seminars...');
+      const result = await runner.runTask(task);
+      if (result && typeof result === 'object' && result.message) {
+        await ctx.reply(result.message, result.options);
+        if (result.imagePath) {
+          await ctx.replyWithPhoto({ source: result.imagePath });
+          await fs.unlink(result.imagePath).catch(() => {});
+        }
+      } else if (typeof result === 'string') {
+        await ctx.reply(result);
+      } else if (result === true) {
+        await ctx.reply('monitor_dinner_seminars finished successfully.');
+      } else {
+        await ctx.reply('monitor_dinner_seminars finished successfully.');
+      }
+    } catch (e) {
+      ctx.reply(`monitor_dinner_seminars failed: ${e && e.message ? escapeMarkdown(e.message) : e}`);
+    }
   });
 
   adminBot.command('inspect', async (ctx) => {

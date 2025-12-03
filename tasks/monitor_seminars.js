@@ -1,8 +1,9 @@
-const { safeGoto, sendNotificationToChannel, sendTelegram } = require('../modules/utils');
+const { safeGoto, sendNotificationToChannel, sendTelegram, getSeminarIdFromUrl } = require('../modules/utils');
 const keyMessageMonitor = require('./monitor_key_messages');
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const BASE_URL = 'https://www.doctorville.co.kr';
+const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
 
 // Helper function for random delay
 const randomDelay = () => {
@@ -14,42 +15,44 @@ const randomDelay = () => {
 async function getTodaysSeminars(page, startHour, endHour) {
   const seminars = {}; // href -> { status, name }
 
-  const listConts = await page.locator('.list_cont');
-  const count = await listConts.count();
+  const container = await page.locator('.list_cont').first();
+  const seminarDay = await container
+    .locator('.seminar_day .date')
+    .innerText()
+    .catch(() => '');
 
   const now = new Date();
   const month = now.toLocaleDateString('en-US', { month: 'numeric', timeZone: 'Asia/Seoul' });
   const day = now.toLocaleDateString('en-US', { day: 'numeric', timeZone: 'Asia/Seoul' });
   const todayString = `${month}/${day}`;
 
-  for (let i = 0; i < count; i++) {
-    const container = listConts.nth(i);
-    const seminarDay = await container
-      .locator('.seminar_day .date')
-      .innerText()
-      .catch(() => '');
+  console.log(
+    `[monitor_seminars] Getting Today seminar lists... Today's date string: ${todayString}, Seminar day string: ${seminarDay}`,
+  );
 
-    if (seminarDay === todayString) {
-      const seminarDetails = await container.locator('.list_detail');
-      const detailCount = await seminarDetails.count();
+  if (seminarDay === todayString) {
+    const seminarDetails = await container.locator('.list_detail');
+    const detailCount = await seminarDetails.count();
 
-      for (let j = 0; j < detailCount; j++) {
-        const detail = seminarDetails.nth(j);
-        const timeStr = await detail.locator('.txt_num.time').first().innerText();
-        const hour = parseInt(timeStr.split(':')[0], 10);
+    for (let j = 0; j < detailCount; j++) {
+      const detail = seminarDetails.nth(j);
+      const timeStr = await detail.locator('.txt_num.time').first().innerText();
+      const hour = parseInt(timeStr.split(':')[0], 10);
 
-        if (hour >= startHour && hour < endHour) {
-          const href = await detail.getAttribute('href');
-          const fullUrl = `${BASE_URL}${href}`;
-          const statusElement = detail.locator('.progress .ico_box');
-          const statusText = (await statusElement.count()) > 0 ? await statusElement.innerText() : '상태없음';
-          const seminarName = await detail.locator('.list_tit .tit').first().innerText();
-          seminars[fullUrl] = { status: statusText, name: seminarName };
-        }
+      if (hour >= startHour && hour < endHour) {
+        const href = await detail.getAttribute('href');
+        const fullUrl = `${BASE_URL}${href}`;
+        const seminarId = getSeminarIdFromUrl(fullUrl);
+        const statusElement = detail.locator('.progress .ico_box');
+        const statusText = (await statusElement.count()) > 0 ? await statusElement.innerText() : '상태없음';
+        const seminarName = await detail.locator('.list_tit .tit').first().innerText();
+        seminars[fullUrl] = { status: statusText, name: seminarName, seminarId: seminarId };
       }
-      break; // Found today's seminars, no need to check other containers
     }
+  } else {
+    console.log('[monitor_seminars] No seminars on today...');
   }
+
   return seminars;
 }
 
@@ -57,8 +60,6 @@ async function monitorSeminars({ page, context }, periodName, startHour, endHour
   let monitoringList = {}; // href -> {status, name}
 
   try {
-    // await sendNotificationToChannel(`[${periodName}] 세미나 감시를 시작합니다.`);
-
     // Initial population of the monitoring list
     await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'load', timeout: 30000 }, 1);
 
@@ -67,8 +68,9 @@ async function monitorSeminars({ page, context }, periodName, startHour, endHour
 
     for (const [url, { status, name }] of Object.entries(initialSeminars)) {
       // If a seminar is already open, start its key message monitor immediately
-      if (status === '입장하기' || status === '입장가능') {
+      if (status === '입장하기') {
         console.log(`[${periodName}] Seminar already available: ${name}. Starting key message monitor.`);
+        await sendTelegram(`[${periodName}] Seminar already available: ${name}. Starting key message monitor.`);
         const newPage = await context.newPage();
         keyMessageMonitor
           .monitor({ page: newPage, context }, url, name)
@@ -120,20 +122,22 @@ async function monitorSeminars({ page, context }, periodName, startHour, endHour
 
         // 1. Check if the seminar has disappeared from the page
         if (!currentSeminarsOnPage[url]) {
-          await sendNotificationToChannel(`[${monitoredInfo.name}] 세미나가 목록에서 사라졌습니다.`);
+          await sendNotificationToChannel(
+            `[${monitoredInfo.name}] 세미나가 종료되었습니다. 설문 입장해주세요. ${monitoredInfo.seminarId ? `${SEMINAR_DETAIL_PAGE}${monitoredInfo.seminarId}` : url}`,
+          );
           delete monitoringList[url]; // Remove from monitoring
           continue; // Move to the next seminar
         }
 
         // 2. If it still exists, get its new state
-        const { status: newStatus, name: newName } = currentSeminarsOnPage[url];
+        const { status: newStatus, name: newName, seminarId: newSeminarId } = currentSeminarsOnPage[url];
         const oldStatus = monitoredInfo.status;
 
-        // 3. Check for status change from '신청완료' to '입장가능'/'입장하기'
-        if ((newStatus === '입장가능' || newStatus === '입장하기') && oldStatus === '신청완료') {
+        // 3. Check for status change from '신청완료' to '입장하기'
+        if (newStatus === '입장하기' && oldStatus === '신청완료') {
           console.log(`[${periodName}] Seminar ready for entry: ${newName}. Starting key message monitor.`);
           await sendNotificationToChannel(
-            `[${newName}] 세미나 입장이 시작되었습니다. 키 메시지 모니터링을 시작합니다.`,
+            `[${newName}] 세미나 입장이 시작되었습니다. ${newSeminarId ? `${SEMINAR_DETAIL_PAGE}${newSeminarId}` : url}`,
           );
 
           const newPage = await context.newPage();
@@ -143,11 +147,11 @@ async function monitorSeminars({ page, context }, periodName, startHour, endHour
         }
 
         // 4. Always update the seminar's status and name in the monitoring list
-        monitoringList[url] = { status: newStatus, name: newName };
+        monitoringList[url] = { status: newStatus, name: newName, seminarId: newSeminarId };
       }
     }
 
-    // await sendNotificationToChannel(`[${periodName}] 세미나 감시를 종료합니다.`);
+    await sendTelegram(`[${periodName}] 세미나 감시를 종료합니다.`);
     return true;
   } catch (e) {
     console.error(`[${periodName}] seminar monitoring task error`, e && e.stack ? e.stack : e);

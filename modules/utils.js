@@ -267,6 +267,7 @@ module.exports = {
   maskToken,
   ensureLoggedIn,
   getSeminarIdFromUrl,
+  escapeMarkdown,
 };
 
 function getSeminarIdFromUrl(url) {
