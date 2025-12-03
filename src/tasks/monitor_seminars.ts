@@ -85,8 +85,8 @@ async function monitorSeminars(
         console.log(`[${periodName}] Seminar already available: ${name}`);
         await sendTelegram(`[${periodName}] Seminar already available: ${name}`);
         const targetUrl = seminarId ? `${SEMINAR_DETAIL_PAGE}${seminarId}` : url;
-        const messagePrefix = escapeMarkdown(`${name} 세미나 입장이 시작되었습니다.`);
-        await sendNotificationToChannel(`${messagePrefix} [바로가기](${escapeMarkdown(targetUrl)})`, null, {
+        const messagePrefix = `${name} 세미나 입장이 시작되었습니다.`;
+        await sendNotificationToChannel(`${messagePrefix} [바로가기](${targetUrl})`, null, {
           parse_mode: 'MarkdownV2',
         });
         // const newPage = await context.newPage();
@@ -141,8 +141,8 @@ async function monitorSeminars(
         // 1. Check if the seminar has disappeared from the page
         if (!currentSeminarsOnPage[url]) {
           const targetUrl = monitoredInfo.seminarId ? `${SEMINAR_DETAIL_PAGE}${monitoredInfo.seminarId}` : url;
-          const messagePrefix = escapeMarkdown(`${monitoredInfo.name} 세미나가 종료되었습니다. 설문 입장해주세요.`);
-          await sendNotificationToChannel(`${messagePrefix} [바로가기](${escapeMarkdown(targetUrl)})`, null, {
+          const messagePrefix = `${monitoredInfo.name} 세미나가 종료되었습니다. 설문 입장해주세요.`;
+          await sendNotificationToChannel(`${messagePrefix} [바로가기](${targetUrl})`, null, {
             parse_mode: 'MarkdownV2',
           });
           delete monitoringList[url]; // Remove from monitoring
@@ -157,8 +157,8 @@ async function monitorSeminars(
         if (newStatus === '입장하기' && oldStatus === '신청완료') {
           console.log(`[${periodName}] Seminar ready for entry: ${newName}. Starting key message monitor.`);
           const targetUrl = newSeminarId ? `${SEMINAR_DETAIL_PAGE}${newSeminarId}` : url;
-          const messagePrefix = escapeMarkdown(`${newName} 세미나 입장이 시작되었습니다.`);
-          await sendNotificationToChannel(`${messagePrefix} [바로가기](${escapeMarkdown(targetUrl)})`, null, {
+          const messagePrefix = `${newName} 세미나 입장이 시작되었습니다.`;
+          await sendNotificationToChannel(`${messagePrefix} [바로가기](${targetUrl})`, null, {
             parse_mode: 'MarkdownV2',
           });
 
