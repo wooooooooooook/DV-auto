@@ -1,22 +1,37 @@
-name: Run Macro
+name: Daily Routine
 
 on:
   schedule:
-    - cron: '0 0 * * *'
+    - cron: '0 2 * * *' # 11:00 KST
   workflow_dispatch:
 
+concurrency:
+  group: telegram-bot
+  cancel-in-progress: false
+
 jobs:
-  run-macro:
-    if: ${{ secrets.RUN_WORKFLOW == 'true' }}
+  run:
+    if: ${{ vars.ENABLE_MACRO == 'true' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      DV_USER: ${{ secrets.DV_USER }}
+      DV_PASS: ${{ secrets.DV_PASS }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      HEADLESS: 'true'
+      TZ: Asia/Seoul
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Set up Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: 20
+          cache: 'pnpm'
 
       - name: Enable Corepack (pnpm)
         run: corepack enable
@@ -26,10 +41,9 @@ jobs:
 
       - name: Cache Playwright Browsers
         id: cache-playwright-browsers
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
-          # matrix.node-version이 없으니 runner.os + hashFiles + node-version 문자열로 대체
           key: ${{ runner.os }}-playwright-${{ hashFiles('**/pnpm-lock.yaml') }}-node20
           restore-keys: |
             ${{ runner.os }}-playwright-${{ hashFiles('**/pnpm-lock.yaml') }}
@@ -41,10 +55,5 @@ jobs:
       - name: Build
         run: pnpm run build
 
-      - name: Run macro.js
+      - name: Run daily routine
         run: node dist/services/macro.js
-        env:
-          DV_USER: ${{ secrets.DV_USER }}
-          DV_PASS: ${{ secrets.DV_PASS }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
