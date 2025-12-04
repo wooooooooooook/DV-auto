@@ -2,7 +2,7 @@ name: Monitor Seminar (Evening)
 
 on:
   schedule:
-    - cron: '1 6 * * *' # 15:01 KST
+    - cron: '12 8 * * *' # 17:12 KST
   workflow_dispatch:
 
 concurrency:
@@ -13,7 +13,7 @@ jobs:
   monitor:
     if: ${{ vars.ENABLE_MONITOR == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 360
     permissions:
       contents: read
     env:

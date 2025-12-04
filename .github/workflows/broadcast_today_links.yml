@@ -2,7 +2,7 @@ name: Broadcast Today Links
 
 on:
   schedule:
-    - cron: '0 2 * * *' # 11:00 KST
+    - cron: '42 1 * * *' # 10:42 KST
   workflow_dispatch:
 
 concurrency:
