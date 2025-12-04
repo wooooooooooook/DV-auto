@@ -22,8 +22,8 @@ dotenv.config();
 // Configuration
 const HEADLESS = (process.env.HEADLESS || 'true').toLowerCase() === 'true';
 
-// Daily schedule: 08:01 Asia/Seoul (cron: minute hour day month weekday)
-const CRON_EXPR = process.env.DAILY_CRON || '1 8 * * *';
+// Daily schedule: 08:00 Asia/Seoul (cron: minute hour day month weekday)
+const CRON_EXPR = process.env.DAILY_CRON || '0 8 * * *';
 const TIMEZONE = process.env.SCHEDULE_TZ || 'Asia/Seoul';
 
 // Create a single composite scheduled task that will run login -> attendance -> apply_seminar
@@ -173,7 +173,7 @@ taskRegistry.registerTask(monitorDinnerSeminarsTask);
 
 const broadcastTodayLinksTask: Task = {
   name: 'broadcast_today_links_daily',
-  schedule: '0 8 * * *', // Every day at 8:00
+  schedule: '59 10 * * *', // Every day at 10:59
   timezone: TIMEZONE,
   run: async () => {
     logger.info('broadcast_today_links_daily: running scheduled task');
@@ -222,7 +222,7 @@ const broadcastTodayLinksTask: Task = {
 };
 scheduler.scheduleTaskCron(broadcastTodayLinksTask);
 taskRegistry.registerTask(broadcastTodayLinksTask);
-logger.info('Scheduled `broadcast_today_links_daily` at 08:00 timezone=', TIMEZONE);
+logger.info('Scheduled `broadcast_today_links_daily` at 10:59 timezone=', TIMEZONE);
 
 // Schedule the lunch monitoring task
 scheduler.scheduleTaskCron({
