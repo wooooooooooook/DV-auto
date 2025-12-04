@@ -1,6 +1,7 @@
 import { Telegraf, type Context } from 'telegraf';
 import fs from 'fs/promises';
 import https from 'https';
+import path from 'path';
 import { setBot } from './bot_instance';
 import * as logger from './logger';
 import * as scheduler from '../core/scheduler';
@@ -11,6 +12,53 @@ import { escapeMarkdown, sendNotificationToChannel } from '../modules/utils';
 
 const ADMIN_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const NOTICE_BOT_TOKEN = process.env.NOTICE_BOT_TOKEN;
+const QUIZ_DATA_PATH = path.join(process.cwd(), 'data/quiz.json');
+
+type QuizMapping = Record<string, Array<string | number>>;
+
+async function loadQuizData(): Promise<QuizMapping> {
+  try {
+    const raw = await fs.readFile(QUIZ_DATA_PATH, 'utf8');
+    return JSON.parse(raw) as QuizMapping;
+  } catch (error) {
+    logger.error('퀴즈 데이터 로드 실패', error);
+    throw new Error('퀴즈 데이터 파일을 읽을 수 없습니다.');
+  }
+}
+
+async function saveQuizData(data: QuizMapping): Promise<void> {
+  try {
+    await fs.writeFile(QUIZ_DATA_PATH, `${JSON.stringify(data, null, 4)}\n`, 'utf8');
+  } catch (error) {
+    logger.error('퀴즈 데이터 저장 실패', error);
+    throw new Error('퀴즈 데이터 파일을 저장할 수 없습니다.');
+  }
+}
+
+function parseQuizAnswers(answerText: string): Array<string | number> {
+  try {
+    const parsed = JSON.parse(answerText);
+    if (!Array.isArray(parsed)) {
+      throw new Error('배열 형식이 아닙니다.');
+    }
+    return parsed.map((item) => {
+      const num = Number(item);
+      return Number.isNaN(num) ? item : num;
+    });
+  } catch (_e) {
+    const parts = answerText
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean);
+    if (!parts.length) {
+      throw new Error('정답 배열을 해석할 수 없습니다. 예) [1,2,3] 또는 1,2,3');
+    }
+    return parts.map((part) => {
+      const num = Number(part);
+      return Number.isNaN(num) ? part : num;
+    });
+  }
+}
 
 if (!ADMIN_BOT_TOKEN) {
   logger.warn('TELEGRAM_BOT_TOKEN is not set. The admin bot will not be initialized.');
@@ -119,6 +167,46 @@ if (adminBot) {
     }
   });
 
+  adminBot.command('add_quiz_answer', async (ctx) => {
+    logger.info('User requested to add quiz answer', { from: ctx.from?.username });
+    const messageText = ctx.message?.text || '';
+    const args = messageText.split(' ').slice(1);
+
+    if (args.length < 2) {
+      return ctx.reply(
+        '사용법: /add_quiz_answer <제품명> <정답 배열(JSON)>\n예) /add_quiz_answer 시너지아정 [1,2,3]',
+      );
+    }
+
+    const productName = args[0];
+    const answerText = args.slice(1).join(' ');
+
+    let answers: Array<string | number>;
+    try {
+      answers = parseQuizAnswers(answerText);
+      if (!answers.length) {
+        throw new Error('정답 배열이 비어있습니다.');
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return ctx.reply(`정답 배열을 해석하지 못했습니다. ${escapeMarkdown(message)}`);
+    }
+
+    try {
+      const data = await loadQuizData();
+      data[productName] = answers;
+      await saveQuizData(data);
+
+      await ctx.reply(
+        `퀴즈 정답이 등록되었습니다.\n제품: ${productName}\n정답: ${JSON.stringify(answers)}`,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error('퀴즈 정답 등록 실패', error);
+      await ctx.reply(`퀴즈 정답을 저장하지 못했습니다: ${escapeMarkdown(message)}`);
+    }
+  });
+
   adminBot.command('broadcast_today_links', async (ctx) => {
     logger.info('Admin requested to broadcast today_links', { from: ctx.from?.username });
     const task = taskRegistry.getByName('today_links');
@@ -152,6 +240,7 @@ if (adminBot) {
 - /schedules: 스케줄된 작업 목록을 확인합니다.
 - /run_routine_now: 즉시 daily_routine 작업을 실행합니다.
 - /run_quiz_now: 즉시 오늘의 퀴즈 작업(today_quiz)을 실행합니다.
+- /add_quiz_answer: 오늘의 퀴즈 정답을 등록합니다. 예) /add_quiz_answer 시너지아정 [1,2,3]
 - /broadcast_today_links: 즉시 오늘의 링크를 채널에 공지합니다.
 - /inspect <url> <selector>: 지정한 URL에서 셀렉터에 해당하는 요소를 검사하고 스크린샷을 전송합니다.
 - /5days_seminar_check: 향후 5일간의 세미나 일정을 확인합니다.
