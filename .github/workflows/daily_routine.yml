@@ -2,7 +2,7 @@ name: Daily Routine
 
 on:
   schedule:
-    - cron: '0 0 * * *' # 9:00 KST
+    - cron: '13 23 * * *' # 8:13 KST
   workflow_dispatch:
 
 concurrency:
