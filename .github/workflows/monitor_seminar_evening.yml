@@ -13,7 +13,7 @@ jobs:
   monitor:
     if: ${{ vars.ENABLE_MONITOR == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 300
     permissions:
       contents: read
     env:
