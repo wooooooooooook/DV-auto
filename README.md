@@ -14,8 +14,19 @@
 
 데일리 루틴만 돌도록 이미 고정되어 있으니 추가 매크로를 신경 쓸 필요가 없습니다.
 
-### 1) 내 깃허브에 복사하기 (Fork)
-- 저장소 오른쪽 위 **Fork** 버튼을 눌러 내 계정에 복사합니다.
+### 1) 내 깃허브에 미러 저장소 만들기 (Fork 대신)
+- GitHub Actions의 스케줄은 포크 저장소에서 동작하지 않으므로, 내 계정에 **새 빈 저장소**를 만든 뒤 이 저장소를 미러링합니다.
+- 아래 명령어를 로컬 터미널에서 실행합니다. (폴더 이름은 자유)
+
+```bash
+git clone --mirror https://github.com/seia-soto/doctorville-auto.git doctorville-auto-mirror
+cd doctorville-auto-mirror
+# GitHub에 새로 만든 빈 저장소 URL로 교체하세요.
+git remote set-url --push origin https://github.com/<YOUR_ID>/<NEW_REPO>.git
+git push --mirror
+```
+
+- 이후 작업은 새로 만든 저장소에서 진행합니다.
 
 ### 2) 아이디·비밀번호 넣기 (Secrets)
 - 내 계정으로 복사된 저장소에서 **Settings → Secrets and variables → Actions**로 이동합니다.
@@ -37,6 +48,12 @@
 ### 5) 매일 자동 실행 확인
 - 기본 스케줄: `0 2 * * *` (UTC) → 한국 시간 11:00에 실행됩니다. (`.github/workflows/daily_routine.yml`의 `cron` 항목)
 - 시간대를 조정하려면 위 파일의 `cron` 값을 직접 수정합니다. 별도의 환경 변수로 스케줄을 바꾸는 옵션은 없습니다.
+
+### Cron 트리거가 실행되지 않을 때 체크리스트
+1. **기본 브랜치에 워크플로가 있어야 합니다.** GitHub의 schedule 이벤트는 기본 브랜치(예: `main`)만 대상으로 실행됩니다. 워크플로 파일이 다른 브랜치에만 있으면 기록이 남지 않습니다.
+2. **포크에서는 schedule이 실행되지 않습니다.** 포크 저장소는 정책상 cron 트리거가 비활성화됩니다. 원 저장소에서 실행하거나 독립 저장소로 전환해야 합니다.
+3. **저장소가 60일 이상 비활성 상태라면 자동으로 꺼집니다.** 커밋·수동 실행 등으로 Actions를 다시 활성화해야 다음 스케줄이 동작합니다.
+4. **조건식 변수를 확인하세요.** `daily_routine.yml`은 `vars.ENABLE_MACRO == 'true'`일 때만 job을 실행합니다. 리포지토리 변수에 정확히 문자열 `true`가 설정되어 있는지 확인하세요.
 
 이렇게 설정하면 서버 없이도 GitHub Actions가 매일 알아서 **데일리 루틴만** 실행합니다. 로그인 정보만 챙겨 넣으면 끝입니다.
 
