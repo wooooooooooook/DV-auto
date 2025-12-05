@@ -24,13 +24,32 @@ dotenv.config();
 const HEADLESS = (process.env.HEADLESS || 'true').toLowerCase() === 'true';
 
 // Daily schedule: 08:00 Asia/Seoul (cron: minute hour day month weekday)
-const CRON_EXPR = process.env.DAILY_CRON || '0 8 * * *';
 const TIMEZONE = process.env.SCHEDULE_TZ || 'Asia/Seoul';
+const DAILY_ROUTINE_CRON = process.env.DAILY_CRON || '0 8 * * *';
+const BROADCAST_TODAY_LINKS_CRON = '59 10 * * *';
+const LUNCH_MONITOR_CRON = '0 11 * * *';
+const DINNER_MONITOR_CRON = '0 17 * * *';
+const MONITOR_RESUME_DURATION_HOURS = 5;
+
+function getStartHourFromCron(cronExpr: string): number | null {
+  const parts = cronExpr.trim().split(/\s+/);
+  if (parts.length < 2) return null;
+  const hour = Number(parts[1]);
+  return Number.isNaN(hour) ? null : hour;
+}
+
+function isWithinWindow(currentHour: number, startHour: number, durationHours: number): boolean {
+  const endHour = (startHour + durationHours) % 24;
+  if (startHour < endHour) {
+    return currentHour >= startHour && currentHour < endHour;
+  }
+  return currentHour >= startHour || currentHour < endHour;
+}
 
 // Create a single composite scheduled task that will run login -> attendance -> apply_seminar
 const scheduledTask: Task = {
   name: 'daily_routine',
-  schedule: CRON_EXPR,
+  schedule: DAILY_ROUTINE_CRON,
   timezone: TIMEZONE,
   run: async () => {
     logger.info('daily_routine: launching browser to perform daily tasks');
@@ -48,7 +67,7 @@ const scheduledTask: Task = {
         { name: 'today_quiz', task: todayQuizTaskModule },
         { name: 'today_links', task: todayLinksTaskModule },
       ];
-      await utils.sendTelegram('🕗 데일리 루틴 작업을 시작합니다.(출석체크, 세미나등록, 브랜드퀴즈)').catch(() => {});
+      await utils.sendTelegram('🕗 데일리 루틴 작업을 시작합니다.(출석체크, 세미나등록, 브랜드퀴즈)').catch(() => { });
       for (const { name, task } of tasks) {
         try {
           await utils.ensureLoggedIn({ page, context });
@@ -65,11 +84,11 @@ const scheduledTask: Task = {
         } catch (err) {
           logger.error(`Error during ${name} task:`, err);
           const message = err instanceof Error ? err.message : String(err);
-          await utils.sendTelegram(`daily_routine 중 ${name} 작업 실패: ${message}`).catch(() => {});
+          await utils.sendTelegram(`daily_routine 중 ${name} 작업 실패: ${message}`).catch(() => { });
         }
       }
     } finally {
-      await utils.sendTelegram('🕗 데일리 루틴 작업이 종료되었습니다.').catch(() => {});
+      await utils.sendTelegram('🕗 데일리 루틴 작업이 종료되었습니다.').catch(() => { });
       try {
         await context.close();
       } catch (_e) {
@@ -87,7 +106,6 @@ const scheduledTask: Task = {
 
 scheduler.scheduleTaskCron(scheduledTask);
 taskRegistry.registerTask(scheduledTask);
-logger.info('Scheduled `daily_routine` at', CRON_EXPR, 'timezone=', TIMEZONE);
 
 // --- Register individual tasks to be runnable from Telegram ---
 const todayQuizTask: Task = {
@@ -140,12 +158,20 @@ taskRegistry.registerTask(todayLinksTask);
 
 const monitorLunchSeminarsTask: Task = {
   name: 'monitor_lunch_seminars',
+  schedule: LUNCH_MONITOR_CRON,
+  timezone: TIMEZONE,
   run: async () => {
     const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
     const context = await browser.newContext();
     const page = await context.newPage();
     try {
       await utils.ensureLoggedIn({ page, context });
+      await applySeminarTask.run({ page, context }).catch((err) => {
+        logger.warn(
+          'monitor_lunch_seminars: apply_seminar 선실행 실패, 모니터링은 계속 진행합니다',
+          err && (typeof err === 'object' && 'stack' in err ? (err as Error).stack : err),
+        );
+      });
       return await monitorLunchSeminars.run({ page, context });
     } finally {
       await browser.close();
@@ -153,15 +179,24 @@ const monitorLunchSeminarsTask: Task = {
   },
 };
 taskRegistry.registerTask(monitorLunchSeminarsTask);
+scheduler.scheduleTaskCron(monitorLunchSeminarsTask);
 
 const monitorDinnerSeminarsTask: Task = {
   name: 'monitor_dinner_seminars',
+  schedule: DINNER_MONITOR_CRON,
+  timezone: TIMEZONE,
   run: async () => {
     const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
     const context = await browser.newContext();
     const page = await context.newPage();
     try {
       await utils.ensureLoggedIn({ page, context });
+      await applySeminarTask.run({ page, context }).catch((err) => {
+        logger.warn(
+          'monitor_dinner_seminars: apply_seminar 선실행 실패, 모니터링은 계속 진행합니다',
+          err && (typeof err === 'object' && 'stack' in err ? (err as Error).stack : err),
+        );
+      });
       return await monitorDinnerSeminars.run({ page, context });
     } finally {
       await browser.close();
@@ -169,6 +204,7 @@ const monitorDinnerSeminarsTask: Task = {
   },
 };
 taskRegistry.registerTask(monitorDinnerSeminarsTask);
+scheduler.scheduleTaskCron(monitorDinnerSeminarsTask);
 
 const naverpayPointExchange: Task = {
   name: '네이버페이포인트교환',
@@ -188,7 +224,7 @@ taskRegistry.registerTask(naverpayPointExchange);
 
 const broadcastTodayLinksTask: Task = {
   name: 'broadcast_today_links_daily',
-  schedule: '59 10 * * *', // Every day at 10:59
+  schedule: BROADCAST_TODAY_LINKS_CRON, // Every day at 10:59
   timezone: TIMEZONE,
   run: async () => {
     logger.info('broadcast_today_links_daily: running scheduled task');
@@ -219,7 +255,7 @@ const broadcastTodayLinksTask: Task = {
         'broadcast_today_links_daily: scheduled task failed',
         e && (typeof e === 'object' && 'stack' in e ? (e as Error).stack : e),
       );
-      await utils.sendTelegram(`❗ Daily link broadcast failed: ${message}`).catch(() => {});
+      await utils.sendTelegram(`❗ Daily link broadcast failed: ${message}`).catch(() => { });
       return { success: false, message: `Broadcast failed: ${message}` };
     } finally {
       try {
@@ -237,25 +273,6 @@ const broadcastTodayLinksTask: Task = {
 };
 scheduler.scheduleTaskCron(broadcastTodayLinksTask);
 taskRegistry.registerTask(broadcastTodayLinksTask);
-logger.info('Scheduled `broadcast_today_links_daily` at 10:59 timezone=', TIMEZONE);
-
-// Schedule the lunch monitoring task
-scheduler.scheduleTaskCron({
-  name: 'monitor_lunch_seminars',
-  schedule: '0 11 * * *', // Every day at 11:00
-  timezone: TIMEZONE,
-  run: monitorLunchSeminarsTask.run,
-});
-logger.info('Scheduled `monitor_lunch_seminars` at 11:00 timezone=', TIMEZONE);
-
-// Schedule the dinner monitoring task
-scheduler.scheduleTaskCron({
-  name: 'monitor_dinner_seminars',
-  schedule: '0 17 * * *', // Every day at 17:00
-  timezone: TIMEZONE,
-  run: monitorDinnerSeminarsTask.run,
-});
-logger.info('Scheduled `monitor_dinner_seminars` at 17:00 timezone=', TIMEZONE);
 
 // Keep the process alive explicitly (node-cron uses timers which usually keep the process alive,
 // but calling process.stdin.resume() prevents accidental exit in some environments).
@@ -268,14 +285,16 @@ function checkAndResumeTasks(): void {
 
   logger.info(`Startup check: current hour is ${currentHour} in ${TIMEZONE}`);
 
-  if (currentHour >= 11 && currentHour < 14) {
+  const lunchStartHour = getStartHourFromCron(LUNCH_MONITOR_CRON);
+  if (lunchStartHour !== null && isWithinWindow(currentHour, lunchStartHour, MONITOR_RESUME_DURATION_HOURS)) {
     logger.info('Inside lunch monitoring window, attempting to resume task.');
     runTask(monitorLunchSeminarsTask).catch((err) => {
       logger.error('Failed to auto-resume lunch monitoring task:', err);
     });
   }
 
-  if (currentHour >= 17 && currentHour < 21) {
+  const dinnerStartHour = getStartHourFromCron(DINNER_MONITOR_CRON);
+  if (dinnerStartHour !== null && isWithinWindow(currentHour, dinnerStartHour, MONITOR_RESUME_DURATION_HOURS)) {
     logger.info('Inside dinner monitoring window, attempting to resume task.');
     runTask(monitorDinnerSeminarsTask).catch((err) => {
       logger.error('Failed to auto-resume dinner monitoring task:', err);
