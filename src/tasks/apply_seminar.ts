@@ -9,7 +9,7 @@ const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
 async function run({ page }: PlaywrightRunArgs) {
   let screenshotPath: string | null = null;
   try {
-    await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'load', timeout: 30000 }, 1);
+    await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'domcontentloaded', timeout: 30000 }, 1);
 
     const totalSeminarLinks = await page.locator('a.list_detail');
     // totalCount can be different from items.length if some seminars are not applyable

@@ -1,5 +1,11 @@
 import type { BrowserContext, Page } from 'playwright';
-import { safeGoto, sendNotificationToChannel, sendTelegram, getSeminarIdFromUrl, escapeMarkdownV2 } from '../modules/utils';
+import {
+  safeGoto,
+  sendNotificationToChannel,
+  sendTelegram,
+  getSeminarIdFromUrl,
+  escapeMarkdownV2,
+} from '../modules/utils';
 import * as storage from '../services/storage';
 // import * as keyMessageMonitor from './monitor_key_messages';
 
@@ -42,7 +48,7 @@ async function isSeminarEnded(
     );
     return false;
   } finally {
-    await detailPage.close().catch(() => { });
+    await detailPage.close().catch(() => {});
   }
 }
 
@@ -145,7 +151,7 @@ async function monitorSeminars(
         console.log(`[${periodName}] Seminar already available: ${name}`);
         await sendTelegram(`[${periodName}] Seminar already available: ${name}`);
         const targetUrl = seminarId ? `${SEMINAR_DETAIL_PAGE}${seminarId}` : url;
-        const messagePrefix = `**${escapeMarkdownV2(name)}** ${escapeMarkdownV2("세미나 입장이 시작되었습니다.")}`;
+        const messagePrefix = `**${escapeMarkdownV2(name)}** ${escapeMarkdownV2('세미나 입장이 시작되었습니다.')}`;
         await sendNotificationToChannel(`${messagePrefix} [바로가기](${targetUrl})`, null, {
           parse_mode: 'MarkdownV2',
         });
@@ -183,7 +189,7 @@ async function monitorSeminars(
           (s) => `**${s.name}** (${SEMINAR_DETAIL_PAGE}${s.seminarId})`,
         );
         if (remainingSeminars.length > 0) {
-          let message = ` ${escapeMarkdownV2(periodName)} ${escapeMarkdownV2("모니터링 시간이 종료되었지만, 마치지 않은 세미나가 있습니다:")}\n`;
+          let message = ` ${escapeMarkdownV2(periodName)} ${escapeMarkdownV2('모니터링 시간이 종료되었지만, 마치지 않은 세미나가 있습니다:')}\n`;
           message += remainingSeminars.join('\n');
           await sendNotificationToChannel(message, null, {
             parse_mode: 'MarkdownV2',
@@ -230,10 +236,8 @@ async function monitorSeminars(
 
         // 1. Check seminar end by visiting detail page
         if (ended) {
-          const targetUrl = mergedSeminarInfo.seminarId
-            ? `${SEMINAR_DETAIL_PAGE}${mergedSeminarInfo.seminarId}`
-            : url;
-          const messagePrefix = `**${escapeMarkdownV2(mergedSeminarInfo.name)}** ${escapeMarkdownV2("세미나가 종료되었습니다. 설문 입장해주세요.")}`;
+          const targetUrl = mergedSeminarInfo.seminarId ? `${SEMINAR_DETAIL_PAGE}${mergedSeminarInfo.seminarId}` : url;
+          const messagePrefix = `**${escapeMarkdownV2(mergedSeminarInfo.name)}** ${escapeMarkdownV2('세미나가 종료되었습니다. 설문 입장해주세요.')}`;
           await sendNotificationToChannel(`${messagePrefix} [바로가기](${targetUrl})`, null, {
             parse_mode: 'MarkdownV2',
           });
@@ -249,7 +253,7 @@ async function monitorSeminars(
         if (currentInfo && newStatus === '입장하기' && oldStatus === '신청완료') {
           console.log(`[${periodName}] Seminar ready for entry: ${newName}. Starting key message monitor.`);
           const targetUrl = mergedSeminarInfo.seminarId ? `${SEMINAR_DETAIL_PAGE}${mergedSeminarInfo.seminarId}` : url;
-          const messagePrefix = `**${escapeMarkdownV2(newName)}** ${escapeMarkdownV2("세미나 입장이 시작되었습니다.")}`;
+          const messagePrefix = `**${escapeMarkdownV2(newName)}** ${escapeMarkdownV2('세미나 입장이 시작되었습니다.')}`;
           await sendNotificationToChannel(`${messagePrefix} [바로가기](${targetUrl})`, null, {
             parse_mode: 'MarkdownV2',
           });
@@ -281,7 +285,7 @@ async function monitorSeminars(
       e && typeof e === 'object' && 'stack' in e ? (e as Error).stack : e,
     );
     const message = e instanceof Error ? e.message : String(e);
-    await sendTelegram(`❗ [${periodName}] 세미나 감시 작업 오류: ${message}`).catch(() => { });
+    await sendTelegram(`❗ [${periodName}] 세미나 감시 작업 오류: ${message}`).catch(() => {});
     return false;
   }
 }

@@ -27,7 +27,7 @@ async function run({ page, context }: PlaywrightRunArgs): Promise<TaskResult> {
       .filter(Boolean)
       .join(', ');
     const message = `네이버페이포인트교환 실패: 환경변수(${missing})를 확인해주세요.`;
-    await sendTelegram(`❗ ${message}`).catch(() => { });
+    await sendTelegram(`❗ ${message}`).catch(() => {});
     return { success: false };
   }
 
@@ -35,17 +35,17 @@ async function run({ page, context }: PlaywrightRunArgs): Promise<TaskResult> {
 
   if (!context) {
     const message = '네이버페이포인트교환 실패: 로그인 확인을 위해 context가 필요합니다.';
-    await sendTelegram(`❗ ${message}`).catch(() => { });
+    await sendTelegram(`❗ ${message}`).catch(() => {});
     return { success: false };
   }
 
-  await ensureLoggedIn({ page, context }).catch(() => { });
+  await ensureLoggedIn({ page, context }).catch(() => {});
 
   await fs.mkdir(path.join(process.cwd(), 'screenshot'), { recursive: true });
   let successCount = 0;
   let iteration = 0;
   const prepareShopPage = async () => {
-    await ensureLoggedIn({ page: workPage, context }).catch(() => { });
+    await ensureLoggedIn({ page: workPage, context }).catch(() => {});
     await safeGoto(workPage, ENTERTAINMENT_URL, { waitUntil: 'load', timeout: 20000 }, 2);
     const pointShopLink = workPage.locator('#btnPointShopLink').first();
     if ((await pointShopLink.count()) > 0) {
@@ -68,7 +68,7 @@ async function run({ page, context }: PlaywrightRunArgs): Promise<TaskResult> {
       // 일정 주기마다 새 페이지로 재생성하여 누적 리소스 사용을 줄임
       if (refreshEvery > 0 && iteration > 0 && iteration % refreshEvery === 0) {
         try {
-          await workPage.close().catch(() => { });
+          await workPage.close().catch(() => {});
         } catch (_e) {
           /* ignore */
         }
@@ -123,7 +123,9 @@ async function run({ page, context }: PlaywrightRunArgs): Promise<TaskResult> {
 
       if (orderCompleted) {
         successCount += 1;
-        await sendTelegram(`✅ 네이버페이포인트교환 성공 (${successCount}회 누적, 시도 ${iteration}회)`).catch(() => { });
+        await sendTelegram(`✅ 네이버페이포인트교환 성공 (${successCount}회 누적, 시도 ${iteration}회)`).catch(
+          () => {},
+        );
         if (iterationDelayMs > 0) {
           await sleep(iterationDelayMs);
         }
@@ -131,9 +133,9 @@ async function run({ page, context }: PlaywrightRunArgs): Promise<TaskResult> {
       }
 
       const failureShot = path.join(process.cwd(), 'screenshot', 'naverpay_point_exchange_failure.png');
-      await workPage.screenshot({ path: failureShot, fullPage: true }).catch(() => { });
+      await workPage.screenshot({ path: failureShot, fullPage: true }).catch(() => {});
       const message = `네이버페이포인트교환 실패 (시도 ${iteration}회, 성공 ${successCount}회). '${SUCCESS_TEXT}' 문구를 찾지 못했습니다.`;
-      await sendTelegram(`❗ ${message}`, failureShot).catch(() => { });
+      await sendTelegram(`❗ ${message}`, failureShot).catch(() => {});
       return { success: false };
     }
 
@@ -141,14 +143,15 @@ async function run({ page, context }: PlaywrightRunArgs): Promise<TaskResult> {
       maxIterations > 0
         ? `네이버페이포인트교환 완료: 설정된 ${maxIterations}회 반복 종료 (성공 ${successCount}회).`
         : `네이버페이포인트교환 종료: 성공 ${successCount}회 후 반복이 중단되었습니다.`;
-    await sendTelegram(`✅ ${message}`).catch(() => { });
+    await sendTelegram(`✅ ${message}`).catch(() => {});
     return { success: true };
   } catch (error) {
     const errorShot = path.join(process.cwd(), 'screenshot', 'naverpay_point_exchange_error.png');
-    await workPage.screenshot({ path: errorShot, fullPage: true }).catch(() => { });
-    const message = `네이버페이포인트교환 오류 발생 (성공 ${successCount}회): ${error instanceof Error ? error.message : String(error)
-      }`;
-    await sendTelegram(`❗ ${message}`, errorShot).catch(() => { });
+    await workPage.screenshot({ path: errorShot, fullPage: true }).catch(() => {});
+    const message = `네이버페이포인트교환 오류 발생 (성공 ${successCount}회): ${
+      error instanceof Error ? error.message : String(error)
+    }`;
+    await sendTelegram(`❗ ${message}`, errorShot).catch(() => {});
     return { success: false };
   }
 }

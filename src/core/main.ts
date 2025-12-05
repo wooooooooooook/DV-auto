@@ -67,7 +67,7 @@ const scheduledTask: Task = {
         { name: 'today_quiz', task: todayQuizTaskModule },
         { name: 'today_links', task: todayLinksTaskModule },
       ];
-      await utils.sendTelegram('🕗 데일리 루틴 작업을 시작합니다.(출석체크, 세미나등록, 브랜드퀴즈)').catch(() => { });
+      await utils.sendTelegram('🕗 데일리 루틴 작업을 시작합니다.(출석체크, 세미나등록, 브랜드퀴즈)').catch(() => {});
       for (const { name, task } of tasks) {
         try {
           await utils.ensureLoggedIn({ page, context });
@@ -84,11 +84,11 @@ const scheduledTask: Task = {
         } catch (err) {
           logger.error(`Error during ${name} task:`, err);
           const message = err instanceof Error ? err.message : String(err);
-          await utils.sendTelegram(`daily_routine 중 ${name} 작업 실패: ${message}`).catch(() => { });
+          await utils.sendTelegram(`daily_routine 중 ${name} 작업 실패: ${message}`).catch(() => {});
         }
       }
     } finally {
-      await utils.sendTelegram('🕗 데일리 루틴 작업이 종료되었습니다.').catch(() => { });
+      await utils.sendTelegram('🕗 데일리 루틴 작업이 종료되었습니다.').catch(() => {});
       try {
         await context.close();
       } catch (_e) {
@@ -255,7 +255,7 @@ const broadcastTodayLinksTask: Task = {
         'broadcast_today_links_daily: scheduled task failed',
         e && (typeof e === 'object' && 'stack' in e ? (e as Error).stack : e),
       );
-      await utils.sendTelegram(`❗ Daily link broadcast failed: ${message}`).catch(() => { });
+      await utils.sendTelegram(`❗ Daily link broadcast failed: ${message}`).catch(() => {});
       return { success: false, message: `Broadcast failed: ${message}` };
     } finally {
       try {
