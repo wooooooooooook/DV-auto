@@ -62,7 +62,7 @@ async function getTodaysSeminars(page: Page, startHour: number, endHour: number)
 }
 
 async function monitorSeminars(
-  { page, _context }: { page: Page; _context: BrowserContext },
+  { page, context }: { page: Page; context: BrowserContext },
   periodName: string,
   startHour: number,
   endHour: number,
