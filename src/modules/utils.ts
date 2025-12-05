@@ -9,6 +9,11 @@ const LOCALSTORAGE_FILE = path.join(process.cwd(), 'localstorage.json');
 type SendMessageOptions = Parameters<Telegraf['telegram']['sendMessage']>[2];
 type SendPhotoOptions = Parameters<Telegraf['telegram']['sendPhoto']>[2];
 
+function escapeMarkdownV2(text: string): string {
+  if (!text) return '';
+  return text.replace(/([_*\[\]()~`>#+\-=|{}.!])/g, '\\$1');
+}
+
 function maskToken(token?: string | null): string {
   if (!token) return '';
   return token.length > 10 ? `${token.slice(0, 6)}...${token.slice(-4)}` : token;
@@ -315,5 +320,6 @@ export {
   sleep,
   maskToken,
   ensureLoggedIn,
+  escapeMarkdownV2,
   getSeminarIdFromUrl,
 };

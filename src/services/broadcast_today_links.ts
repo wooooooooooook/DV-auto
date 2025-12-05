@@ -3,7 +3,9 @@ import dotenv from 'dotenv';
 import { chromium, type Browser, type BrowserContext } from 'playwright';
 import * as utils from '../modules/utils';
 import * as todayLinksTask from '../tasks/today_links';
+import type { SeminarTaskData } from '../tasks/today_links';
 import * as telegram from './telegram';
+import * as storage from './storage';
 
 dns.setDefaultResultOrder('ipv4first');
 dotenv.config();
@@ -13,6 +15,24 @@ function ensureEnv(varName: 'DV_USER' | 'DV_PASS' | 'NOTICE_BOT_TOKEN' | 'NOTICE
     console.error(`broadcast_today_links: ${varName} is not set.`);
     process.exit(1);
   }
+}
+
+const TODAY_SEMINAR_KEY = 'today_seminars';
+const seoulDateString = (): string => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+
+function saveSeminarIds(seminarData: SeminarTaskData | undefined): void {
+  const data = seminarData || {
+    date: seoulDateString(),
+    lunchSeminarIds: [],
+    dinnerSeminarIds: [],
+    allSeminarIds: [],
+  };
+  const normalized = {
+    date: data.date || seoulDateString(),
+    lunchSeminarIds: Array.from(new Set((data.lunchSeminarIds || []).filter(Boolean))),
+    dinnerSeminarIds: Array.from(new Set((data.dinnerSeminarIds || []).filter(Boolean))),
+  };
+  storage.set(TODAY_SEMINAR_KEY, normalized);
 }
 
 async function main(): Promise<void> {
@@ -41,6 +61,8 @@ async function main(): Promise<void> {
 
     await utils.ensureLoggedIn({ page, context });
     const linksResult = await todayLinksTask.run({ page, context });
+    const seminarData = (linksResult as { seminarData?: SeminarTaskData }).seminarData;
+    saveSeminarIds(seminarData);
 
     if (
       linksResult &&

@@ -1,6 +1,7 @@
 import quizMapping from '../../data/quiz.json';
 import type { PlaywrightRunArgs } from '../types';
 import { safeGoto, getSeminarIdFromUrl } from '../modules/utils';
+import * as storage from '../services/storage';
 
 const QUIZ_LIST_URLS = [
   'https://www.doctorville.co.kr/product/medicineList',
@@ -11,6 +12,23 @@ const BASE_URL = 'https://www.doctorville.co.kr/';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
 
 type QuizInfo = { link: string; productTitle?: string; answers?: Array<string | number> };
+type SeminarData = {
+  date: string;
+  lunchSeminarIds: string[];
+  dinnerSeminarIds: string[];
+};
+type SeminarTaskData = SeminarData & { allSeminarIds: string[] };
+type SeminarMessageResult = SeminarData & { message: string };
+const TODAY_SEMINAR_KEY = 'today_seminars';
+
+function getTodayDateStrings() {
+  const opts = { timeZone: 'Asia/Seoul' as const };
+  const now = new Date();
+  const month = now.toLocaleDateString('en-US', { month: 'numeric', ...opts });
+  const day = now.toLocaleDateString('en-US', { day: 'numeric', ...opts });
+  const iso = now.toLocaleDateString('en-CA', opts);
+  return { todayString: `${month}/${day}`, isoDate: iso };
+}
 
 async function findQuizHref(page: PlaywrightRunArgs['page']): Promise<string | null> {
   for (const url of QUIZ_LIST_URLS) {
@@ -82,17 +100,16 @@ async function collectQuizInfo(page: PlaywrightRunArgs['page']): Promise<QuizInf
   }
 }
 
-async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Promise<string> {
+async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Promise<SeminarMessageResult> {
+  const { todayString, isoDate } = getTodayDateStrings();
+  const lunchSeminarIds: string[] = [];
+  const dinnerSeminarIds: string[] = [];
+
   try {
     await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'load', timeout: 30000 }, 1);
 
     const listConts = await page.locator('.list_cont');
     const count = await listConts.count();
-
-    const now = new Date();
-    const month = now.toLocaleDateString('en-US', { month: 'numeric', timeZone: 'Asia/Seoul' });
-    const day = now.toLocaleDateString('en-US', { day: 'numeric', timeZone: 'Asia/Seoul' });
-    const todayString = `${month}/${day}`;
 
     const lunchSeminars: string[] = [];
     const dinnerSeminars: string[] = [];
@@ -125,8 +142,10 @@ async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Prom
         // If the time element has the `night_time` class treat as dinner, otherwise lunch
         if (classAttr.includes('night_time')) {
           dinnerSeminars.push(seminarInfo);
+          if (seminarId) dinnerSeminarIds.push(seminarId);
         } else {
           lunchSeminars.push(seminarInfo);
+          if (seminarId) lunchSeminarIds.push(seminarId);
         }
       }
     }
@@ -142,16 +161,31 @@ async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Prom
         message += `\n🍴[저녁 세미나]\n`;
         message += dinnerSeminars.join('\n');
       }
-      return message;
+      return {
+        message,
+        date: isoDate,
+        lunchSeminarIds: [...new Set(lunchSeminarIds)],
+        dinnerSeminarIds: [...new Set(dinnerSeminarIds)],
+      };
     }
-    return '오늘의 세미나 리스트: 오늘은 세미나가 없습니다.';
+    return {
+      message: '오늘의 세미나 리스트: 오늘은 세미나가 없습니다.',
+      date: isoDate,
+      lunchSeminarIds: [],
+      dinnerSeminarIds: [],
+    };
   } catch (_e) {
     const message = _e instanceof Error ? _e.message : String(_e);
     console.error(
       'collectTodaySeminarMessage error',
       _e && typeof _e === 'object' && 'stack' in _e ? (_e as Error).stack : _e,
     );
-    return `오늘의 세미나 확인 실패: ${message}`;
+    return {
+      message: `오늘의 세미나 확인 실패: ${message}`,
+      date: isoDate,
+      lunchSeminarIds: [],
+      dinnerSeminarIds: [],
+    };
   }
 }
 
@@ -175,11 +209,31 @@ async function run({ page }: PlaywrightRunArgs) {
     }
     message += `✏️ 오늘의 퀴즈:${quizMessage}\n`;
 
-    if (seminarMessage) {
-      message += `\n📖${seminarMessage}`;
+    if (seminarMessage?.message) {
+      message += `\n📖${seminarMessage.message}`;
     }
 
-    return { success: true, message, options };
+    const allSeminarIds = seminarMessage
+      ? Array.from(new Set([...(seminarMessage.lunchSeminarIds || []), ...(seminarMessage.dinnerSeminarIds || [])]))
+      : [];
+
+    storage.set(TODAY_SEMINAR_KEY, {
+      date: seminarMessage.date,
+      lunchSeminarIds: seminarMessage.lunchSeminarIds,
+      dinnerSeminarIds: seminarMessage.dinnerSeminarIds,
+    });
+
+    return {
+      success: true,
+      message,
+      options,
+      seminarData: {
+        date: seminarMessage.date,
+        lunchSeminarIds: seminarMessage.lunchSeminarIds,
+        dinnerSeminarIds: seminarMessage.dinnerSeminarIds,
+        allSeminarIds,
+      } as SeminarTaskData,
+    };
   } catch (_e) {
     console.error('today_links task error', _e && typeof _e === 'object' && 'stack' in _e ? (_e as Error).stack : _e);
     const message = _e instanceof Error ? _e.message : String(_e);
@@ -188,3 +242,4 @@ async function run({ page }: PlaywrightRunArgs) {
 }
 
 export { run };
+export type { SeminarData, SeminarTaskData };
