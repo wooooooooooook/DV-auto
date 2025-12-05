@@ -8,7 +8,7 @@ import * as scheduler from '../core/scheduler';
 import * as runner from '../core/runner';
 import * as taskRegistry from '../core/taskRegistry';
 import { inspect } from '../modules/inspect';
-import { escapeMarkdown, sendNotificationToChannel } from '../modules/utils';
+import { sendNotificationToChannel } from '../modules/utils';
 
 const ADMIN_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const NOTICE_BOT_TOKEN = process.env.NOTICE_BOT_TOKEN;
@@ -130,7 +130,7 @@ if (adminBot) {
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`daily_routine failed: ${escapeMarkdown(message)}`);
+      ctx.reply(`daily_routine failed: ${message}`);
     }
   });
 
@@ -163,7 +163,7 @@ if (adminBot) {
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`today_quiz failed: ${escapeMarkdown(message)}`);
+      ctx.reply(`today_quiz failed: ${message}`);
     }
   });
 
@@ -187,7 +187,7 @@ if (adminBot) {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      return ctx.reply(`정답 배열을 해석하지 못했습니다. ${escapeMarkdown(message)}`);
+      return ctx.reply(`정답 배열을 해석하지 못했습니다. ${message}`);
     }
 
     try {
@@ -199,7 +199,7 @@ if (adminBot) {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.error('퀴즈 정답 등록 실패', error);
-      await ctx.reply(`퀴즈 정답을 저장하지 못했습니다: ${escapeMarkdown(message)}`);
+      await ctx.reply(`퀴즈 정답을 저장하지 못했습니다: ${message}`);
     }
   });
 
@@ -226,7 +226,40 @@ if (adminBot) {
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Broadcast failed: ${escapeMarkdown(message)}`);
+      ctx.reply(`Broadcast failed: ${message}`);
+    }
+  });
+
+  adminBot.command('naverpay_point_exchange', async (ctx) => {
+    logger.info('User requested to run naverpay_point_exchange now', { from: ctx.from?.username });
+    const task = taskRegistry.getByName('네이버페이포인트교환');
+    if (!task) {
+      logger.error('네이버페이포인트교환 task not found, cannot run');
+      return ctx.reply('네이버페이포인트교환 task not found!');
+    }
+
+    try {
+      await ctx.reply('네이버페이포인트교환 작업을 시작합니다...');
+      const result = await runner.runTask(task);
+      if (result && typeof result === 'object' && (result as { message?: string }).message) {
+        await ctx.reply(
+          (result as { message: string }).message,
+          (result as { options?: Record<string, unknown> }).options,
+        );
+        if ((result as { imagePath?: string }).imagePath) {
+          await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
+          await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
+        }
+      } else if (typeof result === 'string') {
+        await ctx.reply(result);
+      } else if (result === true) {
+        await ctx.reply('네이버페이포인트교환 작업이 완료되었습니다.');
+      } else {
+        await ctx.reply('네이버페이포인트교환 작업이 완료되었습니다.');
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      ctx.reply(`네이버페이포인트교환 실패: ${message}`);
     }
   });
 
@@ -236,6 +269,7 @@ if (adminBot) {
 - /schedules: 스케줄된 작업 목록을 확인합니다.
 - /run_routine_now: 즉시 daily_routine 작업을 실행합니다.
 - /run_quiz_now: 즉시 오늘의 퀴즈 작업(today_quiz)을 실행합니다.
+- /naverpay_point_exchange: 네이버페이포인트교환 작업을 실행합니다.
 - /add_quiz_answer: 오늘의 퀴즈 정답을 등록합니다. 예) /add_quiz_answer 시너지아정 [1,2,3]
 - /broadcast_today_links: 즉시 오늘의 링크를 채널에 공지합니다.
 - /inspect <url> <selector>: 지정한 URL에서 셀렉터에 해당하는 요소를 검사하고 스크린샷을 전송합니다.
@@ -278,7 +312,7 @@ if (adminBot) {
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`monitor_lunch_seminars failed: ${escapeMarkdown(message)}`);
+      ctx.reply(`monitor_lunch_seminars failed: ${message}`);
     }
   });
 
@@ -311,7 +345,7 @@ if (adminBot) {
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`monitor_dinner_seminars failed: ${escapeMarkdown(message)}`);
+      ctx.reply(`monitor_dinner_seminars failed: ${message}`);
     }
   });
 
@@ -367,7 +401,7 @@ if (adminBot) {
       if (e instanceof Error && e.message.includes('Timeout')) {
         errorMessage = `Navigation timeout: The page at ${url} took too long to load or was unreachable.`;
       } else if (e instanceof Error) {
-        errorMessage += `\nDetails: ${escapeMarkdown(e.message)}`;
+        errorMessage += `\nDetails: ${e.message}`;
       }
       ctx.reply(errorMessage);
     } finally {
@@ -410,7 +444,7 @@ const seminarCheck5Days = async (ctx: Context) => {
     }
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    ctx.reply(`세미나 확인 중 오류 발생: ${escapeMarkdown(message)}`);
+    ctx.reply(`세미나 확인 중 오류 발생: ${message}`);
   }
 };
 
@@ -439,7 +473,7 @@ const todayLinks = async (ctx: Context) => {
     }
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    ctx.reply(`링크 수집 중 오류 발생: ${escapeMarkdown(message)}`);
+    ctx.reply(`링크 수집 중 오류 발생: ${message}`);
   }
 };
 

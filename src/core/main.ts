@@ -14,6 +14,7 @@ import * as fiveDaysSeminarTaskModule from '../tasks/5days_seminar_check';
 import * as todayLinksTaskModule from '../tasks/today_links';
 import * as monitorLunchSeminars from '../tasks/monitor_lunch_seminars';
 import * as monitorDinnerSeminars from '../tasks/monitor_dinner_seminars';
+import * as naverpayPointExchangeTask from '../tasks/naverpay_point_exchange';
 import type { Task } from '../types';
 
 dns.setDefaultResultOrder('ipv4first');
@@ -64,9 +65,7 @@ const scheduledTask: Task = {
         } catch (err) {
           logger.error(`Error during ${name} task:`, err);
           const message = err instanceof Error ? err.message : String(err);
-          await utils
-            .sendTelegram(`daily_routine 중 ${name} 작업 실패: ${utils.escapeMarkdown(message)}`)
-            .catch(() => {});
+          await utils.sendTelegram(`daily_routine 중 ${name} 작업 실패: ${message}`).catch(() => {});
         }
       }
     } finally {
@@ -171,6 +170,22 @@ const monitorDinnerSeminarsTask: Task = {
 };
 taskRegistry.registerTask(monitorDinnerSeminarsTask);
 
+const naverpayPointExchange: Task = {
+  name: '네이버페이포인트교환',
+  run: async () => {
+    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await utils.ensureLoggedIn({ page, context });
+      return await naverpayPointExchangeTask.run({ page, context });
+    } finally {
+      await browser.close();
+    }
+  },
+};
+taskRegistry.registerTask(naverpayPointExchange);
+
 const broadcastTodayLinksTask: Task = {
   name: 'broadcast_today_links_daily',
   schedule: '59 10 * * *', // Every day at 10:59
@@ -204,7 +219,7 @@ const broadcastTodayLinksTask: Task = {
         'broadcast_today_links_daily: scheduled task failed',
         e && (typeof e === 'object' && 'stack' in e ? (e as Error).stack : e),
       );
-      await utils.sendTelegram(`❗ Daily link broadcast failed: ${utils.escapeMarkdown(message)}`).catch(() => {});
+      await utils.sendTelegram(`❗ Daily link broadcast failed: ${message}`).catch(() => {});
       return { success: false, message: `Broadcast failed: ${message}` };
     } finally {
       try {
