@@ -15,8 +15,9 @@ async function run({ page, context }: { page: Page; context: BrowserContext }) {
     if (!alreadyLoggedIn) {
       await page.fill('input#identifier', DV_USER).catch(() => {});
       await page.fill('input#password', DV_PASS).catch(() => {});
+      const currentUrl = page.url();
       await Promise.all([
-        page.waitForNavigation({ waitUntil: 'load', timeout: 15000 }).catch(() => {}),
+        page.waitForURL((url) => url.toString() !== currentUrl, { waitUntil: 'load', timeout: 15000 }).catch(() => {}),
         page.click('button:text("로그인")').catch(() => {}),
       ]);
     } else {
