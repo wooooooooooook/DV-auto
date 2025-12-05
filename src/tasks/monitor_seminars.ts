@@ -85,7 +85,7 @@ async function monitorSeminars(
         console.log(`[${periodName}] Seminar already available: ${name}`);
         await sendTelegram(`[${periodName}] Seminar already available: ${name}`);
         const targetUrl = seminarId ? `${SEMINAR_DETAIL_PAGE}${seminarId}` : url;
-        const messagePrefix = `${name} 세미나 입장이 시작되었습니다.`;
+        const messagePrefix = `**${name}** 세미나 입장이 시작되었습니다.`;
         await sendNotificationToChannel(`${messagePrefix} [바로가기](${targetUrl})`, null, {
           parse_mode: 'MarkdownV2',
         });
@@ -119,11 +119,13 @@ async function monitorSeminars(
 
       const currentTime = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
       if (currentTime.getHours() >= endHour) {
-        const remainingSeminars = Object.values(monitoringList).map((s) => s.name);
+        const remainingSeminars = Object.values(monitoringList).map((s) => `**${s.name}** (${SEMINAR_DETAIL_PAGE}${s.seminarId})`);
         if (remainingSeminars.length > 0) {
-          let message = `[${periodName}] 모니터링 시간이 종료되었지만, 마치지 않은 세미나가 있습니다:\n`;
+          let message = `${periodName} 모니터링 시간이 종료되었지만, 마치지 않은 세미나가 있습니다:\n`;
           message += remainingSeminars.join('\n');
-          await sendNotificationToChannel(message);
+          await sendNotificationToChannel(message, null, {
+            parse_mode: 'MarkdownV2',
+          });
         }
         break;
       }
@@ -141,7 +143,7 @@ async function monitorSeminars(
         // 1. Check if the seminar has disappeared from the page
         if (!currentSeminarsOnPage[url]) {
           const targetUrl = monitoredInfo.seminarId ? `${SEMINAR_DETAIL_PAGE}${monitoredInfo.seminarId}` : url;
-          const messagePrefix = `${monitoredInfo.name} 세미나가 종료되었습니다. 설문 입장해주세요.`;
+          const messagePrefix = `**${monitoredInfo.name}** 세미나가 종료되었습니다. 설문 입장해주세요.`;
           await sendNotificationToChannel(`${messagePrefix} [바로가기](${targetUrl})`, null, {
             parse_mode: 'MarkdownV2',
           });
@@ -157,7 +159,7 @@ async function monitorSeminars(
         if (newStatus === '입장하기' && oldStatus === '신청완료') {
           console.log(`[${periodName}] Seminar ready for entry: ${newName}. Starting key message monitor.`);
           const targetUrl = newSeminarId ? `${SEMINAR_DETAIL_PAGE}${newSeminarId}` : url;
-          const messagePrefix = `${newName} 세미나 입장이 시작되었습니다.`;
+          const messagePrefix = `**${newName}** 세미나 입장이 시작되었습니다.`;
           await sendNotificationToChannel(`${messagePrefix} [바로가기](${targetUrl})`, null, {
             parse_mode: 'MarkdownV2',
           });
@@ -181,7 +183,7 @@ async function monitorSeminars(
       e && typeof e === 'object' && 'stack' in e ? (e as Error).stack : e,
     );
     const message = e instanceof Error ? e.message : String(e);
-    await sendTelegram(`❗ [${periodName}] 세미나 감시 작업 오류: ${message}`).catch(() => {});
+    await sendTelegram(`❗ [${periodName}] 세미나 감시 작업 오류: ${message}`).catch(() => { });
     return false;
   }
 }
