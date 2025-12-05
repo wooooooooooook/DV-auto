@@ -55,7 +55,7 @@ async function main(): Promise<void> {
       { name: 'today_quiz', task: todayQuizTask },
       { name: 'today_links', task: todayLinksTask },
     ];
-    await utils.sendTelegram('🕗 데일리 루틴 작업을 시작합니다.(출석체크, 세미나등록, 브랜드퀴즈)').catch(() => { });
+    await utils.sendTelegram('🕗 데일리 루틴 작업을 시작합니다.(출석체크, 세미나등록, 브랜드퀴즈)').catch(() => {});
     for (const { name, task } of tasks) {
       try {
         console.log(`macro.ts: Running ${name} task.`);
@@ -101,7 +101,7 @@ async function main(): Promise<void> {
       });
     }
   } finally {
-    await utils.sendTelegram('🕗 데일리 루틴 작업이 종료되었습니다.').catch(() => { });
+    await utils.sendTelegram('🕗 데일리 루틴 작업이 종료되었습니다.').catch(() => {});
     if (context) {
       try {
         await context.close();

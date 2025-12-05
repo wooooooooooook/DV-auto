@@ -8,8 +8,8 @@
     "build": "tsc",
     "start": "node dist/core/main.js",
     "dev": "ts-node src/core/main.ts",
-    "restart": "pnpm run build && systemctl restart doctorville-auto.service",
-    "update": "git pull && pnpm install --frozen-lockfile && pnpm run build && cp deploy/doctorville-auto.service /etc/systemd/system/ && systemctl daemon-reload && systemctl restart doctorville-auto.service",
+    "restart:app": "pnpm run build && systemctl restart doctorville-auto.service",
+    "update:app": "git pull && pnpm install --frozen-lockfile && pnpm run build && cp deploy/doctorville-auto.service /etc/systemd/system/ && systemctl daemon-reload && systemctl restart doctorville-auto.service",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix"
   },

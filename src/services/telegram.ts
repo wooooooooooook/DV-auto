@@ -173,9 +173,7 @@ if (adminBot) {
     const args = messageText.split(' ').slice(1);
 
     if (args.length < 2) {
-      return ctx.reply(
-        '사용법: /add_quiz_answer <제품명> <정답 배열(JSON)>\n예) /add_quiz_answer 시너지아정 [1,2,3]',
-      );
+      return ctx.reply('사용법: /add_quiz_answer <제품명> <정답 배열(JSON)>\n예) /add_quiz_answer 시너지아정 [1,2,3]');
     }
 
     const productName = args[0];
@@ -197,9 +195,7 @@ if (adminBot) {
       data[productName] = answers;
       await saveQuizData(data);
 
-      await ctx.reply(
-        `퀴즈 정답이 등록되었습니다.\n제품: ${productName}\n정답: ${JSON.stringify(answers)}`,
-      );
+      await ctx.reply(`퀴즈 정답이 등록되었습니다.\n제품: ${productName}\n정답: ${JSON.stringify(answers)}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.error('퀴즈 정답 등록 실패', error);

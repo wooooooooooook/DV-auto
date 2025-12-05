@@ -1,5 +1,11 @@
 import type { BrowserContext, Page } from 'playwright';
-import { safeGoto, sendNotificationToChannel, sendTelegram, getSeminarIdFromUrl, escapeMarkdown } from '../modules/utils';
+import {
+  safeGoto,
+  sendNotificationToChannel,
+  sendTelegram,
+  getSeminarIdFromUrl,
+  escapeMarkdown,
+} from '../modules/utils';
 // import * as keyMessageMonitor from './monitor_key_messages';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
@@ -181,7 +187,7 @@ async function monitorSeminars(
       e && typeof e === 'object' && 'stack' in e ? (e as Error).stack : e,
     );
     const message = e instanceof Error ? e.message : String(e);
-    await sendTelegram(`❗ [${periodName}] 세미나 감시 작업 오류: ${message}`).catch(() => { });
+    await sendTelegram(`❗ [${periodName}] 세미나 감시 작업 오류: ${message}`).catch(() => {});
     return false;
   }
 }
