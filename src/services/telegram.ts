@@ -380,6 +380,7 @@ if (adminBot) {
           message += `  - Inner Text: ${element.innerText}\n`;
           if (element.id) message += `  - ID: ${element.id}\n`;
           if (element.className) message += `  - Class: ${element.className}\n`;
+          if (element.selectorPath) message += `  - Selector Path: ${element.selectorPath}\n`;
 
           const otherAttributes = Object.entries(element.attributes).filter(([key]) => key !== 'id' && key !== 'class');
           if (otherAttributes.length > 0) {

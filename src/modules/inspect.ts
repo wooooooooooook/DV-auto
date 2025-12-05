@@ -8,6 +8,7 @@ interface InspectElementData {
   id: string;
   className: string;
   attributes: Record<string, string>;
+  selectorPath: string;
 }
 
 interface InspectResult {
@@ -95,11 +96,40 @@ async function inspect(url: string, selector: string): Promise<InspectResult> {
           for (const attr of node.attributes) {
             attributes[attr.name] = attr.value;
           }
+
+          const buildSelectorPart = (target: Element): string => {
+            const tag = target.tagName.toLowerCase();
+            const id = target.id ? `#${target.id}` : '';
+            const classes = target.classList.length > 0 ? `.${Array.from(target.classList).join('.')}` : '';
+
+            if (id) return `${tag}${id}${classes}`;
+
+            const siblings = target.parentElement
+              ? Array.from(target.parentElement.children).filter((child) => child.tagName === target.tagName)
+              : [];
+            const nthIndex = siblings.indexOf(target);
+            const nth = nthIndex >= 0 ? `:nth-of-type(${nthIndex + 1})` : '';
+            return `${tag}${classes}${nth}`;
+          };
+
+          const buildSelectorPath = (target: Element): string => {
+            const parts: string[] = [];
+            let current: Element | null = target;
+
+            while (current && current.tagName.toLowerCase() !== 'html') {
+              parts.unshift(buildSelectorPart(current));
+              current = current.parentElement;
+            }
+
+            return parts.join(' > ');
+          };
+
           return {
             innerText: (node.innerText || '').toString(),
             id: node.id,
             className: node.className,
             attributes,
+            selectorPath: buildSelectorPath(node),
           };
         }),
       ),
