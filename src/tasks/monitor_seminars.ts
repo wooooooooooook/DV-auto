@@ -1,11 +1,5 @@
 import type { BrowserContext, Page } from 'playwright';
-import {
-  safeGoto,
-  sendNotificationToChannel,
-  sendTelegram,
-  getSeminarIdFromUrl,
-  escapeMarkdown,
-} from '../modules/utils';
+import { safeGoto, sendNotificationToChannel, sendTelegram, getSeminarIdFromUrl } from '../modules/utils';
 // import * as keyMessageMonitor from './monitor_key_messages';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
@@ -68,7 +62,7 @@ async function getTodaysSeminars(page: Page, startHour: number, endHour: number)
 }
 
 async function monitorSeminars(
-  { page, context }: { page: Page; context: BrowserContext },
+  { page, _context }: { page: Page; _context: BrowserContext },
   periodName: string,
   startHour: number,
   endHour: number,

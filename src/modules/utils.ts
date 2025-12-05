@@ -18,40 +18,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Function to escape MarkdownV2 special characters without double-escaping existing backslashes
-// https://core.telegram.org/bots/api#markdownv2-style
-function escapeMarkdown(text: string): string {
-  if (typeof text !== 'string') return '';
-  return text.replace(/(?<!\\)([_*\[\]()~`>#+\-=|{}.!\\])/g, '\\$1');
-}
-
-function escapeMarkdownLinkUrl(url: string): string {
-  if (typeof url !== 'string') return '';
-  return url.replace(/(?<!\\)([()])/g, '\\$1');
-}
-
-function ensureMarkdownV2SafeText(text: string): string {
-  if (typeof text !== 'string' || text.length === 0) return '';
-
-  const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
-  let result = '';
-  let lastIndex = 0;
-
-  let match: RegExpExecArray | null;
-  while ((match = linkRegex.exec(text)) !== null) {
-    const [fullMatch, label, url] = match;
-    result += escapeMarkdown(text.slice(lastIndex, match.index));
-    result += `[${escapeMarkdown(label)}](${escapeMarkdownLinkUrl(url)})`;
-    lastIndex = match.index + fullMatch.length;
-  }
-
-  if (lastIndex < text.length) {
-    result += escapeMarkdown(text.slice(lastIndex));
-  }
-
-  return result;
-}
-
 async function sendTelegram(
   text: string,
   imagePath: string | null = null,
@@ -106,17 +72,16 @@ async function sendNotificationToChannel(
 
   const baseOptions: SendMessageOptions | SendPhotoOptions = { ...(options as SendMessageOptions | SendPhotoOptions) };
   const isMarkdownV2 = baseOptions.parse_mode === 'MarkdownV2';
-  const sanitizedText = isMarkdownV2 ? ensureMarkdownV2SafeText(text) : text;
   const messageOptions = isMarkdownV2
     ? ({ ...baseOptions, parse_mode: 'MarkdownV2' } as SendMessageOptions | SendPhotoOptions)
     : baseOptions;
 
   try {
     if (imagePath) {
-      const photoOptions: SendPhotoOptions = { ...messageOptions, caption: sanitizedText } as SendPhotoOptions;
+      const photoOptions: SendPhotoOptions = { ...messageOptions, caption: text } as SendPhotoOptions;
       await bot.telegram.sendPhoto(CHANNEL_ID, { source: imagePath }, photoOptions);
     } else {
-      await bot.telegram.sendMessage(CHANNEL_ID, sanitizedText, messageOptions as SendMessageOptions);
+      await bot.telegram.sendMessage(CHANNEL_ID, text, messageOptions as SendMessageOptions);
     }
   } catch (error) {
     console.error('Failed to send Telegram notification to channel:', error);
@@ -210,7 +175,7 @@ async function loadLocalStorage(page: Page, targetUrl: string): Promise<boolean>
     try {
       const cur = page.url();
       if (!cur || !cur.startsWith(origin)) {
-        await page.goto(origin, { waitUntil: 'domcontentloaded', timeout: 8000 }).catch(() => {});
+        await page.goto(origin, { waitUntil: 'domcontentloaded', timeout: 8000 }).catch(() => { });
       }
     } catch (_e) {
       // ignore navigation errors, we'll still try to set items
@@ -311,12 +276,12 @@ async function ensureLoggedIn({ page, context }: { page: Page; context: BrowserC
   }
 
   try {
-    await loadCookies(context).catch(() => {});
+    await loadCookies(context).catch(() => { });
   } catch (_e) {
     /* ignore */
   }
   try {
-    await loadLocalStorage(page, LOGIN_URL).catch(() => {});
+    await loadLocalStorage(page, LOGIN_URL).catch(() => { });
   } catch (_e) {
     /* ignore */
   }
@@ -351,5 +316,4 @@ export {
   maskToken,
   ensureLoggedIn,
   getSeminarIdFromUrl,
-  escapeMarkdown,
 };
