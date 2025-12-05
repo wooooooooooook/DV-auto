@@ -4,6 +4,7 @@ import type { PlaywrightRunArgs, TaskResult } from '../types';
 import { ensureLoggedIn, safeGoto, sendTelegram, sleep } from '../modules/utils';
 
 const TARGET_URL = 'https://mcircle.bizmarketb2b.com/Goods/Content.aspx?guid=14131415&catecode=14592';
+const ENTERTAINMENT_URL = 'https://www.doctorville.co.kr/entertainment/main';
 const SUCCESS_TEXT = '주문이 완료되었습니다.';
 const DEFAULT_POINT = '4900';
 
@@ -28,9 +29,13 @@ async function run({ page, context }: PlaywrightRunArgs): Promise<TaskResult> {
     return { success: false, message };
   }
 
-  if (context) {
-    await ensureLoggedIn({ page, context }).catch(() => {});
+  if (!context) {
+    const message = '네이버페이포인트교환 실패: 로그인 확인을 위해 context가 필요합니다.';
+    await sendTelegram(`❗ ${message}`).catch(() => {});
+    return { success: false, message };
   }
+
+  await ensureLoggedIn({ page, context }).catch(() => {});
 
   await fs.mkdir(path.join(process.cwd(), 'screenshot'), { recursive: true });
   let successCount = 0;
@@ -40,6 +45,16 @@ async function run({ page, context }: PlaywrightRunArgs): Promise<TaskResult> {
     // maxIterations가 0이면 실패할 때까지 무제한 반복
     while (maxIterations === 0 || iteration < maxIterations) {
       iteration += 1;
+
+      await ensureLoggedIn({ page, context }).catch(() => {});
+      await safeGoto(page, ENTERTAINMENT_URL, { waitUntil: 'load', timeout: 20000 }, 2);
+      const pointShopLink = page.locator('#btnPointShopLink').first();
+      if ((await pointShopLink.count()) > 0) {
+        await Promise.all([
+          page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => null),
+          pointShopLink.click(),
+        ]);
+      }
 
       await safeGoto(page, TARGET_URL, { waitUntil: 'load', timeout: 30000 }, 2);
 
