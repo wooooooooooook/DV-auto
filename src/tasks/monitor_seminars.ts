@@ -38,8 +38,9 @@ async function isSeminarEnded(
   const detailPage = await context.newPage();
 
   try {
-    await safeGoto(detailPage, targetUrl, { waitUntil: 'load', timeout: 15000 }, 1);
+    await safeGoto(detailPage, targetUrl, { waitUntil: 'networkidle', timeout: 15000 }, 1);
     const surveyEnded = await detailPage.locator('.survey-end').first().isVisible({ timeout: 2000 });
+    console.log(`[monitor_seminars] Seminar end check (${seminar.name}): ${surveyEnded}`);
     return surveyEnded;
   } catch (e) {
     console.error(
@@ -48,7 +49,7 @@ async function isSeminarEnded(
     );
     return false;
   } finally {
-    await detailPage.close().catch(() => {});
+    await detailPage.close().catch(() => { });
   }
 }
 
@@ -285,7 +286,7 @@ async function monitorSeminars(
       e && typeof e === 'object' && 'stack' in e ? (e as Error).stack : e,
     );
     const message = e instanceof Error ? e.message : String(e);
-    await sendTelegram(`❗ [${periodName}] 세미나 감시 작업 오류: ${message}`).catch(() => {});
+    await sendTelegram(`❗ [${periodName}] 세미나 감시 작업 오류: ${message}`).catch(() => { });
     return false;
   }
 }

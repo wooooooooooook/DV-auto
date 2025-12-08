@@ -272,14 +272,14 @@ if (adminBot) {
 - /naverpay_point_exchange: 네이버페이포인트교환 작업을 실행합니다.
 - /add_quiz_answer: 오늘의 퀴즈 정답을 등록합니다. 예) /add_quiz_answer 시너지아정 [1,2,3]
 - /broadcast_today_links: 즉시 오늘의 링크를 채널에 공지합니다.
-- /inspect <url> <selector>: 지정한 URL에서 셀렉터에 해당하는 요소를 검사하고 스크린샷을 전송합니다.
+- /inspect <url> <selector> [waitUntil]: 지정한 URL에서 셀렉터에 해당하는 요소를 검사하고 스크린샷을 전송합니다. (waitUntil: load, domcontentloaded, networkidle, commit)
 - /5days_seminar_check: 향후 5일간의 세미나 일정을 확인합니다.
 - /today_links: 오늘의 세미나와 퀴즈 링크, 출석 링크를 한 번에 가져옵니다.
 - /broadcast_today_links: 오늘의 링크를 채널에 공지합니다.
 - /monitor_lunch_seminar_now: 즉시 점심 세미나 모니터링을 시작합니다.
 - /monitor_dinner_seminar_now: 즉시 저녁 세미나 모니터링을 시작합니다.
 
-명령어 사용 예: /inspect https://example.com "div.article"`;
+명령어 사용 예: /inspect https://example.com "div.article" networkidle`;
     ctx.reply(message);
   });
 
@@ -353,16 +353,35 @@ if (adminBot) {
     logger.info('User requested to inspect a page', { from: ctx.from?.username });
     const messageText = ctx.message?.text || '';
     const args = messageText.split(' ').slice(1);
+
     if (args.length < 2) {
-      return ctx.reply('Usage: /inspect <url> <selector>');
+      return ctx.reply('Usage: /inspect <url> <selector> [waitUntil]');
     }
+
     const url = args[0];
-    const selector = args.slice(1).join(' ');
+    let selector: string;
+    let waitUntil: 'load' | 'domcontentloaded' | 'networkidle' | 'commit' | undefined;
+
+    const lastArg = args[args.length - 1];
+    const validWaitUntil = ['load', 'domcontentloaded', 'networkidle', 'commit'];
+
+    if (args.length > 2 && validWaitUntil.includes(lastArg)) {
+      waitUntil = lastArg as 'load' | 'domcontentloaded' | 'networkidle' | 'commit';
+      selector = args.slice(1, args.length - 1).join(' ');
+    } else {
+      selector = args.slice(1).join(' ');
+    }
+
+    // Remove quotes from selector if present
+    if ((selector.startsWith('"') && selector.endsWith('"')) || (selector.startsWith("'") && selector.endsWith("'"))) {
+      selector = selector.substring(1, selector.length - 1);
+    }
+
     let screenshotPath: string | null = null;
 
     try {
-      ctx.reply(`Inspecting ${url} with selector "${selector}"...`);
-      const result = await inspect(url, selector);
+      ctx.reply(`Inspecting ${url} with selector "${selector}"... (waitUntil: ${waitUntil || 'load'})`);
+      const result = await inspect(url, selector, { waitUntil });
       screenshotPath = result.screenshotPath;
       let message = `Found ${result.count} elements matching selector "${selector}".\n\n`;
 

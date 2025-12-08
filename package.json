@@ -11,7 +11,8 @@
     "restart:app": "pnpm run build && systemctl restart doctorville-auto.service",
     "update:app": "git pull && pnpm install --frozen-lockfile && pnpm run build && cp deploy/doctorville-auto.service /etc/systemd/system/ && systemctl daemon-reload && systemctl restart doctorville-auto.service",
     "lint": "eslint .",
-    "lint:fix": "eslint . --fix"
+    "lint:fix": "eslint . --fix",
+    "log": "journalctl -u doctorville-auto.service -f -n 100"
   },
   "keywords": [],
   "author": "",

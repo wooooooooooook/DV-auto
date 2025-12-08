@@ -18,7 +18,11 @@ interface InspectResult {
   warnings: string[];
 }
 
-async function inspect(url: string, selector: string): Promise<InspectResult> {
+async function inspect(
+  url: string,
+  selector: string,
+  options: { waitUntil?: 'load' | 'domcontentloaded' | 'networkidle' | 'commit' } = {},
+): Promise<InspectResult> {
   const browser = await chromium.launch();
   const context = await browser.newContext();
   const page = await context.newPage();
@@ -35,7 +39,8 @@ async function inspect(url: string, selector: string): Promise<InspectResult> {
       warnings.push(`Failed to load local storage: ${message}`);
     });
 
-    await safeGoto(page, url, { waitUntil: 'load', timeout: 30000 });
+    const { waitUntil = 'load' } = options;
+    await safeGoto(page, url, { waitUntil, timeout: 30000 });
 
     const screenshotDir = path.join(process.cwd(), 'screenshot');
     await fs.mkdir(screenshotDir, { recursive: true });
