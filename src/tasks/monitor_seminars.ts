@@ -47,7 +47,7 @@ async function isSeminarEnded(
     console.log(`[monitor_seminars] Seminar end check (${seminar.name}): ${surveyEnded}`);
 
     await detailPage.screenshot({ path: screenshotPath, fullPage: false });
-    await sendTelegram(`[종료 확인] ${seminar.name}`, screenshotPath);
+    await sendTelegram(`[종료 확인] ${seminar.name}? ${surveyEnded} `, screenshotPath);
 
     return surveyEnded;
   } catch (e) {
