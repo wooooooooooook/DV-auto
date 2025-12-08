@@ -38,7 +38,8 @@ async function isSeminarEnded(
   const detailPage = await context.newPage();
 
   try {
-    await safeGoto(detailPage, targetUrl, { waitUntil: 'networkidle', timeout: 15000 }, 1);
+    await safeGoto(detailPage, targetUrl, { waitUntil: 'networkidle', timeout: 15000 }, 2);
+    await detailPage.reload({ waitUntil: 'networkidle', timeout: 15000 });
     const surveyEnded = await detailPage.locator('.survey-end').first().isVisible({ timeout: 2000 });
     console.log(`[monitor_seminars] Seminar end check (${seminar.name}): ${surveyEnded}`);
     return surveyEnded;
