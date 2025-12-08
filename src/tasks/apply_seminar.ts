@@ -37,9 +37,13 @@ async function run({ page }: PlaywrightRunArgs) {
       }
 
       try {
+        await page.waitForSelector('.agg_confirm', { timeout: 2000 });
+        await page.click('.agg_confirm').catch((_e) => {
+          console.error('Error clicking agree checkbox(.agg_confirm):', _e);
+        });
         await page.waitForSelector('#seminarAgree', { timeout: 2000 });
         await page.click('#seminarAgree').catch((_e) => {
-          console.error('Error clicking agree checkbox:', _e);
+          console.error('Error clicking agree checkbox(#seminarAgree):', _e);
         });
       } catch (_e) {
         // Not present within 2s — continue without blocking
@@ -48,6 +52,7 @@ async function run({ page }: PlaywrightRunArgs) {
       console.log('success applied for seminar');
     }
 
+    await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'domcontentloaded', timeout: 30000 }, 1);
     const appliedCount = await page.locator('a:has(.ico_completion)').count();
     let message = `✅ ${appliedCount}개 세미나 신청 완료! (${appliedCount}/${totalSeminarsAvailable})`;
 
@@ -79,7 +84,7 @@ async function run({ page }: PlaywrightRunArgs) {
         .catch((err: unknown) => console.error('Failed to capture error screenshot:', err));
     }
     const message = error instanceof Error ? error.message : String(error);
-    await sendTelegram(`❗ 세미나 신청 작업 오류: ${message}`, screenshotPath).catch(() => {});
+    await sendTelegram(`❗ 세미나 신청 작업 오류: ${message}`, screenshotPath).catch(() => { });
     return {
       success: false,
       message: `세미나 신청 작업 오류: ${message}`,

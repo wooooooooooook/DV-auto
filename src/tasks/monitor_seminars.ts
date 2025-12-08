@@ -41,7 +41,7 @@ async function isSeminarEnded(
   const screenshotPath = path.join(process.cwd(), `screenshot_end_check_${seminar.seminarId || Date.now()}.png`);
 
   try {
-    await safeGoto(detailPage, targetUrl, { waitUntil: 'networkidle', timeout: 15000 }, 2);
+    await safeGoto(detailPage, targetUrl, { waitUntil: 'commit', timeout: 15000 }, 2);
     await detailPage.reload({ waitUntil: 'networkidle', timeout: 15000 });
     const surveyEnded = await detailPage.locator('text="세미나 종료"').first().isVisible({ timeout: 2000 });
     console.log(`[monitor_seminars] Seminar end check (${seminar.name}): ${surveyEnded}`);
@@ -58,7 +58,7 @@ async function isSeminarEnded(
     return false;
   } finally {
     await fs.unlink(screenshotPath).catch((err) => console.error(`Failed to delete screenshot: ${screenshotPath}`, err));
-    await detailPage.close().catch(() => {});
+    await detailPage.close().catch(() => { });
   }
 }
 
@@ -222,7 +222,7 @@ async function monitorSeminars(
         const { seminarId, name } = info;
         if (storedSeminarIdSet && seminarId && !storedSeminarIdSet.has(seminarId)) {
           const targetUrl = `${SEMINAR_DETAIL_PAGE}${seminarId}`;
-          await sendNotificationToChannel(`새로 추가된 세미나가 있습니다. ${name} ${targetUrl}`);
+          await sendNotificationToChannel(`오늘 새로 추가된 세미나가 있습니다. ${name} ${targetUrl}`);
           storedSeminars = updateStoredSeminars(todayIsoDate, bucketKey, seminarId, storedSeminars);
           storedSeminarIdSet.add(seminarId);
         }
