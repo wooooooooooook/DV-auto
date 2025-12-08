@@ -1,4 +1,6 @@
 import type { BrowserContext, Page } from 'playwright';
+import fs from 'fs/promises';
+import path from 'path';
 import {
   safeGoto,
   sendNotificationToChannel,
@@ -36,12 +38,17 @@ async function isSeminarEnded(
 ): Promise<boolean> {
   const targetUrl = seminar.seminarId ? `${SEMINAR_DETAIL_PAGE}${seminar.seminarId}` : fallbackUrl;
   const detailPage = await context.newPage();
+  const screenshotPath = path.join(process.cwd(), `screenshot_end_check_${seminar.seminarId || Date.now()}.png`);
 
   try {
     await safeGoto(detailPage, targetUrl, { waitUntil: 'networkidle', timeout: 15000 }, 2);
     await detailPage.reload({ waitUntil: 'networkidle', timeout: 15000 });
-    const surveyEnded = await detailPage.locator('.survey-end').first().isVisible({ timeout: 2000 });
+    const surveyEnded = await detailPage.locator('text="세미나 종료"').first().isVisible({ timeout: 2000 });
     console.log(`[monitor_seminars] Seminar end check (${seminar.name}): ${surveyEnded}`);
+
+    await detailPage.screenshot({ path: screenshotPath, fullPage: false });
+    await sendTelegram(`[종료 확인] ${seminar.name}? ${surveyEnded} `, screenshotPath);
+
     return surveyEnded;
   } catch (e) {
     console.error(
@@ -50,7 +57,8 @@ async function isSeminarEnded(
     );
     return false;
   } finally {
-    await detailPage.close().catch(() => { });
+    await fs.unlink(screenshotPath).catch((err) => console.error(`Failed to delete screenshot: ${screenshotPath}`, err));
+    await detailPage.close().catch(() => {});
   }
 }
 
