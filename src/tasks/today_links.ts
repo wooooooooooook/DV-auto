@@ -80,11 +80,11 @@ async function collectQuizInfo(page: PlaywrightRunArgs['page']): Promise<QuizInf
     const productTitle =
       (await titleElem.count()) > 0
         ? (
-            await titleElem
-              .first()
-              .innerText()
-              .catch(() => '')
-          ).trim()
+          await titleElem
+            .first()
+            .innerText()
+            .catch(() => '')
+        ).trim()
         : '';
     const mapping = quizMapping as Record<string, Array<string | number>>;
     const answers = productTitle && mapping[productTitle];
@@ -212,6 +212,8 @@ async function run({ page }: PlaywrightRunArgs) {
     if (seminarMessage?.message) {
       message += `\n📖${seminarMessage.message}`;
     }
+
+    message += '\n\n🤖텔레그램 봇이 자동으로 전송한 메시지입니다.\nhttps://t.me/+J1UGmvLA9jU4NjQ1';
 
     const allSeminarIds = seminarMessage
       ? Array.from(new Set([...(seminarMessage.lunchSeminarIds || []), ...(seminarMessage.dinnerSeminarIds || [])]))

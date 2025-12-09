@@ -44,11 +44,14 @@ async function isSeminarEnded(
     await safeGoto(detailPage, targetUrl, { waitUntil: 'commit', timeout: 15000 }, 2);
     await detailPage.reload({ waitUntil: 'networkidle', timeout: 15000 });
     const surveyEnded = await detailPage.locator('text="세미나 종료"').first().isVisible({ timeout: 2000 });
-    console.log(`[monitor_seminars] Seminar end check (${seminar.name}): ${surveyEnded}`);
+    const canCancel = await detailPage.locator('text="신청 취소"').first().isVisible({ timeout: 2000 });
+    console.log(`[monitor_seminars] Seminar end check (${seminar.name}): ${surveyEnded}, ${canCancel}`);
 
     await detailPage.screenshot({ path: screenshotPath, fullPage: false });
-    await sendTelegram(`[종료 확인] ${seminar.name}? ${surveyEnded} `, screenshotPath);
-
+    if (!canCancel) {
+      await sendTelegram(`[종료 확인 모니터 중] ${seminar.name}? ${surveyEnded} `, screenshotPath);
+    }
+    await fs.unlink(screenshotPath).catch((err) => console.error(`Failed to delete screenshot: ${screenshotPath}`, err));
     return surveyEnded;
   } catch (e) {
     console.error(
@@ -57,7 +60,6 @@ async function isSeminarEnded(
     );
     return false;
   } finally {
-    await fs.unlink(screenshotPath).catch((err) => console.error(`Failed to delete screenshot: ${screenshotPath}`, err));
     await detailPage.close().catch(() => { });
   }
 }
@@ -261,7 +263,7 @@ async function monitorSeminars(
 
         // 3. Check for status change from '신청완료' to '입장하기'
         if (currentInfo && newStatus === '입장하기' && oldStatus === '신청완료') {
-          console.log(`[${periodName}] Seminar ready for entry: ${newName}. Starting key message monitor.`);
+          console.log(`[${periodName}] Seminar ready for entry: ${newName}.`);
           const targetUrl = mergedSeminarInfo.seminarId ? `${SEMINAR_DETAIL_PAGE}${mergedSeminarInfo.seminarId}` : url;
           const messagePrefix = `**${escapeMarkdownV2(newName)}** ${escapeMarkdownV2('세미나 입장이 시작되었습니다.')}`;
           await sendNotificationToChannel(`${messagePrefix} [바로가기](${targetUrl})`, null, {
