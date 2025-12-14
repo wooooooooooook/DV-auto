@@ -25,7 +25,7 @@ const HEADLESS = (process.env.HEADLESS || 'true').toLowerCase() === 'true';
 
 // Daily schedule: 08:00 Asia/Seoul (cron: minute hour day month weekday)
 const TIMEZONE = process.env.SCHEDULE_TZ || 'Asia/Seoul';
-const DAILY_ROUTINE_CRON = process.env.DAILY_CRON || '0 8 * * *';
+const DAILY_ROUTINE_CRON = process.env.DAILY_CRON || '1 0 * * *';
 const BROADCAST_TODAY_LINKS_CRON = '59 10 * * *';
 const LUNCH_MONITOR_CRON = '0 11 * * *';
 const DINNER_MONITOR_CRON = '0 17 * * *';
