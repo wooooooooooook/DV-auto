@@ -290,6 +290,9 @@ async function monitorSeminars(
     }
 
     await sendTelegram(`[${periodName}] 세미나 감시를 종료합니다.`);
+    const finishMessage = `🏁${todayIsoDate}의 ${periodName}세미나 모니터링이 종료되었습니다.🏁`;
+    await sendNotificationToChannel(finishMessage);
+
     return true;
   } catch (e) {
     console.error(
