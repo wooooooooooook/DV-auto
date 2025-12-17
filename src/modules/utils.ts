@@ -11,7 +11,7 @@ type SendPhotoOptions = Parameters<Telegraf['telegram']['sendPhoto']>[2];
 
 function escapeMarkdownV2(text: string): string {
   if (!text) return '';
-  return text.replace(/([_*\[\]()~`>#+\-=|{}.!])/g, '\\$1');
+  return text.replace(/([_*[\]()~`>#+\-=|{}.!])/g, '\\$1');
 }
 
 function maskToken(token?: string | null): string {

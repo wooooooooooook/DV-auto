@@ -1,15 +1,8 @@
 import type { BrowserContext, Page } from 'playwright';
 import fs from 'fs/promises';
 import path from 'path';
-import {
-  safeGoto,
-  sendNotificationToChannel,
-  sendTelegram,
-  getSeminarIdFromUrl,
-  escapeMarkdownV2,
-} from '../modules/utils';
+import { safeGoto, sendNotificationToChannel, sendTelegram, getSeminarIdFromUrl } from '../modules/utils';
 import * as storage from '../services/storage';
-// import * as keyMessageMonitor from './monitor_key_messages';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const BASE_URL = 'https://www.doctorville.co.kr';
@@ -25,11 +18,31 @@ const randomDelay = (): Promise<void> => {
 };
 
 // Helper function to get today's seminars within a specific time range
-type SeminarInfo = { status: string; name: string; seminarId: string | null };
+type SeminarInfo = { status: string; name: string; seminarId: string | null; hasSurvey?: boolean };
 type StoredSeminarIds = { date: string; lunchSeminarIds: string[]; dinnerSeminarIds: string[] };
 type SeminarBucketKey = 'lunchSeminarIds' | 'dinnerSeminarIds';
 
 const seoulDateString = (): string => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+
+async function checkSurveyExistence(context: BrowserContext, url: string): Promise<boolean> {
+  const page = await context.newPage();
+  try {
+    await safeGoto(page, url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+
+    // Check for "설문참여" button
+    const surveyBtn = page.locator('text="설문참여"').first();
+    const isVisible = await surveyBtn.isVisible({ timeout: 5000 });
+    return isVisible;
+  } catch (e) {
+    console.warn(`[checkSurveyExistence] Failed to check survey for ${url}`, e);
+    // If check fails, assume it exists to be safe (or false? User wants to suppress if *missing*. Safe default is true.)
+    // But if we error out, maybe we shouldn't suppress the end notification.
+    return true;
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
 
 async function isSeminarEnded(
   context: BrowserContext,
@@ -51,7 +64,9 @@ async function isSeminarEnded(
     if (!canCancel) {
       await sendTelegram(`[종료 확인 모니터 중] ${seminar.name}? ${surveyEnded} `, screenshotPath);
     }
-    await fs.unlink(screenshotPath).catch((err) => console.error(`Failed to delete screenshot: ${screenshotPath}`, err));
+    await fs
+      .unlink(screenshotPath)
+      .catch((err) => console.error(`Failed to delete screenshot: ${screenshotPath}`, err));
     return surveyEnded;
   } catch (e) {
     console.error(
@@ -60,7 +75,7 @@ async function isSeminarEnded(
     );
     return false;
   } finally {
-    await detailPage.close().catch(() => { });
+    await detailPage.close().catch(() => {});
   }
 }
 
@@ -143,7 +158,7 @@ async function monitorSeminars(
   startHour: number,
   endHour: number,
 ) {
-  let monitoringList: Record<string, { status: string; name: string; seminarId: string | null }> = {};
+  let monitoringList: Record<string, SeminarInfo> = {};
   const todayIsoDate = seoulDateString();
   const bucketKey: SeminarBucketKey = periodName === '점심' ? 'lunchSeminarIds' : 'dinnerSeminarIds';
 
@@ -152,10 +167,7 @@ async function monitorSeminars(
     await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'load', timeout: 30000 }, 1);
 
     const initialSeminars = await getTodaysSeminars(page, startHour, endHour);
-    monitoringList = { ...initialSeminars } as Record<
-      string,
-      { status: string; name: string; seminarId: string | null }
-    >; // Track all seminars from the start
+    monitoringList = { ...initialSeminars };
 
     for (const [url, { status, name, seminarId }] of Object.entries(initialSeminars)) {
       // If a seminar is already open, start its key message monitor immediately
@@ -163,14 +175,16 @@ async function monitorSeminars(
         console.log(`[${periodName}] Seminar already available: ${name}`);
         await sendTelegram(`[${periodName}] Seminar already available: ${name}`);
         const targetUrl = seminarId ? `${SEMINAR_DETAIL_PAGE}${seminarId}` : url;
-        const messagePrefix = `**${escapeMarkdownV2(name)}** ${escapeMarkdownV2('세미나 입장이 시작되었습니다.')}`;
-        await sendNotificationToChannel(`${messagePrefix} [바로가기](${targetUrl})`, null, {
-          parse_mode: 'MarkdownV2',
-        });
-        // const newPage = await context.newPage();
-        // keyMessageMonitor
-        //   .monitor({ page: newPage, context }, url, name)
-        //   .catch((e) => console.error(`Key message monitor failed for ${name}`, e));
+
+        // Check for survey existence
+        const hasSurvey = await checkSurveyExistence(context, targetUrl);
+        monitoringList[url].hasSurvey = hasSurvey;
+
+        let message = `**${name}** 세미나 입장이 시작되었습니다.`;
+        if (!hasSurvey) {
+          message += ` (설문이 없는 세미나인 것 같습니다)`;
+        }
+        await sendNotificationToChannel(`${message}\n${targetUrl}`);
       }
     }
 
@@ -188,24 +202,15 @@ async function monitorSeminars(
 
     // Monitoring loop
     while (Object.keys(monitoringList).length > 0) {
-      // const statusMessage =
-      //   `[${periodName}] 현재 ${Object.keys(monitoringList).length}개의 세미나를 감시중입니다.\n` +
-      //   Object.values(monitoringList)
-      //     .map((s) => `  - ${s.name} (${s.status})`)
-      //     .join('\n');
-      // await sendTelegram(statusMessage);
-
       const currentTime = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
       if (currentTime.getHours() >= endHour) {
         const remainingSeminars = Object.values(monitoringList).map(
           (s) => `**${s.name}** (${SEMINAR_DETAIL_PAGE}${s.seminarId})`,
         );
         if (remainingSeminars.length > 0) {
-          let message = ` ${escapeMarkdownV2(periodName)} ${escapeMarkdownV2('모니터링 시간이 종료되었지만, 마치지 않은 세미나가 있습니다:')}\n`;
+          let message = ` ${periodName} 모니터링 시간이 종료되었지만, 마치지 않은 세미나가 있습니다:\n`;
           message += remainingSeminars.join('\n');
-          await sendNotificationToChannel(message, null, {
-            parse_mode: 'MarkdownV2',
-          });
+          await sendNotificationToChannel(message);
         }
         break;
       }
@@ -239,20 +244,37 @@ async function monitorSeminars(
         const monitoredInfo = monitoringList[url];
 
         const currentInfo = currentSeminarsOnPage[url];
-        const mergedSeminarInfo = {
+        const mergedSeminarInfo: SeminarInfo = {
           name: currentInfo?.name || monitoredInfo.name,
           status: currentInfo?.status || monitoredInfo.status,
           seminarId: currentInfo?.seminarId || monitoredInfo.seminarId,
+          hasSurvey: monitoredInfo.hasSurvey, // Preserve hasSurvey state
         };
-        const ended = await isSeminarEnded(context, mergedSeminarInfo, url);
+
+        let ended = false;
+        if (mergedSeminarInfo.hasSurvey === false) {
+          if (!currentInfo) {
+            // If survey is not required and seminar disappeared from the list, consider it ended/removed
+            ended = true;
+          }
+        } else {
+          ended = await isSeminarEnded(context, mergedSeminarInfo, url);
+        }
 
         // 1. Check seminar end by visiting detail page
         if (ended) {
-          const targetUrl = mergedSeminarInfo.seminarId ? `${SEMINAR_DETAIL_PAGE}${mergedSeminarInfo.seminarId}` : url;
-          const messagePrefix = `**${escapeMarkdownV2(mergedSeminarInfo.name)}** ${escapeMarkdownV2('세미나가 종료되었습니다. 설문 입장해주세요.')}`;
-          await sendNotificationToChannel(`${messagePrefix} [바로가기](${targetUrl})`, null, {
-            parse_mode: 'MarkdownV2',
-          });
+          // Only send end notification if survey was present (or unknown, default to true/undefined)
+          if (mergedSeminarInfo.hasSurvey !== false) {
+            const targetUrl = mergedSeminarInfo.seminarId
+              ? `${SEMINAR_DETAIL_PAGE}${mergedSeminarInfo.seminarId}`
+              : url;
+            const message = `**${mergedSeminarInfo.name}** 세미나가 종료되었습니다. 설문 입장해주세요.\n${targetUrl}`;
+            await sendNotificationToChannel(message);
+          } else {
+            console.log(
+              `[monitor_seminars] Skipping end notification for ${mergedSeminarInfo.name} because it has no survey.`,
+            );
+          }
           delete monitoringList[url]; // Remove from monitoring
           continue; // Move to the next seminar
         }
@@ -265,15 +287,18 @@ async function monitorSeminars(
         if (currentInfo && newStatus === '입장하기' && oldStatus === '신청완료') {
           console.log(`[${periodName}] Seminar ready for entry: ${newName}.`);
           const targetUrl = mergedSeminarInfo.seminarId ? `${SEMINAR_DETAIL_PAGE}${mergedSeminarInfo.seminarId}` : url;
-          const messagePrefix = `**${escapeMarkdownV2(newName)}** ${escapeMarkdownV2('세미나 입장이 시작되었습니다.')}`;
-          await sendNotificationToChannel(`${messagePrefix} [바로가기](${targetUrl})`, null, {
-            parse_mode: 'MarkdownV2',
-          });
 
-          // const newPage = await context.newPage();
-          // keyMessageMonitor
-          //   .monitor({ page: newPage, context }, url, newName)
-          //   .catch((e) => console.error(`Key message monitor failed for ${newName}`, e));
+          // Check for survey existence
+          const hasSurvey = await checkSurveyExistence(context, targetUrl);
+
+          let message = `**${newName}** 세미나 입장이 시작되었습니다.`;
+          if (!hasSurvey) {
+            message += ` (설문이 없는 세미나인 것 같습니다)`;
+          }
+          await sendNotificationToChannel(`${message}\n${targetUrl}`);
+
+          // Update hasSurvey in merged info so it gets saved to monitoringList
+          mergedSeminarInfo.hasSurvey = hasSurvey;
         }
 
         // 4. Always update the seminar's status and name in the monitoring list
@@ -282,6 +307,7 @@ async function monitorSeminars(
             status: newStatus,
             name: newName,
             seminarId: mergedSeminarInfo.seminarId,
+            hasSurvey: mergedSeminarInfo.hasSurvey,
           };
         } else {
           monitoringList[url] = mergedSeminarInfo;
@@ -300,7 +326,7 @@ async function monitorSeminars(
       e && typeof e === 'object' && 'stack' in e ? (e as Error).stack : e,
     );
     const message = e instanceof Error ? e.message : String(e);
-    await sendTelegram(`❗ [${periodName}] 세미나 감시 작업 오류: ${message}`).catch(() => { });
+    await sendTelegram(`❗ [${periodName}] 세미나 감시 작업 오류: ${message}`).catch(() => {});
     return false;
   }
 }

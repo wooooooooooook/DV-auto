@@ -80,11 +80,11 @@ async function collectQuizInfo(page: PlaywrightRunArgs['page']): Promise<QuizInf
     const productTitle =
       (await titleElem.count()) > 0
         ? (
-          await titleElem
-            .first()
-            .innerText()
-            .catch(() => '')
-        ).trim()
+            await titleElem
+              .first()
+              .innerText()
+              .catch(() => '')
+          ).trim()
         : '';
     const mapping = quizMapping as Record<string, Array<string | number>>;
     const answers = productTitle && mapping[productTitle];
