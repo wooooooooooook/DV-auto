@@ -27,11 +27,11 @@ const seoulDateString = (): string => new Date().toLocaleDateString('en-CA', { t
 async function checkSurveyExistence(context: BrowserContext, url: string): Promise<boolean> {
   const page = await context.newPage();
   try {
-    await safeGoto(page, url, { waitUntil: 'commit', timeout: 15000 });
+    await safeGoto(page, url, { waitUntil: 'domcontentloaded', timeout: 15000 });
     await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
 
-    // Check for "설문 참여" button
-    const surveyBtn = page.locator('text="설문 참여"').first();
+    // Check for "설문참여" button
+    const surveyBtn = page.locator('text="설문참여"').first();
     const isVisible = await surveyBtn.isVisible({ timeout: 5000 });
     return isVisible;
   } catch (e) {
