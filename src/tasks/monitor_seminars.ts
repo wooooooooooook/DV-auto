@@ -250,7 +250,16 @@ async function monitorSeminars(
           seminarId: currentInfo?.seminarId || monitoredInfo.seminarId,
           hasSurvey: monitoredInfo.hasSurvey, // Preserve hasSurvey state
         };
-        const ended = await isSeminarEnded(context, mergedSeminarInfo, url);
+
+        let ended = false;
+        if (mergedSeminarInfo.hasSurvey === false) {
+          if (!currentInfo) {
+            // If survey is not required and seminar disappeared from the list, consider it ended/removed
+            ended = true;
+          }
+        } else {
+          ended = await isSeminarEnded(context, mergedSeminarInfo, url);
+        }
 
         // 1. Check seminar end by visiting detail page
         if (ended) {
