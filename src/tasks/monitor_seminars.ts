@@ -18,7 +18,13 @@ const randomDelay = (): Promise<void> => {
 };
 
 // Helper function to get today's seminars within a specific time range
-type SeminarInfo = { status: string; name: string; seminarId: string | null; hasSurvey?: boolean };
+type SeminarInfo = {
+  status: string;
+  name: string;
+  seminarId: string | null;
+  hasSurvey?: boolean;
+  isEntryStarted?: boolean;
+};
 type StoredSeminarIds = { date: string; lunchSeminarIds: string[]; dinnerSeminarIds: string[] };
 type SeminarBucketKey = 'lunchSeminarIds' | 'dinnerSeminarIds';
 
@@ -179,6 +185,7 @@ async function monitorSeminars(
         // Check for survey existence
         const hasSurvey = await checkSurveyExistence(context, targetUrl);
         monitoringList[url].hasSurvey = hasSurvey;
+        monitoringList[url].isEntryStarted = true;
 
         let message = `**${name}** 세미나 입장이 시작되었습니다.`;
         if (!hasSurvey) {
@@ -249,12 +256,13 @@ async function monitorSeminars(
           status: currentInfo?.status || monitoredInfo.status,
           seminarId: currentInfo?.seminarId || monitoredInfo.seminarId,
           hasSurvey: monitoredInfo.hasSurvey, // Preserve hasSurvey state
+          isEntryStarted: monitoredInfo.isEntryStarted, // Preserve isEntryStarted state
         };
 
         let ended = false;
 
-        // Only check for end if the seminar is in '입장하기' state.
-        if (monitoredInfo.status === '입장하기') {
+        // Only check for end if the seminar entry has started (notice sent).
+        if (mergedSeminarInfo.isEntryStarted) {
           if (mergedSeminarInfo.hasSurvey === false) {
             if (!currentInfo) {
               // If survey is not required and seminar disappeared from the list, consider it ended/removed
@@ -303,6 +311,7 @@ async function monitorSeminars(
 
           // Update hasSurvey in merged info so it gets saved to monitoringList
           mergedSeminarInfo.hasSurvey = hasSurvey;
+          mergedSeminarInfo.isEntryStarted = true;
         }
 
         // 4. Always update the seminar's status and name in the monitoring list
@@ -312,6 +321,7 @@ async function monitorSeminars(
             name: newName,
             seminarId: mergedSeminarInfo.seminarId,
             hasSurvey: mergedSeminarInfo.hasSurvey,
+            isEntryStarted: mergedSeminarInfo.isEntryStarted,
           };
         } else {
           monitoringList[url] = mergedSeminarInfo;
