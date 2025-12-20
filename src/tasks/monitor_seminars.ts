@@ -252,13 +252,17 @@ async function monitorSeminars(
         };
 
         let ended = false;
-        if (mergedSeminarInfo.hasSurvey === false) {
-          if (!currentInfo) {
-            // If survey is not required and seminar disappeared from the list, consider it ended/removed
-            ended = true;
+
+        // Only check for end if the seminar is in '입장하기' state.
+        if (monitoredInfo.status === '입장하기') {
+          if (mergedSeminarInfo.hasSurvey === false) {
+            if (!currentInfo) {
+              // If survey is not required and seminar disappeared from the list, consider it ended/removed
+              ended = true;
+            }
+          } else {
+            ended = await isSeminarEnded(context, mergedSeminarInfo, url);
           }
-        } else {
-          ended = await isSeminarEnded(context, mergedSeminarInfo, url);
         }
 
         // 1. Check seminar end by visiting detail page
