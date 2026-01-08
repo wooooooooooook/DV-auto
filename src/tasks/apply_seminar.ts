@@ -2,9 +2,16 @@ import path from 'path';
 import fs from 'fs/promises';
 import type { PlaywrightRunArgs } from '../types';
 import { safeGoto, sendTelegram } from '../modules/utils';
+import * as storage from '../services/storage';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
+const SEMINAR_LIST_KEY = 'apply_seminar:seminar_list';
+
+type SeminarListItem = {
+  name: string;
+  url: string;
+};
 
 async function run({ page }: PlaywrightRunArgs) {
   let screenshotPath: string | null = null;
@@ -53,6 +60,36 @@ async function run({ page }: PlaywrightRunArgs) {
     }
 
     await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'domcontentloaded', timeout: 30000 }, 1);
+
+    const currentSeminars = await page.locator('a.list_detail').evaluateAll((nodes) =>
+      nodes
+        .map((node) => {
+          const href = node.getAttribute('href') || '';
+          const title =
+            node.querySelector('.list_tit .tit')?.textContent?.trim() || node.textContent?.trim() || '세미나';
+          return { url: href, name: title };
+        })
+        .filter((item) => item.url),
+    );
+
+    const normalizedCurrentSeminars: SeminarListItem[] = currentSeminars.map((item) => ({
+      name: item.name,
+      url: new URL(item.url, SEMINAR_PAGE).toString(),
+    }));
+
+    const storedSeminars = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
+    if (storedSeminars.length > 0) {
+      const storedUrls = new Set(storedSeminars.map((item) => item.url));
+      const newlyAdded = normalizedCurrentSeminars.filter((item) => !storedUrls.has(item.url));
+      if (newlyAdded.length > 0) {
+        const newSeminarMessage = newlyAdded
+          .map((item, index) => `${index + 1}. ${item.name}\n${item.url}`)
+          .join('\n\n');
+        await sendTelegram(`🆕 새로 추가된 세미나 ${newlyAdded.length}건 발견\n\n${newSeminarMessage}`);
+      }
+    }
+    storage.set(SEMINAR_LIST_KEY, normalizedCurrentSeminars);
+
     const appliedCount = await page.locator('a:has(.ico_completion)').count();
     let message = `✅ ${appliedCount}개 세미나 신청 완료! (${appliedCount}/${totalSeminarsAvailable})`;
 
