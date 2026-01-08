@@ -75,11 +75,18 @@ const noticeBot = NOTICE_BOT_TOKEN ? new Telegraf(NOTICE_BOT_TOKEN, { telegram: 
 
 if (adminBot) {
   setBot('admin', adminBot);
+  adminBot.catch((err, ctx) => {
+    logger.error(`Admin Bot Error for ${ctx.updateType}`, err);
+    ctx.reply('오류가 발생했습니다. 로그를 확인해주세요.').catch(() => {});
+  });
   adminBot.start((ctx) => ctx.reply('Welcome, Admin!'));
 }
 
 if (noticeBot) {
   setBot('notice', noticeBot);
+  noticeBot.catch((err, ctx) => {
+    logger.error(`Notice Bot Error for ${ctx.updateType}`, err);
+  });
   noticeBot.start((ctx) => ctx.reply('Welcome!'));
 }
 
@@ -111,26 +118,34 @@ if (adminBot) {
 
     try {
       await ctx.reply('Starting daily_routine...');
-      const result = await runner.runTask(task);
-      if (result && typeof result === 'object' && (result as { message?: string }).message) {
-        await ctx.reply(
-          (result as { message: string }).message,
-          (result as { options?: Record<string, unknown> }).options,
-        );
-        if ((result as { imagePath?: string }).imagePath) {
-          await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-          await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
-        }
-      } else if (typeof result === 'string') {
-        await ctx.reply(result);
-      } else if (result === true) {
-        await ctx.reply('daily_routine finished successfully.');
-      } else {
-        await ctx.reply('daily_routine finished successfully.');
-      }
+      // Run in background to avoid timeout
+      runner
+        .runTask(task)
+        .then(async (result) => {
+          if (result && typeof result === 'object' && (result as { message?: string }).message) {
+            await ctx.reply(
+              (result as { message: string }).message,
+              (result as { options?: Record<string, unknown> }).options,
+            );
+            if ((result as { imagePath?: string }).imagePath) {
+              await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
+              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
+            }
+          } else if (typeof result === 'string') {
+            await ctx.reply(result);
+          } else if (result === true) {
+            await ctx.reply('daily_routine finished successfully.');
+          } else {
+            await ctx.reply('daily_routine finished successfully.');
+          }
+        })
+        .catch((e) => {
+          const message = e instanceof Error ? e.message : String(e);
+          ctx.reply(`daily_routine failed: ${message}`);
+        });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`daily_routine failed: ${message}`);
+      ctx.reply(`Failed to start daily_routine: ${message}`);
     }
   });
 
@@ -144,26 +159,33 @@ if (adminBot) {
 
     try {
       await ctx.reply('Starting today_quiz...');
-      const result = await runner.runTask(task);
-      if (result && typeof result === 'object' && (result as { message?: string }).message) {
-        await ctx.reply(
-          (result as { message: string }).message,
-          (result as { options?: Record<string, unknown> }).options,
-        );
-        if ((result as { imagePath?: string }).imagePath) {
-          await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-          await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
-        }
-      } else if (typeof result === 'string') {
-        await ctx.reply(result);
-      } else if (result === true) {
-        await ctx.reply('today_quiz finished successfully.');
-      } else {
-        await ctx.reply('today_quiz finished successfully.');
-      }
+      runner
+        .runTask(task)
+        .then(async (result) => {
+          if (result && typeof result === 'object' && (result as { message?: string }).message) {
+            await ctx.reply(
+              (result as { message: string }).message,
+              (result as { options?: Record<string, unknown> }).options,
+            );
+            if ((result as { imagePath?: string }).imagePath) {
+              await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
+              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
+            }
+          } else if (typeof result === 'string') {
+            await ctx.reply(result);
+          } else if (result === true) {
+            await ctx.reply('today_quiz finished successfully.');
+          } else {
+            await ctx.reply('today_quiz finished successfully.');
+          }
+        })
+        .catch((e) => {
+          const message = e instanceof Error ? e.message : String(e);
+          ctx.reply(`today_quiz failed: ${message}`);
+        });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`today_quiz failed: ${message}`);
+      ctx.reply(`Failed to start today_quiz: ${message}`);
     }
   });
 
@@ -212,21 +234,28 @@ if (adminBot) {
     }
 
     try {
-      await ctx.reply('Running today_links and broadcasting to channel...');
-      const result = await runner.runTask(task);
-      if (result && (result as { message?: string }).message) {
-        await sendNotificationToChannel(
-          (result as { message: string }).message,
-          null,
-          (result as { options?: Record<string, unknown> }).options,
-        );
-        await ctx.reply('Broadcast successful.');
-      } else {
-        await ctx.reply('Task ran, but no message was produced to broadcast.');
-      }
+      await ctx.reply('Running today_links and broadcasting to channel... (백그라운드 실행)');
+      runner
+        .runTask(task)
+        .then(async (result) => {
+          if (result && (result as { message?: string }).message) {
+            await sendNotificationToChannel(
+              (result as { message: string }).message,
+              null,
+              (result as { options?: Record<string, unknown> }).options,
+            );
+            await ctx.reply('Broadcast successful.');
+          } else {
+            await ctx.reply('Task ran, but no message was produced to broadcast.');
+          }
+        })
+        .catch((e) => {
+          const message = e instanceof Error ? e.message : String(e);
+          ctx.reply(`Broadcast failed: ${message}`);
+        });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Broadcast failed: ${message}`);
+      ctx.reply(`Failed to start broadcast: ${message}`);
     }
   });
 
@@ -239,27 +268,35 @@ if (adminBot) {
     }
 
     try {
-      await ctx.reply('네이버페이포인트교환 작업을 시작합니다...');
-      const result = await runner.runTask(task);
-      if (result && typeof result === 'object' && (result as { message?: string }).message) {
-        await ctx.reply(
-          (result as { message: string }).message,
-          (result as { options?: Record<string, unknown> }).options,
-        );
-        if ((result as { imagePath?: string }).imagePath) {
-          await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-          await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
-        }
-      } else if (typeof result === 'string') {
-        await ctx.reply(result);
-      } else if (result === true) {
-        await ctx.reply('네이버페이포인트교환 작업이 완료되었습니다.');
-      } else {
-        await ctx.reply('네이버페이포인트교환 작업이 완료되었습니다.');
-      }
+      await ctx.reply('네이버페이포인트교환 작업을 시작합니다... (백그라운드 실행)');
+      // Run in background to avoid timeout
+      runner
+        .runTask(task)
+        .then(async (result) => {
+          if (result && typeof result === 'object' && (result as { message?: string }).message) {
+            await ctx.reply(
+              (result as { message: string }).message,
+              (result as { options?: Record<string, unknown> }).options,
+            );
+            if ((result as { imagePath?: string }).imagePath) {
+              await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
+              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
+            }
+          } else if (typeof result === 'string') {
+            await ctx.reply(result);
+          } else if (result === true) {
+            await ctx.reply('네이버페이포인트교환 작업이 완료되었습니다.');
+          } else {
+            await ctx.reply('네이버페이포인트교환 작업이 완료되었습니다.');
+          }
+        })
+        .catch((e) => {
+          const message = e instanceof Error ? e.message : String(e);
+          ctx.reply(`네이버페이포인트교환 실패: ${message}`);
+        });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`네이버페이포인트교환 실패: ${message}`);
+      ctx.reply(`Failed to start 네이버페이포인트교환: ${message}`);
     }
   });
 
@@ -292,27 +329,34 @@ if (adminBot) {
     }
 
     try {
-      await ctx.reply('Starting monitor_lunch_seminars...');
-      const result = await runner.runTask(task);
-      if (result && typeof result === 'object' && (result as { message?: string }).message) {
-        await ctx.reply(
-          (result as { message: string }).message,
-          (result as { options?: Record<string, unknown> }).options,
-        );
-        if ((result as { imagePath?: string }).imagePath) {
-          await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-          await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
-        }
-      } else if (typeof result === 'string') {
-        await ctx.reply(result);
-      } else if (result === true) {
-        await ctx.reply('monitor_lunch_seminars finished successfully.');
-      } else {
-        await ctx.reply('monitor_lunch_seminars finished successfully.');
-      }
+      await ctx.reply('Starting monitor_lunch_seminars... (백그라운드 실행)');
+      runner
+        .runTask(task)
+        .then(async (result) => {
+          if (result && typeof result === 'object' && (result as { message?: string }).message) {
+            await ctx.reply(
+              (result as { message: string }).message,
+              (result as { options?: Record<string, unknown> }).options,
+            );
+            if ((result as { imagePath?: string }).imagePath) {
+              await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
+              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
+            }
+          } else if (typeof result === 'string') {
+            await ctx.reply(result);
+          } else if (result === true) {
+            await ctx.reply('monitor_lunch_seminars finished successfully.');
+          } else {
+            await ctx.reply('monitor_lunch_seminars finished successfully.');
+          }
+        })
+        .catch((e) => {
+          const message = e instanceof Error ? e.message : String(e);
+          ctx.reply(`monitor_lunch_seminars failed: ${message}`);
+        });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`monitor_lunch_seminars failed: ${message}`);
+      ctx.reply(`Failed to start monitor_lunch_seminars: ${message}`);
     }
   });
 
@@ -325,27 +369,34 @@ if (adminBot) {
     }
 
     try {
-      await ctx.reply('Starting monitor_dinner_seminars...');
-      const result = await runner.runTask(task);
-      if (result && typeof result === 'object' && (result as { message?: string }).message) {
-        await ctx.reply(
-          (result as { message: string }).message,
-          (result as { options?: Record<string, unknown> }).options,
-        );
-        if ((result as { imagePath?: string }).imagePath) {
-          await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-          await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
-        }
-      } else if (typeof result === 'string') {
-        await ctx.reply(result);
-      } else if (result === true) {
-        await ctx.reply('monitor_dinner_seminars finished successfully.');
-      } else {
-        await ctx.reply('monitor_dinner_seminars finished successfully.');
-      }
+      await ctx.reply('Starting monitor_dinner_seminars... (백그라운드 실행)');
+      runner
+        .runTask(task)
+        .then(async (result) => {
+          if (result && typeof result === 'object' && (result as { message?: string }).message) {
+            await ctx.reply(
+              (result as { message: string }).message,
+              (result as { options?: Record<string, unknown> }).options,
+            );
+            if ((result as { imagePath?: string }).imagePath) {
+              await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
+              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
+            }
+          } else if (typeof result === 'string') {
+            await ctx.reply(result);
+          } else if (result === true) {
+            await ctx.reply('monitor_dinner_seminars finished successfully.');
+          } else {
+            await ctx.reply('monitor_dinner_seminars finished successfully.');
+          }
+        })
+        .catch((e) => {
+          const message = e instanceof Error ? e.message : String(e);
+          ctx.reply(`monitor_dinner_seminars failed: ${message}`);
+        });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`monitor_dinner_seminars failed: ${message}`);
+      ctx.reply(`Failed to start monitor_dinner_seminars: ${message}`);
     }
   });
 
@@ -444,27 +495,34 @@ const seminarCheck5Days = async (ctx: Context) => {
   }
 
   try {
-    await ctx.reply('5일간의 세미나를 확인합니다...');
-    const result = await runner.runTask(task);
-    if (result && typeof result === 'object' && (result as { message?: string }).message) {
-      await ctx.reply(
-        (result as { message: string }).message,
-        (result as { options?: Record<string, unknown> }).options,
-      );
-      if ((result as { imagePath?: string }).imagePath) {
-        await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-        await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
-      }
-    } else if (typeof result === 'string') {
-      await ctx.reply(result);
-    } else if (result === true) {
-      await ctx.reply('세미나 확인이 완료되었습니다.');
-    } else {
-      await ctx.reply('세미나 확인이 완료되었습니다.');
-    }
+    await ctx.reply('5일간의 세미나를 확인합니다... (백그라운드 실행)');
+    runner
+      .runTask(task)
+      .then(async (result) => {
+        if (result && typeof result === 'object' && (result as { message?: string }).message) {
+          await ctx.reply(
+            (result as { message: string }).message,
+            (result as { options?: Record<string, unknown> }).options,
+          );
+          if ((result as { imagePath?: string }).imagePath) {
+            await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
+            await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
+          }
+        } else if (typeof result === 'string') {
+          await ctx.reply(result);
+        } else if (result === true) {
+          await ctx.reply('세미나 확인이 완료되었습니다.');
+        } else {
+          await ctx.reply('세미나 확인이 완료되었습니다.');
+        }
+      })
+      .catch((e) => {
+        const message = e instanceof Error ? e.message : String(e);
+        ctx.reply(`세미나 확인 중 오류 발생: ${message}`);
+      });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    ctx.reply(`세미나 확인 중 오류 발생: ${message}`);
+    ctx.reply(`Failed to start 세미나 확인: ${message}`);
   }
 };
 
@@ -477,23 +535,30 @@ const todayLinks = async (ctx: Context) => {
   }
 
   try {
-    await ctx.reply('오늘의 링크를 수집합니다...');
-    const result = await runner.runTask(task);
-    if (result && typeof result === 'object' && (result as { message?: string }).message) {
-      await ctx.reply(
-        (result as { message: string }).message,
-        (result as { options?: Record<string, unknown> }).options,
-      );
-    } else if (typeof result === 'string') {
-      await ctx.reply(result);
-    } else if (result === true) {
-      await ctx.reply('작업이 완료되었습니다.');
-    } else {
-      await ctx.reply('작업이 완료되었습니다.');
-    }
+    await ctx.reply('오늘의 링크를 수집합니다... (백그라운드 실행)');
+    runner
+      .runTask(task)
+      .then(async (result) => {
+        if (result && typeof result === 'object' && (result as { message?: string }).message) {
+          await ctx.reply(
+            (result as { message: string }).message,
+            (result as { options?: Record<string, unknown> }).options,
+          );
+        } else if (typeof result === 'string') {
+          await ctx.reply(result);
+        } else if (result === true) {
+          await ctx.reply('작업이 완료되었습니다.');
+        } else {
+          await ctx.reply('작업이 완료되었습니다.');
+        }
+      })
+      .catch((e) => {
+        const message = e instanceof Error ? e.message : String(e);
+        ctx.reply(`링크 수집 중 오류 발생: ${message}`);
+      });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    ctx.reply(`링크 수집 중 오류 발생: ${message}`);
+    ctx.reply(`Failed to start 링크 수집: ${message}`);
   }
 };
 
