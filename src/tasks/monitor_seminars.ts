@@ -38,8 +38,13 @@ async function checkSurveyExistence(context: BrowserContext, url: string): Promi
 
     // Check for "설문참여" button
     const surveyBtn = page.locator('text="설문참여"').first();
-    const isVisible = await surveyBtn.isVisible({ timeout: 5000 });
-    return isVisible;
+    const isSurveyButtonVisible = await surveyBtn.isVisible({ timeout: 5000 }).catch(() => false);
+
+    // Check for badge with inner text "설문" and class "seminar-badge"
+    const surveyBadge = page.locator('.seminar-badge', { hasText: '설문' }).first();
+    const isSurveyBadgeVisible = await surveyBadge.isVisible({ timeout: 5000 }).catch(() => false);
+
+    return isSurveyButtonVisible || isSurveyBadgeVisible;
   } catch (e) {
     console.warn(`[checkSurveyExistence] Failed to check survey for ${url}`, e);
     // If check fails, assume it exists to be safe (or false? User wants to suppress if *missing*. Safe default is true.)
