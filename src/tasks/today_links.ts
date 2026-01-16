@@ -19,7 +19,12 @@ type SeminarData = {
 };
 type SeminarTaskData = SeminarData & { allSeminarIds: string[] };
 type SeminarMessageResult = SeminarData & { message: string };
+type StoredNewSeminars = {
+  date: string;
+  seminars: Array<{ name: string; url: string; seminarId: string | null }>;
+};
 const TODAY_SEMINAR_KEY = 'today_seminars';
+const NEW_SEMINAR_KEY = 'apply_seminar:new_seminars';
 
 function getTodayDateStrings() {
   const opts = { timeZone: 'Asia/Seoul' as const };
@@ -28,6 +33,12 @@ function getTodayDateStrings() {
   const day = now.toLocaleDateString('en-US', { day: 'numeric', ...opts });
   const iso = now.toLocaleDateString('en-CA', opts);
   return { todayString: `${month}/${day}`, isoDate: iso };
+}
+
+function getStoredNewSeminars(isoDate: string): StoredNewSeminars['seminars'] {
+  const stored = storage.get<StoredNewSeminars>(NEW_SEMINAR_KEY);
+  if (!stored || stored.date !== isoDate) return [];
+  return stored.seminars || [];
 }
 
 async function findQuizHref(page: PlaywrightRunArgs['page']): Promise<string | null> {
@@ -193,6 +204,8 @@ async function run({ page }: PlaywrightRunArgs) {
   try {
     const quizInfo = await collectQuizInfo(page);
     const seminarMessage = await collectTodaySeminarMessage(page);
+    const { isoDate } = getTodayDateStrings();
+    const storedNewSeminars = getStoredNewSeminars(isoDate);
 
     const options: Record<string, unknown> = {};
 
@@ -213,11 +226,28 @@ async function run({ page }: PlaywrightRunArgs) {
       message += `\n📖${seminarMessage.message}`;
     }
 
+    if (storedNewSeminars.length > 0) {
+      const newSeminarList = storedNewSeminars
+        .map((item, index) => {
+          const link = item.seminarId ? `${SEMINAR_DETAIL_PAGE}${item.seminarId}` : item.url;
+          return `${index + 1}. ${item.name}\n${link}`;
+        })
+        .join('\n\n');
+      message += `\n\n🆕 신규 세미나\n${newSeminarList}`;
+    }
+
     message += '\n\n🤖텔레그램 봇이 자동으로 전송한 메시지입니다.\nhttps://t.me/+J1UGmvLA9jU4NjQ1';
 
+    const newSeminarIds = storedNewSeminars.map((item) => item.seminarId).filter((id): id is string => Boolean(id));
     const allSeminarIds = seminarMessage
-      ? Array.from(new Set([...(seminarMessage.lunchSeminarIds || []), ...(seminarMessage.dinnerSeminarIds || [])]))
-      : [];
+      ? Array.from(
+          new Set([
+            ...(seminarMessage.lunchSeminarIds || []),
+            ...(seminarMessage.dinnerSeminarIds || []),
+            ...newSeminarIds,
+          ]),
+        )
+      : [...newSeminarIds];
 
     storage.set(TODAY_SEMINAR_KEY, {
       date: seminarMessage.date,
