@@ -1,16 +1,21 @@
 import path from 'path';
 import fs from 'fs/promises';
 import type { PlaywrightRunArgs } from '../types';
-import { safeGoto, sendTelegram } from '../modules/utils';
+import { safeGoto, sendTelegram, getSeminarIdFromUrl } from '../modules/utils';
 import * as storage from '../services/storage';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
 const SEMINAR_LIST_KEY = 'apply_seminar:seminar_list';
+const NEW_SEMINAR_KEY = 'apply_seminar:new_seminars';
 
 type SeminarListItem = {
   name: string;
   url: string;
+};
+type StoredNewSeminars = {
+  date: string;
+  seminars: Array<SeminarListItem & { seminarId: string | null }>;
 };
 
 async function run({ page }: PlaywrightRunArgs) {
@@ -86,6 +91,20 @@ async function run({ page }: PlaywrightRunArgs) {
           .map((item, index) => `${index + 1}. ${item.name}\n${item.url}`)
           .join('\n\n');
         await sendTelegram(`🆕 새로 추가된 세미나 ${newlyAdded.length}건 발견\n\n${newSeminarMessage}`);
+        const todayIso = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+        const storedNew = storage.get<StoredNewSeminars>(NEW_SEMINAR_KEY);
+        const baseSeminars = storedNew?.date === todayIso ? storedNew.seminars : [];
+        const merged = [...baseSeminars];
+        const existingUrls = new Set(baseSeminars.map((item) => item.url));
+        for (const item of newlyAdded) {
+          if (existingUrls.has(item.url)) continue;
+          merged.push({ ...item, seminarId: getSeminarIdFromUrl(item.url) });
+          existingUrls.add(item.url);
+        }
+        storage.set(NEW_SEMINAR_KEY, {
+          date: todayIso,
+          seminars: merged,
+        });
       }
     }
     storage.set(SEMINAR_LIST_KEY, normalizedCurrentSeminars);
