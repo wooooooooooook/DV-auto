@@ -73,7 +73,7 @@ async function isSeminarEnded(
 
     await detailPage.screenshot({ path: screenshotPath, fullPage: false });
     if (!canCancel) {
-      await sendTelegram(`[종료 확인 모니터 중] ${seminar.name}? ${surveyEnded} `, screenshotPath);
+      console.log(`[monitor_seminars] End check pending for ${seminar.name}. surveyEnded=${surveyEnded}`);
     }
     await fs
       .unlink(screenshotPath)
