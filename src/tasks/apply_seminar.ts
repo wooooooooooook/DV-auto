@@ -60,6 +60,18 @@ async function run({ page }: PlaywrightRunArgs) {
       } catch (_e) {
         // Not present within 2s — continue without blocking
       }
+
+      try {
+        const nextTerms = page.locator('.agg_next_terms');
+        if (await nextTerms.isVisible({ timeout: 1000 })) {
+          await nextTerms.click();
+          await page.waitForSelector('#terms_confirm', { timeout: 2000 });
+          await page.click('#terms_confirm');
+          console.log('Clicked .agg_next_terms and #terms_confirm');
+        }
+      } catch (_e) {
+        // Optional step, ignore if elements are not found
+      }
       await page.waitForTimeout(500);
       console.log('success applied for seminar');
     }
@@ -140,7 +152,7 @@ async function run({ page }: PlaywrightRunArgs) {
         .catch((err: unknown) => console.error('Failed to capture error screenshot:', err));
     }
     const message = error instanceof Error ? error.message : String(error);
-    await sendTelegram(`❗ 세미나 신청 작업 오류: ${message}`, screenshotPath).catch(() => {});
+    await sendTelegram(`❗ 세미나 신청 작업 오류: ${message}`, screenshotPath).catch(() => { });
     return {
       success: false,
       message: `세미나 신청 작업 오류: ${message}`,
