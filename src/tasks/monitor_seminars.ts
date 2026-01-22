@@ -102,6 +102,7 @@ async function handleSeminarEndAndQuiz(
 ): Promise<void> {
   const targetUrl = seminar.seminarId ? `${SEMINAR_DETAIL_PAGE}${seminar.seminarId}` : fallbackUrl;
   const surveyPage = await context.newPage();
+  let activePage = surveyPage;
 
   try {
     await safeGoto(surveyPage, targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
@@ -113,26 +114,40 @@ async function handleSeminarEndAndQuiz(
 
     if (isSurveyButtonVisible) {
       console.log(`[monitor_seminars] "설문참여" 버튼 발견, 클릭 (${seminar.name})`);
+      const popupPromise = context.waitForEvent('page', { timeout: 5000 }).catch(() => null);
       await surveyBtn.click().catch(() => { });
-      await surveyPage.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => { });
-      await surveyPage.waitForTimeout(1000); // 페이지 로드 대기
+      const popupPage = await popupPromise;
+      if (popupPage) {
+        activePage = popupPage;
+        await popupPage.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => { });
+      } else {
+        await surveyPage.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => { });
+      }
+      await activePage.waitForTimeout(1000); // 페이지 로드 대기
 
       // "설문 참여하기" 버튼이 추가로 나타날 수 있음
-      const surveyStartBtn = surveyPage.locator('text="설문 참여하기"').first();
+      const surveyStartBtn = activePage.locator('text="설문 참여하기"').first();
       const isSurveyStartVisible = await surveyStartBtn.isVisible({ timeout: 2000 }).catch(() => false);
       if (isSurveyStartVisible) {
         console.log(`[monitor_seminars] "설문 참여하기" 버튼 발견, 클릭 (${seminar.name})`);
+        const popupPromise = context.waitForEvent('page', { timeout: 5000 }).catch(() => null);
         await surveyStartBtn.click().catch(() => { });
-        await surveyPage.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => { });
-        await surveyPage.waitForTimeout(1000);
+        const popupPage = await popupPromise;
+        if (popupPage) {
+          activePage = popupPage;
+          await popupPage.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => { });
+        } else {
+          await activePage.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => { });
+        }
+        await activePage.waitForTimeout(1000);
       }
 
       // 퀴즈 처리 (댓글로 결과 전송)
-      await processSeminarQuiz(surveyPage, seminar.name, replyToMessageId);
+      await processSeminarQuiz(activePage, seminar.name, replyToMessageId);
     } else {
       console.log(`[monitor_seminars] "설문참여" 버튼을 찾지 못함 (${seminar.name})`);
       // 버튼이 없어도 현재 페이지에서 퀴즈 찾기 시도
-      await processSeminarQuiz(surveyPage, seminar.name, replyToMessageId);
+      await processSeminarQuiz(activePage, seminar.name, replyToMessageId);
     }
   } catch (e) {
     console.error(
@@ -140,7 +155,10 @@ async function handleSeminarEndAndQuiz(
       e && typeof e === 'object' && 'stack' in e ? (e as Error).stack : e,
     );
   } finally {
-    await surveyPage.close().catch(() => { });
+    const pagesToClose = activePage === surveyPage ? [surveyPage] : [activePage, surveyPage];
+    for (const page of pagesToClose) {
+      await page.close().catch(() => { });
+    }
   }
 }
 

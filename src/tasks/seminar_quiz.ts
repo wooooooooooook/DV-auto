@@ -168,11 +168,23 @@ function formatUnknownQuestions(questions: QuizQuestion[], results: QuizResult[]
  */
 async function processSeminarQuiz(page: Page, seminarName?: string, replyToMessageId?: number | null) {
     try {
+        await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => { });
+        await page
+            .waitForSelector('.whitespace-pre-wrap:has(span:text("[퀴즈]"))', { timeout: 5000 })
+            .catch(() => { });
         // 퀴즈 문제 파싱
         const questions = await parseQuizQuestions(page);
 
         if (questions.length === 0) {
-            return { success: true, message: '퀴즈를 찾지 못했습니다.' };
+            const message = seminarName
+                ? `ℹ️ ${seminarName} 설문 페이지에서 퀴즈를 찾지 못했습니다.`
+                : 'ℹ️ 설문 페이지에서 퀴즈를 찾지 못했습니다.';
+            if (replyToMessageId) {
+                await sendNotificationToChannel(message, null, { reply_parameters: { message_id: replyToMessageId } });
+            } else {
+                await sendTelegram(message);
+            }
+            return { success: true, message };
         }
 
         // 족보 로드
