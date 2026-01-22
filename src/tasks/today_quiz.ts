@@ -68,7 +68,7 @@ async function run({ page }: PlaywrightRunArgs) {
           await btn
             .first()
             .scrollIntoViewIfNeeded()
-            .catch(() => {});
+            .catch(() => { });
           await page.waitForTimeout(200);
           await page.screenshot({ path: shot });
         } catch (_e) {
@@ -79,7 +79,7 @@ async function run({ page }: PlaywrightRunArgs) {
       await btn
         .first()
         .click()
-        .catch(() => {});
+        .catch(() => { });
     } else {
       // If there's no banner button, still check for popup
       console.debug('#btn_quiz_banner not found');
@@ -110,24 +110,42 @@ async function run({ page }: PlaywrightRunArgs) {
       return { success: true, message: `정답이 등록되지 않았습니다. 직접 퀴즈를 풀어주세요. ${href}` };
     }
 
-    // Click the labels based on mapping
+    // Select the answers based on mapping
     for (let i = 0; i < answers.length; i++) {
       const val = answers[i];
-      const selector = `label[for='answer${i + 1}-${val}']`;
-      const cnt = await page.locator(selector).count();
-      if (cnt) {
-        await page
-          .locator(selector)
-          .first()
-          .click()
-          .catch(() => {});
-        await page.waitForTimeout(200);
+      // Construct ID for the input element (e.g., answer1-3)
+      const inputId = `answer${i + 1}-${val}`;
+      const inputLocator = page.locator(`#${inputId}`);
+
+      // Try checking the input directly using Playwright's check()
+      // force: true ensures it works even if the actual input is hidden by CSS (common in quizzes)
+      if ((await inputLocator.count()) > 0) {
+        await inputLocator.check({ force: true }).catch(async (e) => {
+          console.warn(`[today_quiz] check() failed for ${inputId}, trying click on label.`, e);
+          // Fallback: click the label if check fails (though check handles label clicks internally usually)
+          await page
+            .locator(`label[for='${inputId}']`)
+            .first()
+            .click()
+            .catch(() => { });
+        });
       } else {
-        return {
-          success: false,
-          message: `정답 선택 요소를 찾을 수 없습니다: ${selector}  (제품: ${productTitle})\n${href}`,
-        };
+        // Fallback: if input ID not found, try label only
+        const labelSelector = `label[for='${inputId}']`;
+        if ((await page.locator(labelSelector).count()) > 0) {
+          await page
+            .locator(labelSelector)
+            .first()
+            .click()
+            .catch(() => { });
+        } else {
+          return {
+            success: false,
+            message: `정답 선택 요소를 찾을 수 없습니다: #${inputId}  (제품: ${productTitle})\n${href}`,
+          };
+        }
       }
+      await page.waitForTimeout(200);
     }
 
     // Submit using the confirmed submit button and take a screenshot if a popup appears
@@ -178,7 +196,7 @@ async function run({ page }: PlaywrightRunArgs) {
   } catch (_e) {
     console.error('today_quiz task error', _e && typeof _e === 'object' && 'stack' in _e ? (_e as Error).stack : _e);
     const message = _e instanceof Error ? _e.message : String(_e);
-    await sendTelegram(`❗ 오늘의 퀴즈 작업 오류: ${message}`).catch(() => {});
+    await sendTelegram(`❗ 오늘의 퀴즈 작업 오류: ${message}`).catch(() => { });
     return { success: false, message: `오늘의 퀴즈 작업 오류: ${message}` };
   }
 }
