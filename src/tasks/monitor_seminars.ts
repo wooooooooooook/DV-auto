@@ -3,6 +3,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { safeGoto, sendNotificationToChannel, sendTelegram, getSeminarIdFromUrl } from '../modules/utils';
 import * as storage from '../services/storage';
+import { processSeminarQuiz } from './seminar_quiz';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const BASE_URL = 'https://www.doctorville.co.kr';
@@ -34,7 +35,7 @@ async function checkSurveyExistence(context: BrowserContext, url: string): Promi
   const page = await context.newPage();
   try {
     await safeGoto(page, url, { waitUntil: 'domcontentloaded', timeout: 15000 });
-    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => { });
 
     // Check for "설문참여" button
     const surveyBtn = page.locator('text="설문참여"').first();
@@ -51,7 +52,7 @@ async function checkSurveyExistence(context: BrowserContext, url: string): Promi
     // But if we error out, maybe we shouldn't suppress the end notification.
     return true;
   } finally {
-    await page.close().catch(() => {});
+    await page.close().catch(() => { });
   }
 }
 
@@ -86,7 +87,60 @@ async function isSeminarEnded(
     );
     return false;
   } finally {
-    await detailPage.close().catch(() => {});
+    await detailPage.close().catch(() => { });
+  }
+}
+
+/**
+ * 세미나 종료 후 설문참여 버튼을 클릭하고 퀴즈를 처리하는 함수
+ */
+async function handleSeminarEndAndQuiz(
+  context: BrowserContext,
+  seminar: { name: string; seminarId: string | null },
+  fallbackUrl: string,
+  replyToMessageId?: number | null,
+): Promise<void> {
+  const targetUrl = seminar.seminarId ? `${SEMINAR_DETAIL_PAGE}${seminar.seminarId}` : fallbackUrl;
+  const surveyPage = await context.newPage();
+
+  try {
+    await safeGoto(surveyPage, targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    await surveyPage.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => { });
+
+    // "설문참여" 버튼 찾기
+    const surveyBtn = surveyPage.locator('text="설문참여"').first();
+    const isSurveyButtonVisible = await surveyBtn.isVisible({ timeout: 3000 }).catch(() => false);
+
+    if (isSurveyButtonVisible) {
+      console.log(`[monitor_seminars] "설문참여" 버튼 발견, 클릭 (${seminar.name})`);
+      await surveyBtn.click().catch(() => { });
+      await surveyPage.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => { });
+      await surveyPage.waitForTimeout(1000); // 페이지 로드 대기
+
+      // "설문 참여하기" 버튼이 추가로 나타날 수 있음
+      const surveyStartBtn = surveyPage.locator('text="설문 참여하기"').first();
+      const isSurveyStartVisible = await surveyStartBtn.isVisible({ timeout: 2000 }).catch(() => false);
+      if (isSurveyStartVisible) {
+        console.log(`[monitor_seminars] "설문 참여하기" 버튼 발견, 클릭 (${seminar.name})`);
+        await surveyStartBtn.click().catch(() => { });
+        await surveyPage.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => { });
+        await surveyPage.waitForTimeout(1000);
+      }
+
+      // 퀴즈 처리 (댓글로 결과 전송)
+      await processSeminarQuiz(surveyPage, seminar.name, replyToMessageId);
+    } else {
+      console.log(`[monitor_seminars] "설문참여" 버튼을 찾지 못함 (${seminar.name})`);
+      // 버튼이 없어도 현재 페이지에서 퀴즈 찾기 시도
+      await processSeminarQuiz(surveyPage, seminar.name, replyToMessageId);
+    }
+  } catch (e) {
+    console.error(
+      `[monitor_seminars] 설문/퀴즈 처리 실패 (${seminar.name})`,
+      e && typeof e === 'object' && 'stack' in e ? (e as Error).stack : e,
+    );
+  } finally {
+    await surveyPage.close().catch(() => { });
   }
 }
 
@@ -286,7 +340,10 @@ async function monitorSeminars(
               ? `${SEMINAR_DETAIL_PAGE}${mergedSeminarInfo.seminarId}`
               : url;
             const message = `**${mergedSeminarInfo.name}** 세미나가 종료되었습니다. 설문 입장해주세요.\n${targetUrl}`;
-            await sendNotificationToChannel(message);
+            const notificationMsgId = await sendNotificationToChannel(message);
+
+            // 설문참여 버튼 클릭 및 퀴즈 처리 (결과를 댓글로 달기)
+            await handleSeminarEndAndQuiz(context, mergedSeminarInfo, url, notificationMsgId);
           } else {
             console.log(
               `[monitor_seminars] Skipping end notification for ${mergedSeminarInfo.name} because it has no survey.`,
@@ -345,7 +402,7 @@ async function monitorSeminars(
       e && typeof e === 'object' && 'stack' in e ? (e as Error).stack : e,
     );
     const message = e instanceof Error ? e.message : String(e);
-    await sendTelegram(`❗ [${periodName}] 세미나 감시 작업 오류: ${message}`).catch(() => {});
+    await sendTelegram(`❗ [${periodName}] 세미나 감시 작업 오류: ${message}`).catch(() => { });
     return false;
   }
 }

@@ -13,8 +13,10 @@ import { sendNotificationToChannel } from '../modules/utils';
 const ADMIN_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const NOTICE_BOT_TOKEN = process.env.NOTICE_BOT_TOKEN;
 const QUIZ_DATA_PATH = path.join(process.cwd(), 'data/quiz.json');
+const SEMINAR_QUIZ_CHEATSHEET_PATH = path.join(process.cwd(), 'data/seminar_quiz_cheatsheet.json');
 
 type QuizMapping = Record<string, Array<string | number>>;
+type SeminarQuizCheatsheet = Record<string, string>;
 
 async function loadQuizData(): Promise<QuizMapping> {
   try {
@@ -60,6 +62,26 @@ function parseQuizAnswers(answerText: string): Array<string | number> {
   }
 }
 
+// --- Seminar Quiz Cheatsheet Functions ---
+async function loadSeminarQuizCheatsheet(): Promise<SeminarQuizCheatsheet> {
+  try {
+    const raw = await fs.readFile(SEMINAR_QUIZ_CHEATSHEET_PATH, 'utf8');
+    return JSON.parse(raw) as SeminarQuizCheatsheet;
+  } catch (error) {
+    logger.warn('세미나 퀴즈 족보 로드 실패, 빈 객체 반환', error);
+    return {};
+  }
+}
+
+async function saveSeminarQuizCheatsheet(data: SeminarQuizCheatsheet): Promise<void> {
+  try {
+    await fs.writeFile(SEMINAR_QUIZ_CHEATSHEET_PATH, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
+  } catch (error) {
+    logger.error('세미나 퀴즈 족보 저장 실패', error);
+    throw new Error('세미나 퀴즈 족보 파일을 저장할 수 없습니다.');
+  }
+}
+
 if (!ADMIN_BOT_TOKEN) {
   logger.warn('TELEGRAM_BOT_TOKEN is not set. The admin bot will not be initialized.');
 }
@@ -77,7 +99,7 @@ if (adminBot) {
   setBot('admin', adminBot);
   adminBot.catch((err, ctx) => {
     logger.error(`Admin Bot Error for ${ctx.updateType}`, err);
-    ctx.reply('오류가 발생했습니다. 로그를 확인해주세요.').catch(() => {});
+    ctx.reply('오류가 발생했습니다. 로그를 확인해주세요.').catch(() => { });
   });
   adminBot.start((ctx) => ctx.reply('Welcome, Admin!'));
 }
@@ -129,7 +151,7 @@ if (adminBot) {
             );
             if ((result as { imagePath?: string }).imagePath) {
               await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
+              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => { });
             }
           } else if (typeof result === 'string') {
             await ctx.reply(result);
@@ -169,7 +191,7 @@ if (adminBot) {
             );
             if ((result as { imagePath?: string }).imagePath) {
               await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
+              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => { });
             }
           } else if (typeof result === 'string') {
             await ctx.reply(result);
@@ -280,7 +302,7 @@ if (adminBot) {
             );
             if ((result as { imagePath?: string }).imagePath) {
               await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
+              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => { });
             }
           } else if (typeof result === 'string') {
             await ctx.reply(result);
@@ -300,6 +322,83 @@ if (adminBot) {
     }
   });
 
+  // --- Seminar Quiz Cheatsheet Commands ---
+  adminBot.command('add_seminar_quiz', async (ctx) => {
+    logger.info('User requested to add seminar quiz answer', { from: ctx.from?.username });
+    const messageText = ctx.message?.text || '';
+    const argsText = messageText.replace(/^\/add_seminar_quiz\s*/, '');
+
+    // Format: /add_seminar_quiz <키워드> | <정답>
+    const parts = argsText.split('|').map((p) => p.trim());
+    if (parts.length !== 2 || !parts[0] || !parts[1]) {
+      return ctx.reply('사용법: /add_seminar_quiz <문제 키워드> | <정답 키워드>\n예) /add_seminar_quiz 펙수클루의 적응증이 아닌 | 과민성 대장증후군');
+    }
+
+    const [keyword, answer] = parts;
+
+    try {
+      const data = await loadSeminarQuizCheatsheet();
+      data[keyword] = answer;
+      await saveSeminarQuizCheatsheet(data);
+
+      await ctx.reply(`✅ 세미나 퀴즈 족보 등록 완료\n\n키워드: ${keyword}\n정답: ${answer}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error('세미나 퀴즈 족보 등록 실패', error);
+      await ctx.reply(`❌ 족보 등록 실패: ${message}`);
+    }
+  });
+
+  adminBot.command('list_seminar_quiz', async (ctx) => {
+    logger.info('User requested to list seminar quiz cheatsheet', { from: ctx.from?.username });
+
+    try {
+      const data = await loadSeminarQuizCheatsheet();
+      const entries = Object.entries(data);
+
+      if (entries.length === 0) {
+        return ctx.reply('📋 등록된 세미나 퀴즈 족보가 없습니다.');
+      }
+
+      let message = `📋 세미나 퀴즈 족보 (${entries.length}개)\n\n`;
+      for (const [keyword, answer] of entries) {
+        message += `• ${keyword} → ${answer}\n`;
+      }
+
+      await ctx.reply(message);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await ctx.reply(`❌ 족보 조회 실패: ${message}`);
+    }
+  });
+
+  adminBot.command('delete_seminar_quiz', async (ctx) => {
+    logger.info('User requested to delete seminar quiz answer', { from: ctx.from?.username });
+    const messageText = ctx.message?.text || '';
+    const keyword = messageText.replace(/^\/delete_seminar_quiz\s*/, '').trim();
+
+    if (!keyword) {
+      return ctx.reply('사용법: /delete_seminar_quiz <문제 키워드>\n예) /delete_seminar_quiz 펙수클루의 적응증이 아닌');
+    }
+
+    try {
+      const data = await loadSeminarQuizCheatsheet();
+      if (!(keyword in data)) {
+        return ctx.reply(`❌ 해당 키워드가 족보에 없습니다: ${keyword}`);
+      }
+
+      const deletedAnswer = data[keyword];
+      delete data[keyword];
+      await saveSeminarQuizCheatsheet(data);
+
+      await ctx.reply(`🗑️ 세미나 퀴즈 족보 삭제 완료\n\n키워드: ${keyword}\n정답: ${deletedAnswer}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error('세미나 퀴즈 족보 삭제 실패', error);
+      await ctx.reply(`❌ 족보 삭제 실패: ${message}`);
+    }
+  });
+
   adminBot.command('help', (ctx) => {
     const message = `사용 가능한 명령어:
 
@@ -309,12 +408,16 @@ if (adminBot) {
 - /naverpay_point_exchange: 네이버페이포인트교환 작업을 실행합니다.
 - /add_quiz_answer: 오늘의 퀴즈 정답을 등록합니다. 예) /add_quiz_answer 시너지아정 [1,2,3]
 - /broadcast_today_links: 즉시 오늘의 링크를 채널에 공지합니다.
-- /inspect <url> <selector> [waitUntil]: 지정한 URL에서 셀렉터에 해당하는 요소를 검사하고 스크린샷을 전송합니다. (waitUntil: load, domcontentloaded, networkidle, commit)
+- /inspect <url> <selector> [waitUntil]: 지정한 URL에서 셀렉터에 해당하는 요소를 검사하고 스크린샷을 전송합니다.
 - /5days_seminar_check: 향후 5일간의 세미나 일정을 확인합니다.
 - /today_links: 오늘의 세미나와 퀴즈 링크, 출석 링크를 한 번에 가져옵니다.
-- /broadcast_today_links: 오늘의 링크를 채널에 공지합니다.
 - /monitor_lunch_seminar_now: 즉시 점심 세미나 모니터링을 시작합니다.
 - /monitor_dinner_seminar_now: 즉시 저녁 세미나 모니터링을 시작합니다.
+
+📚 세미나 퀴즈 족보:
+- /add_seminar_quiz <키워드> | <정답>: 족보 등록
+- /list_seminar_quiz: 등록된 족보 목록
+- /delete_seminar_quiz <키워드>: 족보 삭제
 
 명령어 사용 예: /inspect https://example.com "div.article" networkidle`;
     ctx.reply(message);
@@ -340,7 +443,7 @@ if (adminBot) {
             );
             if ((result as { imagePath?: string }).imagePath) {
               await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
+              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => { });
             }
           } else if (typeof result === 'string') {
             await ctx.reply(result);
@@ -380,7 +483,7 @@ if (adminBot) {
             );
             if ((result as { imagePath?: string }).imagePath) {
               await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
+              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => { });
             }
           } else if (typeof result === 'string') {
             await ctx.reply(result);
@@ -506,7 +609,7 @@ const seminarCheck5Days = async (ctx: Context) => {
           );
           if ((result as { imagePath?: string }).imagePath) {
             await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-            await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
+            await fs.unlink((result as { imagePath: string }).imagePath).catch(() => { });
           }
         } else if (typeof result === 'string') {
           await ctx.reply(result);

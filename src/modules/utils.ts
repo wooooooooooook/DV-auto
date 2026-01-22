@@ -62,17 +62,17 @@ async function sendNotificationToChannel(
   text: string,
   imagePath: string | null = null,
   options: SendMessageOptions | SendPhotoOptions = {},
-): Promise<void> {
+): Promise<number | null> {
   const bot = getBot('notice');
   if (!bot) {
     console.error('Notice bot is not initialized. Cannot send message.');
-    return;
+    return null;
   }
 
   const CHANNEL_ID = process.env.NOTICE_CHANNEL_ID;
   if (!CHANNEL_ID) {
     console.error('NOTICE_CHANNEL_ID is not set.');
-    return;
+    return null;
   }
 
   const baseOptions: SendMessageOptions | SendPhotoOptions = { ...(options as SendMessageOptions | SendPhotoOptions) };
@@ -84,9 +84,11 @@ async function sendNotificationToChannel(
   try {
     if (imagePath) {
       const photoOptions: SendPhotoOptions = { ...messageOptions, caption: text } as SendPhotoOptions;
-      await bot.telegram.sendPhoto(CHANNEL_ID, { source: imagePath }, photoOptions);
+      const result = await bot.telegram.sendPhoto(CHANNEL_ID, { source: imagePath }, photoOptions);
+      return result.message_id;
     } else {
-      await bot.telegram.sendMessage(CHANNEL_ID, text, messageOptions as SendMessageOptions);
+      const result = await bot.telegram.sendMessage(CHANNEL_ID, text, messageOptions as SendMessageOptions);
+      return result.message_id;
     }
   } catch (error) {
     console.error('Failed to send Telegram notification to channel:', error);
@@ -97,11 +99,12 @@ async function sendNotificationToChannel(
 
       if (imagePath) {
         const fallbackPhotoOptions: SendPhotoOptions = { ...plainOptions, caption: text } as SendPhotoOptions;
-        await bot.telegram.sendPhoto(CHANNEL_ID, { source: imagePath }, fallbackPhotoOptions);
+        const result = await bot.telegram.sendPhoto(CHANNEL_ID, { source: imagePath }, fallbackPhotoOptions);
+        return result.message_id;
       } else {
-        await bot.telegram.sendMessage(CHANNEL_ID, text, plainOptions as SendMessageOptions);
+        const result = await bot.telegram.sendMessage(CHANNEL_ID, text, plainOptions as SendMessageOptions);
+        return result.message_id;
       }
-      return;
     } catch (fallbackError) {
       console.error('Failed to send escaped Telegram notification to channel:', fallbackError);
     }
@@ -113,6 +116,7 @@ async function sendNotificationToChannel(
       console.error('Failed to send the failure notification as well:', nestedError);
     }
   }
+  return null;
 }
 
 async function saveCookies(context: BrowserContext): Promise<void> {
@@ -180,7 +184,7 @@ async function loadLocalStorage(page: Page, targetUrl: string): Promise<boolean>
     try {
       const cur = page.url();
       if (!cur || !cur.startsWith(origin)) {
-        await page.goto(origin, { waitUntil: 'domcontentloaded', timeout: 8000 }).catch(() => {});
+        await page.goto(origin, { waitUntil: 'domcontentloaded', timeout: 8000 }).catch(() => { });
       }
     } catch (_e) {
       // ignore navigation errors, we'll still try to set items
@@ -284,12 +288,12 @@ async function ensureLoggedIn({ page, context }: { page: Page; context: BrowserC
   }
 
   try {
-    await loadCookies(context).catch(() => {});
+    await loadCookies(context).catch(() => { });
   } catch (_e) {
     /* ignore */
   }
   try {
-    await loadLocalStorage(page, LOGIN_URL).catch(() => {});
+    await loadLocalStorage(page, LOGIN_URL).catch(() => { });
   } catch (_e) {
     /* ignore */
   }
@@ -331,7 +335,7 @@ const analyticsBlockedPages = new WeakSet<Page>();
 function setupAnalyticsBlock(page: Page): void {
   if (analyticsBlockedPages.has(page)) return;
   try {
-    page.route('**/dev-analytics.villeway.com/**', (route) => route.abort().catch(() => {}));
+    page.route('**/dev-analytics.villeway.com/**', (route) => route.abort().catch(() => { }));
     analyticsBlockedPages.add(page);
   } catch (_e) {
     console.error('setupAnalyticsBlock failed', _e);
