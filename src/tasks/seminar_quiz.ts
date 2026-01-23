@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import type { Page } from 'playwright';
-import { sendTelegram, sendNotificationToChannel } from '../modules/utils';
+import { sendTelegram } from '../modules/utils';
 
 const CHEATSHEET_PATH = path.join(process.cwd(), 'data/seminar_quiz_cheatsheet.json');
 
@@ -172,6 +172,11 @@ async function processSeminarQuiz(page: Page, seminarName?: string, replyToMessa
         await page
             .waitForSelector('.whitespace-pre-wrap:has(span:text("[퀴즈]"))', { timeout: 5000 })
             .catch(() => { });
+        const screenshotDir = path.join(process.cwd(), 'screenshot');
+        await fs.mkdir(screenshotDir, { recursive: true });
+        const quizScreenshotPath = path.join(screenshotDir, `seminar_quiz_${Date.now()}.png`);
+        await page.screenshot({ path: quizScreenshotPath, fullPage: true }).catch(() => { });
+        await sendTelegram('🖼️ 세미나 퀴즈 페이지 스크린샷', quizScreenshotPath);
         // 퀴즈 문제 파싱
         const questions = await parseQuizQuestions(page);
 
@@ -179,11 +184,11 @@ async function processSeminarQuiz(page: Page, seminarName?: string, replyToMessa
             const message = seminarName
                 ? `ℹ️ ${seminarName} 설문 페이지에서 퀴즈를 찾지 못했습니다.`
                 : 'ℹ️ 설문 페이지에서 퀴즈를 찾지 못했습니다.';
-            if (replyToMessageId) {
-                await sendNotificationToChannel(message, null, { reply_parameters: { message_id: replyToMessageId } });
-            } else {
-                await sendTelegram(message);
-            }
+            // notice bot reply 비활성화 (replyToMessageId 사용 중단)
+            // if (replyToMessageId) {
+            //   await sendNotificationToChannel(message, null, { reply_parameters: { message_id: replyToMessageId } });
+            // }
+            await sendTelegram(message);
             return { success: true, message };
         }
 
@@ -260,11 +265,11 @@ async function processSeminarQuiz(page: Page, seminarName?: string, replyToMessa
         const resultMessage = formatQuizResults(results, hasUnknown, hasMultipleMatches);
 
         // replyToMessageId가 있으면 notice 채널에 댓글로, 없으면 admin_bot에 전송
-        if (replyToMessageId) {
-            await sendNotificationToChannel(resultMessage, null, { reply_parameters: { message_id: replyToMessageId } });
-        } else {
-            await sendTelegram(resultMessage);
-        }
+        // notice bot reply 비활성화 (replyToMessageId 사용 중단)
+        // if (replyToMessageId) {
+        //   await sendNotificationToChannel(resultMessage, null, { reply_parameters: { message_id: replyToMessageId } });
+        // }
+        await sendTelegram(resultMessage);
 
         // 미등록 문제가 있으면 추가 정보 전송 (admin_bot에)
         if (hasUnknown) {
