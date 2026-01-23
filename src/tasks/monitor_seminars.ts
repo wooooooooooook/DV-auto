@@ -31,11 +31,22 @@ type SeminarBucketKey = 'lunchSeminarIds' | 'dinnerSeminarIds';
 
 const seoulDateString = (): string => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
 
-async function checkSurveyExistence(context: BrowserContext, url: string): Promise<boolean> {
+type SeminarSurveyMeta = {
+  hasSurvey: boolean;
+  isSurveyPointExcluded: boolean;
+};
+
+async function checkSurveyMeta(context: BrowserContext, url: string): Promise<SeminarSurveyMeta> {
   const page = await context.newPage();
   try {
     await safeGoto(page, url, { waitUntil: 'domcontentloaded', timeout: 15000 });
     await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => { });
+
+    const isSurveyPointExcluded = await page
+      .locator('text="설문 포인트가 지급되지 않는"')
+      .first()
+      .isVisible({ timeout: 3000 })
+      .catch(() => false);
 
     // Check for "설문참여" button
     const surveyBtn = page.locator('text="설문참여"').first();
@@ -45,12 +56,15 @@ async function checkSurveyExistence(context: BrowserContext, url: string): Promi
     const surveyBadge = page.locator('.seminar-badge', { hasText: '설문' }).first();
     const isSurveyBadgeVisible = await surveyBadge.isVisible({ timeout: 5000 }).catch(() => false);
 
-    return isSurveyButtonVisible || isSurveyBadgeVisible;
+    return {
+      hasSurvey: isSurveyButtonVisible || isSurveyBadgeVisible,
+      isSurveyPointExcluded,
+    };
   } catch (e) {
-    console.warn(`[checkSurveyExistence] Failed to check survey for ${url}`, e);
+    console.warn(`[checkSurveyMeta] Failed to check survey for ${url}`, e);
     // If check fails, assume it exists to be safe (or false? User wants to suppress if *missing*. Safe default is true.)
     // But if we error out, maybe we shouldn't suppress the end notification.
-    return true;
+    return { hasSurvey: true, isSurveyPointExcluded: false };
   } finally {
     await page.close().catch(() => { });
   }
@@ -242,7 +256,14 @@ async function monitorSeminars(
         const targetUrl = seminarId ? `${SEMINAR_DETAIL_PAGE}${seminarId}` : url;
 
         // Check for survey existence
-        const hasSurvey = await checkSurveyExistence(context, targetUrl);
+        const { hasSurvey, isSurveyPointExcluded } = await checkSurveyMeta(context, targetUrl);
+        if (isSurveyPointExcluded) {
+          console.log(
+            `[monitor_seminars] Skipping monitoring for ${name} because survey points are excluded.`,
+          );
+          delete monitoringList[url];
+          continue;
+        }
         monitoringList[url].hasSurvey = hasSurvey;
         monitoringList[url].isEntryStarted = true;
 
@@ -363,7 +384,14 @@ async function monitorSeminars(
           const targetUrl = mergedSeminarInfo.seminarId ? `${SEMINAR_DETAIL_PAGE}${mergedSeminarInfo.seminarId}` : url;
 
           // Check for survey existence
-          const hasSurvey = await checkSurveyExistence(context, targetUrl);
+          const { hasSurvey, isSurveyPointExcluded } = await checkSurveyMeta(context, targetUrl);
+          if (isSurveyPointExcluded) {
+            console.log(
+              `[monitor_seminars] Skipping monitoring for ${newName} because survey points are excluded.`,
+            );
+            delete monitoringList[url];
+            continue;
+          }
 
           let message = `**${newName}** 세미나 입장이 시작되었습니다.`;
           if (!hasSurvey) {
