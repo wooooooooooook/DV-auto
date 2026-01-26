@@ -294,11 +294,11 @@ async function monitorSeminars(
         monitoringList[url].hasSurvey = hasSurvey;
         monitoringList[url].isEntryStarted = true;
 
-        let message = `**${name}** 세미나 입장이 시작되었습니다.`;
+        let message = `🟢세미나시작\n**${name}**\n${targetUrl}`;
         if (!hasSurvey) {
-          message += ` (설문이 없는 세미나인 것 같습니다)`;
+          message += `\n(설문이 없는 세미나인 것 같습니다)`;
         }
-        await sendNotificationToChannel(`${message}\n${targetUrl}`);
+        await sendNotificationToChannel(message);
       }
     }
 
@@ -389,7 +389,7 @@ async function monitorSeminars(
               : url;
             const quizResultMessage = await handleSeminarEndAndQuiz(context, mergedSeminarInfo, url);
             const quizSuffix = quizResultMessage ? `\n\n${quizResultMessage}` : '';
-            const message = `**${mergedSeminarInfo.name}** 세미나가 종료되었습니다. 설문 입장해주세요.\n${targetUrl}${quizSuffix}`;
+            const message = `🔴세미나종료\n**${mergedSeminarInfo.name}**\n${targetUrl}${quizSuffix}`;
             await sendNotificationToChannel(message);
           } else {
             console.log(
@@ -419,11 +419,11 @@ async function monitorSeminars(
             continue;
           }
 
-          let message = `**${newName}** 세미나 입장이 시작되었습니다.`;
+          let message = `🟢세미나시작\n**${newName}**\n${targetUrl}`;
           if (!hasSurvey) {
-            message += ` (설문이 없는 세미나인 것 같습니다)`;
+            message += `\n(설문이 없는 세미나인 것 같습니다)`;
           }
-          await sendNotificationToChannel(`${message}\n${targetUrl}`);
+          await sendNotificationToChannel(message);
 
           // Update hasSurvey in merged info so it gets saved to monitoringList
           mergedSeminarInfo.hasSurvey = hasSurvey;
