@@ -112,12 +112,12 @@ async function handleSeminarEndAndQuiz(
   context: BrowserContext,
   seminar: { name: string; seminarId: string | null },
   fallbackUrl: string,
-  replyToMessageId?: number | null,
-): Promise<void> {
+): Promise<string | null> {
   const targetUrl = seminar.seminarId ? `${SEMINAR_DETAIL_PAGE}${seminar.seminarId}` : fallbackUrl;
   const surveyPage = await context.newPage();
   let popupPage: Page | null = null;
   let quizPage: Page = surveyPage;
+  let quizResultMessage: string | null = null;
 
   try {
     await safeGoto(surveyPage, targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
@@ -159,11 +159,17 @@ async function handleSeminarEndAndQuiz(
       }
 
       // 퀴즈 처리 (댓글로 결과 전송)
-      await processSeminarQuiz(quizPage, seminar.name, replyToMessageId);
+      const quizResult = await processSeminarQuiz(quizPage, seminar.name);
+      if (quizResult.success && quizResult.hasQuizResult) {
+        quizResultMessage = quizResult.message;
+      }
     } else {
       console.log(`[monitor_seminars] "설문참여" 버튼을 찾지 못함 (${seminar.name})`);
       // 버튼이 없어도 현재 페이지에서 퀴즈 찾기 시도
-      await processSeminarQuiz(quizPage, seminar.name, replyToMessageId);
+      const quizResult = await processSeminarQuiz(quizPage, seminar.name);
+      if (quizResult.success && quizResult.hasQuizResult) {
+        quizResultMessage = quizResult.message;
+      }
     }
   } catch (e) {
     console.error(
@@ -176,6 +182,7 @@ async function handleSeminarEndAndQuiz(
     }
     await surveyPage.close().catch(() => { });
   }
+  return quizResultMessage;
 }
 
 function getStoredSeminarsForToday(todayIsoDate: string): StoredSeminarIds | null {
@@ -380,11 +387,10 @@ async function monitorSeminars(
             const targetUrl = mergedSeminarInfo.seminarId
               ? `${SEMINAR_DETAIL_PAGE}${mergedSeminarInfo.seminarId}`
               : url;
-            const message = `**${mergedSeminarInfo.name}** 세미나가 종료되었습니다. 설문 입장해주세요.\n${targetUrl}`;
-            const notificationMsgId = await sendNotificationToChannel(message);
-
-            // 설문참여 버튼 클릭 및 퀴즈 처리 (결과를 댓글로 달기)
-            await handleSeminarEndAndQuiz(context, mergedSeminarInfo, url, notificationMsgId);
+            const quizResultMessage = await handleSeminarEndAndQuiz(context, mergedSeminarInfo, url);
+            const quizSuffix = quizResultMessage ? `\n\n${quizResultMessage}` : '';
+            const message = `**${mergedSeminarInfo.name}** 세미나가 종료되었습니다. 설문 입장해주세요.\n${targetUrl}${quizSuffix}`;
+            await sendNotificationToChannel(message);
           } else {
             console.log(
               `[monitor_seminars] Skipping end notification for ${mergedSeminarInfo.name} because it has no survey.`,

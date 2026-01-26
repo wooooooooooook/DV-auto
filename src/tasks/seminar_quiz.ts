@@ -162,21 +162,22 @@ function formatUnknownQuestions(questions: QuizQuestion[], results: QuizResult[]
     return message;
 }
 
+type SeminarQuizResult = {
+    success: boolean;
+    hasQuizResult: boolean;
+    message: string;
+};
+
 /**
  * 세미나 퀴즈 처리 메인 함수
  * 설문참여 페이지에서 퀴즈를 감지하고 정답을 찾아 보고
  */
-async function processSeminarQuiz(page: Page, seminarName?: string, replyToMessageId?: number | null) {
+async function processSeminarQuiz(page: Page, seminarName?: string): Promise<SeminarQuizResult> {
     try {
         await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => { });
         await page
             .waitForSelector('.whitespace-pre-wrap:has(span:text("[퀴즈]"))', { timeout: 5000 })
             .catch(() => { });
-        const screenshotDir = path.join(process.cwd(), 'screenshot');
-        await fs.mkdir(screenshotDir, { recursive: true });
-        const quizScreenshotPath = path.join(screenshotDir, `seminar_quiz_${Date.now()}.png`);
-        await page.screenshot({ path: quizScreenshotPath, fullPage: true }).catch(() => { });
-        await sendTelegram('🖼️ 세미나 퀴즈 페이지 스크린샷', quizScreenshotPath);
         // 퀴즈 문제 파싱
         const questions = await parseQuizQuestions(page);
 
@@ -184,12 +185,8 @@ async function processSeminarQuiz(page: Page, seminarName?: string, replyToMessa
             const message = seminarName
                 ? `ℹ️ ${seminarName} 설문 페이지에서 퀴즈를 찾지 못했습니다.`
                 : 'ℹ️ 설문 페이지에서 퀴즈를 찾지 못했습니다.';
-            // notice bot reply 비활성화 (replyToMessageId 사용 중단)
-            // if (replyToMessageId) {
-            //   await sendNotificationToChannel(message, null, { reply_parameters: { message_id: replyToMessageId } });
-            // }
             await sendTelegram(message);
-            return { success: true, message };
+            return { success: true, hasQuizResult: false, message };
         }
 
         // 족보 로드
@@ -207,7 +204,7 @@ async function processSeminarQuiz(page: Page, seminarName?: string, replyToMessa
                 message += '\n';
             }
             await sendTelegram(message);
-            return { success: true, message };
+            return { success: true, hasQuizResult: false, message };
         }
 
         // 각 문제에 대해 정답 찾기
@@ -264,12 +261,7 @@ async function processSeminarQuiz(page: Page, seminarName?: string, replyToMessa
         // 결과 메시지 생성 및 전송
         const resultMessage = formatQuizResults(results, hasUnknown, hasMultipleMatches);
 
-        // replyToMessageId가 있으면 notice 채널에 댓글로, 없으면 admin_bot에 전송
-        // notice bot reply 비활성화 (replyToMessageId 사용 중단)
-        // if (replyToMessageId) {
-        //   await sendNotificationToChannel(resultMessage, null, { reply_parameters: { message_id: replyToMessageId } });
-        // }
-        await sendTelegram(resultMessage);
+        // 퀴즈 결과는 세미나 종료 메시지에 붙여서 보냅니다.
 
         // 미등록 문제가 있으면 추가 정보 전송 (admin_bot에)
         if (hasUnknown) {
@@ -277,12 +269,12 @@ async function processSeminarQuiz(page: Page, seminarName?: string, replyToMessa
             await sendTelegram(unknownMessage);
         }
 
-        return { success: true, message: resultMessage };
+        return { success: true, hasQuizResult: true, message: resultMessage };
     } catch (e) {
         console.error('[seminar_quiz] 오류', e && typeof e === 'object' && 'stack' in e ? (e as Error).stack : e);
         const message = e instanceof Error ? e.message : String(e);
         await sendTelegram(`❗ 세미나 퀴즈 처리 오류: ${message}`).catch(() => { });
-        return { success: false, message: `세미나 퀴즈 처리 오류: ${message}` };
+        return { success: false, hasQuizResult: false, message: `세미나 퀴즈 처리 오류: ${message}` };
     }
 }
 
