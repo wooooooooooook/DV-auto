@@ -2,6 +2,7 @@ import quizMapping from '../../data/quiz.json';
 import type { PlaywrightRunArgs } from '../types';
 import { safeGoto, getSeminarIdFromUrl } from '../modules/utils';
 import * as storage from '../services/storage';
+import { loadCheatsheet, findMatchingKeywords, findOptionByAnswer, type QuizQuestion } from './seminar_quiz';
 
 const QUIZ_LIST_URLS = [
   'https://www.doctorville.co.kr/product/medicineList',
@@ -25,6 +26,78 @@ type StoredNewSeminars = {
 };
 const TODAY_SEMINAR_KEY = 'today_seminars';
 const NEW_SEMINAR_KEY = 'apply_seminar:new_seminars';
+
+async function parseTodayQuizQuestions(page: PlaywrightRunArgs['page']): Promise<QuizQuestion[]> {
+  const questions: QuizQuestion[] = [];
+
+  const areaSelector = '#questionArea .question_area';
+  const areas = await page.locator(areaSelector).all();
+
+  for (const area of areas) {
+    const questionText = await area
+      .locator('.txt_question')
+      .innerText()
+      .catch(() => '');
+    const options: QuizQuestion['options'] = [];
+
+    const choiceItems = await area.locator('.question_choice li').all();
+    for (let i = 0; i < choiceItems.length; i++) {
+      const item = choiceItems[i];
+      const label = item.locator('label');
+      const input = item.locator('input[type="radio"]');
+
+      const text = await label.innerText().catch(() => '');
+      const value = (await input.getAttribute('value')) || '';
+
+      options.push({
+        index: i + 1,
+        text: text.trim(),
+        value,
+      });
+    }
+
+    if (questionText) {
+      questions.push({
+        questionText: questionText.trim(),
+        options,
+      });
+    }
+  }
+
+  return questions;
+}
+
+async function findAnswersByCheatsheet(page: PlaywrightRunArgs['page']): Promise<Array<string | number> | null> {
+  try {
+    const cheatsheet = await loadCheatsheet();
+    if (Object.keys(cheatsheet).length === 0) return null;
+
+    const questions = await parseTodayQuizQuestions(page);
+    if (questions.length === 0) return null;
+
+    const result: Array<string | number> = [];
+    for (const q of questions) {
+      console.log(`[today_links] 매칭 시도 문제: ${q.questionText.substring(0, 30)}...`);
+      const matches = findMatchingKeywords(q.questionText, cheatsheet);
+      if (matches.length > 0) {
+        const chosenKeyword = matches[0];
+        const answerKeyword = cheatsheet[chosenKeyword];
+        const option = findOptionByAnswer(q.options, answerKeyword);
+        if (option) {
+          console.log(`[today_links] 매칭 성공: ${chosenKeyword} -> ${answerKeyword} (보기 ${option.index}번)`);
+          result.push(option.index);
+          continue;
+        }
+      }
+      console.warn(`[today_links] 문제에 대한 정답을 찾지 못했습니다: ${q.questionText.substring(0, 50)}...`);
+      return null;
+    }
+    return result;
+  } catch (e) {
+    console.error('[today_links] 족보 매칭 중 오류', e);
+    return null;
+  }
+}
 
 function getTodayDateStrings() {
   const opts = { timeZone: 'Asia/Seoul' as const };
@@ -98,7 +171,12 @@ async function collectQuizInfo(page: PlaywrightRunArgs['page']): Promise<QuizInf
           ).trim()
         : '';
     const mapping = quizMapping as Record<string, Array<string | number>>;
-    const answers = productTitle && mapping[productTitle];
+    let answers = productTitle && mapping[productTitle];
+
+    if (!answers || !Array.isArray(answers) || answers.length === 0) {
+      console.log(`[today_links] "${productTitle}"에 대한 정답이 quiz.json에 없습니다. 족보에서 찾기를 시도합니다.`);
+      answers = (await findAnswersByCheatsheet(page)) || [];
+    }
 
     return {
       link: href,
