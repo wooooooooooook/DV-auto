@@ -26,7 +26,7 @@ const HEADLESS = (process.env.HEADLESS || 'true').toLowerCase() === 'true';
 // Daily schedule: 08:00 Asia/Seoul (cron: minute hour day month weekday)
 const TIMEZONE = process.env.SCHEDULE_TZ || 'Asia/Seoul';
 const DAILY_ROUTINE_CRON = process.env.DAILY_CRON || '1 0 * * *';
-const BROADCAST_TODAY_LINKS_CRON = '59 10 * * *';
+const BROADCAST_TODAY_LINKS_CRON = '0 9 * * *';
 const LUNCH_MONITOR_CRON = '0 11 * * *';
 const DINNER_MONITOR_CRON = '0 17 * * *';
 const MONITOR_RESUME_DURATION_HOURS = 5;
@@ -224,7 +224,7 @@ taskRegistry.registerTask(naverpayPointExchange);
 
 const broadcastTodayLinksTask: Task = {
   name: 'broadcast_today_links_daily',
-  schedule: BROADCAST_TODAY_LINKS_CRON, // Every day at 10:59
+  schedule: BROADCAST_TODAY_LINKS_CRON, // Every day at 09:00
   timezone: TIMEZONE,
   run: async () => {
     logger.info('broadcast_today_links_daily: running scheduled task');

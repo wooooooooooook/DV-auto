@@ -31,11 +31,22 @@ type SeminarBucketKey = 'lunchSeminarIds' | 'dinnerSeminarIds';
 
 const seoulDateString = (): string => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
 
-async function checkSurveyExistence(context: BrowserContext, url: string): Promise<boolean> {
+type SeminarSurveyMeta = {
+  hasSurvey: boolean;
+  isSurveyPointExcluded: boolean;
+};
+
+async function checkSurveyMeta(context: BrowserContext, url: string): Promise<SeminarSurveyMeta> {
   const page = await context.newPage();
   try {
     await safeGoto(page, url, { waitUntil: 'domcontentloaded', timeout: 15000 });
     await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => { });
+
+    const isSurveyPointExcluded = await page
+      .locator('text="설문 포인트가 지급되지 않는"')
+      .first()
+      .isVisible({ timeout: 3000 })
+      .catch(() => false);
 
     // Check for "설문참여" button
     const surveyBtn = page.locator('text="설문참여"').first();
@@ -45,12 +56,15 @@ async function checkSurveyExistence(context: BrowserContext, url: string): Promi
     const surveyBadge = page.locator('.seminar-badge', { hasText: '설문' }).first();
     const isSurveyBadgeVisible = await surveyBadge.isVisible({ timeout: 5000 }).catch(() => false);
 
-    return isSurveyButtonVisible || isSurveyBadgeVisible;
+    return {
+      hasSurvey: isSurveyButtonVisible || isSurveyBadgeVisible,
+      isSurveyPointExcluded,
+    };
   } catch (e) {
-    console.warn(`[checkSurveyExistence] Failed to check survey for ${url}`, e);
+    console.warn(`[checkSurveyMeta] Failed to check survey for ${url}`, e);
     // If check fails, assume it exists to be safe (or false? User wants to suppress if *missing*. Safe default is true.)
     // But if we error out, maybe we shouldn't suppress the end notification.
-    return true;
+    return { hasSurvey: true, isSurveyPointExcluded: false };
   } finally {
     await page.close().catch(() => { });
   }
@@ -98,10 +112,12 @@ async function handleSeminarEndAndQuiz(
   context: BrowserContext,
   seminar: { name: string; seminarId: string | null },
   fallbackUrl: string,
-  replyToMessageId?: number | null,
-): Promise<void> {
+): Promise<string | null> {
   const targetUrl = seminar.seminarId ? `${SEMINAR_DETAIL_PAGE}${seminar.seminarId}` : fallbackUrl;
   const surveyPage = await context.newPage();
+  let popupPage: Page | null = null;
+  let quizPage: Page = surveyPage;
+  let quizResultMessage: string | null = null;
 
   try {
     await safeGoto(surveyPage, targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
@@ -113,26 +129,47 @@ async function handleSeminarEndAndQuiz(
 
     if (isSurveyButtonVisible) {
       console.log(`[monitor_seminars] "설문참여" 버튼 발견, 클릭 (${seminar.name})`);
+      const firstPopupPromise = context.waitForEvent('page', { timeout: 5000 }).catch(() => null);
       await surveyBtn.click().catch(() => { });
-      await surveyPage.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => { });
-      await surveyPage.waitForTimeout(1000); // 페이지 로드 대기
+      popupPage = (await firstPopupPromise) || null;
+      if (popupPage) {
+        quizPage = popupPage;
+        await popupPage.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => { });
+      } else {
+        await surveyPage.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => { });
+        await surveyPage.waitForTimeout(1000); // 페이지 로드 대기
+      }
 
       // "설문 참여하기" 버튼이 추가로 나타날 수 있음
       const surveyStartBtn = surveyPage.locator('text="설문 참여하기"').first();
       const isSurveyStartVisible = await surveyStartBtn.isVisible({ timeout: 2000 }).catch(() => false);
       if (isSurveyStartVisible) {
         console.log(`[monitor_seminars] "설문 참여하기" 버튼 발견, 클릭 (${seminar.name})`);
+        const secondPopupPromise = context.waitForEvent('page', { timeout: 5000 }).catch(() => null);
         await surveyStartBtn.click().catch(() => { });
-        await surveyPage.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => { });
-        await surveyPage.waitForTimeout(1000);
+        const secondPopup = (await secondPopupPromise) || null;
+        if (secondPopup) {
+          popupPage = secondPopup;
+          quizPage = secondPopup;
+          await secondPopup.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => { });
+        } else if (!popupPage) {
+          await surveyPage.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => { });
+          await surveyPage.waitForTimeout(1000);
+        }
       }
 
       // 퀴즈 처리 (댓글로 결과 전송)
-      await processSeminarQuiz(surveyPage, seminar.name, replyToMessageId);
+      const quizResult = await processSeminarQuiz(quizPage, seminar.name);
+      if (quizResult.success && quizResult.hasQuizResult) {
+        quizResultMessage = quizResult.message;
+      }
     } else {
       console.log(`[monitor_seminars] "설문참여" 버튼을 찾지 못함 (${seminar.name})`);
       // 버튼이 없어도 현재 페이지에서 퀴즈 찾기 시도
-      await processSeminarQuiz(surveyPage, seminar.name, replyToMessageId);
+      const quizResult = await processSeminarQuiz(quizPage, seminar.name);
+      if (quizResult.success && quizResult.hasQuizResult) {
+        quizResultMessage = quizResult.message;
+      }
     }
   } catch (e) {
     console.error(
@@ -140,8 +177,12 @@ async function handleSeminarEndAndQuiz(
       e && typeof e === 'object' && 'stack' in e ? (e as Error).stack : e,
     );
   } finally {
+    if (popupPage) {
+      await popupPage.close().catch(() => { });
+    }
     await surveyPage.close().catch(() => { });
   }
+  return quizResultMessage;
 }
 
 function getStoredSeminarsForToday(todayIsoDate: string): StoredSeminarIds | null {
@@ -242,15 +283,22 @@ async function monitorSeminars(
         const targetUrl = seminarId ? `${SEMINAR_DETAIL_PAGE}${seminarId}` : url;
 
         // Check for survey existence
-        const hasSurvey = await checkSurveyExistence(context, targetUrl);
+        const { hasSurvey, isSurveyPointExcluded } = await checkSurveyMeta(context, targetUrl);
+        if (isSurveyPointExcluded) {
+          console.log(
+            `[monitor_seminars] Skipping monitoring for ${name} because survey points are excluded.`,
+          );
+          delete monitoringList[url];
+          continue;
+        }
         monitoringList[url].hasSurvey = hasSurvey;
         monitoringList[url].isEntryStarted = true;
 
-        let message = `**${name}** 세미나 입장이 시작되었습니다.`;
+        let message = `🟢세미나시작\n**${name}**\n${targetUrl}`;
         if (!hasSurvey) {
-          message += ` (설문이 없는 세미나인 것 같습니다)`;
+          message += `\n(설문이 없는 세미나인 것 같습니다)`;
         }
-        await sendNotificationToChannel(`${message}\n${targetUrl}`);
+        await sendNotificationToChannel(message);
       }
     }
 
@@ -339,11 +387,10 @@ async function monitorSeminars(
             const targetUrl = mergedSeminarInfo.seminarId
               ? `${SEMINAR_DETAIL_PAGE}${mergedSeminarInfo.seminarId}`
               : url;
-            const message = `**${mergedSeminarInfo.name}** 세미나가 종료되었습니다. 설문 입장해주세요.\n${targetUrl}`;
-            const notificationMsgId = await sendNotificationToChannel(message);
-
-            // 설문참여 버튼 클릭 및 퀴즈 처리 (결과를 댓글로 달기)
-            await handleSeminarEndAndQuiz(context, mergedSeminarInfo, url, notificationMsgId);
+            const quizResultMessage = await handleSeminarEndAndQuiz(context, mergedSeminarInfo, url);
+            const quizSuffix = quizResultMessage ? `\n\n${quizResultMessage}` : '';
+            const message = `🔴세미나종료\n**${mergedSeminarInfo.name}**\n${targetUrl}${quizSuffix}`;
+            await sendNotificationToChannel(message);
           } else {
             console.log(
               `[monitor_seminars] Skipping end notification for ${mergedSeminarInfo.name} because it has no survey.`,
@@ -363,13 +410,20 @@ async function monitorSeminars(
           const targetUrl = mergedSeminarInfo.seminarId ? `${SEMINAR_DETAIL_PAGE}${mergedSeminarInfo.seminarId}` : url;
 
           // Check for survey existence
-          const hasSurvey = await checkSurveyExistence(context, targetUrl);
-
-          let message = `**${newName}** 세미나 입장이 시작되었습니다.`;
-          if (!hasSurvey) {
-            message += ` (설문이 없는 세미나인 것 같습니다)`;
+          const { hasSurvey, isSurveyPointExcluded } = await checkSurveyMeta(context, targetUrl);
+          if (isSurveyPointExcluded) {
+            console.log(
+              `[monitor_seminars] Skipping monitoring for ${newName} because survey points are excluded.`,
+            );
+            delete monitoringList[url];
+            continue;
           }
-          await sendNotificationToChannel(`${message}\n${targetUrl}`);
+
+          let message = `🟢세미나시작\n**${newName}**\n${targetUrl}`;
+          if (!hasSurvey) {
+            message += `\n(설문이 없는 세미나인 것 같습니다)`;
+          }
+          await sendNotificationToChannel(message);
 
           // Update hasSurvey in merged info so it gets saved to monitoringList
           mergedSeminarInfo.hasSurvey = hasSurvey;
