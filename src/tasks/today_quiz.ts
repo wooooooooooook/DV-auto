@@ -187,19 +187,21 @@ async function run({ page }: PlaywrightRunArgs) {
     }
 
     // Select the answers based on mapping
+    const quizArea = page.locator('#questionArea');
+
     for (let i = 0; i < answers.length; i++) {
       const val = answers[i];
       // Construct ID for the input element (e.g., answer1-3)
       const inputId = `answer${i + 1}-${val}`;
-      const inputLocator = page.locator(`#${inputId}`);
+      const inputLocator = quizArea.locator(`#${inputId}`);
 
       // Try checking the input directly using Playwright's check()
       // force: true ensures it works even if the actual input is hidden by CSS (common in quizzes)
       if ((await inputLocator.count()) > 0) {
-        await inputLocator.check({ force: true }).catch(async (e) => {
+        await inputLocator.first().check({ force: true }).catch(async (e) => {
           console.warn(`[today_quiz] check() failed for ${inputId}, trying click on label.`, e);
           // Fallback: click the label if check fails (though check handles label clicks internally usually)
-          await page
+          await quizArea
             .locator(`label[for='${inputId}']`)
             .first()
             .click()
@@ -208,8 +210,8 @@ async function run({ page }: PlaywrightRunArgs) {
       } else {
         // Fallback: if input ID not found, try label only
         const labelSelector = `label[for='${inputId}']`;
-        if ((await page.locator(labelSelector).count()) > 0) {
-          await page
+        if ((await quizArea.locator(labelSelector).count()) > 0) {
+          await quizArea
             .locator(labelSelector)
             .first()
             .click()
