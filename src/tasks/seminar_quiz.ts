@@ -5,9 +5,9 @@ import { sendTelegram } from '../modules/utils';
 
 const CHEATSHEET_PATH = path.join(process.cwd(), 'data/seminar_quiz_cheatsheet.json');
 
-type Cheatsheet = Record<string, string>;
+export type Cheatsheet = Record<string, string>;
 
-interface QuizQuestion {
+export interface QuizQuestion {
     questionText: string;
     options: Array<{ index: number; text: string; value: string }>;
 }
@@ -35,7 +35,7 @@ async function loadCheatsheet(): Promise<Cheatsheet> {
  * 문제 텍스트에서 족보 키워드 검색
  * 여러 개가 매칭되면 모두 반환
  */
-function findMatchingKeywords(questionText: string, cheatsheet: Cheatsheet): string[] {
+export function findMatchingKeywords(questionText: string, cheatsheet: Cheatsheet): string[] {
     const matches: string[] = [];
     for (const keyword of Object.keys(cheatsheet)) {
         if (questionText.includes(keyword)) {
@@ -49,7 +49,7 @@ function findMatchingKeywords(questionText: string, cheatsheet: Cheatsheet): str
  * 보기에서 정답 키워드가 포함된 항목 찾기
  * 1-indexed 반환 (1번, 2번, ...)
  */
-function findOptionByAnswer(
+export function findOptionByAnswer(
     options: QuizQuestion['options'],
     answerKeyword: string,
 ): { index: number; text: string } | null {
