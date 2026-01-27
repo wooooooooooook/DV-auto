@@ -126,16 +126,7 @@ function formatQuizResults(results: QuizResult[], hasUnknown: boolean, hasMultip
             message += `   → ${result.selectedText} (${result.selectedIndex}번)\n\n`;
         } else {
             message += `❓ Q${result.questionIndex}: ${shortQuestion}\n`;
-            message += `   → 족보에 없음\n\n`;
         }
-    }
-
-    if (hasUnknown) {
-        message += `\n⚠️ 족보에 없는 문제가 있습니다. 아래 정보로 등록해주세요.`;
-    }
-
-    if (hasMultipleMatches) {
-        message += `\n⚠️ 여러 키워드가 매칭된 문제가 있습니다. 족보를 확인해주세요.`;
     }
 
     return message;
