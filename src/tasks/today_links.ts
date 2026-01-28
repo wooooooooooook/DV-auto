@@ -11,6 +11,7 @@ const QUIZ_LIST_URLS = [
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const BASE_URL = 'https://www.doctorville.co.kr/';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
+const TODAY_QUIZ_TEMP_KEY = 'today_quiz:temp_answers';
 
 type QuizInfo = { link: string; productTitle?: string; answers?: Array<string | number> };
 type SeminarData = {
@@ -23,6 +24,11 @@ type SeminarMessageResult = SeminarData & { message: string };
 type StoredNewSeminars = {
   date: string;
   seminars: Array<{ name: string; url: string; seminarId: string | null }>;
+};
+type TempQuizAnswers = {
+  date: string;
+  productTitle: string;
+  answers: Array<string | number>;
 };
 const TODAY_SEMINAR_KEY = 'today_seminars';
 const NEW_SEMINAR_KEY = 'apply_seminar:new_seminars';
@@ -114,6 +120,13 @@ function getStoredNewSeminars(isoDate: string): StoredNewSeminars['seminars'] {
   return stored.seminars || [];
 }
 
+function getTempQuizAnswers(isoDate: string, productTitle: string): Array<string | number> | null {
+  const stored = storage.get<TempQuizAnswers>(TODAY_QUIZ_TEMP_KEY);
+  if (!stored || stored.date !== isoDate || stored.productTitle !== productTitle) return null;
+  if (!Array.isArray(stored.answers) || stored.answers.length === 0) return null;
+  return stored.answers;
+}
+
 async function findQuizHref(page: PlaywrightRunArgs['page']): Promise<string | null> {
   for (const url of QUIZ_LIST_URLS) {
     console.log(`[today_links] 퀴즈 목록 확인: ${url}`);
@@ -172,10 +185,16 @@ async function collectQuizInfo(page: PlaywrightRunArgs['page']): Promise<QuizInf
         : '';
     const mapping = quizMapping as Record<string, Array<string | number>>;
     let answers = productTitle && mapping[productTitle];
+    const { isoDate } = getTodayDateStrings();
 
     if (!answers || !Array.isArray(answers) || answers.length === 0) {
-      console.log(`[today_links] "${productTitle}"에 대한 정답이 quiz.json에 없습니다. 족보에서 찾기를 시도합니다.`);
-      answers = (await findAnswersByCheatsheet(page)) || [];
+      const tempAnswers = productTitle ? getTempQuizAnswers(isoDate, productTitle) : null;
+      if (tempAnswers) {
+        answers = tempAnswers;
+      } else {
+        console.log(`[today_links] "${productTitle}"에 대한 정답이 quiz.json에 없습니다. 족보에서 찾기를 시도합니다.`);
+        answers = (await findAnswersByCheatsheet(page)) || [];
+      }
     }
 
     return {

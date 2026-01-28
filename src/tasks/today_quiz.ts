@@ -1,5 +1,6 @@
 import quizMapping from '../../data/quiz.json';
 import { safeGoto, sendTelegram } from '../modules/utils';
+import * as storage from '../services/storage';
 import type { PlaywrightRunArgs } from '../types';
 import { loadCheatsheet, findMatchingKeywords, findOptionByAnswer, type QuizQuestion } from './seminar_quiz';
 
@@ -7,6 +8,17 @@ const QUIZ_LIST_URLS = [
   'https://www.doctorville.co.kr/product/medicineList',
   'https://www.doctorville.co.kr/product/instrumentList',
 ];
+const TODAY_QUIZ_TEMP_KEY = 'today_quiz:temp_answers';
+
+type TempQuizAnswers = {
+  date: string;
+  productTitle: string;
+  answers: Array<string | number>;
+};
+
+function getTodayIsoDate() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' as const });
+}
 
 async function parseTodayQuizQuestions(page: PlaywrightRunArgs['page']): Promise<QuizQuestion[]> {
   const questions: QuizQuestion[] = [];
@@ -176,14 +188,26 @@ async function run({ page }: PlaywrightRunArgs) {
     // Load mapping from data/quiz.json, fallback to cheatsheet if missing
     const mapping = quizMapping as Record<string, Array<string | number>>;
     let answers = mapping[productTitle];
+    let answersSource: 'mapping' | 'cheatsheet' | 'none' = answers && answers.length > 0 ? 'mapping' : 'none';
 
     if (!answers || !Array.isArray(answers) || answers.length === 0) {
       console.log(`[today_quiz] "${productTitle}"에 대한 정답이 quiz.json에 없습니다. 족보에서 찾기를 시도합니다.`);
       answers = await findAnswersByCheatsheet(page) || [];
+      if (answers.length > 0) {
+        answersSource = 'cheatsheet';
+      }
     }
 
     if (!answers || answers.length === 0) {
       return { success: true, message: `정답이 등록되지 않았습니다. 직접 퀴즈를 풀어주세요. ${href}` };
+    }
+
+    if (answersSource === 'cheatsheet' && productTitle) {
+      storage.set<TempQuizAnswers>(TODAY_QUIZ_TEMP_KEY, {
+        date: getTodayIsoDate(),
+        productTitle,
+        answers,
+      });
     }
 
     // Select the answers based on mapping
