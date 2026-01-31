@@ -19,6 +19,7 @@ const SEMINAR_QUIZ_CHEATSHEET_PATH = path.join(process.cwd(), 'data/seminar_quiz
 type QuizMapping = Record<string, Array<string | number>>;
 type SeminarQuizCheatsheet = Record<string, string>;
 type CommandResult = { stdout: string; stderr: string };
+type CommandResultWithExitCode = CommandResult & { exitCode?: number };
 
 async function loadQuizData(): Promise<QuizMapping> {
   try {
@@ -76,6 +77,29 @@ function runShellCommand(command: string): Promise<CommandResult> {
         const wrappedError = new Error(error.message);
         (wrappedError as Error & { stdout?: string; stderr?: string }).stdout = stdout;
         (wrappedError as Error & { stdout?: string; stderr?: string }).stderr = stderr;
+        return reject(wrappedError);
+      }
+      resolve({ stdout, stderr });
+    });
+  });
+}
+
+function runShellCommandWithAllowedExitCodes(
+  command: string,
+  allowedExitCodes: number[] = [],
+): Promise<CommandResultWithExitCode> {
+  return new Promise((resolve, reject) => {
+    exec(command, { cwd: process.cwd(), maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error) {
+        const rawExitCode = (error as unknown as NodeJS.ErrnoException & { code?: number | string }).code;
+        const exitCode =
+          typeof rawExitCode === 'number' ? rawExitCode : Number.parseInt(String(rawExitCode), 10);
+        if (!Number.isNaN(exitCode) && allowedExitCodes.includes(exitCode)) {
+          return resolve({ stdout, stderr, exitCode });
+        }
+        const wrappedError = new Error(error.message);
+        (wrappedError as Error & { stdout?: string; stderr?: string }).stdout = stdout;
+        (wrappedError as Error & { stderr?: string }).stderr = stderr;
         return reject(wrappedError);
       }
       resolve({ stdout, stderr });
@@ -421,6 +445,36 @@ if (adminBot) {
     }
   });
 
+  adminBot.command('log', async (ctx) => {
+    logger.info('User requested to fetch recent logs via pnpm log', { from: ctx.from?.username });
+    try {
+      await ctx.reply('최근 로그를 불러옵니다... (최대 5초)');
+      const { stdout, stderr, exitCode } = await runShellCommandWithAllowedExitCodes(
+        'timeout 5s pnpm run log -- --no-pager',
+        [124, 143],
+      );
+
+      let message = 'pnpm log 결과';
+      if (exitCode) {
+        message += ' (시간 제한으로 일부 로그만 표시됩니다)';
+      }
+      if (stdout.trim()) {
+        message += `\n\nstdout:\n${stdout.trim()}`;
+      }
+      if (stderr.trim()) {
+        message += `\n\nstderr:\n${stderr.trim()}`;
+      }
+      if (!stdout.trim() && !stderr.trim()) {
+        message += '\n\n출력된 로그가 없습니다.';
+      }
+      await ctx.reply(truncateMessage(message));
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      logger.error('pnpm log failed', e);
+      await ctx.reply(`pnpm log 실패: ${message}`);
+    }
+  });
+
   // --- Seminar Quiz Cheatsheet Commands ---
   adminBot.command('add_seminar_quiz', async (ctx) => {
     logger.info('User requested to add seminar quiz answer', { from: ctx.from?.username });
@@ -509,6 +563,7 @@ if (adminBot) {
 - /add_quiz_answer: 오늘의 퀴즈 정답을 등록합니다. 예) /add_quiz_answer 시너지아정 [1,2,3]
 - /broadcast_today_links: 즉시 오늘의 링크를 채널에 공지합니다.
 - /update_app: pnpm update:app 명령어를 실행합니다. (서버 권한 필요, 재시작으로 응답 중단 가능)
+- /log: pnpm log 명령어로 최근 로그를 가져옵니다.
 - /inspect <url> <selector> [waitUntil]: 지정한 URL에서 셀렉터에 해당하는 요소를 검사하고 스크린샷을 전송합니다.
 - /5days_seminar_check: 향후 5일간의 세미나 일정을 확인합니다.
 - /today_links: 오늘의 세미나와 퀴즈 링크, 출석 링크를 한 번에 가져옵니다.
