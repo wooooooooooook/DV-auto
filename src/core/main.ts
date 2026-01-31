@@ -27,6 +27,7 @@ const HEADLESS = (process.env.HEADLESS || 'true').toLowerCase() === 'true';
 const TIMEZONE = process.env.SCHEDULE_TZ || 'Asia/Seoul';
 const DAILY_ROUTINE_CRON = process.env.DAILY_CRON || '1 0 * * *';
 const BROADCAST_TODAY_LINKS_CRON = '0 9 * * *';
+const APPLY_SEMINAR_EXTRA_CRON = '0 11,14,17 * * *';
 const LUNCH_MONITOR_CRON = '0 11 * * *';
 const DINNER_MONITOR_CRON = '0 17 * * *';
 const MONITOR_RESUME_DURATION_HOURS = 5;
@@ -108,6 +109,28 @@ scheduler.scheduleTaskCron(scheduledTask);
 taskRegistry.registerTask(scheduledTask);
 
 // --- Register individual tasks to be runnable from Telegram ---
+const applySeminarExtraTask: Task = {
+  name: 'apply_seminar_extra',
+  schedule: APPLY_SEMINAR_EXTRA_CRON,
+  timezone: TIMEZONE,
+  run: async () => {
+    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await utils.ensureLoggedIn({ page, context });
+      return await applySeminarTask.run(
+        { page, context },
+        { notifyNewSeminarsToChannel: true, notifyNewSeminarsToTelegram: false },
+      );
+    } finally {
+      await browser.close();
+    }
+  },
+};
+taskRegistry.registerTask(applySeminarExtraTask);
+scheduler.scheduleTaskCron(applySeminarExtraTask);
+
 const todayQuizTask: Task = {
   name: 'today_quiz',
   run: async () => {
