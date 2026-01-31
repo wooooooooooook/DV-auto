@@ -13,8 +13,10 @@ import { sendNotificationToChannel } from '../modules/utils';
 
 const ADMIN_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const NOTICE_BOT_TOKEN = process.env.NOTICE_BOT_TOKEN;
-const QUIZ_DATA_PATH = path.join(process.cwd(), 'data/quiz.json');
-const SEMINAR_QUIZ_CHEATSHEET_PATH = path.join(process.cwd(), 'data/seminar_quiz_cheatsheet.json');
+const QUIZ_DATA_FILE = 'data/quiz.json';
+const SEMINAR_QUIZ_CHEATSHEET_FILE = 'data/seminar_quiz_cheatsheet.json';
+const QUIZ_DATA_PATH = path.join(process.cwd(), QUIZ_DATA_FILE);
+const SEMINAR_QUIZ_CHEATSHEET_PATH = path.join(process.cwd(), SEMINAR_QUIZ_CHEATSHEET_FILE);
 
 type QuizMapping = Record<string, Array<string | number>>;
 type SeminarQuizCheatsheet = Record<string, string>;
@@ -105,6 +107,32 @@ function runShellCommandWithAllowedExitCodes(
       resolve({ stdout, stderr });
     });
   });
+}
+
+function buildShellArgs(values: string[]): string {
+  return values.map((value) => `'${value.replace(/'/g, "'\\''")}'`).join(' ');
+}
+
+async function commitAndPushIfChanged(
+  files: string[],
+  message: string,
+): Promise<{ performed: boolean; notice: string }> {
+  const fileArgs = buildShellArgs(files);
+  const { stdout: statusOutput } = await runShellCommand(`git status --porcelain -- ${fileArgs}`);
+  if (!statusOutput.trim()) {
+    return { performed: false, notice: 'ℹ️ Git 변경사항 없음' };
+  }
+
+  await runShellCommand(`git add ${fileArgs}`);
+  await runShellCommand(`git commit -m ${buildShellArgs([message])}`);
+  const { stdout: pushStdout, stderr: pushStderr } = await runShellCommand('git push');
+
+  let notice = '✅ Git 커밋/푸시 완료';
+  if (pushStdout.trim() || pushStderr.trim()) {
+    const output = `${pushStdout}${pushStderr}`.trim();
+    notice = `${notice}\n${truncateMessage(output)}`;
+  }
+  return { performed: true, notice };
 }
 
 // --- Seminar Quiz Cheatsheet Functions ---
@@ -323,8 +351,19 @@ if (adminBot) {
       const data = await loadQuizData();
       data[productName] = answers;
       await saveQuizData(data);
+      let gitNotice = '';
+      try {
+        const result = await commitAndPushIfChanged([QUIZ_DATA_FILE], 'update quiz data');
+        gitNotice = `\n\n${result.notice}`;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.error('퀴즈 정답 Git 커밋/푸시 실패', error);
+        gitNotice = `\n\n⚠️ Git 커밋/푸시 실패: ${message}`;
+      }
 
-      await ctx.reply(`퀴즈 정답이 등록되었습니다.\n제품: ${productName}\n정답: ${JSON.stringify(answers)}`);
+      await ctx.reply(
+        `퀴즈 정답이 등록되었습니다.\n제품: ${productName}\n정답: ${JSON.stringify(answers)}${gitNotice}`,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.error('퀴즈 정답 등록 실패', error);
@@ -493,8 +532,17 @@ if (adminBot) {
       const data = await loadSeminarQuizCheatsheet();
       data[keyword] = answer;
       await saveSeminarQuizCheatsheet(data);
+      let gitNotice = '';
+      try {
+        const result = await commitAndPushIfChanged([SEMINAR_QUIZ_CHEATSHEET_FILE], 'update seminar quiz cheatsheet');
+        gitNotice = `\n\n${result.notice}`;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.error('세미나 퀴즈 족보 Git 커밋/푸시 실패', error);
+        gitNotice = `\n\n⚠️ Git 커밋/푸시 실패: ${message}`;
+      }
 
-      await ctx.reply(`✅ 세미나 퀴즈 족보 등록 완료\n\n키워드: ${keyword}\n정답: ${answer}`);
+      await ctx.reply(`✅ 세미나 퀴즈 족보 등록 완료\n\n키워드: ${keyword}\n정답: ${answer}${gitNotice}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.error('세미나 퀴즈 족보 등록 실패', error);
@@ -543,8 +591,17 @@ if (adminBot) {
       const deletedAnswer = data[keyword];
       delete data[keyword];
       await saveSeminarQuizCheatsheet(data);
+      let gitNotice = '';
+      try {
+        const result = await commitAndPushIfChanged([SEMINAR_QUIZ_CHEATSHEET_FILE], 'update seminar quiz cheatsheet');
+        gitNotice = `\n\n${result.notice}`;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.error('세미나 퀴즈 족보 삭제 Git 커밋/푸시 실패', error);
+        gitNotice = `\n\n⚠️ Git 커밋/푸시 실패: ${message}`;
+      }
 
-      await ctx.reply(`🗑️ 세미나 퀴즈 족보 삭제 완료\n\n키워드: ${keyword}\n정답: ${deletedAnswer}`);
+      await ctx.reply(`🗑️ 세미나 퀴즈 족보 삭제 완료\n\n키워드: ${keyword}\n정답: ${deletedAnswer}${gitNotice}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.error('세미나 퀴즈 족보 삭제 실패', error);
