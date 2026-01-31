@@ -131,6 +131,25 @@ const applySeminarExtraTask: Task = {
 taskRegistry.registerTask(applySeminarExtraTask);
 scheduler.scheduleTaskCron(applySeminarExtraTask);
 
+const applySeminarTaskStandalone: Task = {
+  name: 'apply_seminar',
+  run: async () => {
+    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await utils.ensureLoggedIn({ page, context });
+      return await applySeminarTask.run(
+        { page, context },
+        { notifyNewSeminarsToChannel: false, notifyNewSeminarsToTelegram: true },
+      );
+    } finally {
+      await browser.close();
+    }
+  },
+};
+taskRegistry.registerTask(applySeminarTaskStandalone);
+
 const todayQuizTask: Task = {
   name: 'today_quiz',
   run: async () => {
