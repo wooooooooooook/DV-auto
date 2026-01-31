@@ -386,7 +386,10 @@ if (adminBot) {
   adminBot.command('update_app', async (ctx) => {
     logger.info('User requested to run pnpm update:app', { from: ctx.from?.username });
     try {
-      await ctx.reply('Starting pnpm update:app... (백그라운드 실행)');
+      await ctx.reply(
+        'Starting pnpm update:app... (백그라운드 실행)\n' +
+          '⚠️ 업데이트 중 서비스가 재시작되어 봇 응답이 잠시 끊길 수 있습니다.',
+      );
       runShellCommand('pnpm run update:app')
         .then(async ({ stdout, stderr }) => {
           let message = 'pnpm update:app 완료';
@@ -505,7 +508,7 @@ if (adminBot) {
 - /naverpay_point_exchange: 네이버페이포인트교환 작업을 실행합니다.
 - /add_quiz_answer: 오늘의 퀴즈 정답을 등록합니다. 예) /add_quiz_answer 시너지아정 [1,2,3]
 - /broadcast_today_links: 즉시 오늘의 링크를 채널에 공지합니다.
-- /update_app: pnpm update:app 명령어를 실행합니다. (서버 권한 필요)
+- /update_app: pnpm update:app 명령어를 실행합니다. (서버 권한 필요, 재시작으로 응답 중단 가능)
 - /inspect <url> <selector> [waitUntil]: 지정한 URL에서 셀렉터에 해당하는 요소를 검사하고 스크린샷을 전송합니다.
 - /5days_seminar_check: 향후 5일간의 세미나 일정을 확인합니다.
 - /today_links: 오늘의 세미나와 퀴즈 링크, 출석 링크를 한 번에 가져옵니다.

@@ -139,7 +139,10 @@ const applySeminarTaskStandalone: Task = {
     const page = await context.newPage();
     try {
       await utils.ensureLoggedIn({ page, context });
-      return await applySeminarTask.run({ page, context });
+      return await applySeminarTask.run(
+        { page, context },
+        { notifyNewSeminarsToChannel: false, notifyNewSeminarsToTelegram: true },
+      );
     } finally {
       await browser.close();
     }
