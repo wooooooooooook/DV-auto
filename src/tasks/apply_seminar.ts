@@ -1,7 +1,7 @@
 import path from 'path';
 import fs from 'fs/promises';
 import type { PlaywrightRunArgs } from '../types';
-import { safeGoto, sendTelegram, getSeminarIdFromUrl } from '../modules/utils';
+import { safeGoto, sendNotificationToChannel, sendTelegram, getSeminarIdFromUrl } from '../modules/utils';
 import * as storage from '../services/storage';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
@@ -18,8 +18,14 @@ type StoredNewSeminars = {
   seminars: Array<SeminarListItem & { seminarId: string | null }>;
 };
 
-async function run({ page }: PlaywrightRunArgs) {
+type ApplySeminarOptions = {
+  notifyNewSeminarsToChannel?: boolean;
+  notifyNewSeminarsToTelegram?: boolean;
+};
+
+async function run({ page }: PlaywrightRunArgs, options: ApplySeminarOptions = {}) {
   let screenshotPath: string | null = null;
+  const { notifyNewSeminarsToChannel = false, notifyNewSeminarsToTelegram = true } = options;
   try {
     await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'domcontentloaded', timeout: 30000 }, 1);
 
@@ -102,7 +108,13 @@ async function run({ page }: PlaywrightRunArgs) {
         const newSeminarMessage = newlyAdded
           .map((item, index) => `${index + 1}. ${item.name}\n${item.url}`)
           .join('\n\n');
-        await sendTelegram(`🆕 새로 추가된 세미나 ${newlyAdded.length}건 발견\n\n${newSeminarMessage}`);
+        const noticeMessage = `🆕 새로 추가된 세미나 ${newlyAdded.length}건 발견\n\n${newSeminarMessage}`;
+        if (notifyNewSeminarsToTelegram) {
+          await sendTelegram(noticeMessage);
+        }
+        if (notifyNewSeminarsToChannel) {
+          await sendNotificationToChannel(noticeMessage);
+        }
         const todayIso = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
         const storedNew = storage.get<StoredNewSeminars>(NEW_SEMINAR_KEY);
         const baseSeminars = storedNew?.date === todayIso ? storedNew.seminars : [];
@@ -152,7 +164,7 @@ async function run({ page }: PlaywrightRunArgs) {
         .catch((err: unknown) => console.error('Failed to capture error screenshot:', err));
     }
     const message = error instanceof Error ? error.message : String(error);
-    await sendTelegram(`❗ 세미나 신청 작업 오류: ${message}`, screenshotPath).catch(() => { });
+    await sendTelegram(`❗ 세미나 신청 작업 오류: ${message}`, screenshotPath).catch(() => {});
     return {
       success: false,
       message: `세미나 신청 작업 오류: ${message}`,
