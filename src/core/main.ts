@@ -121,7 +121,7 @@ const applySeminarExtraTask: Task = {
       await utils.ensureLoggedIn({ page, context });
       return await applySeminarTask.run(
         { page, context },
-        { notifyNewSeminarsToChannel: true, notifyNewSeminarsToTelegram: false },
+        { notifyNewSeminarsToChannel: false, notifyNewSeminarsToTelegram: true },
       );
     } finally {
       await browser.close();
