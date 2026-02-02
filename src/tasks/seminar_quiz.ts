@@ -76,6 +76,11 @@ async function parseQuizQuestions(page: Page): Promise<QuizQuestion[]> {
 
         // 전체 텍스트에서 문제 추출
         const fullText = await container.innerText().catch(() => '');
+        const questionLine =
+            fullText
+                .split('\n')
+                .map((line) => line.trim())
+                .find((line) => line.length > 0) || fullText.trim();
 
         // 보기 추출 - ol > li 안의 label > span
         const optionElements = container.locator('ol li label');
@@ -94,7 +99,7 @@ async function parseQuizQuestions(page: Page): Promise<QuizQuestion[]> {
         }
 
         questions.push({
-            questionText: fullText.trim(),
+            questionText: questionLine,
             options,
         });
     }
@@ -115,7 +120,7 @@ function formatQuizResults(results: QuizResult[], hasUnknown: boolean, hasMultip
     // 상세 내역
     for (const result of results) {
         const shortQuestion =
-            result.questionText.length > 50 ? result.questionText.substring(0, 50) + '...' : result.questionText;
+            result.questionText.length > 25 ? result.questionText.substring(0, 25) + '...' : result.questionText;
 
         if (result.multipleMatches && result.multipleMatches.length > 1) {
             message += `⚠️ Q${result.questionIndex}: ${shortQuestion}\n`;
