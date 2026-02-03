@@ -451,7 +451,7 @@ if (adminBot) {
     try {
       await ctx.reply(
         'Starting pnpm update:app... (백그라운드 실행)\n' +
-          '⚠️ 업데이트 중 서비스가 재시작되어 봇 응답이 잠시 끊길 수 있습니다.',
+        '⚠️ 업데이트 중 서비스가 재시작되어 봇 응답이 잠시 끊길 수 있습니다.',
       );
       runShellCommand('pnpm run update:app')
         .then(async ({ stdout, stderr }) => {
@@ -489,7 +489,7 @@ if (adminBot) {
     try {
       await ctx.reply('최근 로그를 불러옵니다... (최대 5초)');
       const { stdout, stderr, exitCode } = await runShellCommandWithAllowedExitCodes(
-        'timeout 5s pnpm run log -- --no-pager',
+        'timeout 5s pnpm run log',
         [124, 143],
       );
 
