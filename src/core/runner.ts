@@ -43,13 +43,14 @@ async function runTask(task: Task, ctx: TaskContext = {}): Promise<TaskResult | 
       if (shouldNotify) {
         // Determine whether the task outcome is successful
         const ok = res === true || (res && (res as TaskResult).success !== false);
-        if (ok) {
+        const silent = res && typeof res === 'object' && (res as TaskResult).silent;
+        if (ok && !silent) {
           let msg = `${name} 작업이 완료되었습니다.`;
           if (res && typeof res === 'object' && (res as TaskResult).message) {
             msg += `\n\n${(res as TaskResult).message}`;
           }
           const imagePath = res && typeof res === 'object' ? (res as TaskResult).imagePath : null;
-          await utils.sendTelegram(msg, imagePath).catch(() => {});
+          await utils.sendTelegram(msg, imagePath).catch(() => { });
         }
       }
     } catch (e) {

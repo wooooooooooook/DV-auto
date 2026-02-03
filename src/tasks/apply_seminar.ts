@@ -1,6 +1,6 @@
 import path from 'path';
 import fs from 'fs/promises';
-import type { PlaywrightRunArgs } from '../types';
+import type { PlaywrightRunArgs, TaskResult } from '../types';
 import { safeGoto, sendNotificationToChannel, sendTelegram, getSeminarIdFromUrl } from '../modules/utils';
 import * as storage from '../services/storage';
 
@@ -12,6 +12,7 @@ const NEW_SEMINAR_KEY = 'apply_seminar:new_seminars';
 type SeminarListItem = {
   name: string;
   url: string;
+  date?: string;
 };
 type StoredNewSeminars = {
   date: string;
@@ -21,9 +22,10 @@ type StoredNewSeminars = {
 type ApplySeminarOptions = {
   notifyNewSeminarsToChannel?: boolean;
   notifyNewSeminarsToTelegram?: boolean;
+  silentIfNoNew?: boolean;
 };
 
-async function run({ page }: PlaywrightRunArgs, options: ApplySeminarOptions = {}) {
+async function run({ page }: PlaywrightRunArgs, options: ApplySeminarOptions = {}): Promise<TaskResult> {
   let screenshotPath: string | null = null;
   const { notifyNewSeminarsToChannel = false, notifyNewSeminarsToTelegram = true } = options;
   try {
@@ -84,29 +86,38 @@ async function run({ page }: PlaywrightRunArgs, options: ApplySeminarOptions = {
 
     await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'domcontentloaded', timeout: 30000 }, 1);
 
-    const currentSeminars = await page.locator('a.list_detail').evaluateAll((nodes) =>
-      nodes
-        .map((node) => {
-          const href = node.getAttribute('href') || '';
+    const currentSeminars = await page.locator('.list_cont').evaluateAll((nodes) => {
+      const results: { url: string; name: string; date: string }[] = [];
+      nodes.forEach((node) => {
+        const date = node.querySelector('.seminar_day .date')?.textContent?.trim() || '';
+        const links = node.querySelectorAll('a.list_detail');
+        links.forEach((link) => {
+          const href = link.getAttribute('href') || '';
           const title =
-            node.querySelector('.list_tit .tit')?.textContent?.trim() || node.textContent?.trim() || '세미나';
-          return { url: href, name: title };
-        })
-        .filter((item) => item.url),
-    );
+            link.querySelector('.list_tit .tit')?.textContent?.trim() || link.textContent?.trim() || '세미나';
+          if (href) {
+            results.push({ url: href, name: title, date: date });
+          }
+        });
+      });
+      return results;
+    });
 
     const normalizedCurrentSeminars: SeminarListItem[] = currentSeminars.map((item) => ({
       name: item.name,
       url: new URL(item.url, SEMINAR_PAGE).toString(),
+      date: item.date,
     }));
 
     const storedSeminars = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
+    let newlyAddedCount = 0;
     if (storedSeminars.length > 0) {
       const storedUrls = new Set(storedSeminars.map((item) => item.url));
       const newlyAdded = normalizedCurrentSeminars.filter((item) => !storedUrls.has(item.url));
+      newlyAddedCount = newlyAdded.length;
       if (newlyAdded.length > 0) {
         const newSeminarMessage = newlyAdded
-          .map((item, index) => `${index + 1}. ${item.name}\n${item.url}`)
+          .map((item, index) => `[${item.date ? item.date : ''}] ${item.name}\n${item.url}`)
           .join('\n\n');
         const noticeMessage = `🆕 새로 추가된 세미나 ${newlyAdded.length}건 발견\n\n${newSeminarMessage}`;
         if (notifyNewSeminarsToTelegram) {
@@ -149,7 +160,11 @@ async function run({ page }: PlaywrightRunArgs, options: ApplySeminarOptions = {
     screenshotPath = path.join(baseScreenshotDir, `apply_seminar_result.png`);
     await page.screenshot({ path: screenshotPath, fullPage: false });
     message += `\n${SEMINAR_DETAIL_PAGE}`;
-    return { success: true, message: message, imagePath: screenshotPath };
+    const result: TaskResult = { success: true, message: message, imagePath: screenshotPath };
+    if (options.silentIfNoNew && newlyAddedCount === 0) {
+      result.silent = true;
+    }
+    return result;
   } catch (error) {
     console.error(
       'seminar task error',
@@ -164,7 +179,7 @@ async function run({ page }: PlaywrightRunArgs, options: ApplySeminarOptions = {
         .catch((err: unknown) => console.error('Failed to capture error screenshot:', err));
     }
     const message = error instanceof Error ? error.message : String(error);
-    await sendTelegram(`❗ 세미나 신청 작업 오류: ${message}`, screenshotPath).catch(() => {});
+    await sendTelegram(`❗ 세미나 신청 작업 오류: ${message}`, screenshotPath).catch(() => { });
     return {
       success: false,
       message: `세미나 신청 작업 오류: ${message}`,

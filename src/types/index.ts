@@ -18,6 +18,7 @@ export interface TaskResult {
   message?: string;
   imagePath?: string;
   options?: Record<string, unknown>;
+  silent?: boolean;
 }
 
 export interface Task {

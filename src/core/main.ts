@@ -15,7 +15,7 @@ import * as todayLinksTaskModule from '../tasks/today_links';
 import * as monitorLunchSeminars from '../tasks/monitor_lunch_seminars';
 import * as monitorDinnerSeminars from '../tasks/monitor_dinner_seminars';
 import * as naverpayPointExchangeTask from '../tasks/naverpay_point_exchange';
-import type { Task } from '../types';
+import type { Task, TaskResult } from '../types';
 
 dns.setDefaultResultOrder('ipv4first');
 dotenv.config();
@@ -27,7 +27,7 @@ const HEADLESS = (process.env.HEADLESS || 'true').toLowerCase() === 'true';
 const TIMEZONE = process.env.SCHEDULE_TZ || 'Asia/Seoul';
 const DAILY_ROUTINE_CRON = process.env.DAILY_CRON || '1 0 * * *';
 const BROADCAST_TODAY_LINKS_CRON = '0 9 * * *';
-const APPLY_SEMINAR_EXTRA_CRON = '0 11,14,17 * * *';
+const APPLY_SEMINAR_EXTRA_CRON = '0 10,11,12,13,14,15,16,17,18,19 * * *';
 const LUNCH_MONITOR_CRON = '0 11 * * *';
 const DINNER_MONITOR_CRON = '0 17 * * *';
 const MONITOR_RESUME_DURATION_HOURS = 5;
@@ -68,28 +68,30 @@ const scheduledTask: Task = {
         { name: 'today_quiz', task: todayQuizTaskModule },
         { name: 'today_links', task: todayLinksTaskModule },
       ];
-      await utils.sendTelegram('🕗 데일리 루틴 작업을 시작합니다.(출석체크, 세미나등록, 브랜드퀴즈)').catch(() => {});
+      await utils.sendTelegram('🕗 데일리 루틴 작업을 시작합니다.(출석체크, 세미나등록, 브랜드퀴즈)').catch(() => { });
       for (const { name, task } of tasks) {
         try {
           await utils.ensureLoggedIn({ page, context });
-          const taskResult = await task.run({ page, context }); // Capture the result
-          if (taskResult && typeof taskResult === 'object' && (taskResult as { message?: string }).message) {
+          const taskResultRaw = await task.run({ page, context });
+          // Normalize to TaskResult if it's not already
+          const taskResult: TaskResult =
+            typeof taskResultRaw === 'object' && taskResultRaw !== null
+              ? (taskResultRaw as TaskResult)
+              : { success: Boolean(taskResultRaw) };
+
+          if (taskResult.message) {
             await utils
-              .sendTelegram(
-                (taskResult as { message: string }).message,
-                (taskResult as { imagePath?: string | null }).imagePath ?? null,
-                (taskResult as { options?: Record<string, unknown> }).options ?? {},
-              )
+              .sendTelegram(taskResult.message, taskResult.imagePath ?? null, taskResult.options ?? {})
               .catch((e) => logger.error(`Failed to send Telegram message for ${name} task result:`, e));
           }
         } catch (err) {
           logger.error(`Error during ${name} task:`, err);
           const message = err instanceof Error ? err.message : String(err);
-          await utils.sendTelegram(`daily_routine 중 ${name} 작업 실패: ${message}`).catch(() => {});
+          await utils.sendTelegram(`daily_routine 중 ${name} 작업 실패: ${message}`).catch(() => { });
         }
       }
     } finally {
-      await utils.sendTelegram('🕗 데일리 루틴 작업이 종료되었습니다.').catch(() => {});
+      await utils.sendTelegram('🕗 데일리 루틴 작업이 종료되었습니다.').catch(() => { });
       try {
         await context.close();
       } catch (_e) {
@@ -121,7 +123,7 @@ const applySeminarExtraTask: Task = {
       await utils.ensureLoggedIn({ page, context });
       return await applySeminarTask.run(
         { page, context },
-        { notifyNewSeminarsToChannel: false, notifyNewSeminarsToTelegram: true },
+        { notifyNewSeminarsToChannel: true, notifyNewSeminarsToTelegram: true, silentIfNoNew: true },
       );
     } finally {
       await browser.close();
@@ -297,7 +299,7 @@ const broadcastTodayLinksTask: Task = {
         'broadcast_today_links_daily: scheduled task failed',
         e && (typeof e === 'object' && 'stack' in e ? (e as Error).stack : e),
       );
-      await utils.sendTelegram(`❗ Daily link broadcast failed: ${message}`).catch(() => {});
+      await utils.sendTelegram(`❗ Daily link broadcast failed: ${message}`).catch(() => { });
       return { success: false, message: `Broadcast failed: ${message}` };
     } finally {
       try {
