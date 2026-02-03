@@ -12,7 +12,7 @@
     "update:app": "git pull && pnpm install --frozen-lockfile && pnpm run build && cp deploy/doctorville-auto.service /etc/systemd/system/ && systemctl daemon-reload && systemctl restart doctorville-auto.service",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "log": "journalctl --no-pager -u doctorville-auto.service -n "20"
+    "log": "journalctl --no-pager -u doctorville-auto.service -n 20"
   },
   "keywords": [],
   "author": "",
