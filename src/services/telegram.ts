@@ -1,4 +1,5 @@
 import { Telegraf, type Context } from 'telegraf';
+import { exec } from 'child_process';
 import fs from 'fs/promises';
 import https from 'https';
 import path from 'path';
@@ -12,11 +13,15 @@ import { sendNotificationToChannel } from '../modules/utils';
 
 const ADMIN_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const NOTICE_BOT_TOKEN = process.env.NOTICE_BOT_TOKEN;
-const QUIZ_DATA_PATH = path.join(process.cwd(), 'data/quiz.json');
-const SEMINAR_QUIZ_CHEATSHEET_PATH = path.join(process.cwd(), 'data/seminar_quiz_cheatsheet.json');
+const QUIZ_DATA_FILE = 'data/quiz.json';
+const SEMINAR_QUIZ_CHEATSHEET_FILE = 'data/seminar_quiz_cheatsheet.json';
+const QUIZ_DATA_PATH = path.join(process.cwd(), QUIZ_DATA_FILE);
+const SEMINAR_QUIZ_CHEATSHEET_PATH = path.join(process.cwd(), SEMINAR_QUIZ_CHEATSHEET_FILE);
 
 type QuizMapping = Record<string, Array<string | number>>;
 type SeminarQuizCheatsheet = Record<string, string>;
+type CommandResult = { stdout: string; stderr: string };
+type CommandResultWithExitCode = CommandResult & { exitCode?: number };
 
 async function loadQuizData(): Promise<QuizMapping> {
   try {
@@ -60,6 +65,74 @@ function parseQuizAnswers(answerText: string): Array<string | number> {
       return Number.isNaN(num) ? part : num;
     });
   }
+}
+
+function truncateMessage(text: string, maxLength = 3500): string {
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength)}... (truncated)`;
+}
+
+function runShellCommand(command: string): Promise<CommandResult> {
+  return new Promise((resolve, reject) => {
+    exec(command, { cwd: process.cwd(), maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error) {
+        const wrappedError = new Error(error.message);
+        (wrappedError as Error & { stdout?: string; stderr?: string }).stdout = stdout;
+        (wrappedError as Error & { stdout?: string; stderr?: string }).stderr = stderr;
+        return reject(wrappedError);
+      }
+      resolve({ stdout, stderr });
+    });
+  });
+}
+
+function runShellCommandWithAllowedExitCodes(
+  command: string,
+  allowedExitCodes: number[] = [],
+): Promise<CommandResultWithExitCode> {
+  return new Promise((resolve, reject) => {
+    exec(command, { cwd: process.cwd(), maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error) {
+        const rawExitCode = (error as unknown as NodeJS.ErrnoException & { code?: number | string }).code;
+        const exitCode =
+          typeof rawExitCode === 'number' ? rawExitCode : Number.parseInt(String(rawExitCode), 10);
+        if (!Number.isNaN(exitCode) && allowedExitCodes.includes(exitCode)) {
+          return resolve({ stdout, stderr, exitCode });
+        }
+        const wrappedError = new Error(error.message);
+        (wrappedError as Error & { stdout?: string; stderr?: string }).stdout = stdout;
+        (wrappedError as Error & { stderr?: string }).stderr = stderr;
+        return reject(wrappedError);
+      }
+      resolve({ stdout, stderr });
+    });
+  });
+}
+
+function buildShellArgs(values: string[]): string {
+  return values.map((value) => `'${value.replace(/'/g, "'\\''")}'`).join(' ');
+}
+
+async function commitAndPushIfChanged(
+  files: string[],
+  message: string,
+): Promise<{ performed: boolean; notice: string }> {
+  const fileArgs = buildShellArgs(files);
+  const { stdout: statusOutput } = await runShellCommand(`git status --porcelain -- ${fileArgs}`);
+  if (!statusOutput.trim()) {
+    return { performed: false, notice: 'ℹ️ Git 변경사항 없음' };
+  }
+
+  await runShellCommand(`git add ${fileArgs}`);
+  await runShellCommand(`git commit -m ${buildShellArgs([message])}`);
+  const { stdout: pushStdout, stderr: pushStderr } = await runShellCommand('git push');
+
+  let notice = '✅ Git 커밋/푸시 완료';
+  if (pushStdout.trim() || pushStderr.trim()) {
+    const output = `${pushStdout}${pushStderr}`.trim();
+    notice = `${notice}\n${truncateMessage(output)}`;
+  }
+  return { performed: true, notice };
 }
 
 // --- Seminar Quiz Cheatsheet Functions ---
@@ -211,6 +284,46 @@ if (adminBot) {
     }
   });
 
+  adminBot.command('apply_seminar_now', async (ctx) => {
+    logger.info('User requested to run apply_seminar now', { from: ctx.from?.username });
+    const task = taskRegistry.getByName('apply_seminar');
+    if (!task) {
+      logger.error('apply_seminar task not found, cannot run');
+      return ctx.reply('apply_seminar task not found!');
+    }
+
+    try {
+      await ctx.reply('Starting apply_seminar... (백그라운드 실행)');
+      runner
+        .runTask(task)
+        .then(async (result) => {
+          if (result && typeof result === 'object' && (result as { message?: string }).message) {
+            await ctx.reply(
+              (result as { message: string }).message,
+              (result as { options?: Record<string, unknown> }).options,
+            );
+            if ((result as { imagePath?: string }).imagePath) {
+              await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
+              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => { });
+            }
+          } else if (typeof result === 'string') {
+            await ctx.reply(result);
+          } else if (result === true) {
+            await ctx.reply('apply_seminar finished successfully.');
+          } else {
+            await ctx.reply('apply_seminar finished successfully.');
+          }
+        })
+        .catch((e) => {
+          const message = e instanceof Error ? e.message : String(e);
+          ctx.reply(`apply_seminar failed: ${message}`);
+        });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      ctx.reply(`Failed to start apply_seminar: ${message}`);
+    }
+  });
+
   adminBot.command('add_quiz_answer', async (ctx) => {
     logger.info('User requested to add quiz answer', { from: ctx.from?.username });
     const messageText = ctx.message?.text || '';
@@ -238,8 +351,19 @@ if (adminBot) {
       const data = await loadQuizData();
       data[productName] = answers;
       await saveQuizData(data);
+      let gitNotice = '';
+      try {
+        const result = await commitAndPushIfChanged([QUIZ_DATA_FILE], 'update quiz data');
+        gitNotice = `\n\n${result.notice}`;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.error('퀴즈 정답 Git 커밋/푸시 실패', error);
+        gitNotice = `\n\n⚠️ Git 커밋/푸시 실패: ${message}`;
+      }
 
-      await ctx.reply(`퀴즈 정답이 등록되었습니다.\n제품: ${productName}\n정답: ${JSON.stringify(answers)}`);
+      await ctx.reply(
+        `퀴즈 정답이 등록되었습니다.\n제품: ${productName}\n정답: ${JSON.stringify(answers)}${gitNotice}`,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.error('퀴즈 정답 등록 실패', error);
@@ -322,6 +446,74 @@ if (adminBot) {
     }
   });
 
+  adminBot.command('update_app', async (ctx) => {
+    logger.info('User requested to run pnpm update:app', { from: ctx.from?.username });
+    try {
+      await ctx.reply(
+        'Starting pnpm update:app... (백그라운드 실행)\n' +
+          '⚠️ 업데이트 중 서비스가 재시작되어 봇 응답이 잠시 끊길 수 있습니다.',
+      );
+      runShellCommand('pnpm run update:app')
+        .then(async ({ stdout, stderr }) => {
+          let message = 'pnpm update:app 완료';
+          if (stdout.trim()) {
+            message += `\n\nstdout:\n${truncateMessage(stdout.trim())}`;
+          }
+          if (stderr.trim()) {
+            message += `\n\nstderr:\n${truncateMessage(stderr.trim())}`;
+          }
+          await ctx.reply(message);
+        })
+        .catch(async (error) => {
+          const message = error instanceof Error ? error.message : String(error);
+          const stdout = (error as Error & { stdout?: string }).stdout ?? '';
+          const stderr = (error as Error & { stderr?: string }).stderr ?? '';
+          logger.error('pnpm update:app failed', error);
+          let reply = `pnpm update:app 실패: ${message}`;
+          if (stdout.trim()) {
+            reply += `\n\nstdout:\n${truncateMessage(stdout.trim())}`;
+          }
+          if (stderr.trim()) {
+            reply += `\n\nstderr:\n${truncateMessage(stderr.trim())}`;
+          }
+          await ctx.reply(reply);
+        });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      ctx.reply(`Failed to start pnpm update:app: ${message}`);
+    }
+  });
+
+  adminBot.command('log', async (ctx) => {
+    logger.info('User requested to fetch recent logs via pnpm log', { from: ctx.from?.username });
+    try {
+      await ctx.reply('최근 로그를 불러옵니다... (최대 5초)');
+      const { stdout, stderr, exitCode } = await runShellCommandWithAllowedExitCodes(
+        'timeout 5s pnpm run log -- --no-pager',
+        [124, 143],
+      );
+
+      let message = 'pnpm log 결과';
+      if (exitCode) {
+        message += ' (시간 제한으로 일부 로그만 표시됩니다)';
+      }
+      if (stdout.trim()) {
+        message += `\n\nstdout:\n${stdout.trim()}`;
+      }
+      if (stderr.trim()) {
+        message += `\n\nstderr:\n${stderr.trim()}`;
+      }
+      if (!stdout.trim() && !stderr.trim()) {
+        message += '\n\n출력된 로그가 없습니다.';
+      }
+      await ctx.reply(truncateMessage(message));
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      logger.error('pnpm log failed', e);
+      await ctx.reply(`pnpm log 실패: ${message}`);
+    }
+  });
+
   // --- Seminar Quiz Cheatsheet Commands ---
   adminBot.command('add_seminar_quiz', async (ctx) => {
     logger.info('User requested to add seminar quiz answer', { from: ctx.from?.username });
@@ -340,8 +532,17 @@ if (adminBot) {
       const data = await loadSeminarQuizCheatsheet();
       data[keyword] = answer;
       await saveSeminarQuizCheatsheet(data);
+      let gitNotice = '';
+      try {
+        const result = await commitAndPushIfChanged([SEMINAR_QUIZ_CHEATSHEET_FILE], 'update seminar quiz cheatsheet');
+        gitNotice = `\n\n${result.notice}`;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.error('세미나 퀴즈 족보 Git 커밋/푸시 실패', error);
+        gitNotice = `\n\n⚠️ Git 커밋/푸시 실패: ${message}`;
+      }
 
-      await ctx.reply(`✅ 세미나 퀴즈 족보 등록 완료\n\n키워드: ${keyword}\n정답: ${answer}`);
+      await ctx.reply(`✅ 세미나 퀴즈 족보 등록 완료\n\n키워드: ${keyword}\n정답: ${answer}${gitNotice}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.error('세미나 퀴즈 족보 등록 실패', error);
@@ -390,8 +591,17 @@ if (adminBot) {
       const deletedAnswer = data[keyword];
       delete data[keyword];
       await saveSeminarQuizCheatsheet(data);
+      let gitNotice = '';
+      try {
+        const result = await commitAndPushIfChanged([SEMINAR_QUIZ_CHEATSHEET_FILE], 'update seminar quiz cheatsheet');
+        gitNotice = `\n\n${result.notice}`;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.error('세미나 퀴즈 족보 삭제 Git 커밋/푸시 실패', error);
+        gitNotice = `\n\n⚠️ Git 커밋/푸시 실패: ${message}`;
+      }
 
-      await ctx.reply(`🗑️ 세미나 퀴즈 족보 삭제 완료\n\n키워드: ${keyword}\n정답: ${deletedAnswer}`);
+      await ctx.reply(`🗑️ 세미나 퀴즈 족보 삭제 완료\n\n키워드: ${keyword}\n정답: ${deletedAnswer}${gitNotice}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.error('세미나 퀴즈 족보 삭제 실패', error);
@@ -405,9 +615,12 @@ if (adminBot) {
 - /schedules: 스케줄된 작업 목록을 확인합니다.
 - /run_routine_now: 즉시 daily_routine 작업을 실행합니다.
 - /run_quiz_now: 즉시 오늘의 퀴즈 작업(today_quiz)을 실행합니다.
+- /apply_seminar_now: 즉시 세미나 신청 작업(apply_seminar)을 실행합니다.
 - /naverpay_point_exchange: 네이버페이포인트교환 작업을 실행합니다.
 - /add_quiz_answer: 오늘의 퀴즈 정답을 등록합니다. 예) /add_quiz_answer 시너지아정 [1,2,3]
 - /broadcast_today_links: 즉시 오늘의 링크를 채널에 공지합니다.
+- /update_app: pnpm update:app 명령어를 실행합니다. (서버 권한 필요, 재시작으로 응답 중단 가능)
+- /log: pnpm log 명령어로 최근 로그를 가져옵니다.
 - /inspect <url> <selector> [waitUntil]: 지정한 URL에서 셀렉터에 해당하는 요소를 검사하고 스크린샷을 전송합니다.
 - /5days_seminar_check: 향후 5일간의 세미나 일정을 확인합니다.
 - /today_links: 오늘의 세미나와 퀴즈 링크, 출석 링크를 한 번에 가져옵니다.
