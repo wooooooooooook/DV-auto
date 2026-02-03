@@ -91,11 +91,11 @@ async function collectQuizInfo(page: PlaywrightRunArgs['page']): Promise<QuizInf
     const productTitle =
       (await titleElem.count()) > 0
         ? (
-            await titleElem
-              .first()
-              .innerText()
-              .catch(() => '')
-          ).trim()
+          await titleElem
+            .first()
+            .innerText()
+            .catch(() => '')
+        ).trim()
         : '';
     const mapping = quizMapping as Record<string, Array<string | number>>;
     const answers = productTitle && mapping[productTitle];
@@ -233,20 +233,20 @@ async function run({ page }: PlaywrightRunArgs) {
           return `${index + 1}. ${item.name}\n${link}`;
         })
         .join('\n\n');
-      message += `\n\n🆕 신규 세미나\n${newSeminarList}`;
+      message += `\n\n🆕 어제 추가된 신규 세미나\n${newSeminarList}`;
     }
 
-    message += '\n\n🤖텔레그램 봇이 자동으로 전송한 메시지입니다.\nhttps://t.me/+J1UGmvLA9jU4NjQ1';
+    message += '\n\n🤖텔레그램 봇이 자동으로 전송한 메시지입니다.\nhttps://t.me/+J1UGmvLA9jU4NjQ1\n★☆ 매일오전9시 ☆★\n▶▷ 링크모음 발송 ◁◀\n☞ 세미나 시작알림\n☞ 세미나 종료알림\n☞ 퀴즈정답 ★즉시★\n☞ 신규세미나 알림!!';
 
     const newSeminarIds = storedNewSeminars.map((item) => item.seminarId).filter((id): id is string => Boolean(id));
     const allSeminarIds = seminarMessage
       ? Array.from(
-          new Set([
-            ...(seminarMessage.lunchSeminarIds || []),
-            ...(seminarMessage.dinnerSeminarIds || []),
-            ...newSeminarIds,
-          ]),
-        )
+        new Set([
+          ...(seminarMessage.lunchSeminarIds || []),
+          ...(seminarMessage.dinnerSeminarIds || []),
+          ...newSeminarIds,
+        ]),
+      )
       : [...newSeminarIds];
 
     storage.set(TODAY_SEMINAR_KEY, {
