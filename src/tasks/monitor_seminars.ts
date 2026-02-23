@@ -25,6 +25,7 @@ type SeminarInfo = {
   seminarId: string | null;
   hasSurvey?: boolean;
   isEntryStarted?: boolean;
+  hasEnteredLecture?: boolean;
 };
 type StoredSeminarIds = { date: string; lunchSeminarIds: string[]; dinnerSeminarIds: string[] };
 type SeminarBucketKey = 'lunchSeminarIds' | 'dinnerSeminarIds';
@@ -40,7 +41,7 @@ async function checkSurveyMeta(context: BrowserContext, url: string): Promise<Se
   const page = await context.newPage();
   try {
     await safeGoto(page, url, { waitUntil: 'domcontentloaded', timeout: 15000 });
-    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => { });
+    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
 
     const isSurveyPointExcluded = await page
       .locator('text="설문 포인트가 지급되지 않는"')
@@ -66,7 +67,7 @@ async function checkSurveyMeta(context: BrowserContext, url: string): Promise<Se
     // But if we error out, maybe we shouldn't suppress the end notification.
     return { hasSurvey: true, isSurveyPointExcluded: false };
   } finally {
-    await page.close().catch(() => { });
+    await page.close().catch(() => {});
   }
 }
 
@@ -101,7 +102,42 @@ async function isSeminarEnded(
     );
     return false;
   } finally {
-    await detailPage.close().catch(() => { });
+    await detailPage.close().catch(() => {});
+  }
+}
+
+async function enterLectureOnce(
+  context: BrowserContext,
+  seminar: { name: string; seminarId: string | null },
+  fallbackUrl: string,
+): Promise<boolean> {
+  const targetUrl = seminar.seminarId ? `${SEMINAR_DETAIL_PAGE}${seminar.seminarId}` : fallbackUrl;
+  const lecturePage = await context.newPage();
+
+  try {
+    await safeGoto(lecturePage, targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    await lecturePage.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+
+    const enterBtn = lecturePage.locator('text="강의입장"').first();
+    const isEnterButtonVisible = await enterBtn.isVisible({ timeout: 3000 }).catch(() => false);
+    if (!isEnterButtonVisible) {
+      console.log(`[monitor_seminars] 강의입장 버튼을 찾지 못함 (${seminar.name})`);
+      return false;
+    }
+
+    console.log(`[monitor_seminars] 강의입장 버튼 클릭 (${seminar.name})`);
+    await enterBtn.click({ timeout: 5000 });
+    await lecturePage.waitForTimeout(10000);
+    console.log(`[monitor_seminars] 강의입장 후 10초 대기 완료 (${seminar.name})`);
+    return true;
+  } catch (e) {
+    console.error(
+      `[monitor_seminars] 강의입장 처리 실패 (${seminar.name})`,
+      e && typeof e === 'object' && 'stack' in e ? (e as Error).stack : e,
+    );
+    return false;
+  } finally {
+    await lecturePage.close().catch(() => {});
   }
 }
 
@@ -121,7 +157,7 @@ async function handleSeminarEndAndQuiz(
 
   try {
     await safeGoto(surveyPage, targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
-    await surveyPage.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => { });
+    await surveyPage.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
 
     // "설문참여" 버튼 찾기
     const surveyBtn = surveyPage.locator('text="설문참여"').first();
@@ -130,13 +166,13 @@ async function handleSeminarEndAndQuiz(
     if (isSurveyButtonVisible) {
       console.log(`[monitor_seminars] "설문참여" 버튼 발견, 클릭 (${seminar.name})`);
       const firstPopupPromise = context.waitForEvent('page', { timeout: 5000 }).catch(() => null);
-      await surveyBtn.click().catch(() => { });
+      await surveyBtn.click().catch(() => {});
       popupPage = (await firstPopupPromise) || null;
       if (popupPage) {
         quizPage = popupPage;
-        await popupPage.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => { });
+        await popupPage.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
       } else {
-        await surveyPage.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => { });
+        await surveyPage.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
         await surveyPage.waitForTimeout(1000); // 페이지 로드 대기
       }
 
@@ -146,14 +182,14 @@ async function handleSeminarEndAndQuiz(
       if (isSurveyStartVisible) {
         console.log(`[monitor_seminars] "설문 참여하기" 버튼 발견, 클릭 (${seminar.name})`);
         const secondPopupPromise = context.waitForEvent('page', { timeout: 5000 }).catch(() => null);
-        await surveyStartBtn.click().catch(() => { });
+        await surveyStartBtn.click().catch(() => {});
         const secondPopup = (await secondPopupPromise) || null;
         if (secondPopup) {
           popupPage = secondPopup;
           quizPage = secondPopup;
-          await secondPopup.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => { });
+          await secondPopup.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
         } else if (!popupPage) {
-          await surveyPage.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => { });
+          await surveyPage.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
           await surveyPage.waitForTimeout(1000);
         }
       }
@@ -178,9 +214,9 @@ async function handleSeminarEndAndQuiz(
     );
   } finally {
     if (popupPage) {
-      await popupPage.close().catch(() => { });
+      await popupPage.close().catch(() => {});
     }
-    await surveyPage.close().catch(() => { });
+    await surveyPage.close().catch(() => {});
   }
   return quizResultMessage;
 }
@@ -285,14 +321,13 @@ async function monitorSeminars(
         // Check for survey existence
         const { hasSurvey, isSurveyPointExcluded } = await checkSurveyMeta(context, targetUrl);
         if (isSurveyPointExcluded) {
-          console.log(
-            `[monitor_seminars] Skipping monitoring for ${name} because survey points are excluded.`,
-          );
+          console.log(`[monitor_seminars] Skipping monitoring for ${name} because survey points are excluded.`);
           delete monitoringList[url];
           continue;
         }
         monitoringList[url].hasSurvey = hasSurvey;
         monitoringList[url].isEntryStarted = true;
+        monitoringList[url].hasEnteredLecture = await enterLectureOnce(context, { name, seminarId }, url);
 
         let message = `🟢세미나시작\n**${name}**\n${targetUrl}`;
         if (!hasSurvey) {
@@ -364,6 +399,7 @@ async function monitorSeminars(
           seminarId: currentInfo?.seminarId || monitoredInfo.seminarId,
           hasSurvey: monitoredInfo.hasSurvey, // Preserve hasSurvey state
           isEntryStarted: monitoredInfo.isEntryStarted, // Preserve isEntryStarted state
+          hasEnteredLecture: monitoredInfo.hasEnteredLecture,
         };
 
         let ended = false;
@@ -412,9 +448,7 @@ async function monitorSeminars(
           // Check for survey existence
           const { hasSurvey, isSurveyPointExcluded } = await checkSurveyMeta(context, targetUrl);
           if (isSurveyPointExcluded) {
-            console.log(
-              `[monitor_seminars] Skipping monitoring for ${newName} because survey points are excluded.`,
-            );
+            console.log(`[monitor_seminars] Skipping monitoring for ${newName} because survey points are excluded.`);
             delete monitoringList[url];
             continue;
           }
@@ -428,6 +462,9 @@ async function monitorSeminars(
           // Update hasSurvey in merged info so it gets saved to monitoringList
           mergedSeminarInfo.hasSurvey = hasSurvey;
           mergedSeminarInfo.isEntryStarted = true;
+          if (!mergedSeminarInfo.hasEnteredLecture) {
+            mergedSeminarInfo.hasEnteredLecture = await enterLectureOnce(context, mergedSeminarInfo, url);
+          }
         }
 
         // 4. Always update the seminar's status and name in the monitoring list
@@ -438,6 +475,7 @@ async function monitorSeminars(
             seminarId: mergedSeminarInfo.seminarId,
             hasSurvey: mergedSeminarInfo.hasSurvey,
             isEntryStarted: mergedSeminarInfo.isEntryStarted,
+            hasEnteredLecture: mergedSeminarInfo.hasEnteredLecture,
           };
         } else {
           monitoringList[url] = mergedSeminarInfo;
@@ -456,7 +494,7 @@ async function monitorSeminars(
       e && typeof e === 'object' && 'stack' in e ? (e as Error).stack : e,
     );
     const message = e instanceof Error ? e.message : String(e);
-    await sendTelegram(`❗ [${periodName}] 세미나 감시 작업 오류: ${message}`).catch(() => { });
+    await sendTelegram(`❗ [${periodName}] 세미나 감시 작업 오류: ${message}`).catch(() => {});
     return false;
   }
 }
