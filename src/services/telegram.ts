@@ -94,8 +94,7 @@ function runShellCommandWithAllowedExitCodes(
     exec(command, { cwd: process.cwd(), maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
       if (error) {
         const rawExitCode = (error as unknown as NodeJS.ErrnoException & { code?: number | string }).code;
-        const exitCode =
-          typeof rawExitCode === 'number' ? rawExitCode : Number.parseInt(String(rawExitCode), 10);
+        const exitCode = typeof rawExitCode === 'number' ? rawExitCode : Number.parseInt(String(rawExitCode), 10);
         if (!Number.isNaN(exitCode) && allowedExitCodes.includes(exitCode)) {
           return resolve({ stdout, stderr, exitCode });
         }
@@ -172,7 +171,7 @@ if (adminBot) {
   setBot('admin', adminBot);
   adminBot.catch((err, ctx) => {
     logger.error(`Admin Bot Error for ${ctx.updateType}`, err);
-    ctx.reply('오류가 발생했습니다. 로그를 확인해주세요.').catch(() => { });
+    ctx.reply('오류가 발생했습니다. 로그를 확인해주세요.').catch(() => {});
   });
   adminBot.start((ctx) => ctx.reply('Welcome, Admin!'));
 }
@@ -224,7 +223,7 @@ if (adminBot) {
             );
             if ((result as { imagePath?: string }).imagePath) {
               await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => { });
+              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
             }
           } else if (typeof result === 'string') {
             await ctx.reply(result);
@@ -264,7 +263,7 @@ if (adminBot) {
             );
             if ((result as { imagePath?: string }).imagePath) {
               await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => { });
+              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
             }
           } else if (typeof result === 'string') {
             await ctx.reply(result);
@@ -304,7 +303,7 @@ if (adminBot) {
             );
             if ((result as { imagePath?: string }).imagePath) {
               await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => { });
+              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
             }
           } else if (typeof result === 'string') {
             await ctx.reply(result);
@@ -426,7 +425,7 @@ if (adminBot) {
             );
             if ((result as { imagePath?: string }).imagePath) {
               await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => { });
+              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
             }
           } else if (typeof result === 'string') {
             await ctx.reply(result);
@@ -451,7 +450,7 @@ if (adminBot) {
     try {
       await ctx.reply(
         'Starting pnpm update:app... (백그라운드 실행)\n' +
-        '⚠️ 업데이트 중 서비스가 재시작되어 봇 응답이 잠시 끊길 수 있습니다.',
+          '⚠️ 업데이트 중 서비스가 재시작되어 봇 응답이 잠시 끊길 수 있습니다.',
       );
       runShellCommand('pnpm run update:app')
         .then(async ({ stdout, stderr }) => {
@@ -523,7 +522,9 @@ if (adminBot) {
     // Format: /add_seminar_quiz <키워드> | <정답>
     const parts = argsText.split('|').map((p) => p.trim());
     if (parts.length !== 2 || !parts[0] || !parts[1]) {
-      return ctx.reply('사용법: /add_seminar_quiz <문제 키워드> | <정답 키워드>\n예) /add_seminar_quiz 펙수클루의 적응증이 아닌 | 과민성 대장증후군');
+      return ctx.reply(
+        '사용법: /add_seminar_quiz <문제 키워드> | <정답 키워드>\n예) /add_seminar_quiz 펙수클루의 적응증이 아닌 | 과민성 대장증후군',
+      );
     }
 
     const [keyword, answer] = parts;
@@ -656,7 +657,7 @@ if (adminBot) {
             );
             if ((result as { imagePath?: string }).imagePath) {
               await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => { });
+              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
             }
           } else if (typeof result === 'string') {
             await ctx.reply(result);
@@ -696,7 +697,7 @@ if (adminBot) {
             );
             if ((result as { imagePath?: string }).imagePath) {
               await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => { });
+              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
             }
           } else if (typeof result === 'string') {
             await ctx.reply(result);
@@ -822,7 +823,7 @@ const seminarCheck5Days = async (ctx: Context) => {
           );
           if ((result as { imagePath?: string }).imagePath) {
             await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-            await fs.unlink((result as { imagePath: string }).imagePath).catch(() => { });
+            await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
           }
         } else if (typeof result === 'string') {
           await ctx.reply(result);
