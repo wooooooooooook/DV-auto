@@ -50,7 +50,7 @@ async function runTask(task: Task, ctx: TaskContext = {}): Promise<TaskResult | 
             msg += `\n\n${(res as TaskResult).message}`;
           }
           const imagePath = res && typeof res === 'object' ? (res as TaskResult).imagePath : null;
-          await utils.sendTelegram(msg, imagePath).catch(() => { });
+          await utils.sendTelegram(msg, imagePath).catch(() => {});
         }
       }
     } catch (e) {

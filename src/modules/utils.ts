@@ -184,7 +184,7 @@ async function loadLocalStorage(page: Page, targetUrl: string): Promise<boolean>
     try {
       const cur = page.url();
       if (!cur || !cur.startsWith(origin)) {
-        await page.goto(origin, { waitUntil: 'domcontentloaded', timeout: 8000 }).catch(() => { });
+        await page.goto(origin, { waitUntil: 'domcontentloaded', timeout: 8000 }).catch(() => {});
       }
     } catch (_e) {
       // ignore navigation errors, we'll still try to set items
@@ -288,12 +288,12 @@ async function ensureLoggedIn({ page, context }: { page: Page; context: BrowserC
   }
 
   try {
-    await loadCookies(context).catch(() => { });
+    await loadCookies(context).catch(() => {});
   } catch (_e) {
     /* ignore */
   }
   try {
-    await loadLocalStorage(page, LOGIN_URL).catch(() => { });
+    await loadLocalStorage(page, LOGIN_URL).catch(() => {});
   } catch (_e) {
     /* ignore */
   }
@@ -335,7 +335,7 @@ const analyticsBlockedPages = new WeakSet<Page>();
 function setupAnalyticsBlock(page: Page): void {
   if (analyticsBlockedPages.has(page)) return;
   try {
-    page.route('**/dev-analytics.villeway.com/**', (route) => route.abort().catch(() => { }));
+    page.route('**/dev-analytics.villeway.com/**', (route) => route.abort().catch(() => {}));
     analyticsBlockedPages.add(page);
   } catch (_e) {
     console.error('setupAnalyticsBlock failed', _e);

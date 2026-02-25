@@ -27,7 +27,10 @@ async function parseTodayQuizQuestions(page: PlaywrightRunArgs['page']): Promise
   const areas = await page.locator(areaSelector).all();
 
   for (const area of areas) {
-    const questionText = await area.locator('.txt_question').innerText().catch(() => '');
+    const questionText = await area
+      .locator('.txt_question')
+      .innerText()
+      .catch(() => '');
     const options: QuizQuestion['options'] = [];
 
     const choiceItems = await area.locator('.question_choice li').all();
@@ -150,7 +153,7 @@ async function run({ page }: PlaywrightRunArgs) {
           await btn
             .first()
             .scrollIntoViewIfNeeded()
-            .catch(() => { });
+            .catch(() => {});
           await page.waitForTimeout(200);
           await page.screenshot({ path: shot });
         } catch (_e) {
@@ -161,7 +164,7 @@ async function run({ page }: PlaywrightRunArgs) {
       await btn
         .first()
         .click()
-        .catch(() => { });
+        .catch(() => {});
     } else {
       // If there's no banner button, still check for popup
       console.debug('#btn_quiz_banner not found');
@@ -192,7 +195,7 @@ async function run({ page }: PlaywrightRunArgs) {
 
     if (!answers || !Array.isArray(answers) || answers.length === 0) {
       console.log(`[today_quiz] "${productTitle}"에 대한 정답이 quiz.json에 없습니다. 족보에서 찾기를 시도합니다.`);
-      answers = await findAnswersByCheatsheet(page) || [];
+      answers = (await findAnswersByCheatsheet(page)) || [];
       if (answers.length > 0) {
         answersSource = 'cheatsheet';
       }
@@ -222,15 +225,18 @@ async function run({ page }: PlaywrightRunArgs) {
       // Try checking the input directly using Playwright's check()
       // force: true ensures it works even if the actual input is hidden by CSS (common in quizzes)
       if ((await inputLocator.count()) > 0) {
-        await inputLocator.first().check({ force: true }).catch(async (e) => {
-          console.warn(`[today_quiz] check() failed for ${inputId}, trying click on label.`, e);
-          // Fallback: click the label if check fails (though check handles label clicks internally usually)
-          await quizArea
-            .locator(`label[for='${inputId}']`)
-            .first()
-            .click()
-            .catch(() => { });
-        });
+        await inputLocator
+          .first()
+          .check({ force: true })
+          .catch(async (e) => {
+            console.warn(`[today_quiz] check() failed for ${inputId}, trying click on label.`, e);
+            // Fallback: click the label if check fails (though check handles label clicks internally usually)
+            await quizArea
+              .locator(`label[for='${inputId}']`)
+              .first()
+              .click()
+              .catch(() => {});
+          });
       } else {
         // Fallback: if input ID not found, try label only
         const labelSelector = `label[for='${inputId}']`;
@@ -239,7 +245,7 @@ async function run({ page }: PlaywrightRunArgs) {
             .locator(labelSelector)
             .first()
             .click()
-            .catch(() => { });
+            .catch(() => {});
         } else {
           return {
             success: false,
@@ -298,7 +304,7 @@ async function run({ page }: PlaywrightRunArgs) {
   } catch (_e) {
     console.error('today_quiz task error', _e && typeof _e === 'object' && 'stack' in _e ? (_e as Error).stack : _e);
     const message = _e instanceof Error ? _e.message : String(_e);
-    await sendTelegram(`❗ 오늘의 퀴즈 작업 오류: ${message}`).catch(() => { });
+    await sendTelegram(`❗ 오늘의 퀴즈 작업 오류: ${message}`).catch(() => {});
     return { success: false, message: `오늘의 퀴즈 작업 오류: ${message}` };
   }
 }

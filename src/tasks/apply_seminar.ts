@@ -179,7 +179,7 @@ async function run({ page }: PlaywrightRunArgs, options: ApplySeminarOptions = {
         .catch((err: unknown) => console.error('Failed to capture error screenshot:', err));
     }
     const message = error instanceof Error ? error.message : String(error);
-    await sendTelegram(`❗ 세미나 신청 작업 오류: ${message}`, screenshotPath).catch(() => { });
+    await sendTelegram(`❗ 세미나 신청 작업 오류: ${message}`, screenshotPath).catch(() => {});
     return {
       success: false,
       message: `세미나 신청 작업 오류: ${message}`,
