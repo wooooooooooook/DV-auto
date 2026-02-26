@@ -113,12 +113,13 @@ async function handleSeminarEndAndQuiz(
   context: BrowserContext,
   seminar: { name: string; seminarId: string | null },
   fallbackUrl: string,
-): Promise<string | null> {
+): Promise<{ message: string | null; foundSurveyButton: boolean }> {
   const targetUrl = seminar.seminarId ? `${SEMINAR_DETAIL_PAGE}${seminar.seminarId}` : fallbackUrl;
   const surveyPage = await context.newPage();
   let popupPage: Page | null = null;
   let quizPage: Page = surveyPage;
   let quizResultMessage: string | null = null;
+  let foundSurveyButton = false;
 
   try {
     await safeGoto(surveyPage, targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
@@ -127,6 +128,7 @@ async function handleSeminarEndAndQuiz(
     // "설문참여" 버튼 찾기
     const surveyBtn = surveyPage.locator('text="설문참여"').first();
     const isSurveyButtonVisible = await surveyBtn.isVisible({ timeout: 3000 }).catch(() => false);
+    foundSurveyButton = isSurveyButtonVisible;
 
     if (isSurveyButtonVisible) {
       console.log(`[monitor_seminars] "설문참여" 버튼 발견, 클릭 (${seminar.name})`);
@@ -183,7 +185,7 @@ async function handleSeminarEndAndQuiz(
     }
     await surveyPage.close().catch(() => {});
   }
-  return quizResultMessage;
+  return { message: quizResultMessage, foundSurveyButton };
 }
 
 function getStoredSeminarsForToday(todayIsoDate: string): StoredSeminarIds | null {
@@ -449,12 +451,18 @@ async function monitorSeminars(
 
         // 1. Check seminar end by visiting detail page
         if (ended) {
-          // Only send end notification if survey was present (or unknown, default to true/undefined)
-          if (mergedSeminarInfo.hasSurvey !== false) {
+          // Always try to handle the end/quiz, regardless of initial survey status
+          const { message: quizResultMessage, foundSurveyButton } = await handleSeminarEndAndQuiz(
+            context,
+            mergedSeminarInfo,
+            url,
+          );
+
+          // If we knew it had a survey, OR if we just found one (even if we thought it didn't have one)
+          if (mergedSeminarInfo.hasSurvey !== false || foundSurveyButton) {
             const targetUrl = mergedSeminarInfo.seminarId
               ? `${SEMINAR_DETAIL_PAGE}${mergedSeminarInfo.seminarId}`
               : url;
-            const quizResultMessage = await handleSeminarEndAndQuiz(context, mergedSeminarInfo, url);
             const quizSuffix = quizResultMessage ? `\n\n${quizResultMessage}` : '';
             const message = `🔴세미나종료\n**${mergedSeminarInfo.name}**\n${targetUrl}${quizSuffix}`;
             await sendNotificationToChannel(message);
