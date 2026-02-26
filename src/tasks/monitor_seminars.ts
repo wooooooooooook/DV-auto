@@ -271,6 +271,18 @@ async function performAutoEnter(context: BrowserContext, seminarId: string, semi
       await enterBtn.click();
       console.log(`[monitor_seminars] Clicked '입장하기' for ${seminarName}. Waiting 10s.`);
       await page.waitForTimeout(10000);
+
+      // Take a screenshot and send to admin
+      const screenshotPath = path.join(process.cwd(), `seminar_entry_${seminarId}.png`);
+      try {
+        await page.screenshot({ path: screenshotPath, fullPage: false });
+        await sendTelegram(`[monitor_seminars] Auto-entered: ${seminarName}`, screenshotPath);
+      } catch (screenshotError) {
+        console.error(`[monitor_seminars] Failed to take/send screenshot for ${seminarName}`, screenshotError);
+      } finally {
+        // Clean up the screenshot file
+        await fs.unlink(screenshotPath).catch(() => {});
+      }
     } else {
       console.log(`[monitor_seminars] '입장하기' button not found for ${seminarName}.`);
     }
