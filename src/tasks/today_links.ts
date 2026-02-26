@@ -111,13 +111,23 @@ function getTodayDateStrings() {
   const month = now.toLocaleDateString('en-US', { month: 'numeric', ...opts });
   const day = now.toLocaleDateString('en-US', { day: 'numeric', ...opts });
   const iso = now.toLocaleDateString('en-CA', opts);
-  return { todayString: `${month}/${day}`, isoDate: iso };
+
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayIso = yesterday.toLocaleDateString('en-CA', opts);
+
+  return { todayString: `${month}/${day}`, isoDate: iso, yesterdayIso };
 }
 
-function getStoredNewSeminars(isoDate: string): StoredNewSeminars['seminars'] {
+function getStoredNewSeminars(isoDate: string, yesterdayIso: string): StoredNewSeminars['seminars'] {
   const stored = storage.get<StoredNewSeminars>(NEW_SEMINAR_KEY);
-  if (!stored || stored.date !== isoDate) return [];
-  return stored.seminars || [];
+  if (!stored) return [];
+
+  // Return if the stored date matches today or yesterday
+  if (stored.date === isoDate || stored.date === yesterdayIso) {
+    return stored.seminars || [];
+  }
+  return [];
 }
 
 function getTempQuizAnswers(isoDate: string, productTitle: string): Array<string | number> | null {
@@ -301,8 +311,8 @@ async function run({ page }: PlaywrightRunArgs) {
   try {
     const quizInfo = await collectQuizInfo(page);
     const seminarMessage = await collectTodaySeminarMessage(page);
-    const { isoDate } = getTodayDateStrings();
-    const storedNewSeminars = getStoredNewSeminars(isoDate);
+    const { isoDate, yesterdayIso } = getTodayDateStrings();
+    const storedNewSeminars = getStoredNewSeminars(isoDate, yesterdayIso);
 
     const options: Record<string, unknown> = {};
 
