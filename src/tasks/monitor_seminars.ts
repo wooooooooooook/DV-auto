@@ -1,7 +1,7 @@
 import type { BrowserContext, Page } from 'playwright';
 import fs from 'fs/promises';
 import path from 'path';
-import { safeGoto, sendNotificationToChannel, sendTelegram, getSeminarIdFromUrl } from '../modules/utils';
+import { safeGoto, sendNotificationToChannel, sendTelegram, getSeminarIdFromUrl, ensureLoggedIn } from '../modules/utils';
 import * as storage from '../services/storage';
 import { processSeminarQuiz } from './seminar_quiz';
 
@@ -266,24 +266,42 @@ async function performAutoEnter(context: BrowserContext, seminarId: string, semi
   const targetUrl = `${SEMINAR_DETAIL_PAGE}${seminarId}`;
   try {
     console.log(`[monitor_seminars] Performing auto-enter for ${seminarName} (${targetUrl})`);
+
+    await ensureLoggedIn({ page, context });
+
     await safeGoto(page, targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
 
     const enterBtn = page.locator('text="입장하기"').first();
     if (await enterBtn.isVisible({ timeout: 5000 })) {
+      const popupPromise = context.waitForEvent('page', { timeout: 5000 }).catch(() => null);
       await enterBtn.click();
-      console.log(`[monitor_seminars] Clicked '입장하기' for ${seminarName}. Waiting 10s.`);
-      await page.waitForTimeout(10000);
+
+      const popup = await popupPromise;
+      let activePage = page;
+
+      if (popup) {
+        console.log(`[monitor_seminars] Popup detected for ${seminarName}`);
+        activePage = popup;
+        await activePage.waitForLoadState('domcontentloaded');
+      }
+
+      console.log(`[monitor_seminars] Clicked '입장하기' for ${seminarName}. Waiting 10s for content.`);
+      await activePage.waitForTimeout(10000);
 
       // Take a screenshot and send to admin
       const screenshotPath = path.join(process.cwd(), `seminar_entry_${seminarId}.png`);
       try {
-        await page.screenshot({ path: screenshotPath, fullPage: false });
+        await activePage.screenshot({ path: screenshotPath, fullPage: false });
         await sendTelegram(`[monitor_seminars] Auto-entered: ${seminarName}`, screenshotPath);
       } catch (screenshotError) {
         console.error(`[monitor_seminars] Failed to take/send screenshot for ${seminarName}`, screenshotError);
       } finally {
         // Clean up the screenshot file
         await fs.unlink(screenshotPath).catch(() => {});
+      }
+
+      if (popup) {
+        await popup.close().catch(() => {});
       }
     } else {
       console.log(`[monitor_seminars] '입장하기' button not found for ${seminarName}.`);
