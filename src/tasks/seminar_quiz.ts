@@ -110,7 +110,7 @@ async function parseQuizQuestions(page: Page): Promise<QuizQuestion[]> {
 /**
  * 퀴즈 결과를 텔레그램 메시지 형식으로 포맷
  */
-function formatQuizResults(results: QuizResult[], hasUnknown: boolean, hasMultipleMatches: boolean): string {
+function formatQuizResults(results: QuizResult[], _hasUnknown: boolean, _hasMultipleMatches: boolean): string {
   let message = '';
 
   // 정답 요약 (예: "퀴즈 정답 213")
@@ -203,8 +203,8 @@ async function processSeminarQuiz(page: Page, seminarName?: string): Promise<Sem
 
     // 각 문제에 대해 정답 찾기
     const results: QuizResult[] = [];
-    let hasUnknown = false;
-    let hasMultipleMatches = false;
+    let _hasUnknown = false;
+    let _hasMultipleMatches = false;
 
     for (let i = 0; i < questions.length; i++) {
       const q = questions[i];
@@ -217,7 +217,7 @@ async function processSeminarQuiz(page: Page, seminarName?: string): Promise<Sem
 
       if (matchingKeywords.length === 0) {
         // 족보에 없음
-        hasUnknown = true;
+        _hasUnknown = true;
       } else if (matchingKeywords.length === 1) {
         // 정확히 하나 매칭
         matchedKeyword = matchingKeywords[0];
@@ -227,11 +227,11 @@ async function processSeminarQuiz(page: Page, seminarName?: string): Promise<Sem
           selectedIndex = found.index;
           selectedText = found.text;
         } else {
-          hasUnknown = true;
+          _hasUnknown = true;
         }
       } else {
         // 여러 개 매칭 - 첫 번째 것 사용하되 경고
-        hasMultipleMatches = true;
+        _hasMultipleMatches = true;
         multipleMatches = matchingKeywords;
         matchedKeyword = matchingKeywords[0];
         const answerKeyword = cheatsheet[matchedKeyword];
@@ -253,12 +253,12 @@ async function processSeminarQuiz(page: Page, seminarName?: string): Promise<Sem
     }
 
     // 결과 메시지 생성 및 전송
-    const resultMessage = formatQuizResults(results, hasUnknown, hasMultipleMatches);
+    const resultMessage = formatQuizResults(results, _hasUnknown, _hasMultipleMatches);
 
     // 퀴즈 결과는 세미나 종료 메시지에 붙여서 보냅니다.
 
     // 미등록 문제가 있으면 추가 정보 전송 (admin_bot에)
-    if (hasUnknown) {
+    if (_hasUnknown) {
       const unknownMessage = formatUnknownQuestions(questions, results);
       await sendTelegram(unknownMessage);
     }
