@@ -1,7 +1,13 @@
 import type { BrowserContext, Page } from 'playwright';
 import fs from 'fs/promises';
 import path from 'path';
-import { safeGoto, sendNotificationToChannel, sendTelegram, getSeminarIdFromUrl, ensureLoggedIn } from '../modules/utils';
+import {
+  safeGoto,
+  sendNotificationToChannel,
+  sendTelegram,
+  getSeminarIdFromUrl,
+  ensureLoggedIn,
+} from '../modules/utils';
 import * as storage from '../services/storage';
 import { processSeminarQuiz } from './seminar_quiz';
 
@@ -261,70 +267,84 @@ async function getTodaysSeminars(page: Page, startHour: number, endHour: number)
   return seminars;
 }
 
-async function performAutoEnter(context: BrowserContext, seminarId: string, seminarName: string): Promise<void> {
+async function performAutoEnter(
+  context: BrowserContext,
+  seminarName: string,
+  targetUrl: string,
+  screenshotKey: string,
+): Promise<boolean> {
   const page = await context.newPage();
-  const targetUrl = `${SEMINAR_DETAIL_PAGE}${seminarId}`;
+  let didEnter = false;
+
   try {
     console.log(`[monitor_seminars] Performing auto-enter for ${seminarName} (${targetUrl})`);
 
     await ensureLoggedIn({ page, context });
-
     await safeGoto(page, targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
 
     const enterBtn = page.locator('text="입장하기"').first();
-    if (await enterBtn.isVisible({ timeout: 5000 })) {
-      const popupPromise = context.waitForEvent('page', { timeout: 5000 }).catch(() => null);
-      await enterBtn.click();
+    if (!(await enterBtn.isVisible({ timeout: 5000 }))) {
+      console.log(`[monitor_seminars] '입장하기' button not found for ${seminarName}. retry needed.`);
+      return false;
+    }
 
-      const popup = await popupPromise;
-      let activePage = page;
+    const popupPromise = context.waitForEvent('page', { timeout: 5000 }).catch(() => null);
+    await enterBtn.click();
 
-      if (popup) {
-        console.log(`[monitor_seminars] Popup detected for ${seminarName}`);
-        activePage = popup;
-        await activePage.waitForLoadState('domcontentloaded');
-      }
+    const popup = await popupPromise;
+    let activePage = page;
 
-      console.log(`[monitor_seminars] Clicked '입장하기' for ${seminarName}. Waiting 10s for content.`);
-      await activePage.waitForTimeout(10000);
+    if (popup) {
+      console.log(`[monitor_seminars] Popup detected for ${seminarName}`);
+      activePage = popup;
+      await activePage.waitForLoadState('domcontentloaded');
+    }
 
-      // Take a screenshot and send to admin
-      const screenshotPath = path.join(process.cwd(), `seminar_entry_${seminarId}.png`);
-      try {
-        await activePage.screenshot({ path: screenshotPath, fullPage: false });
-        await sendTelegram(`[monitor_seminars] Auto-entered: ${seminarName}`, screenshotPath);
-      } catch (screenshotError) {
-        console.error(`[monitor_seminars] Failed to take/send screenshot for ${seminarName}`, screenshotError);
-      } finally {
-        // Clean up the screenshot file
-        await fs.unlink(screenshotPath).catch(() => {});
-      }
+    console.log(`[monitor_seminars] Clicked '입장하기' for ${seminarName}. Waiting 10s for content.`);
+    await activePage.waitForTimeout(10000);
 
-      if (popup) {
-        await popup.close().catch(() => {});
-      }
-    } else {
-      console.log(`[monitor_seminars] '입장하기' button not found for ${seminarName}.`);
+    // Take a screenshot and send to admin
+    const screenshotPath = path.join(process.cwd(), `seminar_entry_${screenshotKey}.png`);
+    try {
+      const entryMessage = `[monitor_seminars] Auto-entered: ${seminarName}`;
+      await activePage.screenshot({ path: screenshotPath, fullPage: false });
+
+      await sendTelegram(entryMessage, screenshotPath);
+      didEnter = true;
+    } catch (screenshotError) {
+      console.error(`[monitor_seminars] Failed to take/send screenshot for ${seminarName}`, screenshotError);
+    } finally {
+      // Clean up the screenshot file
+      await fs.unlink(screenshotPath).catch(() => {});
+    }
+
+    if (popup) {
+      await popup.close().catch(() => {});
     }
   } catch (e) {
     console.error(`[monitor_seminars] Auto-enter failed for ${seminarName}`, e);
   } finally {
     await page.close().catch(() => {});
   }
+
+  return didEnter;
 }
 
 async function checkAndPerformAutoEnter(
   context: BrowserContext,
   seminarId: string | null,
+  seminarUrl: string,
   name: string,
   status: string,
   autoEnterDone: boolean | undefined,
 ): Promise<boolean> {
-  if (status === '입장하기' && seminarId && !autoEnterDone) {
-    await performAutoEnter(context, seminarId, name);
-    return true;
+  if (status !== '입장하기' || autoEnterDone) {
+    return !!autoEnterDone;
   }
-  return !!autoEnterDone;
+
+  const targetUrl = seminarId ? `${SEMINAR_DETAIL_PAGE}${seminarId}` : seminarUrl;
+  const screenshotKey = seminarId || `url_${Date.now()}`;
+  return performAutoEnter(context, name, targetUrl, screenshotKey);
 }
 
 async function monitorSeminars(
@@ -355,6 +375,7 @@ async function monitorSeminars(
           monitoringList[url].autoEnterDone = await checkAndPerformAutoEnter(
             context,
             seminarId,
+            url,
             name,
             status,
             monitoringList[url]?.autoEnterDone,
@@ -448,6 +469,7 @@ async function monitorSeminars(
         mergedSeminarInfo.autoEnterDone = await checkAndPerformAutoEnter(
           context,
           mergedSeminarInfo.seminarId,
+          url,
           mergedSeminarInfo.name,
           effectiveStatus,
           mergedSeminarInfo.autoEnterDone,
