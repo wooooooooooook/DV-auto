@@ -309,13 +309,7 @@ async function performAutoEnter(
       const entryMessage = `[monitor_seminars] Auto-entered: ${seminarName}`;
       await activePage.screenshot({ path: screenshotPath, fullPage: false });
 
-      const noticeMessageId = await sendNotificationToChannel(entryMessage, screenshotPath);
-      if (!noticeMessageId) {
-        console.warn(
-          `[monitor_seminars] Failed to send auto-enter screenshot to notice channel. Fallback to admin chat (${seminarName}).`,
-        );
-        await sendTelegram(entryMessage, screenshotPath);
-      }
+      await sendTelegram(entryMessage, screenshotPath);
       didEnter = true;
     } catch (screenshotError) {
       console.error(`[monitor_seminars] Failed to take/send screenshot for ${seminarName}`, screenshotError);
