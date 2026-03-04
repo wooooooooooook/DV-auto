@@ -484,20 +484,41 @@ if (adminBot) {
   });
 
   adminBot.command('log', async (ctx) => {
-    logger.info('User requested to fetch recent logs via pnpm log', { from: ctx.from?.username });
-    try {
-      await ctx.reply('최근 로그를 불러옵니다... (최대 5초)');
-      const { stdout, stderr, exitCode } = await runShellCommandWithAllowedExitCodes(
-        'timeout 5s pnpm run log',
-        [124, 143],
-      );
+    const messageText = ctx.message?.text || '';
+    const args = messageText.split(' ').slice(1);
 
-      let message = 'pnpm log 결과';
+    let lineCount = 20; // 기본값
+    if (args.length > 0) {
+      const parsedCount = parseInt(args[0], 10);
+      if (!isNaN(parsedCount) && parsedCount > 0) {
+        lineCount = parsedCount;
+      }
+    }
+
+    logger.info(`User requested to fetch recent ${lineCount} logs`, { from: ctx.from?.username });
+
+    try {
+      await ctx.reply(`최근 ${lineCount}개 로그를 불러옵니다... (최대 5초)`);
+
+      const cmd = `journalctl --no-pager -u doctorville-auto.service -n ${lineCount}`;
+      const { stdout, stderr, exitCode } = await runShellCommandWithAllowedExitCodes(`timeout 5s ${cmd}`, [124, 143]);
+
+      let message = `로그 결과 (${lineCount}줄)`;
       if (exitCode) {
         message += ' (시간 제한으로 일부 로그만 표시됩니다)';
       }
+
       if (stdout.trim()) {
-        message += `\n\nstdout:\n${stdout.trim()}`;
+        // 불필요한 정보(예: 호스트명과 프로세스명) 제거
+        // 원본 예시: Mar 04 00:51:55 CT105 env[48145]: [info] ...
+        // 결과 예시: Mar 04 00:51:55 [info] ...
+        const cleanedStdout = stdout
+          .split('\n')
+          .map((line) => line.replace(/([A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\s+[^:]+:\s*/, '$1 '))
+          .join('\n')
+          .trim();
+
+        message += `\n\nstdout:\n${cleanedStdout}`;
       }
       if (stderr.trim()) {
         message += `\n\nstderr:\n${stderr.trim()}`;
@@ -508,8 +529,8 @@ if (adminBot) {
       await ctx.reply(truncateMessage(message));
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      logger.error('pnpm log failed', e);
-      await ctx.reply(`pnpm log 실패: ${message}`);
+      logger.error('log fetch failed', e);
+      await ctx.reply(`로그 가져오기 실패: ${message}`);
     }
   });
 
@@ -621,7 +642,7 @@ if (adminBot) {
 - /add_quiz_answer: 오늘의 퀴즈 정답을 등록합니다. 예) /add_quiz_answer 시너지아정 [1,2,3]
 - /broadcast_today_links: 즉시 오늘의 링크를 채널에 공지합니다.
 - /update_app: pnpm update:app 명령어를 실행합니다. (서버 권한 필요, 재시작으로 응답 중단 가능)
-- /log: pnpm log 명령어로 최근 로그를 가져옵니다.
+- /log [수량]: 최근 로그를 가져옵니다. (기본값: 20)
 - /inspect <url> <selector> [waitUntil]: 지정한 URL에서 셀렉터에 해당하는 요소를 검사하고 스크린샷을 전송합니다.
 - /5days_seminar_check: 향후 5일간의 세미나 일정을 확인합니다.
 - /today_links: 오늘의 세미나와 퀴즈 링크, 출석 링크를 한 번에 가져옵니다.

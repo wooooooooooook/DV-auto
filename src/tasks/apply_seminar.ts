@@ -117,7 +117,7 @@ async function run({ page }: PlaywrightRunArgs, options: ApplySeminarOptions = {
       newlyAddedCount = newlyAdded.length;
       if (newlyAdded.length > 0) {
         const newSeminarMessage = newlyAdded
-          .map((item, index) => `[${item.date ? item.date : ''}] ${item.name}\n${item.url}`)
+          .map((item, _index) => `[${item.date ? item.date : ''}] ${item.name}\n${item.url}`)
           .join('\n\n');
         const noticeMessage = `🆕 새로 추가된 세미나 ${newlyAdded.length}건 발견\n\n${newSeminarMessage}`;
         if (notifyNewSeminarsToTelegram) {
