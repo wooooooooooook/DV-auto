@@ -306,11 +306,16 @@ async function performAutoEnter(
     // Take a screenshot and send to admin
     const screenshotPath = path.join(process.cwd(), `seminar_entry_${screenshotKey}.png`);
     try {
-      const entryMessage = `[monitor_seminars] Auto-entered: ${seminarName}`;
+      const entryMessage = `🟢세미나 입장 완료\n**${seminarName}**\n${targetUrl}`;
       await activePage.screenshot({ path: screenshotPath, fullPage: false });
 
-      await sendTelegram(entryMessage, screenshotPath);
-      didEnter = true;
+      const sentToAdmin = await sendTelegram(entryMessage, screenshotPath);
+      if (!sentToAdmin) {
+        console.error(
+          `[monitor_seminars] Auto-enter screenshot send skipped/failed for ${seminarName}. Check TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID.`,
+        );
+      }
+      didEnter = sentToAdmin;
     } catch (screenshotError) {
       console.error(`[monitor_seminars] Failed to take/send screenshot for ${seminarName}`, screenshotError);
     } finally {

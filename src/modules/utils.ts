@@ -27,17 +27,17 @@ async function sendTelegram(
   text: string,
   imagePath: string | null = null,
   options: SendMessageOptions | SendPhotoOptions = {},
-): Promise<void> {
+): Promise<boolean> {
   const bot = getBot('admin');
   if (!bot) {
-    console.error('Admin bot is not initialized. Cannot send message.');
-    return;
+    console.error('Admin bot is not initialized. Cannot send message. Check TELEGRAM_BOT_TOKEN.');
+    return false;
   }
 
   const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
   if (!CHAT_ID) {
     console.error('TELEGRAM_CHAT_ID is not set.');
-    return;
+    return false;
   }
 
   try {
@@ -47,6 +47,7 @@ async function sendTelegram(
     } else {
       await bot.telegram.sendMessage(CHAT_ID, text, options as SendMessageOptions);
     }
+    return true;
   } catch (error) {
     console.error('Failed to send Telegram message:', error);
     try {
@@ -55,6 +56,7 @@ async function sendTelegram(
     } catch (nestedError) {
       console.error('Failed to send the failure notification as well:', nestedError);
     }
+    return false;
   }
 }
 
