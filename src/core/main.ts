@@ -27,7 +27,7 @@ const HEADLESS = (process.env.HEADLESS || 'true').toLowerCase() === 'true';
 const TIMEZONE = process.env.SCHEDULE_TZ || 'Asia/Seoul';
 const DAILY_ROUTINE_CRON = process.env.DAILY_CRON || '1 0 * * *';
 const BROADCAST_TODAY_LINKS_CRON = '0 9 * * *';
-const APPLY_SEMINAR_EXTRA_CRON = '0 10,11,12,13,14,15,16,17,18,19 * * *';
+const APPLY_SEMINAR_EXTRA_CRON = '0 */30 6-23 * * *';
 const LUNCH_MONITOR_CRON = '0 11 * * *';
 const DINNER_MONITOR_CRON = '0 17 * * *';
 const MONITOR_RESUME_DURATION_HOURS = 5;
