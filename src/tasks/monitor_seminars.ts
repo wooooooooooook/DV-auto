@@ -280,11 +280,24 @@ async function performAutoEnter(
     console.log(`[monitor_seminars] Performing auto-enter for ${seminarName} (${targetUrl})`);
 
     await ensureLoggedIn({ page, context });
-    await safeGoto(page, targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    await safeGoto(page, targetUrl, { waitUntil: 'networkidle', timeout: 15000 });
 
     const enterBtn = page.locator('text="입장하기"').first();
     if (!(await enterBtn.isVisible({ timeout: 5000 }))) {
       console.log(`[monitor_seminars] '입장하기' button not found for ${seminarName}. retry needed.`);
+      // 버튼 못 찾아도 현재 페이지 스크린샷 전송
+      const notFoundScreenshotPath = path.join(process.cwd(), `seminar_entry_notfound_${screenshotKey}.png`);
+      try {
+        await page.screenshot({ path: notFoundScreenshotPath, fullPage: false });
+        await sendTelegram(
+          `⚠️ '입장하기' 버튼을 찾지 못했습니다 (재시도 예정)\n**${seminarName}**\n${targetUrl}`,
+          notFoundScreenshotPath,
+        );
+      } catch (ssErr) {
+        console.error(`[monitor_seminars] Failed to take/send not-found screenshot for ${seminarName}`, ssErr);
+      } finally {
+        await fs.unlink(notFoundScreenshotPath).catch(() => {});
+      }
       return false;
     }
 
