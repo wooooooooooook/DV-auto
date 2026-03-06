@@ -10,6 +10,8 @@
     "dev": "ts-node src/core/main.ts",
     "restart:app": "pnpm run build && systemctl restart doctorville-auto.service",
     "update:app": "git pull && pnpm install --frozen-lockfile && pnpm run build && cp deploy/doctorville-auto.service /etc/systemd/system/ && systemctl daemon-reload && systemctl restart doctorville-auto.service",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\"",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "log": "journalctl --no-pager -u doctorville-auto.service -n 20"
