@@ -32,6 +32,7 @@ type SeminarInfo = {
   hasSurvey?: boolean;
   isEntryStarted?: boolean;
   autoEnterDone?: boolean;
+  isExcluded?: boolean;
 };
 type StoredSeminarIds = { date: string; lunchSeminarIds: string[]; dinnerSeminarIds: string[] };
 type SeminarBucketKey = 'lunchSeminarIds' | 'dinnerSeminarIds';
@@ -389,6 +390,16 @@ async function monitorSeminars(
         await sendTelegram(`[${periodName}] Seminar already available: ${name}`);
         const targetUrl = seminarId ? `${SEMINAR_DETAIL_PAGE}${seminarId}` : url;
 
+        // Check for survey existence before auto-enter
+        const { hasSurvey, isSurveyPointExcluded } = await checkSurveyMeta(context, targetUrl);
+        if (isSurveyPointExcluded) {
+          console.log(`[monitor_seminars] Skipping monitoring for ${name} because survey points are excluded.`);
+          if (monitoringList[url]) {
+            monitoringList[url].isExcluded = true;
+          }
+          continue;
+        }
+
         if (monitoringList[url]) {
           monitoringList[url].autoEnterDone = await checkAndPerformAutoEnter(
             context,
@@ -398,14 +409,6 @@ async function monitorSeminars(
             status,
             monitoringList[url]?.autoEnterDone,
           );
-        }
-
-        // Check for survey existence
-        const { hasSurvey, isSurveyPointExcluded } = await checkSurveyMeta(context, targetUrl);
-        if (isSurveyPointExcluded) {
-          console.log(`[monitor_seminars] Skipping monitoring for ${name} because survey points are excluded.`);
-          delete monitoringList[url];
-          continue;
         }
         monitoringList[url].hasSurvey = hasSurvey;
         monitoringList[url].isEntryStarted = true;
@@ -481,9 +484,20 @@ async function monitorSeminars(
           hasSurvey: monitoredInfo.hasSurvey, // Preserve hasSurvey state
           isEntryStarted: monitoredInfo.isEntryStarted, // Preserve isEntryStarted state
           autoEnterDone: monitoredInfo.autoEnterDone, // Preserve autoEnterDone state
+          isExcluded: monitoredInfo.isExcluded, // Preserve isExcluded state
         };
 
         const effectiveStatus = currentInfo ? currentInfo.status : monitoredInfo.status;
+
+        if (mergedSeminarInfo.isExcluded) {
+          if (!currentInfo) {
+            delete monitoringList[url];
+          } else {
+            monitoringList[url] = mergedSeminarInfo;
+          }
+          continue;
+        }
+
         mergedSeminarInfo.autoEnterDone = await checkAndPerformAutoEnter(
           context,
           mergedSeminarInfo.seminarId,
@@ -546,7 +560,8 @@ async function monitorSeminars(
           const { hasSurvey, isSurveyPointExcluded } = await checkSurveyMeta(context, targetUrl);
           if (isSurveyPointExcluded) {
             console.log(`[monitor_seminars] Skipping monitoring for ${newName} because survey points are excluded.`);
-            delete monitoringList[url];
+            mergedSeminarInfo.isExcluded = true;
+            monitoringList[url] = mergedSeminarInfo;
             continue;
           }
 
@@ -570,6 +585,7 @@ async function monitorSeminars(
             hasSurvey: mergedSeminarInfo.hasSurvey,
             isEntryStarted: mergedSeminarInfo.isEntryStarted,
             autoEnterDone: mergedSeminarInfo.autoEnterDone,
+            isExcluded: mergedSeminarInfo.isExcluded,
           };
         } else {
           monitoringList[url] = mergedSeminarInfo;
