@@ -631,6 +631,87 @@ if (adminBot) {
     }
   });
 
+  adminBot.command('add_seminar_answer_batch', async (ctx) => {
+    logger.info('User requested batch seminar quiz registration', { from: ctx.from?.username });
+    const messageText = ctx.message?.text || '';
+    const content = messageText.replace(/^\/add_seminar_answer_batch\s*/, '').trim();
+
+    if (!content) {
+      return ctx.reply('사용법: /add_seminar_answer_batch <퀴즈 알림 내용 + 마지막 줄에 정답번호>');
+    }
+
+    const lines = content.split('\n').map((l) => l.trim());
+    const lastLine = lines[lines.length - 1];
+
+    if (!/^\d+$/.test(lastLine)) {
+      return ctx.reply('❌ 마지막 줄에 숫자 형식의 정답(예: 3313)이 포함되어야 합니다.');
+    }
+
+    const answers = lastLine.split('').map(Number);
+    const questions: { keyword: string; options: string[] }[] = [];
+    let currentQuestion: { keyword: string; options: string[] } | null = null;
+
+    for (const line of lines) {
+      if (line.match(/^Q\d+:/)) {
+        // New question block
+        const keywordMatch = line.match(/Q\d+:\s*\[퀴즈\]\s*(.*?)(?:\*|\.\.\.|$)/);
+        if (keywordMatch) {
+          currentQuestion = { keyword: keywordMatch[1].trim(), options: [] };
+          questions.push(currentQuestion);
+        }
+      } else if (currentQuestion && line.match(/^\d+\./)) {
+        // Option line
+        const optionText = line.replace(/^\d+\.\s*/, '').trim();
+        currentQuestion.options.push(optionText);
+      }
+    }
+
+    if (questions.length === 0) {
+      return ctx.reply('❌ 퀴즈 내용을 파싱하지 못했습니다. 형식을 확인해주세요.');
+    }
+
+    if (questions.length !== answers.length) {
+      return ctx.reply(`❌ 퀴즈 개수(${questions.length})와 정답 개수(${answers.length})가 일치하지 않습니다.`);
+    }
+
+    try {
+      const data = await loadSeminarQuizCheatsheet();
+      const registered: string[] = [];
+
+      for (let i = 0; i < questions.length; i++) {
+        const q = questions[i];
+        const answerIndex = answers[i];
+        const selectedOption = q.options[answerIndex - 1];
+
+        if (selectedOption) {
+          data[q.keyword] = selectedOption;
+          registered.push(`• ${q.keyword} → ${selectedOption}`);
+        }
+      }
+
+      await saveSeminarQuizCheatsheet(data);
+
+      let gitNotice = '';
+      try {
+        const result = await commitAndPushIfChanged(
+          [SEMINAR_QUIZ_CHEATSHEET_FILE],
+          'update seminar quiz cheatsheet (batch)',
+        );
+        gitNotice = `\n\n${result.notice}`;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.error('세미나 퀴즈 족보 Git 커밋/푸시 실패', error);
+        gitNotice = `\n\n⚠️ Git 커밋/푸시 실패: ${message}`;
+      }
+
+      await ctx.reply(`✅ 세미나 퀴즈 ${registered.length}개 일괄 등록 완료\n\n${registered.join('\n')}${gitNotice}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error('세미나 퀴즈 족보 일괄 등록 실패', error);
+      await ctx.reply(`❌ 일괄 등록 실패: ${message}`);
+    }
+  });
+
   adminBot.command('help', (ctx) => {
     const message = `사용 가능한 명령어:
 
@@ -653,6 +734,7 @@ if (adminBot) {
 - /add_seminar_quiz <키워드> | <정답>: 족보 등록
 - /list_seminar_quiz: 등록된 족보 목록
 - /delete_seminar_quiz <키워드>: 족보 삭제
+- /add_seminar_answer_batch: 알림 내용을 복사하여 일괄 등록 (마지막 줄에 정답번호 포함)
 
 명령어 사용 예: /inspect https://example.com "div.article" networkidle`;
     ctx.reply(message);
