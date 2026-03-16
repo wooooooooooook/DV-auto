@@ -350,3 +350,9 @@ checkAndResumeTasks();
 
 // Launch the Telegram bot
 telegram.launch();
+
+// Send online notification
+const nowStr = new Date().toLocaleString('ko-KR', { timeZone: TIMEZONE });
+utils.sendTelegram(`🚀 앱이 온라인 상태입니다. (${nowStr})`).catch((err) => {
+  logger.error('Failed to send startup notification:', err);
+});
