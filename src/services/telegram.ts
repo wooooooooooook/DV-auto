@@ -1003,14 +1003,48 @@ if (noticeBot) {
   });
 }
 
+const adminCommands = [
+  { command: 'schedules', description: '스케줄된 작업 목록 확인' },
+  { command: 'run_routine_now', description: '즉시 daily_routine 실행' },
+  { command: 'run_quiz_now', description: '즉시 오늘의 퀴즈(today_quiz) 실행' },
+  { command: 'apply_seminar_now', description: '즉시 세미나 신청(apply_seminar) 실행' },
+  { command: 'naverpay_point_exchange', description: '네이버페이포인트교환 실행' },
+  { command: 'add_quiz_answer', description: '오늘의 퀴즈 정답 등록' },
+  { command: 'broadcast_today_links', description: '오늘의 링크 채널 공지' },
+  { command: 'update_app', description: '앱 업데이트 (pnpm update:app)' },
+  { command: 'log', description: '최근 로그 확인' },
+  { command: 'inspect', description: '페이지 요소 검사' },
+  { command: '5days_seminar_check', description: '향후 5일간 세미나 일정 확인' },
+  { command: 'today_links', description: '오늘의 세미나/퀴즈/출석 링크 모음' },
+  { command: 'monitor_lunch_seminar_now', description: '즉시 점심 세미나 모니터링 시작' },
+  { command: 'monitor_dinner_seminar_now', description: '즉시 저녁 세미나 모니터링 시작' },
+  { command: 'add_seminar_quiz', description: '세미나 퀴즈 족보 등록' },
+  { command: 'list_seminar_quiz', description: '등록된 족보 목록' },
+  { command: 'delete_seminar_quiz', description: '족보 삭제' },
+  { command: 'add_seminar_answer_batch', description: '족보 일괄 등록' },
+  { command: 'help', description: '도움말' },
+];
+
+const noticeCommands = [
+  { command: '5days_seminar_check', description: '향후 5일간 세미나 일정 확인' },
+  { command: 'today_links', description: '오늘의 세미나/퀴즈/출석 링크 모음' },
+  { command: 'help', description: '도움말' },
+];
+
 function launch(): void {
   if (adminBot) {
     adminBot.launch();
     logger.info('Admin bot started');
+    adminBot.telegram
+      .setMyCommands(adminCommands)
+      .catch((err) => logger.error('Failed to set admin bot commands', err));
   }
   if (noticeBot) {
     noticeBot.launch();
     logger.info('Notice bot started');
+    noticeBot.telegram
+      .setMyCommands(noticeCommands)
+      .catch((err) => logger.error('Failed to set notice bot commands', err));
   }
 }
 
