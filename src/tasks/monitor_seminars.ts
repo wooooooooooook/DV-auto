@@ -149,34 +149,20 @@ async function handleSeminarEndAndQuiz(
         await surveyPage.waitForTimeout(1000); // 페이지 로드 대기
       }
 
-      // 동의 버튼 (Agree) 찾기 및 클릭
-      const agreeBtn = quizPage.locator('text="동의"').first();
-      if (await agreeBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-        console.log(`[monitor_seminars] "동의" 버튼 발견, 클릭 (${seminar.name})`);
-        await agreeBtn.click({ force: true }).catch(() => {});
+      // 참여하기 버튼 (Participate) 찾기 및 클릭 (동의 대신)
+      const participateBtn = quizPage.locator('text="참여하기"').first();
+      if (await participateBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+        console.log(`[monitor_seminars] "참여하기" 버튼 발견, 클릭 (${seminar.name})`);
+        await participateBtn.click({ force: true }).catch(() => {});
         await quizPage.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
         await quizPage.waitForTimeout(1000);
       }
 
-      // "설문 참여하기" 버튼이 추가로 나타날 수 있음 (이벤트성으로 quizPage/popup에 뜰 수 있음)
-      const surveyStartBtn = quizPage.locator('text="설문 참여하기"').first();
-      const isSurveyStartVisible = await surveyStartBtn.isVisible({ timeout: 2000 }).catch(() => false);
-      if (isSurveyStartVisible) {
-        console.log(`[monitor_seminars] "설문 참여하기" 버튼 발견, 클릭 (${seminar.name})`);
-        const secondPopupPromise = context.waitForEvent('page', { timeout: 5000 }).catch(() => null);
-        await surveyStartBtn.click({ force: true }).catch(() => {});
-        const secondPopup = (await secondPopupPromise) || null;
-        if (secondPopup) {
-          if (popupPage && popupPage !== quizPage) {
-            await popupPage.close().catch(() => {});
-          }
-          popupPage = secondPopup;
-          quizPage = secondPopup;
-          await secondPopup.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
-        } else {
-          await quizPage.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
-          await quizPage.waitForTimeout(1000);
-        }
+      // "설문을 시작합니다" 텍스트가 보이는지 확인 (성공적인 진입 확인)
+      const startText = quizPage.locator('text="설문을 시작합니다"').first();
+      const isStartTextVisible = await startText.isVisible({ timeout: 3000 }).catch(() => false);
+      if (!isStartTextVisible) {
+        console.log(`[monitor_seminars] "설문을 시작합니다" 텍스트를 찾을 수 없음 (${seminar.name})`);
       }
 
       // 퀴즈 처리 (댓글로 결과 전송)
