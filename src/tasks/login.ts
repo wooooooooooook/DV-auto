@@ -32,7 +32,7 @@ async function run({ page, context }: { page: Page; context: BrowserContext }) {
     if (!loginSuccess) {
       const shot = 'screenshot/login_failed.png';
       await page.screenshot({ path: shot }).catch(() => {});
-      await sendTelegram(`🔴 로그인 실패 (스크린샷: ${shot})`).catch((err) =>
+      await sendTelegram(`🔴 로그인 실패 (스크린샷: ${shot})`, shot).catch((err) =>
         console.error('Failed to send Telegram message:', err),
       );
       return { success: false, message: `로그인 실패 (스크린샷: ${shot})`, imagePath: shot };
