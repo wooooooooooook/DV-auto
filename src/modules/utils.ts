@@ -264,9 +264,25 @@ async function safeGoto(page: Page, url: string, options: Parameters<Page['goto'
       try {
         const errName = err && typeof err === 'object' && 'name' in err ? (err as Error).name : String(err);
         const errCode = err && typeof err === 'object' && 'code' in err ? (err as { code?: string }).code : '';
+
+        let screenshotPath = null;
+        try {
+          const p = `screenshot_safegoto_failed_${Date.now()}.png`;
+          await page.screenshot({ path: p, fullPage: false }).catch(() => {});
+          screenshotPath = p;
+        } catch (ssErr) {
+          console.error('safeGoto screenshot capture failed', ssErr);
+        }
+
         await sendTelegram(
           `❗ safeGoto failed (${resolvedUrl}) attempt ${attempt}: ${errName}${errCode ? ` (${errCode})` : ''}`,
+          screenshotPath,
         );
+
+        if (screenshotPath) {
+          const fsPromises = await import('fs/promises');
+          await fsPromises.default.unlink(screenshotPath).catch(() => {});
+        }
       } catch (notifyErr) {
         console.error(
           'notify failed',

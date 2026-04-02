@@ -28,6 +28,9 @@ async function run({ page, context }: { page: Page; context: BrowserContext }) {
       return { success: true, message: '로그인 성공했습니다. (이미 로그인 됨)' };
     }
 
+    await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+    await page.waitForTimeout(3000);
+
     const loginSuccess = (await page.locator('text=로그아웃').count()) || (await page.url()).includes('dashboard');
     if (!loginSuccess) {
       const shot = 'screenshot/login_failed.png';
