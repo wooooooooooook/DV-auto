@@ -149,13 +149,24 @@ async function handleSeminarEndAndQuiz(
         await surveyPage.waitForTimeout(1000); // 페이지 로드 대기
       }
 
-      // 참여하기 버튼 (Participate) 찾기 및 클릭 (동의 대신)
-      const participateBtn = quizPage.locator('text="참여하기"').first();
+      // "참여하기" 또는 "설문 참여하기" 버튼 찾기 및 클릭 (클릭 시 팝업 발생)
+      const participateBtn = quizPage.locator('text="참여하기", text="설문 참여하기"').first();
       if (await participateBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
         console.log(`[monitor_seminars] "참여하기" 버튼 발견, 클릭 (${seminar.name})`);
+        const secondPopupPromise = context.waitForEvent('page', { timeout: 5000 }).catch(() => null);
         await participateBtn.click({ force: true }).catch(() => {});
-        await quizPage.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
-        await quizPage.waitForTimeout(1000);
+        const secondPopup = (await secondPopupPromise) || null;
+        if (secondPopup) {
+          if (popupPage && popupPage !== quizPage) {
+            await popupPage.close().catch(() => {});
+          }
+          popupPage = secondPopup;
+          quizPage = secondPopup;
+          await secondPopup.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
+        } else {
+          await quizPage.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+          await quizPage.waitForTimeout(1000);
+        }
       }
 
       // "설문을 시작합니다" 텍스트가 보이는지 확인 (성공적인 진입 확인)
