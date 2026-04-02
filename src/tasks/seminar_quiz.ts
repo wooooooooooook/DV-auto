@@ -179,7 +179,9 @@ async function processSeminarQuiz(page: Page, seminarName?: string): Promise<Sem
       const message = seminarName
         ? `ℹ️ ${seminarName} 설문 페이지에서 퀴즈를 찾지 못했습니다.`
         : 'ℹ️ 설문 페이지에서 퀴즈를 찾지 못했습니다.';
-      await sendTelegram(message);
+      const shotPath = `screenshot/quiz_not_found_${Date.now()}.png`;
+      await page.screenshot({ path: shotPath, fullPage: true }).catch(() => {});
+      await sendTelegram(message, shotPath);
       return { success: true, hasQuizResult: false, message };
     }
 
@@ -267,7 +269,9 @@ async function processSeminarQuiz(page: Page, seminarName?: string): Promise<Sem
   } catch (e) {
     console.error('[seminar_quiz] 오류', e && typeof e === 'object' && 'stack' in e ? (e as Error).stack : e);
     const message = e instanceof Error ? e.message : String(e);
-    await sendTelegram(`❗ 세미나 퀴즈 처리 오류: ${message}`).catch(() => {});
+    const errShotPath = `screenshot/quiz_error_${Date.now()}.png`;
+    await page.screenshot({ path: errShotPath, fullPage: true }).catch(() => {});
+    await sendTelegram(`❗ 세미나 퀴즈 처리 오류: ${message}`, errShotPath).catch(() => {});
     return { success: false, hasQuizResult: false, message: `세미나 퀴즈 처리 오류: ${message}` };
   }
 }
