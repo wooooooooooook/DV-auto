@@ -139,7 +139,7 @@ async function handleSeminarEndAndQuiz(
     if (isSurveyButtonVisible) {
       console.log(`[monitor_seminars] "설문참여" 버튼 발견, 클릭 (${seminar.name})`);
       const firstPopupPromise = context.waitForEvent('page', { timeout: 5000 }).catch(() => null);
-      await surveyBtn.click().catch(() => {});
+      await surveyBtn.click({ force: true }).catch(() => {});
       popupPage = (await firstPopupPromise) || null;
       if (popupPage) {
         quizPage = popupPage;
@@ -149,21 +149,33 @@ async function handleSeminarEndAndQuiz(
         await surveyPage.waitForTimeout(1000); // 페이지 로드 대기
       }
 
-      // "설문 참여하기" 버튼이 추가로 나타날 수 있음
-      const surveyStartBtn = surveyPage.locator('text="설문 참여하기"').first();
+      // 동의 버튼 (Agree) 찾기 및 클릭
+      const agreeBtn = quizPage.locator('text="동의"').first();
+      if (await agreeBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+        console.log(`[monitor_seminars] "동의" 버튼 발견, 클릭 (${seminar.name})`);
+        await agreeBtn.click({ force: true }).catch(() => {});
+        await quizPage.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+        await quizPage.waitForTimeout(1000);
+      }
+
+      // "설문 참여하기" 버튼이 추가로 나타날 수 있음 (이벤트성으로 quizPage/popup에 뜰 수 있음)
+      const surveyStartBtn = quizPage.locator('text="설문 참여하기"').first();
       const isSurveyStartVisible = await surveyStartBtn.isVisible({ timeout: 2000 }).catch(() => false);
       if (isSurveyStartVisible) {
         console.log(`[monitor_seminars] "설문 참여하기" 버튼 발견, 클릭 (${seminar.name})`);
         const secondPopupPromise = context.waitForEvent('page', { timeout: 5000 }).catch(() => null);
-        await surveyStartBtn.click().catch(() => {});
+        await surveyStartBtn.click({ force: true }).catch(() => {});
         const secondPopup = (await secondPopupPromise) || null;
         if (secondPopup) {
+          if (popupPage && popupPage !== quizPage) {
+            await popupPage.close().catch(() => {});
+          }
           popupPage = secondPopup;
           quizPage = secondPopup;
           await secondPopup.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
-        } else if (!popupPage) {
-          await surveyPage.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
-          await surveyPage.waitForTimeout(1000);
+        } else {
+          await quizPage.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+          await quizPage.waitForTimeout(1000);
         }
       }
 
