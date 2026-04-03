@@ -153,6 +153,15 @@ async function handleSeminarEndAndQuiz(
       const participateBtn = quizPage.locator('text="참여하기", text="설문 참여하기"').first();
       if (await participateBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
         console.log(`[monitor_seminars] "참여하기" 버튼 발견, 클릭 (${seminar.name})`);
+
+        // "동의합니다." 체크박스 처리 추가
+        const agreeCheckbox = quizPage.locator('text=/동의합니다/').first();
+        if (await agreeCheckbox.isVisible({ timeout: 1000 }).catch(() => false)) {
+          console.log(`[monitor_seminars] "동의합니다." 발견, 클릭 (${seminar.name})`);
+          await agreeCheckbox.click({ force: true }).catch(() => {});
+          await quizPage.waitForTimeout(500);
+        }
+
         const secondPopupPromise = context.waitForEvent('page', { timeout: 5000 }).catch(() => null);
         await participateBtn.click({ force: true }).catch(() => {});
         const secondPopup = (await secondPopupPromise) || null;
