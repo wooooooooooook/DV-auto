@@ -152,15 +152,9 @@ async function handleSeminarEndAndQuiz(
       // "참여하기" 또는 "설문 참여하기" 버튼 찾기 및 클릭 (클릭 시 팝업 발생)
       const participateBtn = quizPage.locator('text="참여하기", text="설문 참여하기"').first();
       if (await participateBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-        console.log(`[monitor_seminars] "참여하기" 버튼 발견, 클릭 (${seminar.name})`);
+        console.log(`[monitor_seminars] "참여하기" 버튼 발견, 대기 후 클릭 (${seminar.name})`);
 
-        // "동의합니다." 체크박스 처리 추가
-        const agreeCheckbox = quizPage.locator('text=/동의합니다/').first();
-        if (await agreeCheckbox.isVisible({ timeout: 1000 }).catch(() => false)) {
-          console.log(`[monitor_seminars] "동의합니다." 발견, 클릭 (${seminar.name})`);
-          await agreeCheckbox.click({ force: true }).catch(() => {});
-          await quizPage.waitForTimeout(500);
-        }
+        await quizPage.waitForTimeout(1000); // UI 안정화 대기
 
         const secondPopupPromise = context.waitForEvent('page', { timeout: 5000 }).catch(() => null);
         await participateBtn.click({ force: true }).catch(() => {});
