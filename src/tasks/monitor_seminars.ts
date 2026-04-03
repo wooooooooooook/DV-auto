@@ -152,7 +152,10 @@ async function handleSeminarEndAndQuiz(
       // "참여하기" 또는 "설문 참여하기" 버튼 찾기 및 클릭 (클릭 시 팝업 발생)
       const participateBtn = quizPage.locator('text="참여하기", text="설문 참여하기"').first();
       if (await participateBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-        console.log(`[monitor_seminars] "참여하기" 버튼 발견, 클릭 (${seminar.name})`);
+        console.log(`[monitor_seminars] "참여하기" 버튼 발견, 대기 후 클릭 (${seminar.name})`);
+
+        await quizPage.waitForTimeout(1000); // UI 안정화 대기
+
         const secondPopupPromise = context.waitForEvent('page', { timeout: 5000 }).catch(() => null);
         await participateBtn.click({ force: true }).catch(() => {});
         const secondPopup = (await secondPopupPromise) || null;
