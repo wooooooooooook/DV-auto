@@ -149,7 +149,8 @@ async function handleSeminarEndAndQuiz(
         await surveyPage.waitForTimeout(1000); // 페이지 로드 대기
       }
 
-      // 개인정보 동의 모달이 있을 경우 체크 후 "설문 참여하기" 클릭
+      // 개인정보 동의 모달이 있을 경우 상태만 확인
+      // NOTE: 일부 페이지는 기본값이 이미 체크된 상태라 추가 클릭 시 오히려 해제될 수 있음.
       const consentModal = quizPage
         .locator('text="개인정보 활용에 대한 동의", text="개인정보 제3자 제공 동의서"')
         .first();
@@ -158,19 +159,11 @@ async function handleSeminarEndAndQuiz(
         console.log(`[monitor_seminars] 개인정보 동의 모달 감지 (${seminar.name})`);
         const agreeCheckbox = quizPage.locator('input[type="checkbox"]').first();
         const isChecked = await agreeCheckbox.isChecked().catch(() => false);
-        if (!isChecked) {
-          await agreeCheckbox.check({ force: true }).catch(async () => {
-            await quizPage
-              .locator('text="동의합니다."')
-              .first()
-              .click({ force: true })
-              .catch(() => {});
-          });
-        }
+        console.log(`[monitor_seminars] 동의 체크박스 상태: ${isChecked ? 'checked' : 'unchecked'} (${seminar.name})`);
       }
 
-      // "참여하기" 또는 "설문 참여하기" 버튼 찾기 및 클릭 (클릭 시 팝업 발생 가능)
-      const participateBtn = quizPage.locator('button:has-text("설문 참여하기"), button:has-text("참여하기")').first();
+      // "참여하기" 또는 "설문 참여하기" 요소 찾기 및 클릭 (button/div/span 등 태그 무관)
+      const participateBtn = quizPage.locator(':text-is("설문 참여하기"), :text-is("참여하기")').first();
       const isParticipateBtnVisible = await participateBtn.isVisible({ timeout: 3000 }).catch(() => false);
       if (isParticipateBtnVisible) {
         const isParticipateBtnEnabled = await participateBtn.isEnabled().catch(() => true);
