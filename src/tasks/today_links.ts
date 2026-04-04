@@ -1,6 +1,6 @@
 import quizMapping from '../../data/quiz.json';
 import type { PlaywrightRunArgs } from '../types';
-import { safeGoto, getSeminarIdFromUrl } from '../modules/utils';
+import { safeGoto, getSeminarIdFromUrl, isSurveyPointExcludedSeminar } from '../modules/utils';
 import * as storage from '../services/storage';
 import { loadCheatsheet, findMatchingKeywords, findOptionByAnswer, type QuizQuestion } from './seminar_quiz';
 
@@ -23,7 +23,7 @@ type SeminarTaskData = SeminarData & { allSeminarIds: string[] };
 type SeminarMessageResult = SeminarData & { message: string };
 type StoredNewSeminars = {
   date: string;
-  seminars: Array<{ name: string; url: string; seminarId: string | null }>;
+  seminars: Array<{ name: string; url: string; seminarId: string | null; isPointExcluded?: boolean }>;
 };
 type TempQuizAnswers = {
   date: string;
@@ -231,6 +231,7 @@ async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Prom
 
     const lunchSeminars: string[] = [];
     const dinnerSeminars: string[] = [];
+    const pointExcludedCache = new Map<string, boolean>();
 
     for (let i = 0; i < count; i++) {
       const container = listConts.nth(i);
@@ -255,7 +256,14 @@ async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Prom
         const fullUrl = new URL(href, BASE_URL).toString();
         const seminarId = getSeminarIdFromUrl(fullUrl);
         const seminarLink = seminarId ? `${SEMINAR_DETAIL_PAGE}${seminarId}` : fullUrl;
-        const seminarInfo = ` ${time}. ${title} ${seminarLink}`;
+        const pointExcludedKey = seminarId || seminarLink;
+        let isPointExcluded = pointExcludedCache.get(pointExcludedKey);
+        if (typeof isPointExcluded !== 'boolean') {
+          isPointExcluded = await isSurveyPointExcludedSeminar(page.context(), seminarLink);
+          pointExcludedCache.set(pointExcludedKey, isPointExcluded);
+        }
+        const pointExcludedSuffix = isPointExcluded ? ' [포인트미지급]' : '';
+        const seminarInfo = ` ${time}. ${title}${pointExcludedSuffix} ${seminarLink}`;
 
         // If the time element has the `night_time` class treat as dinner, otherwise lunch
         if (classAttr.includes('night_time')) {
@@ -337,7 +345,8 @@ async function run({ page }: PlaywrightRunArgs) {
       const newSeminarList = storedNewSeminars
         .map((item, index) => {
           const link = item.seminarId ? `${SEMINAR_DETAIL_PAGE}${item.seminarId}` : item.url;
-          return `${index + 1}. ${item.name}\n${link}`;
+          const pointExcludedSuffix = item.isPointExcluded ? ' [포인트미지급]' : '';
+          return `${index + 1}. ${item.name}${pointExcludedSuffix}\n${link}`;
         })
         .join('\n\n');
       message += `\n\n🆕 어제 추가된 신규 세미나\n${newSeminarList}`;
