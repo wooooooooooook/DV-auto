@@ -1,7 +1,13 @@
 import path from 'path';
 import fs from 'fs/promises';
 import type { PlaywrightRunArgs, TaskResult } from '../types';
-import { safeGoto, sendNotificationToChannel, sendTelegram, getSeminarIdFromUrl } from '../modules/utils';
+import {
+  safeGoto,
+  sendNotificationToChannel,
+  sendTelegram,
+  getSeminarIdFromUrl,
+  isSurveyPointExcludedSeminar,
+} from '../modules/utils';
 import * as storage from '../services/storage';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
@@ -16,7 +22,7 @@ type SeminarListItem = {
 };
 type StoredNewSeminars = {
   date: string;
-  seminars: Array<SeminarListItem & { seminarId: string | null }>;
+  seminars: Array<SeminarListItem & { seminarId: string | null; isPointExcluded?: boolean }>;
 };
 
 type ApplySeminarOptions = {
@@ -116,8 +122,20 @@ async function run({ page }: PlaywrightRunArgs, options: ApplySeminarOptions = {
       const newlyAdded = normalizedCurrentSeminars.filter((item) => !storedUrls.has(item.url));
       newlyAddedCount = newlyAdded.length;
       if (newlyAdded.length > 0) {
+        const newlyAddedWithFlags = await Promise.all(
+          newlyAdded.map(async (item) => {
+            const seminarId = getSeminarIdFromUrl(item.url);
+            const link = seminarId ? `${SEMINAR_DETAIL_PAGE}${seminarId}` : item.url;
+            const isPointExcluded = await isSurveyPointExcludedSeminar(page.context(), link);
+            return { ...item, seminarId, isPointExcluded };
+          }),
+        );
         const newSeminarMessage = newlyAdded
-          .map((item, _index) => `[${item.date ? item.date : ''}] ${item.name}\n${item.url}`)
+          .map((item, _index) => {
+            const matched = newlyAddedWithFlags.find((flagged) => flagged.url === item.url);
+            const pointExcludedSuffix = matched?.isPointExcluded ? ' [포인트미지급]' : '';
+            return `[${item.date ? item.date : ''}] ${item.name}${pointExcludedSuffix}\n${item.url}`;
+          })
           .join('\n\n');
         const noticeMessage = `🆕 새로 추가된 세미나 ${newlyAdded.length}건 발견\n\n${newSeminarMessage}`;
         if (notifyNewSeminarsToTelegram) {
@@ -131,9 +149,9 @@ async function run({ page }: PlaywrightRunArgs, options: ApplySeminarOptions = {
         const baseSeminars = storedNew?.date === todayIso ? storedNew.seminars : [];
         const merged = [...baseSeminars];
         const existingUrls = new Set(baseSeminars.map((item) => item.url));
-        for (const item of newlyAdded) {
+        for (const item of newlyAddedWithFlags) {
           if (existingUrls.has(item.url)) continue;
-          merged.push({ ...item, seminarId: getSeminarIdFromUrl(item.url) });
+          merged.push(item);
           existingUrls.add(item.url);
         }
         storage.set(NEW_SEMINAR_KEY, {

@@ -326,6 +326,34 @@ async function ensureLoggedIn({ page, context }: { page: Page; context: BrowserC
   }
 }
 
+async function hasSurveyPointExcludedNotice(page: Page): Promise<boolean> {
+  const isSurveyPointExcludedByBanner = await page
+    .locator('text=/포인트가\\s*지급되지\\s*않는/')
+    .first()
+    .isVisible({ timeout: 3000 })
+    .catch(() => false);
+  const isSurveyPointExcludedByText = await page
+    .locator('body')
+    .first()
+    .innerText()
+    .then((text) => text.replace(/\s+/g, ' ').includes('포인트가 지급되지 않는 세미나'))
+    .catch(() => false);
+  return isSurveyPointExcludedByBanner || isSurveyPointExcludedByText;
+}
+
+async function isSurveyPointExcludedSeminar(context: BrowserContext, url: string): Promise<boolean> {
+  const page = await context.newPage();
+  try {
+    await safeGoto(page, url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+    return hasSurveyPointExcludedNotice(page);
+  } catch (_e) {
+    return false;
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
+
 function getSeminarIdFromUrl(url: string): string | null {
   try {
     const urlObj = new URL(url);
@@ -349,6 +377,8 @@ export {
   ensureLoggedIn,
   escapeMarkdownV2,
   getSeminarIdFromUrl,
+  hasSurveyPointExcludedNotice,
+  isSurveyPointExcludedSeminar,
 };
 
 const analyticsBlockedPages = new WeakSet<Page>();

@@ -7,6 +7,7 @@ import {
   sendTelegram,
   getSeminarIdFromUrl,
   ensureLoggedIn,
+  hasSurveyPointExcludedNotice,
 } from '../modules/utils';
 import * as storage from '../services/storage';
 import { processSeminarQuiz } from './seminar_quiz';
@@ -49,11 +50,7 @@ async function checkSurveyMeta(context: BrowserContext, url: string): Promise<Se
     await safeGoto(page, url, { waitUntil: 'domcontentloaded', timeout: 15000 });
     await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
 
-    const isSurveyPointExcluded = await page
-      .locator('text="설문 포인트가 지급되지 않는"')
-      .first()
-      .isVisible({ timeout: 3000 })
-      .catch(() => false);
+    const isSurveyPointExcluded = await hasSurveyPointExcludedNotice(page);
 
     // Check for "설문참여" button
     const surveyBtn = page.locator('text="설문참여"').first();
