@@ -149,12 +149,35 @@ async function handleSeminarEndAndQuiz(
         await surveyPage.waitForTimeout(1000); // 페이지 로드 대기
       }
 
-      // "참여하기" 또는 "설문 참여하기" 버튼 찾기 및 클릭 (클릭 시 팝업 발생)
-      const participateBtn = quizPage.locator('text="참여하기", text="설문 참여하기"').first();
-      if (await participateBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-        console.log(`[monitor_seminars] "참여하기" 버튼 발견, 대기 후 클릭 (${seminar.name})`);
+      // 개인정보 동의 모달이 있을 경우 체크 후 "설문 참여하기" 클릭
+      const consentModal = quizPage
+        .locator('text="개인정보 활용에 대한 동의", text="개인정보 제3자 제공 동의서"')
+        .first();
+      const isConsentModalVisible = await consentModal.isVisible({ timeout: 1500 }).catch(() => false);
+      if (isConsentModalVisible) {
+        console.log(`[monitor_seminars] 개인정보 동의 모달 감지 (${seminar.name})`);
+        const agreeCheckbox = quizPage.locator('input[type="checkbox"]').first();
+        const isChecked = await agreeCheckbox.isChecked().catch(() => false);
+        if (!isChecked) {
+          await agreeCheckbox.check({ force: true }).catch(async () => {
+            await quizPage
+              .locator('text="동의합니다."')
+              .first()
+              .click({ force: true })
+              .catch(() => {});
+          });
+        }
+      }
+
+      // "참여하기" 또는 "설문 참여하기" 버튼 찾기 및 클릭 (클릭 시 팝업 발생 가능)
+      const participateBtn = quizPage.locator('button:has-text("설문 참여하기"), button:has-text("참여하기")').first();
+      const isParticipateBtnVisible = await participateBtn.isVisible({ timeout: 3000 }).catch(() => false);
+      if (isParticipateBtnVisible) {
+        const isParticipateBtnEnabled = await participateBtn.isEnabled().catch(() => true);
+        console.log(`[monitor_seminars] "참여하기" 버튼 발견 (enabled=${isParticipateBtnEnabled}) (${seminar.name})`);
 
         await quizPage.waitForTimeout(1000); // UI 안정화 대기
+        const beforeUrl = quizPage.url();
 
         const secondPopupPromise = context.waitForEvent('page', { timeout: 5000 }).catch(() => null);
         await participateBtn.click({ force: true }).catch(() => {});
@@ -166,10 +189,15 @@ async function handleSeminarEndAndQuiz(
           popupPage = secondPopup;
           quizPage = secondPopup;
           await secondPopup.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
+          console.log(`[monitor_seminars] 2차 팝업 열림: ${quizPage.url()} (${seminar.name})`);
         } else {
           await quizPage.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
           await quizPage.waitForTimeout(1000);
+          const afterUrl = quizPage.url();
+          console.log(`[monitor_seminars] 2차 팝업 미감지 (samePage: ${beforeUrl} -> ${afterUrl}) (${seminar.name})`);
         }
+      } else {
+        console.log(`[monitor_seminars] "참여하기" 버튼 미감지 (${seminar.name})`);
       }
 
       // "설문을 시작합니다" 텍스트가 보이는지 확인 (성공적인 진입 확인)
@@ -177,6 +205,16 @@ async function handleSeminarEndAndQuiz(
       const isStartTextVisible = await startText.isVisible({ timeout: 3000 }).catch(() => false);
       if (!isStartTextVisible) {
         console.log(`[monitor_seminars] "설문을 시작합니다" 텍스트를 찾을 수 없음 (${seminar.name})`);
+        const debugPath = `screenshot/survey_start_not_found_${seminar.seminarId || Date.now()}.png`;
+        await quizPage.screenshot({ path: debugPath, fullPage: true }).catch(() => {});
+        const debugMessage = [
+          `⚠️ 세미나 설문 진입 디버깅`,
+          `세미나: ${seminar.name}`,
+          `url: ${quizPage.url()}`,
+          `"설문을 시작합니다" 텍스트 미노출`,
+          `팝업 수: ${context.pages().length}`,
+        ].join('\n');
+        await sendTelegram(debugMessage, debugPath).catch(() => {});
       }
 
       // 퀴즈 처리 (댓글로 결과 전송)
