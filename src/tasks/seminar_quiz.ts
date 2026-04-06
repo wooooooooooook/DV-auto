@@ -171,7 +171,29 @@ type SeminarQuizResult = {
 async function processSeminarQuiz(page: Page, seminarName?: string): Promise<SeminarQuizResult> {
   try {
     await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
-    await page.waitForSelector('.whitespace-pre-wrap:has(span:text("[퀴즈]"))', { timeout: 5000 }).catch(() => {});
+
+    const quizSelector = '.whitespace-pre-wrap:has(span:text("[퀴즈]"))';
+    let isQuizVisible = false;
+
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      isQuizVisible = await page
+        .locator(quizSelector)
+        .first()
+        .isVisible({ timeout: 5000 })
+        .catch(() => false);
+
+      if (isQuizVisible) {
+        break;
+      }
+
+      if (attempt < 3) {
+        console.log(
+          `[seminar_quiz] [퀴즈] 텍스트 탐지 실패, 새로고침 재시도 (${attempt}/3) (${seminarName ?? 'unknown'})`,
+        );
+        await page.reload({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+      }
+    }
+
     // 퀴즈 문제 파싱
     const questions = await parseQuizQuestions(page);
 
