@@ -140,7 +140,7 @@ async function handleSeminarEndAndQuiz(
       popupPage = (await firstPopupPromise) || null;
       if (popupPage) {
         quizPage = popupPage;
-        await popupPage.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
+        await popupPage.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
       } else {
         await surveyPage.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
         await surveyPage.waitForTimeout(1000); // 페이지 로드 대기
@@ -178,7 +178,7 @@ async function handleSeminarEndAndQuiz(
           }
           popupPage = secondPopup;
           quizPage = secondPopup;
-          await secondPopup.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
+          await secondPopup.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
           console.log(`[monitor_seminars] 2차 팝업 열림: ${quizPage.url()} (${seminar.name})`);
         } else {
           await quizPage.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
