@@ -23,8 +23,16 @@ type SeminarTaskData = SeminarData & { allSeminarIds: string[] };
 type SeminarMessageResult = SeminarData & { message: string };
 type StoredNewSeminars = {
   date: string;
-  seminars: Array<{ name: string; url: string; seminarId: string | null; isPointExcluded?: boolean }>;
+  seminars: Array<{
+    name: string;
+    url: string;
+    seminarId: string | null;
+    isPointExcluded?: boolean;
+    date?: string;
+    time?: string;
+  }>;
 };
+
 type TempQuizAnswers = {
   date: string;
   productTitle: string;
@@ -347,9 +355,11 @@ async function run({ page }: PlaywrightRunArgs) {
         .map((item, index) => {
           const link = item.seminarId ? `${SEMINAR_DETAIL_PAGE}${item.seminarId}` : item.url;
           const pointExcludedSuffix = item.isPointExcluded ? ' [포인트미지급]' : '';
-          return `${index + 1}. ${item.name}${pointExcludedSuffix}\n${link}`;
+          const dateTimePrefix = item.date || item.time ? `[${item.date}${item.time ? ' ' + item.time : ''}] ` : '';
+          return `${index + 1}. ${dateTimePrefix}${item.name}${pointExcludedSuffix}\n${link}`;
         })
         .join('\n');
+
       message += `\n\n🆕 어제 추가된 신규 세미나\n${newSeminarList}`;
     }
 

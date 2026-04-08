@@ -19,7 +19,9 @@ type SeminarListItem = {
   name: string;
   url: string;
   date?: string;
+  time?: string;
 };
+
 type StoredNewSeminars = {
   date: string;
   seminars: Array<SeminarListItem & { seminarId: string | null; isPointExcluded?: boolean }>;
@@ -93,7 +95,7 @@ async function run({ page }: PlaywrightRunArgs, options: ApplySeminarOptions = {
     await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'domcontentloaded', timeout: 30000 }, 1);
 
     const currentSeminars = await page.locator('.list_cont').evaluateAll((nodes) => {
-      const results: { url: string; name: string; date: string }[] = [];
+      const results: { url: string; name: string; date: string; time: string }[] = [];
       nodes.forEach((node) => {
         const date = node.querySelector('.seminar_day .date')?.textContent?.trim() || '';
         const links = node.querySelectorAll('a.list_detail');
@@ -101,8 +103,9 @@ async function run({ page }: PlaywrightRunArgs, options: ApplySeminarOptions = {
           const href = link.getAttribute('href') || '';
           const title =
             link.querySelector('.list_tit .tit')?.textContent?.trim() || link.textContent?.trim() || '세미나';
+          const time = link.querySelector('.txt_num.time')?.textContent?.replace(/\n/g, '').trim() || '';
           if (href) {
-            results.push({ url: href, name: title, date: date });
+            results.push({ url: href, name: title, date: date, time: time });
           }
         });
       });
@@ -134,9 +137,11 @@ async function run({ page }: PlaywrightRunArgs, options: ApplySeminarOptions = {
           .map((item, _index) => {
             const matched = newlyAddedWithFlags.find((flagged) => flagged.url === item.url);
             const pointExcludedSuffix = matched?.isPointExcluded ? ' [포인트미지급]' : '';
-            return `[${item.date ? item.date : ''}] ${item.name}${pointExcludedSuffix}\n${item.url}`;
+            const dateTimePrefix = item.date || item.time ? `[${item.date}${item.time ? ' ' + item.time : ''}] ` : '';
+            return `${dateTimePrefix}${item.name}${pointExcludedSuffix}\n${item.url}`;
           })
           .join('\n\n');
+
         const noticeMessage = `🆕 새로 추가된 세미나 ${newlyAdded.length}건 발견\n\n${newSeminarMessage}`;
         if (notifyNewSeminarsToTelegram) {
           await sendTelegram(noticeMessage);
