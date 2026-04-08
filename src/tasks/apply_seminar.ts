@@ -20,6 +20,7 @@ type SeminarListItem = {
   url: string;
   date?: string;
   time?: string;
+  isPointExcluded?: boolean;
 };
 
 type StoredNewSeminars = {
@@ -120,12 +121,13 @@ async function run({ page }: PlaywrightRunArgs, options: ApplySeminarOptions = {
 
     const storedSeminars = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
     let newlyAddedCount = 0;
+    let newlyAddedWithFlags: Array<SeminarListItem & { seminarId: string | null; isPointExcluded?: boolean }> = [];
     if (storedSeminars.length > 0) {
       const storedUrls = new Set(storedSeminars.map((item) => item.url));
       const newlyAdded = normalizedCurrentSeminars.filter((item) => !storedUrls.has(item.url));
       newlyAddedCount = newlyAdded.length;
       if (newlyAdded.length > 0) {
-        const newlyAddedWithFlags = await Promise.all(
+        newlyAddedWithFlags = await Promise.all(
           newlyAdded.map(async (item) => {
             const seminarId = getSeminarIdFromUrl(item.url);
             const link = seminarId ? `${SEMINAR_DETAIL_PAGE}${seminarId}` : item.url;
@@ -133,6 +135,7 @@ async function run({ page }: PlaywrightRunArgs, options: ApplySeminarOptions = {
             return { ...item, seminarId, isPointExcluded };
           }),
         );
+
         const newSeminarMessage = newlyAdded
           .map((item, _index) => {
             const matched = newlyAddedWithFlags.find((flagged) => flagged.url === item.url);
@@ -165,7 +168,13 @@ async function run({ page }: PlaywrightRunArgs, options: ApplySeminarOptions = {
         });
       }
     }
-    storage.set(SEMINAR_LIST_KEY, normalizedCurrentSeminars);
+    const finalSeminarsToStore: SeminarListItem[] = normalizedCurrentSeminars.map((item) => {
+      const stored = storedSeminars.find((s) => s.url === item.url);
+      const isPointExcluded =
+        stored?.isPointExcluded ?? newlyAddedWithFlags.find((n) => n.url === item.url)?.isPointExcluded;
+      return { ...item, isPointExcluded };
+    });
+    storage.set(SEMINAR_LIST_KEY, finalSeminarsToStore);
 
     const appliedCount = await page.locator('a:has(.ico_completion)').count();
     let message = `✅ ${appliedCount}개 세미나 신청 완료! (${appliedCount}/${totalSeminarsAvailable})`;

@@ -40,6 +40,7 @@ type TempQuizAnswers = {
 };
 const TODAY_SEMINAR_KEY = 'today_seminars';
 const NEW_SEMINAR_KEY = 'apply_seminar:new_seminars';
+const SEMINAR_LIST_KEY = 'apply_seminar:seminar_list';
 
 async function parseTodayQuizQuestions(page: PlaywrightRunArgs['page']): Promise<QuizQuestion[]> {
   const questions: QuizQuestion[] = [];
@@ -266,10 +267,19 @@ async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Prom
         const seminarLink = seminarId ? `${SEMINAR_DETAIL_PAGE}${seminarId}` : fullUrl;
         const pointExcludedKey = seminarId || seminarLink;
         let isPointExcluded = pointExcludedCache.get(pointExcludedKey);
+
         if (typeof isPointExcluded !== 'boolean') {
-          isPointExcluded = await isSurveyPointExcludedSeminar(page.context(), seminarLink);
+          // Check storage first
+          const storedSeminars = storage.get<Array<{ url: string; isPointExcluded?: boolean }>>(SEMINAR_LIST_KEY) || [];
+          const storedMatch = storedSeminars.find((s) => s.url === fullUrl);
+          if (storedMatch && typeof storedMatch.isPointExcluded === 'boolean') {
+            isPointExcluded = storedMatch.isPointExcluded;
+          } else {
+            isPointExcluded = await isSurveyPointExcludedSeminar(page.context(), seminarLink);
+          }
           pointExcludedCache.set(pointExcludedKey, isPointExcluded);
         }
+
         const pointExcludedSuffix = isPointExcluded ? ' [포인트미지급]' : '';
         const seminarInfo = ` ${time}. ${title}${pointExcludedSuffix} ${seminarLink}`;
 
