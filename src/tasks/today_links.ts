@@ -280,12 +280,13 @@ async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Prom
       let message = `오늘의 세미나 리스트:\n`;
 
       if (lunchSeminars.length > 0) {
-        message += `\n🍴[점심 세미나]\n`;
-        message += lunchSeminars.join('\n');
+        message += `🍴[점심 세미나]\n- `;
+        message += lunchSeminars.join('\n- ');
       }
+      message += '\n';
       if (dinnerSeminars.length > 0) {
-        message += `\n🍴[저녁 세미나]\n`;
-        message += dinnerSeminars.join('\n');
+        message += `\n🍴[저녁 세미나]\n- `;
+        message += dinnerSeminars.join('\n- ');
       }
       return {
         message,
@@ -330,7 +331,7 @@ async function run({ page }: PlaywrightRunArgs) {
     if (quizInfo?.link) {
       if (quizInfo.productTitle) {
         const answersText = quizInfo.answers?.map(String).join('');
-        const answerNote = answersText ? `, 정답: ${answersText}` : ' (저장된 정답이 없습니다. 댓글로 알려주세요.)';
+        const answerNote = answersText ? `, 정답: *${answersText}*` : ' (저장된 정답이 없습니다. 댓글로 알려주세요.)';
         quizMessage = `${quizInfo.productTitle}${answerNote}`;
       }
       quizMessage += `\n${quizInfo.link}`;
@@ -348,7 +349,7 @@ async function run({ page }: PlaywrightRunArgs) {
           const pointExcludedSuffix = item.isPointExcluded ? ' [포인트미지급]' : '';
           return `${index + 1}. ${item.name}${pointExcludedSuffix}\n${link}`;
         })
-        .join('\n\n');
+        .join('\n');
       message += `\n\n🆕 어제 추가된 신규 세미나\n${newSeminarList}`;
     }
 

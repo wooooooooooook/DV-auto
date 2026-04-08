@@ -190,22 +190,8 @@ async function handleSeminarEndAndQuiz(
         console.log(`[monitor_seminars] "참여하기" 버튼 미감지 (${seminar.name})`);
       }
 
-      // "설문을 시작합니다" 텍스트가 보이는지 확인 (성공적인 진입 확인)
-      const startText = quizPage.locator('text="설문을 시작합니다"').first();
-      const isStartTextVisible = await startText.isVisible({ timeout: 3000 }).catch(() => false);
-      if (!isStartTextVisible) {
-        console.log(`[monitor_seminars] "설문을 시작합니다" 텍스트를 찾을 수 없음 (${seminar.name})`);
-        const debugPath = `screenshot/survey_start_not_found_${seminar.seminarId || Date.now()}.png`;
-        await quizPage.screenshot({ path: debugPath, fullPage: true }).catch(() => {});
-        const debugMessage = [
-          `⚠️ 세미나 설문 진입 디버깅`,
-          `세미나: ${seminar.name}`,
-          `url: ${quizPage.url()}`,
-          `"설문을 시작합니다" 텍스트 미노출`,
-          `팝업 수: ${context.pages().length}`,
-        ].join('\n');
-        await sendTelegram(debugMessage, debugPath).catch(() => {});
-      }
+      // "설문을 시작합니다" 텍스트 확인 대신 5초 대기
+      await quizPage.waitForTimeout(5000);
 
       // 퀴즈 처리 (댓글로 결과 전송)
       const quizResult = await processSeminarQuiz(quizPage, seminar.name);
@@ -443,12 +429,17 @@ async function monitorSeminars(
         // Check for survey existence
         const { hasSurvey, isSurveyPointExcluded } = await checkSurveyMeta(context, targetUrl);
         if (isSurveyPointExcluded) {
-          console.log(`[monitor_seminars] Skipping monitoring for ${name} because survey points are excluded.`);
+          console.log(
+            `[monitor_seminars] Skipping monitoring for ${name} because survey points are excluded. (During Initialization)`,
+          );
           delete monitoringList[url];
           continue;
         }
-        monitoringList[url].hasSurvey = hasSurvey;
-        monitoringList[url].isEntryStarted = true;
+
+        if (monitoringList[url]) {
+          monitoringList[url].hasSurvey = hasSurvey;
+          monitoringList[url].isEntryStarted = true;
+        }
 
         let message = `🟢세미나시작\n**${name}**\n${targetUrl}`;
         if (!hasSurvey) {
@@ -577,15 +568,18 @@ async function monitorSeminars(
         const { status: newStatus, name: newName } = currentInfo || monitoredInfo;
         const oldStatus = monitoredInfo.status;
 
-        // 3. Check for status change from '신청완료' to '입장하기'
-        if (currentInfo && newStatus === '입장하기' && oldStatus === '신청완료') {
+        // 3. Check for transition to '입장하기' (New entry detection)
+        // Check if now ready for entry (either newly transitioned from Apply status, or newly discovered as entry-ready)
+        if (currentInfo && newStatus === '입장하기' && !monitoredInfo.isEntryStarted) {
           console.log(`[${periodName}] Seminar ready for entry: ${newName}.`);
           const targetUrl = mergedSeminarInfo.seminarId ? `${SEMINAR_DETAIL_PAGE}${mergedSeminarInfo.seminarId}` : url;
 
           // Check for survey existence
           const { hasSurvey, isSurveyPointExcluded } = await checkSurveyMeta(context, targetUrl);
           if (isSurveyPointExcluded) {
-            console.log(`[monitor_seminars] Skipping monitoring for ${newName} because survey points are excluded.`);
+            console.log(
+              `[monitor_seminars] Skipping monitoring for ${newName} because survey points are excluded. (During Loop)`,
+            );
             delete monitoringList[url];
             continue;
           }
@@ -596,24 +590,18 @@ async function monitorSeminars(
           }
           await sendNotificationToChannel(message);
 
-          // Update hasSurvey in merged info so it gets saved to monitoringList
+          // Update state in both merged and original list
           mergedSeminarInfo.hasSurvey = hasSurvey;
           mergedSeminarInfo.isEntryStarted = true;
+          // Note: monitoringList[url] will be updated below at step 4
         }
 
         // 4. Always update the seminar's status and name in the monitoring list
-        if (currentInfo) {
-          monitoringList[url] = {
-            status: newStatus,
-            name: newName,
-            seminarId: mergedSeminarInfo.seminarId,
-            hasSurvey: mergedSeminarInfo.hasSurvey,
-            isEntryStarted: mergedSeminarInfo.isEntryStarted,
-            autoEnterDone: mergedSeminarInfo.autoEnterDone,
-          };
-        } else {
-          monitoringList[url] = mergedSeminarInfo;
-        }
+        monitoringList[url] = {
+          ...mergedSeminarInfo,
+          status: newStatus,
+          name: newName,
+        };
       }
     }
 
