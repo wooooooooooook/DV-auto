@@ -354,7 +354,7 @@ async function run({ page }: PlaywrightRunArgs) {
     }
 
     message +=
-      '\n\n🤖텔레그램 봇이 자동으로 전송한 메시지입니다.\nhttps://t.me/+J1UGmvLA9jU4NjQ1\n★☆ 매일오전9시 ☆★\n▶▷ 링크모음 발송 ◁◀\n☞ 세미나 시작알림\n☞ 세미나 종료알림\n☞ 퀴즈정답 ★즉시★\n☞ 신규세미나 알림!!';
+      '\n\n🤖텔레그램 봇이 자동으로 전송한 메시지입니다.\n★☆ 매일오전9시 ☆★\n▶▷ 링크모음 발송 ◁◀\n☞ 세미나 시작알림\n☞ 세미나 종료알림\n☞ 퀴즈정답 ★즉시★\n☞ 신규세미나 알림!!\n§지금가입하세요§\nhttps://t.me/+J1UGmvLA9jU4NjQ1';
 
     const newSeminarIds = storedNewSeminars.map((item) => item.seminarId).filter((id): id is string => Boolean(id));
     const allSeminarIds = seminarMessage
