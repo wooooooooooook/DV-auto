@@ -566,7 +566,7 @@ async function monitorSeminars(
 
         // 2. If it still exists, get its new state
         const { status: newStatus, name: newName } = currentInfo || monitoredInfo;
-        const oldStatus = monitoredInfo.status;
+        const _oldStatus = monitoredInfo.status;
 
         // 3. Check for transition to '입장하기' (New entry detection)
         // Check if now ready for entry (either newly transitioned from Apply status, or newly discovered as entry-ready)
