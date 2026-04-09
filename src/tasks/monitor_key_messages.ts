@@ -23,7 +23,7 @@ async function monitor(
     return;
   }
 
-  console.log(`monitor_key_messages: Starting monitor for "${seminarName}" (ID: ${seminarId})`);
+  console.log(`monitor_key_messages: Starting monitor for "${seminarId}" (ID: ${seminarId})`);
 
   await ensureLoggedIn({ page, context });
 
@@ -49,7 +49,7 @@ async function monitor(
 
         if (oldMessages.length === 0) {
           // First time seeing messages for this seminar
-          console.log(`monitor_key_messages: [${seminarName}] Storing initial messages.`);
+          console.log(`monitor_key_messages: [${seminarId}] Storing initial messages.`);
           seminarData.messages = newMessages;
           allStoredMessages[seminarId] = seminarData;
           storage.set(KEY, allStoredMessages);
@@ -59,7 +59,7 @@ async function monitor(
           await sendNotificationToChannel(notificationText);
         } else if (newMessagesStr !== oldMessagesStr) {
           // Messages have changed
-          console.log(`monitor_key_messages: [${seminarName}] Change detected, sending notification.`);
+          console.log(`monitor_key_messages: [${seminarId}] Change detected, sending notification.`);
           seminarData.messages = newMessages;
           allStoredMessages[seminarId] = seminarData;
           storage.set(KEY, allStoredMessages);
@@ -73,11 +73,11 @@ async function monitor(
     } catch (e) {
       // If page is closed or navigation fails, it might mean the seminar has ended.
       if (e instanceof Error && e.message.includes('Target page, context or browser has been closed')) {
-        console.log(`monitor_key_messages: [${seminarName}] Page closed, ending monitoring.`);
+        console.log(`monitor_key_messages: [${seminarId}] Page closed, ending monitoring.`);
         break;
       }
       console.error(
-        `monitor_key_messages: [${seminarName}] Error during check`,
+        `monitor_key_messages: [${seminarId}] Error during check`,
         e && typeof e === 'object' && 'stack' in e ? (e as Error).stack : e,
       );
     }
@@ -86,7 +86,7 @@ async function monitor(
   }
 
   console.log(
-    `monitor_key_messages: Finished monitoring for "${seminarName}" (ID: ${seminarId}) after ${checks} checks.`,
+    `monitor_key_messages: Finished monitoring for "${seminarId}" (ID: ${seminarId}) after ${checks} checks.`,
   );
 }
 

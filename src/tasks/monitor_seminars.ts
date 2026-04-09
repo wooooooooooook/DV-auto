@@ -88,11 +88,11 @@ async function isSeminarEnded(
     await detailPage.reload({ waitUntil: 'networkidle', timeout: 15000 });
     const surveyEnded = await detailPage.locator('text="세미나 종료"').first().isVisible({ timeout: 2000 });
     const canCancel = await detailPage.locator('text="신청 취소"').first().isVisible({ timeout: 2000 });
-    console.log(`[monitor_seminars] Seminar end check (${seminar.name}): ${surveyEnded}, ${canCancel}`);
+    console.log(`[monitor_seminars] Seminar end check (${seminar.seminarId}): ${surveyEnded}, ${canCancel}`);
 
     await detailPage.screenshot({ path: screenshotPath, fullPage: false });
     if (!canCancel) {
-      console.log(`[monitor_seminars] End check pending for ${seminar.name}. surveyEnded=${surveyEnded}`);
+      console.log(`[monitor_seminars] End check pending for ${seminar.seminarId}. surveyEnded=${surveyEnded}`);
     }
     await fs
       .unlink(screenshotPath)
@@ -100,7 +100,7 @@ async function isSeminarEnded(
     return surveyEnded;
   } catch (e) {
     console.error(
-      `[monitor_seminars] 종료 여부 확인 실패 (${seminar.name})`,
+      `[monitor_seminars] 종료 여부 확인 실패 (${seminar.seminarId})`,
       e && typeof e === 'object' && 'stack' in e ? (e as Error).stack : e,
     );
     return false;
@@ -134,7 +134,7 @@ async function handleSeminarEndAndQuiz(
     foundSurveyButton = isSurveyButtonVisible;
 
     if (isSurveyButtonVisible) {
-      console.log(`[monitor_seminars] "설문참여" 버튼 발견, 클릭 (${seminar.name})`);
+      console.log(`[monitor_seminars] "설문참여" 버튼 발견, 클릭 (${seminar.seminarId})`);
       const firstPopupPromise = context.waitForEvent('page', { timeout: 5000 }).catch(() => null);
       await surveyBtn.click({ force: true }).catch(() => {});
       popupPage = (await firstPopupPromise) || null;
@@ -153,10 +153,12 @@ async function handleSeminarEndAndQuiz(
         .first();
       const isConsentModalVisible = await consentModal.isVisible({ timeout: 1500 }).catch(() => false);
       if (isConsentModalVisible) {
-        console.log(`[monitor_seminars] 개인정보 동의 모달 감지 (${seminar.name})`);
+        console.log(`[monitor_seminars] 개인정보 동의 모달 감지 (${seminar.seminarId})`);
         const agreeCheckbox = quizPage.locator('input[type="checkbox"]').first();
         const isChecked = await agreeCheckbox.isChecked().catch(() => false);
-        console.log(`[monitor_seminars] 동의 체크박스 상태: ${isChecked ? 'checked' : 'unchecked'} (${seminar.name})`);
+        console.log(
+          `[monitor_seminars] 동의 체크박스 상태: ${isChecked ? 'checked' : 'unchecked'} (${seminar.seminarId})`,
+        );
       }
 
       // "참여하기" 또는 "설문 참여하기" 요소 찾기 및 클릭 (button/div/span 등 태그 무관)
@@ -164,7 +166,9 @@ async function handleSeminarEndAndQuiz(
       const isParticipateBtnVisible = await participateBtn.isVisible({ timeout: 3000 }).catch(() => false);
       if (isParticipateBtnVisible) {
         const isParticipateBtnEnabled = await participateBtn.isEnabled().catch(() => true);
-        console.log(`[monitor_seminars] "참여하기" 버튼 발견 (enabled=${isParticipateBtnEnabled}) (${seminar.name})`);
+        console.log(
+          `[monitor_seminars] "참여하기" 버튼 발견 (enabled=${isParticipateBtnEnabled}) (${seminar.seminarId})`,
+        );
 
         await quizPage.waitForTimeout(1000); // UI 안정화 대기
         const beforeUrl = quizPage.url();
@@ -179,36 +183,38 @@ async function handleSeminarEndAndQuiz(
           popupPage = secondPopup;
           quizPage = secondPopup;
           await secondPopup.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
-          console.log(`[monitor_seminars] 2차 팝업 열림: ${quizPage.url()} (${seminar.name})`);
+          console.log(`[monitor_seminars] 2차 팝업 열림: ${quizPage.url()} (${seminar.seminarId})`);
         } else {
           await quizPage.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
           await quizPage.waitForTimeout(1000);
           const afterUrl = quizPage.url();
-          console.log(`[monitor_seminars] 2차 팝업 미감지 (samePage: ${beforeUrl} -> ${afterUrl}) (${seminar.name})`);
+          console.log(
+            `[monitor_seminars] 2차 팝업 미감지 (samePage: ${beforeUrl} -> ${afterUrl}) (${seminar.seminarId})`,
+          );
         }
       } else {
-        console.log(`[monitor_seminars] "참여하기" 버튼 미감지 (${seminar.name})`);
+        console.log(`[monitor_seminars] "참여하기" 버튼 미감지 (${seminar.seminarId})`);
       }
 
       // "설문을 시작합니다" 텍스트 확인 대신 5초 대기
       await quizPage.waitForTimeout(5000);
 
       // 퀴즈 처리 (댓글로 결과 전송)
-      const quizResult = await processSeminarQuiz(quizPage, seminar.name);
+      const quizResult = await processSeminarQuiz(quizPage, seminar.seminarId);
       if (quizResult.success && quizResult.hasQuizResult) {
         quizResultMessage = quizResult.message;
       }
     } else {
-      console.log(`[monitor_seminars] "설문참여" 버튼을 찾지 못함 (${seminar.name})`);
+      console.log(`[monitor_seminars] "설문참여" 버튼을 찾지 못함 (${seminar.seminarId})`);
       // 버튼이 없어도 현재 페이지에서 퀴즈 찾기 시도
-      const quizResult = await processSeminarQuiz(quizPage, seminar.name);
+      const quizResult = await processSeminarQuiz(quizPage, seminar.seminarId);
       if (quizResult.success && quizResult.hasQuizResult) {
         quizResultMessage = quizResult.message;
       }
     }
   } catch (e) {
     console.error(
-      `[monitor_seminars] 설문/퀴즈 처리 실패 (${seminar.name})`,
+      `[monitor_seminars] 설문/퀴즈 처리 실패 (${seminar.seminarId})`,
       e && typeof e === 'object' && 'stack' in e ? (e as Error).stack : e,
     );
   } finally {
@@ -303,14 +309,14 @@ async function performAutoEnter(
   let didEnter = false;
 
   try {
-    console.log(`[monitor_seminars] Performing auto-enter for ${seminarName} (${targetUrl})`);
+    console.log(`[monitor_seminars] Performing auto-enter for ${seminarId} (${targetUrl})`);
 
     await ensureLoggedIn({ page, context });
     await safeGoto(page, targetUrl, { waitUntil: 'networkidle', timeout: 15000 });
 
     const enterBtn = page.locator('text="입장하기"').first();
     if (!(await enterBtn.isVisible({ timeout: 5000 }))) {
-      console.log(`[monitor_seminars] '입장하기' button not found for ${seminarName}. retry needed.`);
+      console.log(`[monitor_seminars] '입장하기' button not found for ${seminarId}. retry needed.`);
       // 버튼 못 찾아도 현재 페이지 스크린샷 전송
       const notFoundScreenshotPath = path.join(process.cwd(), `seminar_entry_notfound_${screenshotKey}.png`);
       try {
@@ -320,7 +326,7 @@ async function performAutoEnter(
           notFoundScreenshotPath,
         );
       } catch (ssErr) {
-        console.error(`[monitor_seminars] Failed to take/send not-found screenshot for ${seminarName}`, ssErr);
+        console.error(`[monitor_seminars] Failed to take/send not-found screenshot for ${seminarId}`, ssErr);
       } finally {
         await fs.unlink(notFoundScreenshotPath).catch(() => {});
       }
@@ -334,12 +340,12 @@ async function performAutoEnter(
     let activePage = page;
 
     if (popup) {
-      console.log(`[monitor_seminars] Popup detected for ${seminarName}`);
+      console.log(`[monitor_seminars] Popup detected for ${seminarId}`);
       activePage = popup;
       await activePage.waitForLoadState('domcontentloaded');
     }
 
-    console.log(`[monitor_seminars] Clicked '입장하기' for ${seminarName}. Waiting 10s for content.`);
+    console.log(`[monitor_seminars] Clicked '입장하기' for ${seminarId}. Waiting 10s for content.`);
     await activePage.waitForTimeout(10000);
 
     // Take a screenshot and send to admin
@@ -351,12 +357,12 @@ async function performAutoEnter(
       const sentToAdmin = await sendTelegram(entryMessage, screenshotPath);
       if (!sentToAdmin) {
         console.error(
-          `[monitor_seminars] Auto-enter screenshot send skipped/failed for ${seminarName}. Check TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID.`,
+          `[monitor_seminars] Auto-enter screenshot send skipped/failed for ${seminarId}. Check TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID.`,
         );
       }
       didEnter = sentToAdmin;
     } catch (screenshotError) {
-      console.error(`[monitor_seminars] Failed to take/send screenshot for ${seminarName}`, screenshotError);
+      console.error(`[monitor_seminars] Failed to take/send screenshot for ${seminarId}`, screenshotError);
     } finally {
       // Clean up the screenshot file
       await fs.unlink(screenshotPath).catch(() => {});
@@ -366,7 +372,7 @@ async function performAutoEnter(
       await popup.close().catch(() => {});
     }
   } catch (e) {
-    console.error(`[monitor_seminars] Auto-enter failed for ${seminarName}`, e);
+    console.error(`[monitor_seminars] Auto-enter failed for ${seminarId}`, e);
   } finally {
     await page.close().catch(() => {});
   }
@@ -566,7 +572,7 @@ async function monitorSeminars(
 
         // 2. If it still exists, get its new state
         const { status: newStatus, name: newName } = currentInfo || monitoredInfo;
-        const oldStatus = monitoredInfo.status;
+        const _oldStatus = monitoredInfo.status;
 
         // 3. Check for transition to '입장하기' (New entry detection)
         // Check if now ready for entry (either newly transitioned from Apply status, or newly discovered as entry-ready)
