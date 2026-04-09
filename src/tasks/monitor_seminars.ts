@@ -301,6 +301,7 @@ async function getTodaysSeminars(page: Page, startHour: number, endHour: number)
 
 async function performAutoEnter(
   context: BrowserContext,
+  seminarId: string | null,
   seminarName: string,
   targetUrl: string,
   screenshotKey: string,
@@ -394,7 +395,7 @@ async function checkAndPerformAutoEnter(
 
   const targetUrl = seminarId ? `${SEMINAR_DETAIL_PAGE}${seminarId}` : seminarUrl;
   const screenshotKey = seminarId || `url_${Date.now()}`;
-  return performAutoEnter(context, name, targetUrl, screenshotKey);
+  return performAutoEnter(context, seminarId, name, targetUrl, screenshotKey);
 }
 
 async function monitorSeminars(
