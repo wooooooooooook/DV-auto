@@ -575,20 +575,34 @@ if (adminBot) {
   adminBot.command('list_seminar_quiz', async (ctx) => {
     logger.info('User requested to list seminar quiz cheatsheet', { from: ctx.from?.username });
 
+    const messageText = ctx.message?.text || '';
+    const searchKeyword = messageText.replace(/^\/list_seminar_quiz\s*/, '').trim();
+
     try {
       const data = await loadSeminarQuizCheatsheet();
-      const entries = Object.entries(data);
+      let entries = Object.entries(data);
 
-      if (entries.length === 0) {
-        return ctx.reply('📋 등록된 세미나 퀴즈 족보가 없습니다.');
+      if (searchKeyword) {
+        entries = entries.filter(([k, a]) => k.includes(searchKeyword) || String(a).includes(searchKeyword));
       }
 
-      let message = `📋 세미나 퀴즈 족보 (${entries.length}개)\n\n`;
+      if (entries.length === 0) {
+        if (searchKeyword) {
+          return ctx.reply(`📋 "${searchKeyword}" 검색 결과가 없습니다.`);
+        } else {
+          return ctx.reply('📋 등록된 세미나 퀴즈 족보가 없습니다.');
+        }
+      }
+
+      let message = searchKeyword
+        ? `📋 "${searchKeyword}" 검색 결과 (${entries.length}개)\n\n`
+        : `📋 세미나 퀴즈 족보 (${entries.length}개)\n\n`;
+
       for (const [keyword, answer] of entries) {
         message += `• ${keyword} → ${answer}\n`;
       }
 
-      await ctx.reply(message);
+      await ctx.reply(truncateMessage(message));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await ctx.reply(`❌ 족보 조회 실패: ${message}`);
