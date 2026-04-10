@@ -28,6 +28,7 @@ type StoredNewSeminars = {
     url: string;
     seminarId: string | null;
     isPointExcluded?: boolean;
+    isAdvancedSurvey?: boolean;
     date?: string;
     time?: string;
   }>;
@@ -259,6 +260,7 @@ async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Prom
         const timeRaw = await timeElem.innerText();
         const time = timeRaw.replace(/\n/g, '').trim();
         const title = await detail.locator('.list_tit .tit').innerText();
+        const isAdvancedSurvey = (await detail.locator('.ic_survey').count()) > 0;
         const classAttr = (await timeElem.getAttribute('class')) || '';
         const href = await detail.getAttribute('href');
         if (!href) continue;
@@ -281,7 +283,8 @@ async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Prom
         }
 
         const pointExcludedSuffix = isPointExcluded ? ' [포인트미지급]' : '';
-        const seminarInfo = ` ${time}. ${title}${pointExcludedSuffix} ${seminarLink}`;
+        const advancedSurveySuffix = isAdvancedSurvey ? ' [심화설문]' : '';
+        const seminarInfo = ` ${time}. ${title}${pointExcludedSuffix}${advancedSurveySuffix} ${seminarLink}`;
 
         // If the time element has the `night_time` class treat as dinner, otherwise lunch
         if (classAttr.includes('night_time')) {
@@ -365,8 +368,9 @@ async function run({ page }: PlaywrightRunArgs) {
         .map((item, index) => {
           const link = item.seminarId ? `${SEMINAR_DETAIL_PAGE}${item.seminarId}` : item.url;
           const pointExcludedSuffix = item.isPointExcluded ? ' [포인트미지급]' : '';
+          const advancedSurveySuffix = item.isAdvancedSurvey ? ' [심화설문]' : '';
           const dateTimePrefix = item.date || item.time ? `[${item.date}${item.time ? ' ' + item.time : ''}] ` : '';
-          return `${index + 1}. ${dateTimePrefix}${item.name}${pointExcludedSuffix}\n${link}`;
+          return `${index + 1}. ${dateTimePrefix}${item.name}${pointExcludedSuffix}${advancedSurveySuffix}\n${link}`;
         })
         .join('\n');
 

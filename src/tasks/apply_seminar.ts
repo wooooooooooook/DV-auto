@@ -20,12 +20,17 @@ type SeminarListItem = {
   url: string;
   date?: string;
   time?: string;
+  currentCount?: string;
+  totalCount?: string;
   isPointExcluded?: boolean;
+  isAdvancedSurvey?: boolean;
 };
 
 type StoredNewSeminars = {
   date: string;
-  seminars: Array<SeminarListItem & { seminarId: string | null; isPointExcluded?: boolean }>;
+  seminars: Array<
+    SeminarListItem & { seminarId: string | null; isPointExcluded?: boolean; isAdvancedSurvey?: boolean }
+  >;
 };
 
 type ApplySeminarOptions = {
@@ -96,7 +101,15 @@ async function run({ page }: PlaywrightRunArgs, options: ApplySeminarOptions = {
     await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'domcontentloaded', timeout: 30000 }, 1);
 
     const currentSeminars = await page.locator('.list_cont').evaluateAll((nodes) => {
-      const results: { url: string; name: string; date: string; time: string }[] = [];
+      const results: {
+        url: string;
+        name: string;
+        date: string;
+        time: string;
+        currentCount: string;
+        totalCount: string;
+        isAdvancedSurvey: boolean;
+      }[] = [];
       nodes.forEach((node) => {
         const date = node.querySelector('.seminar_day .date')?.textContent?.trim() || '';
         const links = node.querySelectorAll('a.list_detail');
@@ -105,8 +118,21 @@ async function run({ page }: PlaywrightRunArgs, options: ApplySeminarOptions = {
           const title =
             link.querySelector('.list_tit .tit')?.textContent?.trim() || link.textContent?.trim() || '세미나';
           const time = link.querySelector('.txt_num.time')?.textContent?.replace(/\n/g, '').trim() || '';
+
+          const personNode = link.querySelector('.person');
+          const currentCount = personNode?.querySelector('.txt_num')?.textContent?.trim() || '';
+          const totalCount = personNode?.querySelector('.total .txt_num')?.textContent?.replace(/\//g, '').trim() || '';
+
           if (href) {
-            results.push({ url: href, name: title, date: date, time: time });
+            results.push({
+              url: href,
+              name: title,
+              date: date,
+              time: time,
+              currentCount,
+              totalCount,
+              isAdvancedSurvey: !!link.querySelector('.ic_survey'),
+            });
           }
         });
       });
@@ -117,6 +143,10 @@ async function run({ page }: PlaywrightRunArgs, options: ApplySeminarOptions = {
       name: item.name,
       url: new URL(item.url, SEMINAR_PAGE).toString(),
       date: item.date,
+      time: item.time,
+      currentCount: item.currentCount,
+      totalCount: item.totalCount,
+      isAdvancedSurvey: item.isAdvancedSurvey,
     }));
 
     const storedSeminars = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
@@ -140,8 +170,11 @@ async function run({ page }: PlaywrightRunArgs, options: ApplySeminarOptions = {
           .map((item, _index) => {
             const matched = newlyAddedWithFlags.find((flagged) => flagged.url === item.url);
             const pointExcludedSuffix = matched?.isPointExcluded ? ' [포인트미지급]' : '';
+            const advancedSurveySuffix = item.isAdvancedSurvey ? ' [심화설문]' : '';
             const dateTimePrefix = item.date || item.time ? `[${item.date}${item.time ? ' ' + item.time : ''}] ` : '';
-            return `${dateTimePrefix}${item.name}${pointExcludedSuffix}\n${item.url}`;
+            const capacityInfo =
+              item.currentCount && item.totalCount ? `(${item.currentCount}/${item.totalCount}) ` : '';
+            return `${dateTimePrefix}${pointExcludedSuffix}${advancedSurveySuffix}${item.name}${capacityInfo}\n${item.url}`;
           })
           .join('\n\n');
 
@@ -172,7 +205,8 @@ async function run({ page }: PlaywrightRunArgs, options: ApplySeminarOptions = {
       const stored = storedSeminars.find((s) => s.url === item.url);
       const isPointExcluded =
         stored?.isPointExcluded ?? newlyAddedWithFlags.find((n) => n.url === item.url)?.isPointExcluded;
-      return { ...item, isPointExcluded };
+      const isAdvancedSurvey = item.isAdvancedSurvey;
+      return { ...item, isPointExcluded, isAdvancedSurvey };
     });
     storage.set(SEMINAR_LIST_KEY, finalSeminarsToStore);
 

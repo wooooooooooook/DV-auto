@@ -9,13 +9,11 @@ import {
   ensureLoggedIn,
   hasSurveyPointExcludedNotice,
 } from '../modules/utils';
-import * as storage from '../services/storage';
 import { processSeminarQuiz } from './seminar_quiz';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const BASE_URL = 'https://www.doctorville.co.kr';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
-const TODAY_SEMINAR_KEY = 'today_seminars';
 
 // Helper function for random delay
 const randomDelay = (): Promise<void> => {
@@ -31,11 +29,10 @@ type SeminarInfo = {
   name: string;
   seminarId: string | null;
   hasSurvey?: boolean;
+  isAdvancedSurvey?: boolean;
   isEntryStarted?: boolean;
   autoEnterDone?: boolean;
 };
-type StoredSeminarIds = { date: string; lunchSeminarIds: string[]; dinnerSeminarIds: string[] };
-type SeminarBucketKey = 'lunchSeminarIds' | 'dinnerSeminarIds';
 
 const seoulDateString = (): string => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
 
@@ -220,35 +217,6 @@ async function handleSeminarEndAndQuiz(
   return { message: quizResultMessage, foundSurveyButton };
 }
 
-function getStoredSeminarsForToday(todayIsoDate: string): StoredSeminarIds | null {
-  const stored = storage.get<StoredSeminarIds>(TODAY_SEMINAR_KEY);
-  if (!stored || stored.date !== todayIsoDate) return null;
-  return {
-    date: stored.date,
-    lunchSeminarIds: stored.lunchSeminarIds || [],
-    dinnerSeminarIds: stored.dinnerSeminarIds || [],
-  };
-}
-
-function updateStoredSeminars(
-  todayIsoDate: string,
-  targetList: SeminarBucketKey,
-  seminarId: string,
-  current: StoredSeminarIds | null,
-): StoredSeminarIds {
-  const base = current || { date: todayIsoDate, lunchSeminarIds: [], dinnerSeminarIds: [] };
-  const updated = {
-    date: todayIsoDate,
-    lunchSeminarIds: [...base.lunchSeminarIds],
-    dinnerSeminarIds: [...base.dinnerSeminarIds],
-  };
-  if (!updated[targetList].includes(seminarId)) {
-    updated[targetList].push(seminarId);
-  }
-  storage.set(TODAY_SEMINAR_KEY, updated);
-  return updated;
-}
-
 async function getTodaysSeminars(page: Page, startHour: number, endHour: number): Promise<Record<string, SeminarInfo>> {
   const seminars: Record<string, SeminarInfo> = {};
 
@@ -283,7 +251,8 @@ async function getTodaysSeminars(page: Page, startHour: number, endHour: number)
         const statusElement = detail.locator('.progress .ico_box');
         const statusText = (await statusElement.count()) > 0 ? await statusElement.innerText() : '상태없음';
         const seminarName = await detail.locator('.list_tit .tit').first().innerText();
-        seminars[fullUrl] = { status: statusText, name: seminarName, seminarId: seminarId };
+        const isAdvancedSurvey = (await detail.locator('.ic_survey').count()) > 0;
+        seminars[fullUrl] = { status: statusText, name: seminarName, seminarId: seminarId, isAdvancedSurvey };
       }
     }
   } else {
@@ -399,7 +368,6 @@ async function monitorSeminars(
 ) {
   let monitoringList: Record<string, SeminarInfo> = {};
   const todayIsoDate = seoulDateString();
-  const bucketKey: SeminarBucketKey = periodName === '점심' ? 'lunchSeminarIds' : 'dinnerSeminarIds';
 
   try {
     // Initial population of the monitoring list
@@ -440,8 +408,8 @@ async function monitorSeminars(
           monitoringList[url].hasSurvey = hasSurvey;
           monitoringList[url].isEntryStarted = true;
         }
-
-        let message = `🟢세미나시작\n**${name}**\n${targetUrl}`;
+        const advancedSurveySuffix = monitoringList[url]?.isAdvancedSurvey ? ' [심화설문]' : '';
+        let message = `🟢세미나시작\n**${name}**${advancedSurveySuffix}\n${targetUrl}`;
         if (!hasSurvey) {
           message += `\n(설문이 없는 세미나인 것 같습니다)`;
         }
@@ -481,20 +449,8 @@ async function monitorSeminars(
       await page.reload({ waitUntil: 'load', timeout: 30000 });
 
       const currentSeminarsOnPage = await getTodaysSeminars(page, startHour, endHour);
-      let storedSeminars = getStoredSeminarsForToday(todayIsoDate);
-      const storedSeminarIdSet = storedSeminars
-        ? new Set([...(storedSeminars.lunchSeminarIds || []), ...(storedSeminars.dinnerSeminarIds || [])])
-        : null;
 
       for (const [url, info] of Object.entries(currentSeminarsOnPage)) {
-        const { seminarId, name } = info;
-        if (storedSeminarIdSet && seminarId && !storedSeminarIdSet.has(seminarId)) {
-          const targetUrl = `${SEMINAR_DETAIL_PAGE}${seminarId}`;
-          await sendNotificationToChannel(`오늘 새로 추가된 세미나가 있습니다. ${name} ${targetUrl}`);
-          storedSeminars = updateStoredSeminars(todayIsoDate, bucketKey, seminarId, storedSeminars);
-          storedSeminarIdSet.add(seminarId);
-        }
-
         if (!monitoringList[url]) {
           monitoringList[url] = info;
         }
@@ -512,6 +468,7 @@ async function monitorSeminars(
           hasSurvey: monitoredInfo.hasSurvey, // Preserve hasSurvey state
           isEntryStarted: monitoredInfo.isEntryStarted, // Preserve isEntryStarted state
           autoEnterDone: monitoredInfo.autoEnterDone, // Preserve autoEnterDone state
+          isAdvancedSurvey: monitoredInfo.isAdvancedSurvey, // Preserve isAdvancedSurvey state
         };
 
         const effectiveStatus = currentInfo ? currentInfo.status : monitoredInfo.status;
@@ -553,7 +510,8 @@ async function monitorSeminars(
               ? `${SEMINAR_DETAIL_PAGE}${mergedSeminarInfo.seminarId}`
               : url;
             const quizSuffix = quizResultMessage ? `\n\n${quizResultMessage}` : '';
-            const message = `🔴세미나종료\n**${mergedSeminarInfo.name}**\n${targetUrl}${quizSuffix}`;
+            const advancedSurveySuffix = mergedSeminarInfo.isAdvancedSurvey ? ' [심화설문]' : '';
+            const message = `🔴세미나종료\n**${mergedSeminarInfo.name}**${advancedSurveySuffix}\n${targetUrl}${quizSuffix}`;
             await sendNotificationToChannel(message);
           } else {
             console.log(
@@ -566,7 +524,6 @@ async function monitorSeminars(
 
         // 2. If it still exists, get its new state
         const { status: newStatus, name: newName } = currentInfo || monitoredInfo;
-        const oldStatus = monitoredInfo.status;
 
         // 3. Check for transition to '입장하기' (New entry detection)
         // Check if now ready for entry (either newly transitioned from Apply status, or newly discovered as entry-ready)
@@ -584,7 +541,12 @@ async function monitorSeminars(
             continue;
           }
 
-          let message = `🟢세미나시작\n**${newName}**\n${targetUrl}`;
+          if (monitoringList[url] && currentInfo) {
+            monitoringList[url].isAdvancedSurvey = currentInfo.isAdvancedSurvey;
+          }
+
+          const advancedSurveySuffix = currentInfo?.isAdvancedSurvey ? ' [심화설문]' : '';
+          let message = `🟢세미나시작\n**${newName}**${advancedSurveySuffix}\n${targetUrl}`;
           if (!hasSurvey) {
             message += `\n(설문이 없는 세미나인 것 같습니다)`;
           }
