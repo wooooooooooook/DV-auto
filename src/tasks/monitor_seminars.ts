@@ -457,7 +457,25 @@ async function monitorSeminars(
 
       await randomDelay();
 
-      await page.reload({ waitUntil: 'load', timeout: 30000 });
+      try {
+        await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });
+        await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+      } catch (reloadError) {
+        console.error(`[${periodName}] page.reload failed. trying safeGoto fallback.`, reloadError);
+
+        try {
+          await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'domcontentloaded', timeout: 30000 }, 1);
+          await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+        } catch (fallbackError) {
+          const reloadMessage = reloadError instanceof Error ? reloadError.message : String(reloadError);
+          const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+          await sendTelegram(
+            `⚠️ [${periodName}] 세미나 목록 새로고침 실패. 다음 주기에 재시도합니다.\nreload: ${reloadMessage}\nfallback: ${fallbackMessage}`,
+          ).catch(() => {});
+          await randomDelay();
+          continue;
+        }
+      }
 
       const currentSeminarsOnPage = await getTodaysSeminars(page, startHour, endHour);
 
