@@ -41,6 +41,8 @@ type SeminarSurveyMeta = {
   isSurveyPointExcluded: boolean;
 };
 
+const getSeminarTrackingKey = (url: string, seminarId: string | null | undefined): string => seminarId || url;
+
 async function checkSurveyMeta(context: BrowserContext, url: string): Promise<SeminarSurveyMeta> {
   const page = await context.newPage();
   try {
@@ -374,6 +376,7 @@ async function monitorSeminars(
   endHour: number,
 ) {
   let monitoringList: Record<string, SeminarInfo> = {};
+  const excludedSeminarKeys = new Set<string>();
   const todayIsoDate = seoulDateString();
 
   try {
@@ -404,6 +407,7 @@ async function monitorSeminars(
         // Check for survey existence
         const { hasSurvey, isSurveyPointExcluded } = await checkSurveyMeta(context, targetUrl);
         if (isSurveyPointExcluded) {
+          excludedSeminarKeys.add(getSeminarTrackingKey(url, seminarId));
           console.log(
             `[monitor_seminars] Skipping monitoring for ${name} because survey points are excluded. (During Initialization)`,
           );
@@ -458,6 +462,11 @@ async function monitorSeminars(
       const currentSeminarsOnPage = await getTodaysSeminars(page, startHour, endHour);
 
       for (const [url, info] of Object.entries(currentSeminarsOnPage)) {
+        const trackingKey = getSeminarTrackingKey(url, info.seminarId);
+        if (excludedSeminarKeys.has(trackingKey)) {
+          continue;
+        }
+
         if (!monitoringList[url]) {
           monitoringList[url] = info;
         }
@@ -542,6 +551,7 @@ async function monitorSeminars(
           // Check for survey existence
           const { hasSurvey, isSurveyPointExcluded } = await checkSurveyMeta(context, targetUrl);
           if (isSurveyPointExcluded) {
+            excludedSeminarKeys.add(getSeminarTrackingKey(url, mergedSeminarInfo.seminarId));
             console.log(
               `[monitor_seminars] Skipping monitoring for ${newName} because survey points are excluded. (During Loop)`,
             );
