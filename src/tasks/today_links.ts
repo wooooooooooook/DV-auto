@@ -342,7 +342,34 @@ async function run({ page }: PlaywrightRunArgs) {
     const quizInfo = await collectQuizInfo(page);
     const seminarMessage = await collectTodaySeminarMessage(page);
     const { isoDate, yesterdayIso } = getTodayDateStrings();
-    const storedNewSeminars = getStoredNewSeminars(isoDate, yesterdayIso);
+    let storedNewSeminars = getStoredNewSeminars(isoDate, yesterdayIso);
+    if (storedNewSeminars.length > 0) {
+      let updatedMissingPointFlag = false;
+      const pointExcludedCache = new Map<string, boolean>();
+
+      storedNewSeminars = await Promise.all(
+        storedNewSeminars.map(async (item) => {
+          if (typeof item.isPointExcluded === 'boolean') return item;
+
+          const link = item.seminarId ? `${SEMINAR_DETAIL_PAGE}${item.seminarId}` : item.url;
+          const cacheKey = item.seminarId || item.url;
+          let isPointExcluded = pointExcludedCache.get(cacheKey);
+          if (typeof isPointExcluded !== 'boolean') {
+            isPointExcluded = await isSurveyPointExcludedSeminar(page.context(), link);
+            pointExcludedCache.set(cacheKey, isPointExcluded);
+          }
+          updatedMissingPointFlag = true;
+          return { ...item, isPointExcluded };
+        }),
+      );
+
+      if (updatedMissingPointFlag) {
+        storage.set(NEW_SEMINAR_KEY, {
+          date: isoDate,
+          seminars: storedNewSeminars,
+        });
+      }
+    }
 
     const options: Record<string, unknown> = {};
 

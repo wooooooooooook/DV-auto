@@ -157,14 +157,20 @@ async function run({ page }: PlaywrightRunArgs, options: ApplySeminarOptions = {
       const newlyAdded = normalizedCurrentSeminars.filter((item) => !storedUrls.has(item.url));
       newlyAddedCount = newlyAdded.length;
       if (newlyAdded.length > 0) {
-        newlyAddedWithFlags = await Promise.all(
-          newlyAdded.map(async (item) => {
-            const seminarId = getSeminarIdFromUrl(item.url);
-            const link = seminarId ? `${SEMINAR_DETAIL_PAGE}${seminarId}` : item.url;
-            const isPointExcluded = await isSurveyPointExcludedSeminar(page.context(), link);
-            return { ...item, seminarId, isPointExcluded };
-          }),
-        );
+        newlyAddedWithFlags = [];
+        for (const item of newlyAdded) {
+          const seminarId = getSeminarIdFromUrl(item.url);
+          const link = seminarId ? `${SEMINAR_DETAIL_PAGE}${seminarId}` : item.url;
+
+          let isPointExcluded = await isSurveyPointExcludedSeminar(page.context(), link);
+          if (!isPointExcluded) {
+            // 상세 페이지가 지연 렌더링되는 경우를 대비한 1회 재시도
+            await page.waitForTimeout(800);
+            isPointExcluded = await isSurveyPointExcludedSeminar(page.context(), link);
+          }
+
+          newlyAddedWithFlags.push({ ...item, seminarId, isPointExcluded });
+        }
 
         const newSeminarMessage = newlyAdded
           .map((item, _index) => {
