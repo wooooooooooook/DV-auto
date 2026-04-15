@@ -250,7 +250,7 @@ async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Prom
       if (!hourMatch) return false;
 
       const hour = Number(hourMatch[1]);
-      return Number.isFinite(hour) && hour >= 17;
+      return Number.isFinite(hour) && hour >= 16;
     };
 
     for (let i = 0; i < count; i++) {
