@@ -243,6 +243,16 @@ async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Prom
     const dinnerSeminars: string[] = [];
     const pointExcludedCache = new Map<string, boolean>();
 
+    const isDinnerSeminar = (classAttr: string, time: string): boolean => {
+      if (classAttr.includes('night_time')) return true;
+
+      const hourMatch = time.match(/(\d{1,2})\s*:/);
+      if (!hourMatch) return false;
+
+      const hour = Number(hourMatch[1]);
+      return Number.isFinite(hour) && hour >= 17;
+    };
+
     for (let i = 0; i < count; i++) {
       const container = listConts.nth(i);
       const seminarDay = await container
@@ -286,8 +296,8 @@ async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Prom
         const advancedSurveySuffix = isAdvancedSurvey ? ' [심화설문]' : '';
         const seminarInfo = ` ${time}. ${title}${pointExcludedSuffix}${advancedSurveySuffix} ${seminarLink}`;
 
-        // If the time element has the `night_time` class treat as dinner, otherwise lunch
-        if (classAttr.includes('night_time')) {
+        // `night_time` 클래스가 없어도 17시 이후 세미나는 저녁 세미나로 처리
+        if (isDinnerSeminar(classAttr, time)) {
           dinnerSeminars.push(seminarInfo);
           if (seminarId) dinnerSeminarIds.push(seminarId);
         } else {
