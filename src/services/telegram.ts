@@ -668,10 +668,19 @@ if (adminBot) {
     for (const line of lines) {
       if (line.match(/^Q\d+:/)) {
         // New question block
-        const keywordMatch = line.match(/Q\d+:\s*\[퀴즈\]\s*(.*?)(?:\*|\.\.\.|$)/);
+        const keywordMatch = line.match(/^Q\d+:\s*(?:\[퀴즈\]\s*)?(.*)$/);
         if (keywordMatch) {
-          currentQuestion = { keyword: keywordMatch[1].trim(), options: [] };
-          questions.push(currentQuestion);
+          const rawKeyword = keywordMatch[1].trim();
+          const normalizedKeyword = rawKeyword
+            .replace(/^["'“”]/, '')
+            .replace(/["'“”]$/, '')
+            .replace(/\.\.\.$/, '')
+            .trim();
+
+          if (normalizedKeyword) {
+            currentQuestion = { keyword: normalizedKeyword, options: [] };
+            questions.push(currentQuestion);
+          }
         }
       } else if (currentQuestion && line.match(/^\d+\./)) {
         // Option line
