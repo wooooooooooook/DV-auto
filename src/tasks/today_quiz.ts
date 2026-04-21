@@ -60,6 +60,33 @@ async function parseTodayQuizQuestions(page: PlaywrightRunArgs['page']): Promise
   return questions;
 }
 
+function formatTodayQuizUnknownQuestions(productTitle: string, questions: QuizQuestion[], href: string): string {
+  let message = `❓ 오늘의 퀴즈 정답 미등록\n제품: ${productTitle}\n링크: ${href}\n\n`;
+
+  for (let i = 0; i < questions.length; i++) {
+    const q = questions[i];
+    message += `Q${i + 1}: ${q.questionText.substring(0, 100)}...\n`;
+    for (const opt of q.options) {
+      message += `  ${opt.index}. ${opt.text}\n`;
+    }
+    message += '\n';
+  }
+
+  message += '등록 후 재실행: /run_quiz_now';
+  return message;
+}
+
+async function notifyTodayQuizUnknownQuestions(
+  page: PlaywrightRunArgs['page'],
+  productTitle: string,
+  href: string,
+): Promise<void> {
+  const questions = await parseTodayQuizQuestions(page);
+  if (questions.length === 0) return;
+  const message = formatTodayQuizUnknownQuestions(productTitle, questions, href);
+  await sendTelegram(message).catch(() => {});
+}
+
 async function findAnswersByCheatsheet(page: PlaywrightRunArgs['page']): Promise<Array<string | number> | null> {
   try {
     const cheatsheet = await loadCheatsheet();
@@ -202,6 +229,7 @@ async function run({ page }: PlaywrightRunArgs) {
     }
 
     if (!answers || answers.length === 0) {
+      await notifyTodayQuizUnknownQuestions(page, productTitle, href);
       return { success: true, message: `정답이 등록되지 않았습니다. 직접 퀴즈를 풀어주세요. ${href}` };
     }
 
