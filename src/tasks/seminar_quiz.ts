@@ -53,9 +53,50 @@ export function findOptionByAnswer(
   options: QuizQuestion['options'],
   answerKeyword: string,
 ): { index: number; text: string } | null {
+  const normalizedAnswer = normalizeForMatch(answerKeyword);
+
+  // 1) 엄격 매칭: 보기 텍스트가 정답 키워드를 포함하는지 확인
   for (const opt of options) {
-    if (opt.text.includes(answerKeyword)) {
+    if (normalizeForMatch(opt.text).includes(normalizedAnswer)) {
       return { index: opt.index, text: opt.text };
+    }
+  }
+
+  // 2) 역방향 매칭: 정답 키워드가 보기 텍스트를 포함하는 경우
+  for (const opt of options) {
+    const normalizedOption = normalizeForMatch(opt.text);
+    if (normalizedAnswer.includes(normalizedOption)) {
+      return { index: opt.index, text: opt.text };
+    }
+  }
+
+  return null;
+}
+
+function normalizeForMatch(text: string): string {
+  return text
+    .normalize('NFKC')
+    .replace(/\s+/g, ' ')
+    .replace(/[.,!?"'`~·•…]/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * 여러 키워드가 매칭되는 경우 가장 구체적인(긴) 키워드부터 시도해
+ * 실제 보기 텍스트에서 답을 찾을 수 있는 후보를 우선 선택
+ */
+export function resolveBestKeywordMatch(
+  questionText: string,
+  options: QuizQuestion['options'],
+  cheatsheet: Cheatsheet,
+): { keyword: string; option: { index: number; text: string } } | null {
+  const matchingKeywords = findMatchingKeywords(questionText, cheatsheet).sort((a, b) => b.length - a.length);
+  for (const keyword of matchingKeywords) {
+    const answerKeyword = cheatsheet[keyword];
+    const option = findOptionByAnswer(options, answerKeyword);
+    if (option) {
+      return { keyword, option };
     }
   }
   return null;
@@ -242,27 +283,19 @@ async function processSeminarQuiz(page: Page, seminarName?: string): Promise<Sem
       if (matchingKeywords.length === 0) {
         // 족보에 없음
         _hasUnknown = true;
-      } else if (matchingKeywords.length === 1) {
-        // 정확히 하나 매칭
-        matchedKeyword = matchingKeywords[0];
-        const answerKeyword = cheatsheet[matchedKeyword];
-        const found = findOptionByAnswer(q.options, answerKeyword);
-        if (found) {
-          selectedIndex = found.index;
-          selectedText = found.text;
+      } else {
+        if (matchingKeywords.length > 1) {
+          _hasMultipleMatches = true;
+          multipleMatches = matchingKeywords;
+        }
+
+        const bestMatch = resolveBestKeywordMatch(q.questionText, q.options, cheatsheet);
+        if (bestMatch) {
+          matchedKeyword = bestMatch.keyword;
+          selectedIndex = bestMatch.option.index;
+          selectedText = bestMatch.option.text;
         } else {
           _hasUnknown = true;
-        }
-      } else {
-        // 여러 개 매칭 - 첫 번째 것 사용하되 경고
-        _hasMultipleMatches = true;
-        multipleMatches = matchingKeywords;
-        matchedKeyword = matchingKeywords[0];
-        const answerKeyword = cheatsheet[matchedKeyword];
-        const found = findOptionByAnswer(q.options, answerKeyword);
-        if (found) {
-          selectedIndex = found.index;
-          selectedText = found.text;
         }
       }
 

@@ -2,7 +2,7 @@ import quizMapping from '../../data/quiz.json';
 import { safeGoto, sendTelegram } from '../modules/utils';
 import * as storage from '../services/storage';
 import type { PlaywrightRunArgs } from '../types';
-import { loadCheatsheet, findMatchingKeywords, findOptionByAnswer, type QuizQuestion } from './seminar_quiz';
+import { findMatchingKeywords, loadCheatsheet, resolveBestKeywordMatch, type QuizQuestion } from './seminar_quiz';
 
 const QUIZ_LIST_URLS = [
   'https://www.doctorville.co.kr/product/medicineList',
@@ -15,6 +15,10 @@ type TempQuizAnswers = {
   productTitle: string;
   answers: Array<string | number>;
 };
+
+type CheatsheetMatchResult =
+  | { answers: Array<string | number>; reason: 'ok' }
+  | { answers: null; reason: 'no_keyword' | 'keyword_matched_but_option_not_found' };
 
 function getTodayIsoDate() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' as const });
@@ -87,35 +91,42 @@ async function notifyTodayQuizUnknownQuestions(
   await sendTelegram(message).catch(() => {});
 }
 
-async function findAnswersByCheatsheet(page: PlaywrightRunArgs['page']): Promise<Array<string | number> | null> {
+async function findAnswersByCheatsheet(page: PlaywrightRunArgs['page']): Promise<CheatsheetMatchResult> {
   try {
     const cheatsheet = await loadCheatsheet();
-    if (Object.keys(cheatsheet).length === 0) return null;
+    if (Object.keys(cheatsheet).length === 0) return { answers: null, reason: 'no_keyword' };
 
     const questions = await parseTodayQuizQuestions(page);
-    if (questions.length === 0) return null;
+    if (questions.length === 0) return { answers: null, reason: 'no_keyword' };
 
     const result: Array<string | number> = [];
+    let hasKeywordButNoOption = false;
     for (const q of questions) {
       console.log(`[today_quiz] 매칭 시도 문제: ${q.questionText.substring(0, 30)}...`);
       const matches = findMatchingKeywords(q.questionText, cheatsheet);
+      const bestMatch = resolveBestKeywordMatch(q.questionText, q.options, cheatsheet);
+      if (bestMatch) {
+        const answerKeyword = cheatsheet[bestMatch.keyword];
+        console.log(
+          `[today_quiz] 매칭 성공: ${bestMatch.keyword} -> ${answerKeyword} (보기 ${bestMatch.option.index}번)`,
+        );
+        result.push(bestMatch.option.index);
+        continue;
+      }
+
       if (matches.length > 0) {
-        const chosenKeyword = matches[0];
-        const answerKeyword = cheatsheet[chosenKeyword];
-        const option = findOptionByAnswer(q.options, answerKeyword);
-        if (option) {
-          console.log(`[today_quiz] 매칭 성공: ${chosenKeyword} -> ${answerKeyword} (보기 ${option.index}번)`);
-          result.push(option.index);
-          continue;
-        }
+        hasKeywordButNoOption = true;
       }
       console.warn(`[today_quiz] 문제에 대한 정답을 찾지 못했습니다: ${q.questionText.substring(0, 50)}...`);
-      return null; // One failure fails the whole quiz to be safe
+      return {
+        answers: null,
+        reason: hasKeywordButNoOption ? 'keyword_matched_but_option_not_found' : 'no_keyword',
+      };
     }
-    return result;
+    return { answers: result, reason: 'ok' };
   } catch (e) {
     console.error('[today_quiz] 족보 매칭 중 오류', e);
-    return null;
+    return { answers: null, reason: 'no_keyword' };
   }
 }
 
@@ -222,9 +233,15 @@ async function run({ page }: PlaywrightRunArgs) {
 
     if (!answers || !Array.isArray(answers) || answers.length === 0) {
       console.log(`[today_quiz] "${productTitle}"에 대한 정답이 quiz.json에 없습니다. 족보에서 찾기를 시도합니다.`);
-      answers = (await findAnswersByCheatsheet(page)) || [];
+      const cheatsheetResult = await findAnswersByCheatsheet(page);
+      answers = cheatsheetResult.answers || [];
       if (answers.length > 0) {
         answersSource = 'cheatsheet';
+      } else if (cheatsheetResult.reason === 'keyword_matched_but_option_not_found') {
+        return {
+          success: true,
+          message: `등록된 정답 키워드를 찾았지만 보기와 일치하지 않아 자동 선택에 실패했습니다. 직접 퀴즈를 풀어주세요. ${href}`,
+        };
       }
     }
 
