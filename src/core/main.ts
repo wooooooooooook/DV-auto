@@ -15,6 +15,7 @@ import * as todayLinksTaskModule from '../tasks/today_links';
 import * as monitorLunchSeminars from '../tasks/monitor_lunch_seminars';
 import * as monitorDinnerSeminars from '../tasks/monitor_dinner_seminars';
 import * as naverpayPointExchangeTask from '../tasks/naverpay_point_exchange';
+import * as refreshSeminarPointExclusionTaskModule from '../tasks/refresh_seminar_point_exclusion';
 import type { Task, TaskResult } from '../types';
 
 dns.setDefaultResultOrder('ipv4first');
@@ -199,6 +200,22 @@ const todayLinksTask: Task = {
   },
 };
 taskRegistry.registerTask(todayLinksTask);
+
+const refreshSeminarPointExclusionTask: Task = {
+  name: 'refresh_seminar_point_exclusion',
+  run: async () => {
+    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await utils.ensureLoggedIn({ page, context });
+      return await refreshSeminarPointExclusionTaskModule.run({ page, context });
+    } finally {
+      await browser.close();
+    }
+  },
+};
+taskRegistry.registerTask(refreshSeminarPointExclusionTask);
 
 const monitorLunchSeminarsTask: Task = {
   name: 'monitor_lunch_seminars',

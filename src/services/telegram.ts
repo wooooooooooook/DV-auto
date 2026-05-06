@@ -283,6 +283,42 @@ if (adminBot) {
     }
   });
 
+  adminBot.command('refresh_seminar_point_exclusion', async (ctx) => {
+    logger.info('User requested to refresh seminar point exclusion flags', { from: ctx.from?.username });
+    const task = taskRegistry.getByName('refresh_seminar_point_exclusion');
+    if (!task) {
+      logger.error('refresh_seminar_point_exclusion task not found, cannot run');
+      return ctx.reply('refresh_seminar_point_exclusion task not found!');
+    }
+
+    try {
+      await ctx.reply('세미나 포인트미지급 여부를 전체 재확인합니다... (백그라운드 실행)');
+      runner
+        .runTask(task)
+        .then(async (result) => {
+          if (result && typeof result === 'object' && (result as { message?: string }).message) {
+            await ctx.reply(
+              (result as { message: string }).message,
+              (result as { options?: Record<string, unknown> }).options,
+            );
+          } else if (typeof result === 'string') {
+            await ctx.reply(result);
+          } else if (result === true) {
+            await ctx.reply('세미나 포인트미지급 여부 재확인이 완료되었습니다.');
+          } else {
+            await ctx.reply('세미나 포인트미지급 여부 재확인이 완료되었습니다.');
+          }
+        })
+        .catch((e) => {
+          const message = e instanceof Error ? e.message : String(e);
+          ctx.reply(`세미나 포인트미지급 여부 재확인 실패: ${message}`);
+        });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      ctx.reply(`Failed to start 세미나 포인트미지급 여부 재확인: ${message}`);
+    }
+  });
+
   adminBot.command('apply_seminar_now', async (ctx) => {
     logger.info('User requested to run apply_seminar now', { from: ctx.from?.username });
     const task = taskRegistry.getByName('apply_seminar');
@@ -742,6 +778,7 @@ if (adminBot) {
 - /run_routine_now: 즉시 daily_routine 작업을 실행합니다.
 - /run_quiz_now: 즉시 오늘의 퀴즈 작업(today_quiz)을 실행합니다.
 - /apply_seminar_now: 즉시 세미나 신청 작업(apply_seminar)을 실행합니다.
+- /refresh_seminar_point_exclusion: 모든 세미나의 포인트미지급 여부를 다시 확인해 캐시를 갱신합니다.
 - /naverpay_point_exchange: 네이버페이포인트교환 작업을 실행합니다.
 - /add_quiz_answer: 오늘의 퀴즈 정답을 등록합니다. 예) /add_quiz_answer 시너지아정 [1,2,3]
 - /broadcast_today_links: 즉시 오늘의 링크를 채널에 공지합니다.
@@ -1031,6 +1068,7 @@ const adminCommands = [
   { command: 'run_routine_now', description: '즉시 daily_routine 실행' },
   { command: 'run_quiz_now', description: '즉시 오늘의 퀴즈(today_quiz) 실행' },
   { command: 'apply_seminar_now', description: '즉시 세미나 신청(apply_seminar) 실행' },
+  { command: 'refresh_seminar_point_exclusion', description: '세미나 포인트미지급 캐시 재확인' },
   { command: 'naverpay_point_exchange', description: '네이버페이포인트교환 실행' },
   { command: 'add_quiz_answer', description: '오늘의 퀴즈 정답 등록' },
   { command: 'broadcast_today_links', description: '오늘의 링크 채널 공지' },
