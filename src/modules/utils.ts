@@ -336,7 +336,7 @@ async function hasSurveyPointExcludedNotice(page: Page): Promise<boolean> {
     .locator('body')
     .first()
     .innerText()
-    .then((text) => text.replace(/\s+/g, ' ').includes('포인트가 지급되지 않는 세미나'))
+    .then((text) => /포인트가\s*지급되지\s*않는\s*세미나/.test(text.replace(/\s+/g, ' ')))
     .catch(() => false);
   return isSurveyPointExcludedByBanner || isSurveyPointExcludedByText;
 }
@@ -344,6 +344,7 @@ async function hasSurveyPointExcludedNotice(page: Page): Promise<boolean> {
 async function isSurveyPointExcludedSeminar(context: BrowserContext, url: string): Promise<boolean> {
   const page = await context.newPage();
   try {
+    await ensureLoggedIn({ page, context });
     await safeGoto(page, url, { waitUntil: 'domcontentloaded', timeout: 15000 });
     await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
     return hasSurveyPointExcludedNotice(page);
