@@ -328,7 +328,7 @@ async function ensureLoggedIn({ page, context }: { page: Page; context: BrowserC
 
 async function hasSurveyPointExcludedNotice(page: Page): Promise<boolean> {
   const isSurveyPointExcludedByBanner = await page
-    .locator('text=/설문\\s*포인트가\\s*지급되지\\s*않는|포인트가\\s*지급되지\\s*않는/')
+    .locator('text=/포인트가\\s*지급되지\\s*않는/')
     .first()
     .isVisible({ timeout: 3000 })
     .catch(() => false);
@@ -336,11 +336,7 @@ async function hasSurveyPointExcludedNotice(page: Page): Promise<boolean> {
     .locator('body')
     .first()
     .innerText()
-    .then(
-      (text) =>
-        text.replace(/\s+/g, ' ').includes('포인트가 지급되지 않는 세미나') ||
-        text.replace(/\s+/g, ' ').includes('설문 포인트가 지급되지 않는 세미나'),
-    )
+    .then((text) => /포인트가\s*지급되지\s*않는\s*세미나/.test(text.replace(/\s+/g, ' ')))
     .catch(() => false);
   return isSurveyPointExcludedByBanner || isSurveyPointExcludedByText;
 }
