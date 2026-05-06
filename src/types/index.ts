@@ -17,6 +17,7 @@ export interface TaskResult {
   success?: boolean;
   message?: string;
   imagePath?: string;
+  screenshotPaths?: string[];
   options?: Record<string, unknown>;
   silent?: boolean;
 }
