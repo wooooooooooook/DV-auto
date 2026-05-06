@@ -1,6 +1,8 @@
 import type { PlaywrightRunArgs, TaskResult } from '../types';
 import { getSeminarIdFromUrl, isSurveyPointExcludedSeminar, safeGoto } from '../modules/utils';
 import * as storage from '../services/storage';
+import fs from 'fs/promises';
+import path from 'path';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
@@ -60,6 +62,9 @@ async function run({ page }: PlaywrightRunArgs): Promise<TaskResult> {
 
     const checked = new Map<string, boolean>();
     const refreshed = [] as SeminarListItem[];
+    const screenshotPaths: string[] = [];
+    const screenshotDir = path.join(process.cwd(), 'screenshot');
+    await fs.mkdir(screenshotDir, { recursive: true });
 
     for (const seminar of currentSeminars) {
       const seminarId = getSeminarIdFromUrl(seminar.url);
@@ -70,6 +75,19 @@ async function run({ page }: PlaywrightRunArgs): Promise<TaskResult> {
       if (typeof isPointExcluded !== 'boolean') {
         isPointExcluded = await isSurveyPointExcludedSeminar(page.context(), detailLink);
         checked.set(cacheKey, isPointExcluded);
+      }
+
+      const seminarPage = await page.context().newPage();
+      try {
+        await safeGoto(seminarPage, detailLink, { waitUntil: 'domcontentloaded', timeout: 20000 }, 1);
+        const shotPath = path.join(
+          screenshotDir,
+          `refresh_point_exclusion_${seminarId || Date.now()}_${Date.now()}.png`,
+        );
+        await seminarPage.screenshot({ path: shotPath, fullPage: true });
+        screenshotPaths.push(shotPath);
+      } finally {
+        await seminarPage.close().catch(() => {});
       }
 
       refreshed.push({
@@ -109,6 +127,7 @@ async function run({ page }: PlaywrightRunArgs): Promise<TaskResult> {
     return {
       success: true,
       message: `✅ 세미나 ${refreshed.length}건의 포인트미지급 여부를 재확인했습니다.\n- 포인트 미지급: ${excludedCount}건\n- 포인트 지급: ${refreshed.length - excludedCount}건`,
+      screenshotPaths,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

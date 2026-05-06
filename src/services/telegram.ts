@@ -301,6 +301,11 @@ if (adminBot) {
               (result as { message: string }).message,
               (result as { options?: Record<string, unknown> }).options,
             );
+            const screenshotPaths = (result as { screenshotPaths?: string[] }).screenshotPaths || [];
+            for (const screenshotPath of screenshotPaths) {
+              await ctx.replyWithPhoto({ source: screenshotPath });
+              await fs.unlink(screenshotPath).catch(() => {});
+            }
           } else if (typeof result === 'string') {
             await ctx.reply(result);
           } else if (result === true) {
