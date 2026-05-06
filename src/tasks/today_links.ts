@@ -43,6 +43,27 @@ const TODAY_SEMINAR_KEY = 'today_seminars';
 const NEW_SEMINAR_KEY = 'apply_seminar:new_seminars';
 const SEMINAR_LIST_KEY = 'apply_seminar:seminar_list';
 
+function findPointExcludedFromStoredSeminars(
+  storedSeminars: Array<{ url: string; seminarId?: string | null; isPointExcluded?: boolean }>,
+  seminarId: string | null,
+  fullUrl: string,
+): boolean | undefined {
+  const normalizedFullUrl = fullUrl.replace(/\/+$/, '');
+  const matched = storedSeminars.find((seminar) => {
+    if (typeof seminar.isPointExcluded !== 'boolean') return false;
+
+    if (seminarId) {
+      if (seminar.seminarId && seminar.seminarId === seminarId) return true;
+      const storedId = getSeminarIdFromUrl(seminar.url);
+      if (storedId && storedId === seminarId) return true;
+    }
+
+    return seminar.url.replace(/\/+$/, '') === normalizedFullUrl;
+  });
+
+  return matched?.isPointExcluded;
+}
+
 async function parseTodayQuizQuestions(page: PlaywrightRunArgs['page']): Promise<QuizQuestion[]> {
   const questions: QuizQuestion[] = [];
 
@@ -282,10 +303,13 @@ async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Prom
 
         if (typeof isPointExcluded !== 'boolean') {
           // Check storage first
-          const storedSeminars = storage.get<Array<{ url: string; isPointExcluded?: boolean }>>(SEMINAR_LIST_KEY) || [];
-          const storedMatch = storedSeminars.find((s) => s.url === fullUrl);
-          if (storedMatch && typeof storedMatch.isPointExcluded === 'boolean') {
-            isPointExcluded = storedMatch.isPointExcluded;
+          const storedSeminars =
+            storage.get<Array<{ url: string; seminarId?: string | null; isPointExcluded?: boolean }>>(
+              SEMINAR_LIST_KEY,
+            ) || [];
+          const storedPointExcluded = findPointExcludedFromStoredSeminars(storedSeminars, seminarId, fullUrl);
+          if (typeof storedPointExcluded === 'boolean') {
+            isPointExcluded = storedPointExcluded;
           } else {
             isPointExcluded = await isSurveyPointExcludedSeminar(page.context(), seminarLink);
           }
@@ -357,11 +381,21 @@ async function run({ page }: PlaywrightRunArgs) {
       let updatedMissingPointFlag = false;
       const pointExcludedCache = new Map<string, boolean>();
 
+      const storedSeminars =
+        storage.get<Array<{ url: string; seminarId?: string | null; isPointExcluded?: boolean }>>(SEMINAR_LIST_KEY) ||
+        [];
+
       storedNewSeminars = await Promise.all(
         storedNewSeminars.map(async (item) => {
           if (typeof item.isPointExcluded === 'boolean') return item;
 
           const link = item.seminarId ? `${SEMINAR_DETAIL_PAGE}${item.seminarId}` : item.url;
+          const storedPointExcluded = findPointExcludedFromStoredSeminars(storedSeminars, item.seminarId, link);
+          if (typeof storedPointExcluded === 'boolean') {
+            updatedMissingPointFlag = true;
+            return { ...item, isPointExcluded: storedPointExcluded };
+          }
+
           const cacheKey = item.seminarId || item.url;
           let isPointExcluded = pointExcludedCache.get(cacheKey);
           if (typeof isPointExcluded !== 'boolean') {
