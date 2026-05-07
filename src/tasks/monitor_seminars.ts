@@ -7,6 +7,7 @@ import {
   sendTelegram,
   getSeminarIdFromUrl,
   ensureLoggedIn,
+  ensureSeminarDetailReady,
   hasSurveyPointExcludedNotice,
 } from '../modules/utils';
 import { processSeminarQuiz } from './seminar_quiz';
@@ -48,6 +49,7 @@ async function checkSurveyMeta(context: BrowserContext, url: string): Promise<Se
   try {
     await safeGoto(page, url, { waitUntil: 'domcontentloaded', timeout: 15000 });
     await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+    await ensureSeminarDetailReady(page, url);
 
     const isSurveyPointExcluded = await hasSurveyPointExcludedNotice(page);
 
