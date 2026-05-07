@@ -345,7 +345,7 @@ async function ensureSeminarDetailReady(page: Page, url: string): Promise<void> 
   const isShareVisible = await page
     .locator('text=공유')
     .first()
-    .isVisible({ timeout: 10000 })
+    .isVisible({ timeout: 30000 })
     .catch(() => false);
 
   if (isShareVisible) return;
