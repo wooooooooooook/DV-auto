@@ -395,17 +395,6 @@ async function monitorSeminars(
         await sendTelegram(`[${periodName}] Seminar already available: ${name}`);
         const targetUrl = seminarId ? `${SEMINAR_DETAIL_PAGE}${seminarId}` : url;
 
-        if (monitoringList[url]) {
-          monitoringList[url].autoEnterDone = await checkAndPerformAutoEnter(
-            context,
-            seminarId,
-            url,
-            name,
-            status,
-            monitoringList[url]?.autoEnterDone,
-          );
-        }
-
         // Check for survey existence
         const { hasSurvey, isSurveyPointExcluded } = await checkSurveyMeta(context, targetUrl);
         if (isSurveyPointExcluded) {
@@ -418,6 +407,14 @@ async function monitorSeminars(
         }
 
         if (monitoringList[url]) {
+          monitoringList[url].autoEnterDone = await checkAndPerformAutoEnter(
+            context,
+            seminarId,
+            url,
+            name,
+            status,
+            monitoringList[url]?.autoEnterDone,
+          );
           monitoringList[url].hasSurvey = hasSurvey;
           monitoringList[url].isEntryStarted = true;
         }
@@ -508,15 +505,6 @@ async function monitorSeminars(
         };
 
         const effectiveStatus = currentInfo ? currentInfo.status : monitoredInfo.status;
-        mergedSeminarInfo.autoEnterDone = await checkAndPerformAutoEnter(
-          context,
-          mergedSeminarInfo.seminarId,
-          url,
-          mergedSeminarInfo.name,
-          effectiveStatus,
-          mergedSeminarInfo.autoEnterDone,
-        );
-
         let ended = false;
 
         // Only check for end if the seminar entry has started (notice sent).
@@ -593,7 +581,24 @@ async function monitorSeminars(
           // Update state in both merged and original list
           mergedSeminarInfo.hasSurvey = hasSurvey;
           mergedSeminarInfo.isEntryStarted = true;
+          mergedSeminarInfo.autoEnterDone = await checkAndPerformAutoEnter(
+            context,
+            mergedSeminarInfo.seminarId,
+            url,
+            mergedSeminarInfo.name,
+            newStatus,
+            mergedSeminarInfo.autoEnterDone,
+          );
           // Note: monitoringList[url] will be updated below at step 4
+        } else {
+          mergedSeminarInfo.autoEnterDone = await checkAndPerformAutoEnter(
+            context,
+            mergedSeminarInfo.seminarId,
+            url,
+            mergedSeminarInfo.name,
+            effectiveStatus,
+            mergedSeminarInfo.autoEnterDone,
+          );
         }
 
         // 4. Always update the seminar's status and name in the monitoring list
