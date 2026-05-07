@@ -341,12 +341,41 @@ async function hasSurveyPointExcludedNotice(page: Page): Promise<boolean> {
   return isSurveyPointExcludedByBanner || isSurveyPointExcludedByText;
 }
 
+async function ensureSeminarDetailReady(page: Page, url: string): Promise<void> {
+  const isShareVisible = await page
+    .locator('text=공유')
+    .first()
+    .isVisible({ timeout: 10000 })
+    .catch(() => false);
+
+  if (isShareVisible) return;
+
+  const screenshotDir = path.join(process.cwd(), 'screenshot');
+  const screenshotPath = path.join(
+    screenshotDir,
+    `seminar_detail_ready_failed_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.png`,
+  );
+
+  try {
+    await fs.promises.mkdir(screenshotDir, { recursive: true });
+    await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {});
+    await sendTelegram(`세미나 상세 페이지 로딩 확인 실패("공유" 텍스트 미검출): ${url}`, screenshotPath).catch(
+      () => false,
+    );
+  } finally {
+    await fs.promises.unlink(screenshotPath).catch(() => {});
+  }
+
+  throw new Error(`세미나 상세 페이지 로딩 확인 실패("공유" 텍스트 미검출): ${url}`);
+}
+
 async function isSurveyPointExcludedSeminar(context: BrowserContext, url: string): Promise<boolean> {
   const page = await context.newPage();
   try {
     await ensureLoggedIn({ page, context });
     await safeGoto(page, url, { waitUntil: 'domcontentloaded', timeout: 15000 });
     await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+    await ensureSeminarDetailReady(page, url);
     return hasSurveyPointExcludedNotice(page);
   } catch (_e) {
     return false;
@@ -379,6 +408,7 @@ export {
   escapeMarkdownV2,
   getSeminarIdFromUrl,
   hasSurveyPointExcludedNotice,
+  ensureSeminarDetailReady,
   isSurveyPointExcludedSeminar,
 };
 

@@ -1,5 +1,11 @@
 import type { PlaywrightRunArgs, TaskResult } from '../types';
-import { ensureLoggedIn, getSeminarIdFromUrl, hasSurveyPointExcludedNotice, safeGoto } from '../modules/utils';
+import {
+  ensureLoggedIn,
+  ensureSeminarDetailReady,
+  getSeminarIdFromUrl,
+  hasSurveyPointExcludedNotice,
+  safeGoto,
+} from '../modules/utils';
 import * as storage from '../services/storage';
 import fs from 'fs/promises';
 import path from 'path';
@@ -30,16 +36,7 @@ async function getPointExclusionStatusFromDetail(
   detailLink: string,
 ): Promise<boolean> {
   await safeGoto(page, detailLink, { waitUntil: 'domcontentloaded', timeout: 20000 }, 1);
-  const isShareVisible = await page
-    .locator('text=공유')
-    .first()
-    .isVisible({ timeout: 10000 })
-    .catch(() => false);
-
-  if (!isShareVisible) {
-    throw new Error(`세미나 상세 페이지 로딩 확인 실패("공유" 텍스트 미검출): ${detailLink}`);
-  }
-
+  await ensureSeminarDetailReady(page, detailLink);
   return hasSurveyPointExcludedNotice(page);
 }
 async function run({ page }: PlaywrightRunArgs): Promise<TaskResult> {
