@@ -342,13 +342,22 @@ async function hasSurveyPointExcludedNotice(page: Page): Promise<boolean> {
 }
 
 async function ensureSeminarDetailReady(page: Page, url: string): Promise<void> {
-  const isShareVisible = await page
-    .locator('text=공유')
-    .first()
-    .isVisible({ timeout: 30000 })
-    .catch(() => false);
+  const shareLocator = page.locator('text=공유').first();
 
-  if (isShareVisible) return;
+  const maxRefreshRetries = 3;
+  for (let attempt = 0; attempt <= maxRefreshRetries; attempt += 1) {
+    const isShareVisible = await shareLocator.isVisible({ timeout: 3000 }).catch(() => false);
+    if (isShareVisible) return;
+
+    if (attempt < maxRefreshRetries) {
+      console.warn(
+        `세미나 상세 페이지 로딩 지연: 공유 텍스트 미검출, 새로고침 재시도 (${attempt + 1}/${maxRefreshRetries})`,
+      );
+      await page.reload({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => false);
+      await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => false);
+      continue;
+    }
+  }
 
   const screenshotDir = path.join(process.cwd(), 'screenshot');
   const screenshotPath = path.join(
