@@ -1,5 +1,5 @@
 import type { PlaywrightRunArgs, TaskResult } from '../types';
-import { getSeminarIdFromUrl, isSurveyPointExcludedSeminar, safeGoto } from '../modules/utils';
+import { ensureLoggedIn, getSeminarIdFromUrl, hasSurveyPointExcludedNotice, safeGoto } from '../modules/utils';
 import * as storage from '../services/storage';
 import fs from 'fs/promises';
 import path from 'path';
@@ -25,6 +25,23 @@ type StoredNewSeminars = {
   seminars: Array<SeminarListItem & { seminarId?: string | null }>;
 };
 
+async function getPointExclusionStatusFromDetail(
+  page: import('playwright').Page,
+  detailLink: string,
+): Promise<boolean> {
+  await safeGoto(page, detailLink, { waitUntil: 'domcontentloaded', timeout: 20000 }, 1);
+  const isShareVisible = await page
+    .locator('text=공유')
+    .first()
+    .isVisible({ timeout: 10000 })
+    .catch(() => false);
+
+  if (!isShareVisible) {
+    throw new Error(`세미나 상세 페이지 로딩 확인 실패("공유" 텍스트 미검출): ${detailLink}`);
+  }
+
+  return hasSurveyPointExcludedNotice(page);
+}
 async function run({ page }: PlaywrightRunArgs): Promise<TaskResult> {
   try {
     await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'networkidle', timeout: 30000 }, 1);
@@ -72,14 +89,16 @@ async function run({ page }: PlaywrightRunArgs): Promise<TaskResult> {
       const cacheKey = seminarId || seminar.url;
 
       let isPointExcluded = checked.get(cacheKey);
-      if (typeof isPointExcluded !== 'boolean') {
-        isPointExcluded = await isSurveyPointExcludedSeminar(page.context(), detailLink);
-        checked.set(cacheKey, isPointExcluded);
-      }
-
       const seminarPage = await page.context().newPage();
       try {
-        await safeGoto(seminarPage, detailLink, { waitUntil: 'domcontentloaded', timeout: 20000 }, 1);
+        await ensureLoggedIn({ page: seminarPage, context: page.context() });
+        if (typeof isPointExcluded !== 'boolean') {
+          isPointExcluded = await getPointExclusionStatusFromDetail(seminarPage, detailLink);
+          checked.set(cacheKey, isPointExcluded);
+        } else {
+          await safeGoto(seminarPage, detailLink, { waitUntil: 'domcontentloaded', timeout: 20000 }, 1);
+        }
+
         const shotPath = path.join(
           screenshotDir,
           `refresh_point_exclusion_${seminarId || Date.now()}_${Date.now()}.png`,
