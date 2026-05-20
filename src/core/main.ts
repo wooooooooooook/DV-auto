@@ -269,13 +269,13 @@ scheduler.scheduleTaskCron(monitorDinnerSeminarsTask);
 
 const naverpayPointExchange: Task = {
   name: '네이버페이포인트교환',
-  run: async () => {
+  run: async (ctx) => {
     const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
     const context = await browser.newContext();
     const page = await context.newPage();
     try {
       await utils.ensureLoggedIn({ page, context });
-      return await naverpayPointExchangeTask.run({ page, context });
+      return await naverpayPointExchangeTask.run({ page, context, maxIterations: ctx.maxIterations });
     } finally {
       await browser.close();
     }

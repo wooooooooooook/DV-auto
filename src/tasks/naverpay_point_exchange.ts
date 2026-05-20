@@ -8,12 +8,17 @@ const ENTERTAINMENT_URL = 'https://www.doctorville.co.kr/entertainment/main';
 const SUCCESS_TEXT = '주문이 완료되었습니다.';
 const DEFAULT_POINT = '4900';
 
-async function run({ page, context }: PlaywrightRunArgs): Promise<TaskResult> {
+async function run({ page, context, maxIterations }: PlaywrightRunArgs): Promise<TaskResult> {
   const name = process.env.USER_NAME?.trim();
   const phone1 = process.env.USER_PHONE_1?.trim();
   const phone2 = process.env.USER_PHONE_2?.trim();
   const phone3 = process.env.USER_PHONE_3?.trim();
-  const maxIterations = Number(process.env.NAVERPAY_MAX_ITERATIONS || '0');
+  const finalMaxIterations =
+    maxIterations !== undefined
+      ? maxIterations
+      : process.env.NAVERPAY_MAX_ITERATIONS !== undefined
+        ? Number(process.env.NAVERPAY_MAX_ITERATIONS)
+        : 10;
   const refreshEvery = Number(process.env.NAVERPAY_REFRESH_EVERY || '3'); // 새 페이지로 리프레시할 주기
   const iterationDelayMs = Number(process.env.NAVERPAY_ITERATION_DELAY_MS || '500'); // 반복 간 대기 시간
 
@@ -63,8 +68,8 @@ async function run({ page, context }: PlaywrightRunArgs): Promise<TaskResult> {
     // 초기 1회 로그인 및 포인트샵 진입
     await prepareShopPage();
 
-    // maxIterations가 0이면 실패할 때까지 무제한 반복
-    while (maxIterations === 0 || iteration < maxIterations) {
+    // finalMaxIterations가 0이면 실패할 때까지 무제한 반복
+    while (finalMaxIterations === 0 || iteration < finalMaxIterations) {
       // 일정 주기마다 새 페이지로 재생성하여 누적 리소스 사용을 줄임
       if (refreshEvery > 0 && iteration > 0 && iteration % refreshEvery === 0) {
         try {
@@ -140,8 +145,8 @@ async function run({ page, context }: PlaywrightRunArgs): Promise<TaskResult> {
     }
 
     const message =
-      maxIterations > 0
-        ? `네이버페이포인트교환 완료: 설정된 ${maxIterations}회 반복 종료 (성공 ${successCount}회).`
+      finalMaxIterations > 0
+        ? `네이버페이포인트교환 완료: 설정된 ${finalMaxIterations}회 반복 종료 (성공 ${successCount}회).`
         : `네이버페이포인트교환 종료: 성공 ${successCount}회 후 반복이 중단되었습니다.`;
     await sendTelegram(`✅ ${message}`).catch(() => {});
     return { success: true };

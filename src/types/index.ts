@@ -4,6 +4,7 @@ export interface TaskContext {
   page?: Page;
   context?: BrowserContext;
   notifyAdminOnSuccess?: boolean;
+  maxIterations?: number;
 }
 
 export interface PlaywrightTaskContext extends TaskContext {
