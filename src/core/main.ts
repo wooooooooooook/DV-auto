@@ -15,6 +15,7 @@ import * as todayLinksTaskModule from '../tasks/today_links';
 import * as monitorLunchSeminars from '../tasks/monitor_lunch_seminars';
 import * as monitorDinnerSeminars from '../tasks/monitor_dinner_seminars';
 import * as naverpayPointExchangeTask from '../tasks/naverpay_point_exchange';
+import * as baeminPointExchangeTask from '../tasks/baemin_point_exchange';
 import * as refreshSeminarPointExclusionTaskModule from '../tasks/refresh_seminar_point_exclusion';
 import type { Task, TaskResult } from '../types';
 
@@ -282,6 +283,22 @@ const naverpayPointExchange: Task = {
   },
 };
 taskRegistry.registerTask(naverpayPointExchange);
+
+const baeminPointExchange: Task = {
+  name: '배민포인트교환',
+  run: async (ctx) => {
+    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await utils.ensureLoggedIn({ page, context });
+      return await baeminPointExchangeTask.run({ page, context, maxIterations: ctx.maxIterations });
+    } finally {
+      await browser.close();
+    }
+  },
+};
+taskRegistry.registerTask(baeminPointExchange);
 
 const broadcastTodayLinksTask: Task = {
   name: 'broadcast_today_links_daily',
