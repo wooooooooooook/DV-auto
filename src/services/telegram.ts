@@ -1176,6 +1176,7 @@ const adminCommands = [
   { command: 'refresh_seminar_point_exclusion', description: '세미나 포인트미지급 캐시 재확인' },
   { command: 'naverpay_point_exchange', description: '네이버페이포인트교환 실행' },
   { command: 'baemin_point_exchange', description: '배민포인트교환 실행' },
+  { command: 'check_point', description: '현재 포인트 확인' },
   { command: 'add_quiz_answer', description: '오늘의 퀴즈 정답 등록' },
   { command: 'broadcast_today_links', description: '오늘의 링크 채널 공지' },
   { command: 'update_app', description: '앱 업데이트 (pnpm update:app)' },
