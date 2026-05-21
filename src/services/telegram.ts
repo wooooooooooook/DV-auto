@@ -547,6 +547,44 @@ if (adminBot) {
     }
   });
 
+  adminBot.command('check_point', async (ctx) => {
+    logger.info('User requested to check point now', { from: ctx.from?.username });
+    const task = taskRegistry.getByName('check_point');
+    if (!task) {
+      logger.error('check_point task not found, cannot run');
+      return ctx.reply('check_point task not found!');
+    }
+
+    try {
+      await ctx.reply('포인트를 확인하는 중입니다... (백그라운드 실행)');
+      runner
+        .runTask(task)
+        .then(async (result) => {
+          if (result && typeof result === 'object' && (result as { message?: string }).message) {
+            const msg = (result as { message: string }).message;
+            const imagePath = (result as { imagePath?: string }).imagePath;
+            if (imagePath) {
+              await ctx.replyWithPhoto({ source: imagePath }, { caption: msg });
+              await fs.unlink(imagePath).catch(() => {});
+            } else {
+              await ctx.reply(msg);
+            }
+          } else if (typeof result === 'string') {
+            await ctx.reply(result);
+          } else {
+            await ctx.reply('포인트 확인 완료 (메시지 없음)');
+          }
+        })
+        .catch((e) => {
+          const message = e instanceof Error ? e.message : String(e);
+          ctx.reply(`포인트 확인 실패: ${message}`);
+        });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      ctx.reply(`Failed to start check_point: ${message}`);
+    }
+  });
+
   adminBot.command('update_app', async (ctx) => {
     logger.info('User requested to run pnpm update:app', { from: ctx.from?.username });
     try {
