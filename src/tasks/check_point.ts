@@ -1,33 +1,48 @@
 import path from 'path';
 import fs from 'fs/promises';
+import type { BrowserContext, Page } from 'playwright';
 import type { PlaywrightRunArgs } from '../types';
 import { safeGoto } from '../modules/utils';
 import * as logger from '../services/logger';
 
-async function run({ page }: PlaywrightRunArgs) {
-  let screenshotPath: string | null = null;
+async function getPoint(context: BrowserContext): Promise<string> {
+  const page = await context.newPage();
   try {
     const MAIN_PAGE = 'https://www.doctorville.co.kr/main';
     await safeGoto(page, MAIN_PAGE, { waitUntil: 'load', timeout: 30000 }, 1);
+    await page.waitForSelector('.member_point', { timeout: 10000 });
+    const pointElement = page.locator('.member_point');
+    return (await pointElement.innerText()).trim();
+  } catch (error) {
+    logger.error(
+      'getPoint error',
+      error && typeof error === 'object' && 'stack' in error ? (error as Error).stack : error,
+    );
+    return '조회 실패';
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
 
-    // Wait for the member_point element or at least some content to be loaded
-    try {
-      await page.waitForSelector('.member_point', { timeout: 10000 });
-    } catch (e) {
-      logger.warn('Failed to find .member_point within timeout, taking screenshot for debugging.');
+async function run({ page, context }: PlaywrightRunArgs) {
+  let screenshotPath: string | null = null;
+  const ctx = context || page.context();
+  try {
+    const pointText = await getPoint(ctx);
+
+    if (pointText === '조회 실패') {
+      const MAIN_PAGE = 'https://www.doctorville.co.kr/main';
+      await safeGoto(page, MAIN_PAGE, { waitUntil: 'load', timeout: 30000 }, 1);
       const baseScreenshotDir = path.join(process.cwd(), 'screenshot');
       await fs.mkdir(baseScreenshotDir, { recursive: true });
-      screenshotPath = path.join(baseScreenshotDir, `check_point_not_found.png`);
+      screenshotPath = path.join(baseScreenshotDir, `check_point_failed.png`);
       await page.screenshot({ path: screenshotPath, fullPage: false });
       return {
         success: false,
-        message: '포인트 요소를 찾을 수 없습니다. 로그인 상태를 확인해주세요.',
+        message: '포인트를 조회할 수 없습니다. 로그인 상태를 확인해주세요.',
         imagePath: screenshotPath,
       };
     }
-
-    const pointElement = page.locator('.member_point');
-    const pointText = (await pointElement.innerText()).trim();
 
     return {
       success: true,
@@ -55,4 +70,4 @@ async function run({ page }: PlaywrightRunArgs) {
   }
 }
 
-export { run };
+export { run, getPoint };

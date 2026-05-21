@@ -2,6 +2,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import type { PlaywrightRunArgs, TaskResult } from '../types';
 import { ensureLoggedIn, safeGoto, sendTelegram, sleep } from '../modules/utils';
+import { getPoint } from './check_point';
 
 const TARGET_URL = 'https://mcircle.bizmarketb2b.com/Goods/Content.aspx?guid=14152303&catecode=14592&eventuid=21006';
 const ENTERTAINMENT_URL = 'https://www.doctorville.co.kr/entertainment/main';
@@ -47,6 +48,9 @@ async function run({ page, context, maxIterations }: PlaywrightRunArgs): Promise
   }
 
   await ensureLoggedIn({ page: workPage, context }).catch(() => {});
+
+  const startPoint = await getPoint(context);
+  await sendTelegram(`💳 배민포인트교환 시작 전 남은 포인트: ${startPoint}`).catch(() => {});
 
   await fs.mkdir(path.join(process.cwd(), 'screenshot'), { recursive: true });
   let successCount = 0;
@@ -139,23 +143,26 @@ async function run({ page, context, maxIterations }: PlaywrightRunArgs): Promise
 
       const failureShot = path.join(process.cwd(), 'screenshot', 'baemin_point_exchange_failure.png');
       await workPage.screenshot({ path: failureShot, fullPage: true }).catch(() => {});
-      const message = `배민포인트교환 실패 (시도 ${iteration}회, 성공 ${successCount}회). '${SUCCESS_TEXT}' 문구를 찾지 못했습니다.`;
+      const endPoint = await getPoint(context);
+      const message = `배민포인트교환 실패 (시도 ${iteration}회, 성공 ${successCount}회). '${SUCCESS_TEXT}' 문구를 찾지 못했습니다.\n종료 후 남은 포인트: ${endPoint}`;
       await sendTelegram(`❗ ${message}`, failureShot).catch(() => {});
       return { success: false };
     }
 
+    const endPoint = await getPoint(context);
     const message =
       finalMaxIterations > 0
-        ? `배민포인트교환 완료: 설정된 ${finalMaxIterations}회 반복 종료 (성공 ${successCount}회).`
-        : `배민포인트교환 종료: 성공 ${successCount}회 후 반복이 중단되었습니다.`;
+        ? `배민포인트교환 완료: 설정된 ${finalMaxIterations}회 반복 종료 (성공 ${successCount}회).\n종료 후 남은 포인트: ${endPoint}`
+        : `배민포인트교환 종료: 성공 ${successCount}회 후 반복이 중단되었습니다.\n종료 후 남은 포인트: ${endPoint}`;
     await sendTelegram(`✅ ${message}`).catch(() => {});
     return { success: true };
   } catch (error) {
     const errorShot = path.join(process.cwd(), 'screenshot', 'baemin_point_exchange_error.png');
     await workPage.screenshot({ path: errorShot, fullPage: true }).catch(() => {});
+    const endPoint = await getPoint(context);
     const message = `배민포인트교환 오류 발생 (성공 ${successCount}회): ${
       error instanceof Error ? error.message : String(error)
-    }`;
+    }\n종료 후 남은 포인트: ${endPoint}`;
     await sendTelegram(`❗ ${message}`, errorShot).catch(() => {});
     return { success: false };
   }
