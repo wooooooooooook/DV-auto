@@ -383,7 +383,7 @@ function checkAndResumeTasks(): void {
   const lunchStartHour = getStartHourFromCron(LUNCH_MONITOR_CRON);
   if (lunchStartHour !== null && isWithinWindow(currentHour, lunchStartHour, MONITOR_RESUME_DURATION_HOURS)) {
     logger.info('Inside lunch monitoring window, attempting to resume task.');
-    runTask(monitorLunchSeminarsTask).catch((err) => {
+    runTask(monitorLunchSeminarsTask, { isAutoResume: true }).catch((err) => {
       logger.error('Failed to auto-resume lunch monitoring task:', err);
     });
   }
@@ -391,7 +391,7 @@ function checkAndResumeTasks(): void {
   const dinnerStartHour = getStartHourFromCron(DINNER_MONITOR_CRON);
   if (dinnerStartHour !== null && isWithinWindow(currentHour, dinnerStartHour, MONITOR_RESUME_DURATION_HOURS)) {
     logger.info('Inside dinner monitoring window, attempting to resume task.');
-    runTask(monitorDinnerSeminarsTask).catch((err) => {
+    runTask(monitorDinnerSeminarsTask, { isAutoResume: true }).catch((err) => {
       logger.error('Failed to auto-resume dinner monitoring task:', err);
     });
   }

@@ -341,17 +341,17 @@ async function performAutoEnter(
 
     // Q&A 섹션 존재 여부로 입장 완료 판정 (다중 fallback 전략)
     let isQnaVisible = false;
-    
+
     // Strategy 1: Exact text match
     const qnaExact = activePage.locator('text="Q&A"').first();
     isQnaVisible = await qnaExact.isVisible({ timeout: 3000 }).catch(() => false);
-    
+
     // Strategy 2: Case-insensitive partial match
     if (!isQnaVisible) {
       const qnaPartial = activePage.locator(':text-matches("Q&A", "i")').first();
       isQnaVisible = await qnaPartial.isVisible({ timeout: 3000 }).catch(() => false);
     }
-    
+
     // Strategy 3: Look for "모든 질문" text (Q&A subsection)
     if (!isQnaVisible) {
       const allQuestions = activePage.locator('text=/모든\s*질문/i').first();
@@ -360,7 +360,7 @@ async function performAutoEnter(
         console.log(`[monitor_seminars] Q&A confirmed via '모든 질문' fallback for ${seminarId}`);
       }
     }
-    
+
     // Strategy 4: Check for chat/message area (세미나 내부 페이지 특징)
     if (!isQnaVisible) {
       const chatArea = activePage.locator('.chat-container, [class*="chat"], [class*="message"]').first();
@@ -433,7 +433,9 @@ async function monitorSeminars(
   periodName: string,
   startHour: number,
   endHour: number,
+  options: { isAutoResume?: boolean } = {},
 ) {
+  const { isAutoResume } = options;
   let monitoringList: Record<string, SeminarInfo> = {};
   const excludedSeminarKeys = new Set<string>();
   const todayIsoDate = seoulDateString();
@@ -480,7 +482,14 @@ async function monitorSeminars(
         if (!hasSurvey) {
           message += `\n(설문이 없는 세미나인 것 같습니다)`;
         }
-        await sendNotificationToChannel(message);
+        // auto-resume 시(재부팅/재시작)에는 이미 시작된 세미나의 채널 공지를 건너뜁니다
+        if (!isAutoResume) {
+          await sendNotificationToChannel(message);
+        } else {
+          console.log(
+            `[${periodName}] Skipping channel notification for already-started seminar during auto-resume: ${name}`,
+          );
+        }
       }
     }
 
