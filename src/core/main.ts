@@ -15,7 +15,9 @@ import * as todayLinksTaskModule from '../tasks/today_links';
 import * as monitorLunchSeminars from '../tasks/monitor_lunch_seminars';
 import * as monitorDinnerSeminars from '../tasks/monitor_dinner_seminars';
 import * as naverpayPointExchangeTask from '../tasks/naverpay_point_exchange';
+import * as baeminPointExchangeTask from '../tasks/baemin_point_exchange';
 import * as refreshSeminarPointExclusionTaskModule from '../tasks/refresh_seminar_point_exclusion';
+import * as checkPointTaskModule from '../tasks/check_point';
 import type { Task, TaskResult } from '../types';
 
 dns.setDefaultResultOrder('ipv4first');
@@ -201,6 +203,22 @@ const todayLinksTask: Task = {
 };
 taskRegistry.registerTask(todayLinksTask);
 
+const checkPointTask: Task = {
+  name: 'check_point',
+  run: async () => {
+    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await utils.ensureLoggedIn({ page, context });
+      return await checkPointTaskModule.run({ page, context });
+    } finally {
+      await browser.close();
+    }
+  },
+};
+taskRegistry.registerTask(checkPointTask);
+
 const refreshSeminarPointExclusionTask: Task = {
   name: 'refresh_seminar_point_exclusion',
   run: async () => {
@@ -269,19 +287,35 @@ scheduler.scheduleTaskCron(monitorDinnerSeminarsTask);
 
 const naverpayPointExchange: Task = {
   name: '네이버페이포인트교환',
-  run: async () => {
+  run: async (ctx) => {
     const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
     const context = await browser.newContext();
     const page = await context.newPage();
     try {
       await utils.ensureLoggedIn({ page, context });
-      return await naverpayPointExchangeTask.run({ page, context });
+      return await naverpayPointExchangeTask.run({ page, context, maxIterations: ctx.maxIterations });
     } finally {
       await browser.close();
     }
   },
 };
 taskRegistry.registerTask(naverpayPointExchange);
+
+const baeminPointExchange: Task = {
+  name: '배민포인트교환',
+  run: async (ctx) => {
+    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await utils.ensureLoggedIn({ page, context });
+      return await baeminPointExchangeTask.run({ page, context, maxIterations: ctx.maxIterations });
+    } finally {
+      await browser.close();
+    }
+  },
+};
+taskRegistry.registerTask(baeminPointExchange);
 
 const broadcastTodayLinksTask: Task = {
   name: 'broadcast_today_links_daily',

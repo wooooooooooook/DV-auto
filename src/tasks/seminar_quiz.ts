@@ -220,7 +220,8 @@ async function processSeminarQuiz(page: Page, seminarName?: string): Promise<Sem
       isQuizVisible = await page
         .locator(quizSelector)
         .first()
-        .isVisible({ timeout: 5000 })
+        .waitFor({ state: 'visible', timeout: 5000 })
+        .then(() => true)
         .catch(() => false);
 
       if (isQuizVisible) {
@@ -232,6 +233,8 @@ async function processSeminarQuiz(page: Page, seminarName?: string): Promise<Sem
           `[seminar_quiz] [퀴즈] 텍스트 탐지 실패, 새로고침 재시도 (${attempt}/3) (${seminarName ?? 'unknown'})`,
         );
         await page.reload({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+        await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+        await page.waitForTimeout(2000);
       }
     }
 

@@ -453,11 +453,21 @@ if (adminBot) {
       return ctx.reply('네이버페이포인트교환 task not found!');
     }
 
+    const messageText = ctx.message?.text || '';
+    const args = messageText.split(' ').slice(1);
+    let attempts = 10;
+    if (args.length > 0) {
+      const parsedAttempts = parseInt(args[0], 10);
+      if (!isNaN(parsedAttempts) && parsedAttempts > 0) {
+        attempts = parsedAttempts;
+      }
+    }
+
     try {
-      await ctx.reply('네이버페이포인트교환 작업을 시작합니다... (백그라운드 실행)');
+      await ctx.reply(`네이버페이포인트교환 작업을 시작합니다... (${attempts}회 시도, 백그라운드 실행)`);
       // Run in background to avoid timeout
       runner
-        .runTask(task)
+        .runTask(task, { maxIterations: attempts })
         .then(async (result) => {
           if (result && typeof result === 'object' && (result as { message?: string }).message) {
             await ctx.reply(
@@ -483,6 +493,95 @@ if (adminBot) {
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       ctx.reply(`Failed to start 네이버페이포인트교환: ${message}`);
+    }
+  });
+
+  adminBot.command('baemin_point_exchange', async (ctx) => {
+    logger.info('User requested to run baemin_point_exchange now', { from: ctx.from?.username });
+    const task = taskRegistry.getByName('배민포인트교환');
+    if (!task) {
+      logger.error('배민포인트교환 task not found, cannot run');
+      return ctx.reply('배민포인트교환 task not found!');
+    }
+
+    const messageText = ctx.message?.text || '';
+    const args = messageText.split(' ').slice(1);
+    let attempts = 1;
+    if (args.length > 0) {
+      const parsedAttempts = parseInt(args[0], 10);
+      if (!isNaN(parsedAttempts) && parsedAttempts > 0) {
+        attempts = parsedAttempts;
+      }
+    }
+
+    try {
+      await ctx.reply(`배민포인트교환 작업을 시작합니다... (${attempts}회 시도, 백그라운드 실행)`);
+      // Run in background to avoid timeout
+      runner
+        .runTask(task, { maxIterations: attempts })
+        .then(async (result) => {
+          if (result && typeof result === 'object' && (result as { message?: string }).message) {
+            await ctx.reply(
+              (result as { message: string }).message,
+              (result as { options?: Record<string, unknown> }).options,
+            );
+            if ((result as { imagePath?: string }).imagePath) {
+              await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
+              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
+            }
+          } else if (typeof result === 'string') {
+            await ctx.reply(result);
+          } else if (result === true) {
+            await ctx.reply('배민포인트교환 작업이 완료되었습니다.');
+          } else {
+            await ctx.reply('배민포인트교환 작업이 완료되었습니다.');
+          }
+        })
+        .catch((e) => {
+          const message = e instanceof Error ? e.message : String(e);
+          ctx.reply(`배민포인트교환 실패: ${message}`);
+        });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      ctx.reply(`Failed to start 배민포인트교환: ${message}`);
+    }
+  });
+
+  adminBot.command('check_point', async (ctx) => {
+    logger.info('User requested to check point now', { from: ctx.from?.username });
+    const task = taskRegistry.getByName('check_point');
+    if (!task) {
+      logger.error('check_point task not found, cannot run');
+      return ctx.reply('check_point task not found!');
+    }
+
+    try {
+      await ctx.reply('포인트를 확인하는 중입니다... (백그라운드 실행)');
+      runner
+        .runTask(task)
+        .then(async (result) => {
+          if (result && typeof result === 'object' && (result as { message?: string }).message) {
+            const msg = (result as { message: string }).message;
+            const imagePath = (result as { imagePath?: string }).imagePath;
+            if (imagePath) {
+              await ctx.replyWithPhoto({ source: imagePath }, { caption: msg });
+              await fs.unlink(imagePath).catch(() => {});
+            } else {
+              await ctx.reply(msg);
+            }
+          } else if (typeof result === 'string') {
+            await ctx.reply(result);
+          } else {
+            await ctx.reply('포인트 확인 완료 (메시지 없음)');
+          }
+        })
+        .catch((e) => {
+          const message = e instanceof Error ? e.message : String(e);
+          ctx.reply(`포인트 확인 실패: ${message}`);
+        });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      ctx.reply(`Failed to start check_point: ${message}`);
     }
   });
 
@@ -784,7 +883,8 @@ if (adminBot) {
 - /run_quiz_now: 즉시 오늘의 퀴즈 작업(today_quiz)을 실행합니다.
 - /apply_seminar_now: 즉시 세미나 신청 작업(apply_seminar)을 실행합니다.
 - /refresh_seminar_point_exclusion: 모든 세미나의 포인트미지급 여부를 다시 확인해 캐시를 갱신합니다.
-- /naverpay_point_exchange: 네이버페이포인트교환 작업을 실행합니다.
+- /naverpay_point_exchange [횟수]: 네이버페이포인트교환 작업을 실행합니다. (기본값: 10)
+- /baemin_point_exchange [횟수]: 배민포인트교환 작업을 실행합니다. (기본값: 1)
 - /add_quiz_answer: 오늘의 퀴즈 정답을 등록합니다. 예) /add_quiz_answer 시너지아정 [1,2,3]
 - /broadcast_today_links: 즉시 오늘의 링크를 채널에 공지합니다.
 - /update_app: pnpm update:app 명령어를 실행합니다. (서버 권한 필요, 재시작으로 응답 중단 가능)
@@ -1075,6 +1175,8 @@ const adminCommands = [
   { command: 'apply_seminar_now', description: '즉시 세미나 신청(apply_seminar) 실행' },
   { command: 'refresh_seminar_point_exclusion', description: '세미나 포인트미지급 캐시 재확인' },
   { command: 'naverpay_point_exchange', description: '네이버페이포인트교환 실행' },
+  { command: 'baemin_point_exchange', description: '배민포인트교환 실행' },
+  { command: 'check_point', description: '현재 포인트 확인' },
   { command: 'add_quiz_answer', description: '오늘의 퀴즈 정답 등록' },
   { command: 'broadcast_today_links', description: '오늘의 링크 채널 공지' },
   { command: 'update_app', description: '앱 업데이트 (pnpm update:app)' },

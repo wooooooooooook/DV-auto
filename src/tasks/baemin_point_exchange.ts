@@ -4,10 +4,10 @@ import type { PlaywrightRunArgs, TaskResult } from '../types';
 import { ensureLoggedIn, safeGoto, sendTelegram, sleep } from '../modules/utils';
 import { getPoint } from './check_point';
 
-const TARGET_URL = 'https://mcircle.bizmarketb2b.com/Goods/Content.aspx?guid=14131415&catecode=14592';
+const TARGET_URL = 'https://mcircle.bizmarketb2b.com/Goods/Content.aspx?guid=14152303&catecode=14592&eventuid=21006';
 const ENTERTAINMENT_URL = 'https://www.doctorville.co.kr/entertainment/main';
 const SUCCESS_TEXT = '주문이 완료되었습니다.';
-const DEFAULT_POINT = '4900';
+const DEFAULT_POINT = '9700';
 
 async function run({ page, context, maxIterations }: PlaywrightRunArgs): Promise<TaskResult> {
   const name = process.env.USER_NAME?.trim();
@@ -17,11 +17,13 @@ async function run({ page, context, maxIterations }: PlaywrightRunArgs): Promise
   const finalMaxIterations =
     maxIterations !== undefined
       ? maxIterations
-      : process.env.NAVERPAY_MAX_ITERATIONS !== undefined
-        ? Number(process.env.NAVERPAY_MAX_ITERATIONS)
-        : 10;
-  const refreshEvery = Number(process.env.NAVERPAY_REFRESH_EVERY || '3'); // 새 페이지로 리프레시할 주기
-  const iterationDelayMs = Number(process.env.NAVERPAY_ITERATION_DELAY_MS || '500'); // 반복 간 대기 시간
+      : process.env.BAEMIN_MAX_ITERATIONS !== undefined
+        ? Number(process.env.BAEMIN_MAX_ITERATIONS)
+        : 1;
+  const refreshEvery = Number(process.env.BAEMIN_REFRESH_EVERY || process.env.NAVERPAY_REFRESH_EVERY || '3'); // 새 페이지로 리프레시할 주기
+  const iterationDelayMs = Number(
+    process.env.BAEMIN_ITERATION_DELAY_MS || process.env.NAVERPAY_ITERATION_DELAY_MS || '500',
+  ); // 반복 간 대기 시간
 
   if (!name || !phone1 || !phone2 || !phone3) {
     const missing = [
@@ -32,7 +34,7 @@ async function run({ page, context, maxIterations }: PlaywrightRunArgs): Promise
     ]
       .filter(Boolean)
       .join(', ');
-    const message = `네이버페이포인트교환 실패: 환경변수(${missing})를 확인해주세요.`;
+    const message = `배민포인트교환 실패: 환경변수(${missing})를 확인해주세요.`;
     await sendTelegram(`❗ ${message}`).catch(() => {});
     return { success: false };
   }
@@ -40,15 +42,15 @@ async function run({ page, context, maxIterations }: PlaywrightRunArgs): Promise
   let workPage = page;
 
   if (!context) {
-    const message = '네이버페이포인트교환 실패: 로그인 확인을 위해 context가 필요합니다.';
+    const message = '배민포인트교환 실패: 로그인 확인을 위해 context가 필요합니다.';
     await sendTelegram(`❗ ${message}`).catch(() => {});
     return { success: false };
   }
 
-  await ensureLoggedIn({ page, context }).catch(() => {});
+  await ensureLoggedIn({ page: workPage, context }).catch(() => {});
 
   const startPoint = await getPoint(context);
-  await sendTelegram(`💳 네이버페이포인트교환 시작 전 남은 포인트: ${startPoint}`).catch(() => {});
+  await sendTelegram(`💳 배민포인트교환 시작 전 남은 포인트: ${startPoint}`).catch(() => {});
 
   await fs.mkdir(path.join(process.cwd(), 'screenshot'), { recursive: true });
   let successCount = 0;
@@ -132,19 +134,17 @@ async function run({ page, context, maxIterations }: PlaywrightRunArgs): Promise
 
       if (orderCompleted) {
         successCount += 1;
-        await sendTelegram(`✅ 네이버페이포인트교환 성공 (${successCount}회 누적, 시도 ${iteration}회)`).catch(
-          () => {},
-        );
+        await sendTelegram(`✅ 배민포인트교환 성공 (${successCount}회 누적, 시도 ${iteration}회)`).catch(() => {});
         if (iterationDelayMs > 0) {
           await sleep(iterationDelayMs);
         }
         continue;
       }
 
-      const failureShot = path.join(process.cwd(), 'screenshot', 'naverpay_point_exchange_failure.png');
+      const failureShot = path.join(process.cwd(), 'screenshot', 'baemin_point_exchange_failure.png');
       await workPage.screenshot({ path: failureShot, fullPage: true }).catch(() => {});
       const endPoint = await getPoint(context);
-      const message = `네이버페이포인트교환 실패 (시도 ${iteration}회, 성공 ${successCount}회). '${SUCCESS_TEXT}' 문구를 찾지 못했습니다.\n종료 후 남은 포인트: ${endPoint}`;
+      const message = `배민포인트교환 실패 (시도 ${iteration}회, 성공 ${successCount}회). '${SUCCESS_TEXT}' 문구를 찾지 못했습니다.\n종료 후 남은 포인트: ${endPoint}`;
       await sendTelegram(`❗ ${message}`, failureShot).catch(() => {});
       return { success: false };
     }
@@ -152,15 +152,15 @@ async function run({ page, context, maxIterations }: PlaywrightRunArgs): Promise
     const endPoint = await getPoint(context);
     const message =
       finalMaxIterations > 0
-        ? `네이버페이포인트교환 완료: 설정된 ${finalMaxIterations}회 반복 종료 (성공 ${successCount}회).\n종료 후 남은 포인트: ${endPoint}`
-        : `네이버페이포인트교환 종료: 성공 ${successCount}회 후 반복이 중단되었습니다.\n종료 후 남은 포인트: ${endPoint}`;
+        ? `배민포인트교환 완료: 설정된 ${finalMaxIterations}회 반복 종료 (성공 ${successCount}회).\n종료 후 남은 포인트: ${endPoint}`
+        : `배민포인트교환 종료: 성공 ${successCount}회 후 반복이 중단되었습니다.\n종료 후 남은 포인트: ${endPoint}`;
     await sendTelegram(`✅ ${message}`).catch(() => {});
     return { success: true };
   } catch (error) {
-    const errorShot = path.join(process.cwd(), 'screenshot', 'naverpay_point_exchange_error.png');
+    const errorShot = path.join(process.cwd(), 'screenshot', 'baemin_point_exchange_error.png');
     await workPage.screenshot({ path: errorShot, fullPage: true }).catch(() => {});
     const endPoint = await getPoint(context);
-    const message = `네이버페이포인트교환 오류 발생 (성공 ${successCount}회): ${
+    const message = `배민포인트교환 오류 발생 (성공 ${successCount}회): ${
       error instanceof Error ? error.message : String(error)
     }\n종료 후 남은 포인트: ${endPoint}`;
     await sendTelegram(`❗ ${message}`, errorShot).catch(() => {});
