@@ -370,6 +370,28 @@ async function performAutoEnter(
       }
     }
 
+    // Strategy 5: Q&A가 cross-origin iframe (video.ibm.com/socialstream) 내부에 있는 경우
+    if (!isQnaVisible) {
+      const chatFrame = page
+        .frames()
+        .find((f) => f.url().includes('socialstream') || f.url().includes('video.ibm.com'));
+      if (chatFrame) {
+        const frameQna = chatFrame.locator('text="Q&A"').first();
+        isQnaVisible = await frameQna.isVisible({ timeout: 3000 }).catch(() => false);
+        if (!isQnaVisible) {
+          const frameChatArea = chatFrame.locator('[class*="chat"], [class*="message"], [class*="comment"]').first();
+          isQnaVisible = await frameChatArea.isVisible({ timeout: 3000 }).catch(() => false);
+          if (isQnaVisible) {
+            console.log(`[monitor_seminars] Q&A confirmed via chat iframe for ${seminarId}`);
+          }
+        } else {
+          console.log(`[monitor_seminars] Q&A confirmed via iframe text match for ${seminarId}`);
+        }
+      } else {
+        console.log(`[monitor_seminars] No socialstream iframe found for ${seminarId}`);
+      }
+    }
+
     if (!isQnaVisible) {
       console.warn(
         `[monitor_seminars] Q&A section not found after entry attempt for ${seminarId}. Entry may have failed.`,
