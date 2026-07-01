@@ -319,13 +319,43 @@ async function performAutoEnter(
       await activePage.waitForLoadState('domcontentloaded');
     }
 
-    console.log(`[monitor_seminars] Clicked '입장하기' for ${seminarId}. Waiting 10s for content.`);
-    await activePage.waitForTimeout(10000);
+    // "채널 선택" 다이얼로그 감지 후 "확인" 버튼 클릭
+    console.log(`[monitor_seminars] Checking for '채널 선택' dialog after clicking '입장하기' (${seminarId})`);
+    await activePage.waitForTimeout(2000);
+    const channelSelectText = activePage.locator('text="채널 선택"').first();
+    const isChannelSelectVisible = await channelSelectText.isVisible({ timeout: 5000 }).catch(() => false);
+    if (isChannelSelectVisible) {
+      console.log(`[monitor_seminars] '채널 선택' dialog detected for ${seminarId}. Clicking '확인'.`);
+      const confirmBtn = activePage.locator('text="확인"').first();
+      await confirmBtn.click({ force: true }).catch(() => {
+        console.warn(`[monitor_seminars] Failed to click '확인' button for ${seminarId}`);
+      });
+      console.log(`[monitor_seminars] Clicked '확인' for channel selection (${seminarId})`);
+      await activePage.waitForTimeout(3000);
+    } else {
+      console.log(`[monitor_seminars] No '채널 선택' dialog detected for ${seminarId}`);
+    }
+
+    console.log(`[monitor_seminars] Waiting for 'Q&A' text to confirm seminar entry (${seminarId})`);
+    await activePage.waitForTimeout(5000);
+
+    // "Q&A" 텍스트 존재 여부로 입장 완료 판정
+    const qnaLocator = activePage.locator('text="Q&A"').first();
+    const isQnaVisible = await qnaLocator.isVisible({ timeout: 10000 }).catch(() => false);
+
+    if (!isQnaVisible) {
+      console.warn(
+        `[monitor_seminars] 'Q&A' text not found after entry attempt for ${seminarId}. Entry may have failed.`,
+      );
+    } else {
+      console.log(`[monitor_seminars] 'Q&A' text confirmed. Seminar entry successful for ${seminarId}.`);
+    }
 
     // Take a screenshot and send to admin
     const screenshotPath = path.join(process.cwd(), `seminar_entry_${screenshotKey}.png`);
     try {
-      const entryMessage = `🟢세미나 입장 완료\n**${seminarName}**\n${targetUrl}`;
+      const entryStatus = isQnaVisible ? '🟢세미나 입장 완료' : '⚠️세미나 입장 불확실 (Q&A 미감지)';
+      const entryMessage = `${entryStatus}\n**${seminarName}**\n${targetUrl}`;
       await activePage.screenshot({ path: screenshotPath, fullPage: false });
 
       const sentToAdmin = await sendTelegram(entryMessage, screenshotPath);
@@ -334,7 +364,7 @@ async function performAutoEnter(
           `[monitor_seminars] Auto-enter screenshot send skipped/failed for ${seminarId}. Check TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID.`,
         );
       }
-      didEnter = sentToAdmin;
+      didEnter = sentToAdmin && isQnaVisible;
     } catch (screenshotError) {
       console.error(`[monitor_seminars] Failed to take/send screenshot for ${seminarId}`, screenshotError);
     } finally {
