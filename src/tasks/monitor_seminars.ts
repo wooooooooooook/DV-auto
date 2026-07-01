@@ -336,60 +336,17 @@ async function performAutoEnter(
       console.log(`[monitor_seminars] No '채널 선택' dialog detected for ${seminarId}`);
     }
 
-    console.log(`[monitor_seminars] Waiting for Q&A section to confirm seminar entry (${seminarId})`);
+    console.log(`[monitor_seminars] Waiting for chat iframe to confirm seminar entry (${seminarId})`);
     await activePage.waitForTimeout(5000);
 
-    // Q&A 섹션 존재 여부로 입장 완료 판정 (다중 fallback 전략)
-    let isQnaVisible = false;
+    // Q&A 섹션 존재 여부로 입장 완료 판정: video.ibm.com/socialstream iframe만 확인
+    const chatFrame = page.frames().find((f) => f.url().includes('socialstream') || f.url().includes('video.ibm.com'));
+    const isQnaVisible = !!chatFrame;
 
-    // Strategy 1: Exact text match
-    const qnaExact = activePage.locator('text="Q&A"').first();
-    isQnaVisible = await qnaExact.isVisible({ timeout: 3000 }).catch(() => false);
-
-    // Strategy 2: Case-insensitive partial match
-    if (!isQnaVisible) {
-      const qnaPartial = activePage.locator(':text-matches("Q&A", "i")').first();
-      isQnaVisible = await qnaPartial.isVisible({ timeout: 3000 }).catch(() => false);
-    }
-
-    // Strategy 3: Look for "모든 질문" text (Q&A subsection)
-    if (!isQnaVisible) {
-      const allQuestions = activePage.locator('text=/모든\s*질문/i').first();
-      isQnaVisible = await allQuestions.isVisible({ timeout: 3000 }).catch(() => false);
-      if (isQnaVisible) {
-        console.log(`[monitor_seminars] Q&A confirmed via '모든 질문' fallback for ${seminarId}`);
-      }
-    }
-
-    // Strategy 4: Check for chat/message area (세미나 내부 페이지 특징)
-    if (!isQnaVisible) {
-      const chatArea = activePage.locator('.chat-container, [class*="chat"], [class*="message"]').first();
-      isQnaVisible = await chatArea.isVisible({ timeout: 3000 }).catch(() => false);
-      if (isQnaVisible) {
-        console.log(`[monitor_seminars] Q&A confirmed via chat area detection for ${seminarId}`);
-      }
-    }
-
-    // Strategy 5: Q&A가 cross-origin iframe (video.ibm.com/socialstream) 내부에 있는 경우
-    if (!isQnaVisible) {
-      const chatFrame = page
-        .frames()
-        .find((f) => f.url().includes('socialstream') || f.url().includes('video.ibm.com'));
-      if (chatFrame) {
-        const frameQna = chatFrame.locator('text="Q&A"').first();
-        isQnaVisible = await frameQna.isVisible({ timeout: 3000 }).catch(() => false);
-        if (!isQnaVisible) {
-          const frameChatArea = chatFrame.locator('[class*="chat"], [class*="message"], [class*="comment"]').first();
-          isQnaVisible = await frameChatArea.isVisible({ timeout: 3000 }).catch(() => false);
-          if (isQnaVisible) {
-            console.log(`[monitor_seminars] Q&A confirmed via chat iframe for ${seminarId}`);
-          }
-        } else {
-          console.log(`[monitor_seminars] Q&A confirmed via iframe text match for ${seminarId}`);
-        }
-      } else {
-        console.log(`[monitor_seminars] No socialstream iframe found for ${seminarId}`);
-      }
+    if (isQnaVisible) {
+      console.log(`[monitor_seminars] Chat iframe (socialstream) found for ${seminarId}. Entry confirmed.`);
+    } else {
+      console.log(`[monitor_seminars] Chat iframe not found for ${seminarId}`);
     }
 
     if (!isQnaVisible) {
