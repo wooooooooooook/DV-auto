@@ -340,13 +340,23 @@ async function performAutoEnter(
     await activePage.waitForTimeout(5000);
 
     // Q&A 섹션 존재 여부로 입장 완료 판정: video.ibm.com/socialstream iframe만 확인
-    const chatFrame = page.frames().find((f) => f.url().includes('socialstream') || f.url().includes('video.ibm.com'));
-    const isQnaVisible = !!chatFrame;
+    const chatFrame = page
+      .frames()
+      .find((f) => f.url().includes('socialstream') || f.url().includes('video.ibm.com'));
+    let isQnaVisible = !!chatFrame;
 
     if (isQnaVisible) {
       console.log(`[monitor_seminars] Chat iframe (socialstream) found for ${seminarId}. Entry confirmed.`);
     } else {
-      console.log(`[monitor_seminars] Chat iframe not found for ${seminarId}`);
+      // Fallback: URL 패턴 확인 (https://m.doctorville.co.kr/cme/seminar/attend?seminarId=...)
+      const currentUrl = activePage.url();
+      const urlPattern = /https:\/\/m\.doctorville\.co\.kr\/cme\/seminar\/attend\?seminarId=\d+/;
+      if (urlPattern.test(currentUrl)) {
+        isQnaVisible = true;
+        console.log(`[monitor_seminars] Entry confirmed via URL pattern for ${seminarId}: ${currentUrl}`);
+      } else {
+        console.log(`[monitor_seminars] Chat iframe not found and URL mismatch for ${seminarId}: ${currentUrl}`);
+      }
     }
 
     if (!isQnaVisible) {
