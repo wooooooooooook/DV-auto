@@ -336,19 +336,46 @@ async function performAutoEnter(
       console.log(`[monitor_seminars] No '채널 선택' dialog detected for ${seminarId}`);
     }
 
-    console.log(`[monitor_seminars] Waiting for 'Q&A' text to confirm seminar entry (${seminarId})`);
+    console.log(`[monitor_seminars] Waiting for Q&A section to confirm seminar entry (${seminarId})`);
     await activePage.waitForTimeout(5000);
 
-    // "Q&A" 텍스트 존재 여부로 입장 완료 판정
-    const qnaLocator = activePage.locator('text="Q&A"').first();
-    const isQnaVisible = await qnaLocator.isVisible({ timeout: 10000 }).catch(() => false);
+    // Q&A 섹션 존재 여부로 입장 완료 판정 (다중 fallback 전략)
+    let isQnaVisible = false;
+    
+    // Strategy 1: Exact text match
+    const qnaExact = activePage.locator('text="Q&A"').first();
+    isQnaVisible = await qnaExact.isVisible({ timeout: 3000 }).catch(() => false);
+    
+    // Strategy 2: Case-insensitive partial match
+    if (!isQnaVisible) {
+      const qnaPartial = activePage.locator(':text-matches("Q&A", "i")').first();
+      isQnaVisible = await qnaPartial.isVisible({ timeout: 3000 }).catch(() => false);
+    }
+    
+    // Strategy 3: Look for "모든 질문" text (Q&A subsection)
+    if (!isQnaVisible) {
+      const allQuestions = activePage.locator('text=/모든\s*질문/i').first();
+      isQnaVisible = await allQuestions.isVisible({ timeout: 3000 }).catch(() => false);
+      if (isQnaVisible) {
+        console.log(`[monitor_seminars] Q&A confirmed via '모든 질문' fallback for ${seminarId}`);
+      }
+    }
+    
+    // Strategy 4: Check for chat/message area (세미나 내부 페이지 특징)
+    if (!isQnaVisible) {
+      const chatArea = activePage.locator('.chat-container, [class*="chat"], [class*="message"]').first();
+      isQnaVisible = await chatArea.isVisible({ timeout: 3000 }).catch(() => false);
+      if (isQnaVisible) {
+        console.log(`[monitor_seminars] Q&A confirmed via chat area detection for ${seminarId}`);
+      }
+    }
 
     if (!isQnaVisible) {
       console.warn(
-        `[monitor_seminars] 'Q&A' text not found after entry attempt for ${seminarId}. Entry may have failed.`,
+        `[monitor_seminars] Q&A section not found after entry attempt for ${seminarId}. Entry may have failed.`,
       );
     } else {
-      console.log(`[monitor_seminars] 'Q&A' text confirmed. Seminar entry successful for ${seminarId}.`);
+      console.log(`[monitor_seminars] Q&A section confirmed. Seminar entry successful for ${seminarId}.`);
     }
 
     // Take a screenshot and send to admin
