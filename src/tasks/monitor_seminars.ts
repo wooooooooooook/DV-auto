@@ -427,15 +427,6 @@ async function monitorSeminars(
   const excludedSeminarKeys = new Set<string>();
   const todayIsoDate = seoulDateString();
 
-  // auto-resume 시에는 모든 채널 공지를 건너뛰는 wrapper
-  const notifyChannel = async (message: string): Promise<void> => {
-    if (isAutoResume) {
-      console.log(`[${periodName}] (auto-resume) Skip channel notify: ${message.split('\n')[0]}`);
-      return;
-    }
-    await sendNotificationToChannel(message);
-  };
-
   try {
     // Initial population of the monitoring list
     await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'load', timeout: 30000 }, 1);
@@ -480,7 +471,7 @@ async function monitorSeminars(
         }
         // auto-resume 시(재부팅/재시작)에는 이미 시작된 세미나의 채널 공지를 건너뜁니다
         if (!isAutoResume) {
-          await notifyChannel(message);
+          await sendNotificationToChannel(message);
         } else {
           console.log(
             `[${periodName}] Skipping channel notification for already-started seminar during auto-resume: ${name}`,
@@ -511,7 +502,7 @@ async function monitorSeminars(
         if (remainingSeminars.length > 0) {
           let message = ` ${periodName} 모니터링 시간이 종료되었지만, 마치지 않은 세미나가 있습니다:\n`;
           message += remainingSeminars.join('\n');
-          await notifyChannel(message);
+          await sendNotificationToChannel(message);
         }
         break;
       }
@@ -598,7 +589,7 @@ async function monitorSeminars(
             const quizSuffix = quizResultMessage ? `\n\n${quizResultMessage}` : '';
             const advancedSurveySuffix = mergedSeminarInfo.isAdvancedSurvey ? ' [심화설문]' : '';
             const message = `🔴세미나종료\n**${mergedSeminarInfo.name}**${advancedSurveySuffix}\n${targetUrl}${quizSuffix}`;
-            await notifyChannel(message);
+            await sendNotificationToChannel(message);
           } else {
             console.log(
               `[monitor_seminars] Skipping end notification for ${mergedSeminarInfo.name} because it has no survey.`,
@@ -638,7 +629,7 @@ async function monitorSeminars(
           if (!hasSurvey) {
             message += `\n(설문이 없는 세미나인 것 같습니다)`;
           }
-          await notifyChannel(message);
+          await sendNotificationToChannel(message);
 
           // Update state in both merged and original list
           mergedSeminarInfo.hasSurvey = hasSurvey;
@@ -674,7 +665,7 @@ async function monitorSeminars(
 
     await sendTelegram(`[${periodName}] 세미나 감시를 종료합니다.`);
     const finishMessage = `🏁${todayIsoDate}의 ${periodName}세미나 모니터링이 종료되었습니다.🏁`;
-    await notifyChannel(finishMessage);
+    await sendNotificationToChannel(finishMessage);
 
     return true;
   } catch (e) {

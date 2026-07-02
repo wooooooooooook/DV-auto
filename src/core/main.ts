@@ -239,7 +239,7 @@ const monitorLunchSeminarsTask: Task = {
   name: 'monitor_lunch_seminars',
   schedule: LUNCH_MONITOR_CRON,
   timezone: TIMEZONE,
-  run: async () => {
+  run: async (ctx) => {
     const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -251,7 +251,7 @@ const monitorLunchSeminarsTask: Task = {
           err && (typeof err === 'object' && 'stack' in err ? (err as Error).stack : err),
         );
       });
-      return await monitorLunchSeminars.run({ page, context });
+      return await monitorLunchSeminars.run({ page, context, isAutoResume: ctx.isAutoResume });
     } finally {
       await browser.close();
     }
@@ -264,7 +264,7 @@ const monitorDinnerSeminarsTask: Task = {
   name: 'monitor_dinner_seminars',
   schedule: DINNER_MONITOR_CRON,
   timezone: TIMEZONE,
-  run: async () => {
+  run: async (ctx) => {
     const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -276,7 +276,7 @@ const monitorDinnerSeminarsTask: Task = {
           err && (typeof err === 'object' && 'stack' in err ? (err as Error).stack : err),
         );
       });
-      return await monitorDinnerSeminars.run({ page, context });
+      return await monitorDinnerSeminars.run({ page, context, isAutoResume: ctx.isAutoResume });
     } finally {
       await browser.close();
     }
