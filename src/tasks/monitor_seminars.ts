@@ -89,16 +89,27 @@ async function isSeminarEnded(
     await detailPage.reload({ waitUntil: 'networkidle', timeout: 15000 });
     const surveyEnded = await detailPage.locator('text="세미나 종료"').first().isVisible({ timeout: 2000 });
     const canCancel = await detailPage.locator('text="신청 취소"').first().isVisible({ timeout: 2000 });
-    console.log(`[monitor_seminars] Seminar end check (${seminar.seminarId}): ${surveyEnded}, ${canCancel}`);
+
+    const surveyBtn = detailPage.locator('text="설문참여"').first();
+    const isSurveyBtnVisible = await surveyBtn.isVisible({ timeout: 2000 }).catch(() => false);
+    const isSurveyBtnEnabled = isSurveyBtnVisible
+      ? await surveyBtn.isEnabled({ timeout: 2000 }).catch(() => false)
+      : false;
+
+    console.log(
+      `[monitor_seminars] Seminar end check (${seminar.seminarId}): surveyEnded=${surveyEnded}, canCancel=${canCancel}, surveyBtnEnabled=${isSurveyBtnEnabled}`,
+    );
 
     await detailPage.screenshot({ path: screenshotPath, fullPage: false });
     if (!canCancel) {
-      console.log(`[monitor_seminars] End check pending for ${seminar.seminarId}. surveyEnded=${surveyEnded}`);
+      console.log(
+        `[monitor_seminars] End check pending for ${seminar.seminarId}. surveyEnded=${surveyEnded}, surveyBtnEnabled=${isSurveyBtnEnabled}`,
+      );
     }
     await fs
       .unlink(screenshotPath)
       .catch((err) => console.error(`Failed to delete screenshot: ${screenshotPath}`, err));
-    return surveyEnded;
+    return surveyEnded || isSurveyBtnEnabled;
   } catch (e) {
     console.error(
       `[monitor_seminars] 종료 여부 확인 실패 (${seminar.seminarId})`,

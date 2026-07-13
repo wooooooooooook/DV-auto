@@ -2,7 +2,13 @@ import quizMapping from '../../data/quiz.json';
 import { safeGoto, sendTelegram } from '../modules/utils';
 import * as storage from '../services/storage';
 import type { PlaywrightRunArgs } from '../types';
-import { findMatchingKeywords, loadCheatsheet, resolveBestKeywordMatch, findOptionByAnswer, type QuizQuestion } from './seminar_quiz';
+import {
+  findMatchingKeywords,
+  loadCheatsheet,
+  resolveBestKeywordMatch,
+  findOptionByAnswer,
+  type QuizQuestion,
+} from './seminar_quiz';
 
 const QUIZ_LIST_URLS = [
   'https://www.doctorville.co.kr/product/medicineList',
@@ -19,7 +25,14 @@ type TempQuizAnswers = {
 type CheatsheetMatchResult =
   | { answers: Array<string | number>; reason: 'ok' }
   | { answers: null; reason: 'no_keyword' }
-  | { answers: null; reason: 'keyword_matched_but_option_not_found'; keyword: string; answerText: string; optionIndex: number; availableOptions: Array<{ index: number; text: string }> };
+  | {
+      answers: null;
+      reason: 'keyword_matched_but_option_not_found';
+      keyword: string;
+      answerText: string;
+      optionIndex: number;
+      availableOptions: Array<{ index: number; text: string }>;
+    };
 
 function getTodayIsoDate() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' as const });
@@ -244,9 +257,7 @@ async function run({ page }: PlaywrightRunArgs) {
       if (answers.length > 0) {
         answersSource = 'cheatsheet';
       } else if (cheatsheetResult.reason === 'keyword_matched_but_option_not_found') {
-        const opts = cheatsheetResult.availableOptions
-          .map((o) => `  ${o.index}. ${o.text}`)
-          .join('\n');
+        const opts = cheatsheetResult.availableOptions.map((o) => `  ${o.index}. ${o.text}`).join('\n');
         return {
           success: true,
           message:
