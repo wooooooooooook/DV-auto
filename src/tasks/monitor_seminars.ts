@@ -89,27 +89,16 @@ async function isSeminarEnded(
     await detailPage.reload({ waitUntil: 'networkidle', timeout: 15000 });
     const surveyEnded = await detailPage.locator('text="세미나 종료"').first().isVisible({ timeout: 2000 });
     const canCancel = await detailPage.locator('text="신청 취소"').first().isVisible({ timeout: 2000 });
-
-    const surveyBtn = detailPage.locator('text="설문참여"').first();
-    const isSurveyBtnVisible = await surveyBtn.isVisible({ timeout: 2000 }).catch(() => false);
-    const isSurveyBtnEnabled = isSurveyBtnVisible
-      ? await surveyBtn.isEnabled({ timeout: 2000 }).catch(() => false)
-      : false;
-
-    console.log(
-      `[monitor_seminars] Seminar end check (${seminar.seminarId}): surveyEnded=${surveyEnded}, canCancel=${canCancel}, surveyBtnEnabled=${isSurveyBtnEnabled}`,
-    );
+    console.log(`[monitor_seminars] Seminar end check (${seminar.seminarId}): ${surveyEnded}, ${canCancel}`);
 
     await detailPage.screenshot({ path: screenshotPath, fullPage: false });
     if (!canCancel) {
-      console.log(
-        `[monitor_seminars] End check pending for ${seminar.seminarId}. surveyEnded=${surveyEnded}, surveyBtnEnabled=${isSurveyBtnEnabled}`,
-      );
+      console.log(`[monitor_seminars] End check pending for ${seminar.seminarId}. surveyEnded=${surveyEnded}`);
     }
     await fs
       .unlink(screenshotPath)
       .catch((err) => console.error(`Failed to delete screenshot: ${screenshotPath}`, err));
-    return surveyEnded || isSurveyBtnEnabled;
+    return surveyEnded;
   } catch (e) {
     console.error(
       `[monitor_seminars] 종료 여부 확인 실패 (${seminar.seminarId})`,
@@ -128,7 +117,6 @@ async function handleSeminarEndAndQuiz(
   context: BrowserContext,
   seminar: { name: string; seminarId: string | null },
   fallbackUrl: string,
-  isAdvancedSurvey = false,
 ): Promise<{ message: string | null; foundSurveyButton: boolean }> {
   const targetUrl = seminar.seminarId ? `${SEMINAR_DETAIL_PAGE}${seminar.seminarId}` : fallbackUrl;
   const surveyPage = await context.newPage();
@@ -213,14 +201,14 @@ async function handleSeminarEndAndQuiz(
       await quizPage.waitForTimeout(5000);
 
       // 퀴즈 처리 (댓글로 결과 전송)
-      const quizResult = await processSeminarQuiz(quizPage, seminar.seminarId ?? undefined, isAdvancedSurvey);
+      const quizResult = await processSeminarQuiz(quizPage, seminar.seminarId);
       if (quizResult.success && quizResult.hasQuizResult) {
         quizResultMessage = quizResult.message;
       }
     } else {
       console.log(`[monitor_seminars] "설문참여" 버튼을 찾지 못함 (${seminar.seminarId})`);
       // 버튼이 없어도 현재 페이지에서 퀴즈 찾기 시도
-      const quizResult = await processSeminarQuiz(quizPage, seminar.seminarId ?? undefined, isAdvancedSurvey);
+      const quizResult = await processSeminarQuiz(quizPage, seminar.seminarId);
       if (quizResult.success && quizResult.hasQuizResult) {
         quizResultMessage = quizResult.message;
       }
@@ -229,6 +217,21 @@ async function handleSeminarEndAndQuiz(
     console.error(
       `[monitor_seminars] 설문/퀴즈 처리 실패 (${seminar.seminarId})`,
       e && typeof e === 'object' && 'stack' in e ? (e as Error).stack : e,
+    );
+    const message = e instanceof Error ? e.message : String(e);
+    const baseScreenshotDir = path.join(process.cwd(), 'screenshot');
+    const errShotPath = path.join(
+      baseScreenshotDir,
+      `seminar_quiz_failed_${seminar.seminarId || Date.now()}_${Math.random().toString(36).slice(2, 8)}.png`,
+    );
+    try {
+      await fs.mkdir(baseScreenshotDir, { recursive: true });
+      await quizPage.screenshot({ path: errShotPath, fullPage: true }).catch(() => {});
+    } catch (_ssErr) {
+      /* ignore */
+    }
+    await sendTelegram(`❗ [${seminar.name}] 세미나 퀴즈 처리 실패: ${message}\n${targetUrl}`, errShotPath).catch(
+      () => {},
     );
   } finally {
     if (popupPage) {
@@ -591,7 +594,6 @@ async function monitorSeminars(
             context,
             mergedSeminarInfo,
             url,
-            mergedSeminarInfo.isAdvancedSurvey ?? false,
           );
 
           // If we knew it had a survey, OR if we just found one (even if we thought it didn't have one)
@@ -599,6 +601,8 @@ async function monitorSeminars(
             const targetUrl = mergedSeminarInfo.seminarId
               ? `${SEMINAR_DETAIL_PAGE}${mergedSeminarInfo.seminarId}`
               : url;
+            // quizResultMessage는 processSeminarQuiz()가 [퀴즈] 문항만으로 만든 결과만 담습니다.
+            // 일반 설문(객관식 서베이 등)은 절대 채널로 가지 않습니다.
             const quizSuffix = quizResultMessage ? `\n\n${quizResultMessage}` : '';
             const advancedSurveySuffix = mergedSeminarInfo.isAdvancedSurvey ? ' [심화설문]' : '';
             const message = `🔴세미나종료\n**${mergedSeminarInfo.name}**${advancedSurveySuffix}\n${targetUrl}${quizSuffix}`;
@@ -687,7 +691,15 @@ async function monitorSeminars(
       e && typeof e === 'object' && 'stack' in e ? (e as Error).stack : e,
     );
     const message = e instanceof Error ? e.message : String(e);
-    await sendTelegram(`❗ [${periodName}] 세미나 감시 작업 오류: ${message}`).catch(() => {});
+    const baseScreenshotDir = path.join(process.cwd(), 'screenshot');
+    const errShotPath = path.join(baseScreenshotDir, `${periodName}_monitoring_failed_${Date.now()}.png`);
+    try {
+      await fs.mkdir(baseScreenshotDir, { recursive: true });
+      await page.screenshot({ path: errShotPath, fullPage: true }).catch(() => {});
+    } catch (_ssErr) {
+      /* ignore */
+    }
+    await sendTelegram(`❗ [${periodName}] 세미나 감시 작업 오류: ${message}`, errShotPath).catch(() => {});
     return false;
   }
 }

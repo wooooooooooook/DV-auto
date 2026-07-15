@@ -8,10 +8,7 @@ import { processSeminarQuiz } from './seminar_quiz';
  * ctx.args.seminarId 와 ctx.args.isAdvancedSurvey 를 받아서 해당 세미나 디테일 페이지로 이동
  *   → 설문참여 → 퀴즈 (선택+제출) 처리
  */
-async function run(
-  { page }: PlaywrightRunArgs,
-  options?: Record<string, unknown>,
-): Promise<TaskResult> {
+async function run({ page }: PlaywrightRunArgs, options?: Record<string, unknown>): Promise<TaskResult> {
   // options 우선, 없으면 ctx.args (그 다음 호환 위해 process.env 도 fallback)
   const opts = (options as { args?: Record<string, string> } | undefined)?.args ?? {};
   const fromCtx: Record<string, string> = opts;
@@ -65,7 +62,9 @@ async function run(
     if (await consentModal.isVisible({ timeout: 1500 }).catch(() => false)) {
       const agreeCheckbox = quizPage.locator('input[type="checkbox"]').first();
       const isChecked = await agreeCheckbox.isChecked().catch(() => false);
-      console.log(`[run_seminar_quiz] 동의 체크박스 상태: ${isChecked ? 'checked' : 'unchecked'} (seminarId=${seminarId})`);
+      console.log(
+        `[run_seminar_quiz] 동의 체크박스 상태: ${isChecked ? 'checked' : 'unchecked'} (seminarId=${seminarId})`,
+      );
     }
 
     // 참여하기 버튼 클릭
