@@ -1,4 +1,20 @@
-import quizMapping from '../../data/quiz.json';
+// Remote quiz data loading – replaced local import
+let quizMappingCache: Record<string, Array<string | number>> | null = null;
+async function loadQuizMapping(): Promise<Record<string, Array<string | number>>> {
+  if (quizMappingCache) return quizMappingCache;
+  try {
+    const response = await fetch('https://raw.githubusercontent.com/wooooooooooook/DV-auto/refs/heads/main/data/quiz.json');
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = (await response.json()) as Record<string, Array<string | number>>;
+    quizMappingCache = data;
+    return data;
+  } catch (e) {
+    console.warn('[today_quiz] Failed to load remote quiz data, using empty mapping', e);
+    quizMappingCache = {};
+    return {};
+  }
+}
+
 import { safeGoto, sendTelegram } from '../modules/utils';
 import * as storage from '../services/storage';
 import type { PlaywrightRunArgs } from '../types';
@@ -64,6 +80,7 @@ async function parseTodayQuizQuestions(page: PlaywrightRunArgs['page']): Promise
         index: i + 1,
         text: text.trim(),
         value,
+        id: value,
       });
     }
 
@@ -71,6 +88,8 @@ async function parseTodayQuizQuestions(page: PlaywrightRunArgs['page']): Promise
       questions.push({
         questionText: questionText.trim(),
         options,
+        isQuiz: false,
+        name: '',
       });
     }
   }
@@ -246,7 +265,7 @@ async function run({ page }: PlaywrightRunArgs) {
     }
 
     // Load mapping from data/quiz.json, fallback to cheatsheet if missing
-    const mapping = quizMapping as Record<string, Array<string | number>>;
+    const mapping = await loadQuizMapping();
     let answers = mapping[productTitle];
     let answersSource: 'mapping' | 'cheatsheet' | 'none' = answers && answers.length > 0 ? 'mapping' : 'none';
 

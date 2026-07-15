@@ -90,6 +90,7 @@ async function parseTodayQuizQuestions(page: PlaywrightRunArgs['page']): Promise
         index: i + 1,
         text: text.trim(),
         value,
+        id: value,
       });
     }
 
@@ -97,6 +98,8 @@ async function parseTodayQuizQuestions(page: PlaywrightRunArgs['page']): Promise
       questions.push({
         questionText: questionText.trim(),
         options,
+        isQuiz: false,
+        name: '',
       });
     }
   }

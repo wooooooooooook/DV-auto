@@ -9,7 +9,9 @@ export type Cheatsheet = Record<string, string>;
 
 export interface QuizQuestion {
   questionText: string;
-  options: Array<{ index: number; text: string; value: string }>;
+  options: Array<{ index: number; text: string; value: string; id: string }>;
+  isQuiz: boolean; // [퀴즈] 마커 있으면 true
+  name: string;   // radio group name (e.g. userQuestions.7.optionIds)
 }
 
 interface QuizResult {
@@ -103,28 +105,35 @@ export function resolveBestKeywordMatch(
 }
 
 /**
- * 페이지에서 퀴즈 문제들을 파싱
+ * 페이지에서 모든 설문 문항(퀴즈 + 일반)을 파싱
+ * 각 문항의 radio group name, 퀴즈 여부, 선택지를 추출
  */
 async function parseQuizQuestions(page: Page): Promise<QuizQuestion[]> {
   const questions: QuizQuestion[] = [];
 
-  // [퀴즈] 텍스트가 포함된 .whitespace-pre-wrap 요소들 찾기
-  const quizContainers = page.locator('.whitespace-pre-wrap:has(span:text("[퀴즈]"))');
-  const count = await quizContainers.count();
+  // .whitespace-pre-wrap 안에서 <ol><li><label><input type="radio"> 구조 탐색
+  // outer label: <label for="userQuestions.N.optionIds" class="block">
+  // inner <div class="whitespace-pre-wrap"> 안에 질문 텍스트 + <ol> 보기
+  const outerLabels = page.locator('label.block:has(.whitespace-pre-wrap)');
 
+  const count = await outerLabels.count();
   for (let i = 0; i < count; i++) {
-    const container = quizContainers.nth(i);
+    const outerLabel = outerLabels.nth(i);
 
-    // 전체 텍스트에서 문제 추출
-    const fullText = await container.innerText().catch(() => '');
-    const questionLine =
-      fullText
-        .split('\n')
-        .map((line) => line.trim())
-        .find((line) => line.length > 0) || fullText.trim();
+    // outer label의 for 속성 → radio group name
+    const name = (await outerLabel.getAttribute('for')) || '';
+    if (!name) continue;
 
-    // 보기 추출 - ol > li 안의 label > span
-    const optionElements = container.locator('ol li label');
+    // div.whitespace-pre-wrap 안에서 텍스트 추출
+    const questionText = await outerLabel.locator('.whitespace-pre-wrap').first().innerText().catch(() => '');
+    // 첫 번째 비어있지 않은 줄을 질문으로 사용
+    const firstLine = questionText.split('\n').map((l: string) => l.trim()).find((l: string) => l.length > 0) || questionText.trim();
+
+    // [퀴즈] 마커 확인 (span 태그 내 포함)
+    const hasQuizMarker = await outerLabel.locator('span:text("[퀴즈]")').count() > 0;
+
+    // ol > li 안의 label > radio + span.col-start-2
+    const optionElements = outerLabel.locator('ol li label');
     const optionCount = await optionElements.count();
 
     const options: QuizQuestion['options'] = [];
@@ -136,13 +145,17 @@ async function parseQuizQuestions(page: Page): Promise<QuizQuestion[]> {
       const value = (await input.getAttribute('value')) || '';
       const text = (await span.innerText().catch(() => '')).trim();
 
-      options.push({ index: j + 1, text, value }); // 1-indexed
+      options.push({ index: j + 1, text, value, id: value });
     }
 
-    questions.push({
-      questionText: questionLine,
-      options,
-    });
+    if (options.length > 0) {
+      questions.push({
+        questionText: firstLine,
+        options,
+        isQuiz: hasQuizMarker,
+        name,
+      });
+    }
   }
 
   return questions;
@@ -206,10 +219,33 @@ type SeminarQuizResult = {
 };
 
 /**
- * 세미나 퀴즈 처리 메인 함수
- * 설문참여 페이지에서 퀴즈를 감지하고 정답을 찾아 보고
+ * 퀴즈 여부에 따라 선택할 선택지 인덱스를 결정
+ * - [퀴즈] 마커 있음 → 족보에서 정답 검색 (1-indexed)
+ * - 일반 문항   → 2번 옵션 선택 (1-indexed)
+ * 반환: null = 선택 안 함 (족보에 없거나 옵션 초과)
  */
-async function processSeminarQuiz(page: Page, seminarName?: string): Promise<SeminarQuizResult> {
+async function resolveSelection(
+  question: QuizQuestion,
+  cheatsheet: Cheatsheet,
+): Promise<{ optionIndex: number; selectedText: string } | null> {
+  if (question.isQuiz) {
+    const bestMatch = resolveBestKeywordMatch(question.questionText, question.options, cheatsheet);
+    if (!bestMatch) return null;
+    return { optionIndex: bestMatch.option.index, selectedText: bestMatch.option.text };
+  }
+  // 일반 문항: 2번 옵션
+  if (question.options.length >= 2) {
+    return { optionIndex: 2, selectedText: question.options[1].text };
+  }
+  return null;
+}
+
+/**
+ * 세미나 퀴즈 처리 메인 함수
+ * 설문참여 페이지에서 퀴즈를 감지하고 정답을 찾아 클릭+제출
+ * @param isAdvancedSurvey - 심화설문 여부 (true면 제출 후 outro 처리 스킵)
+ */
+async function processSeminarQuiz(page: Page, seminarName?: string, isAdvancedSurvey = false): Promise<SeminarQuizResult> {
   try {
     await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
 
@@ -224,10 +260,7 @@ async function processSeminarQuiz(page: Page, seminarName?: string): Promise<Sem
         .then(() => true)
         .catch(() => false);
 
-      if (isQuizVisible) {
-        break;
-      }
-
+      if (isQuizVisible) break;
       if (attempt < 3) {
         console.log(
           `[seminar_quiz] [퀴즈] 텍스트 탐지 실패, 새로고침 재시도 (${attempt}/3) (${seminarName ?? 'unknown'})`,
@@ -238,87 +271,106 @@ async function processSeminarQuiz(page: Page, seminarName?: string): Promise<Sem
       }
     }
 
-    // 퀴즈 문제 파싱
     const questions = await parseQuizQuestions(page);
 
     if (questions.length === 0) {
       const message = seminarName
-        ? `ℹ️ ${seminarName} 설문 페이지에서 퀴즈를 찾지 못했습니다.`
-        : 'ℹ️ 설문 페이지에서 퀴즈를 찾지 못했습니다.';
+        ? `ℹ️ ${seminarName} 설문 페이지에서 문항을 찾지 못했습니다.`
+        : 'ℹ️ 설문 페이지에서 문항을 찾지 못했습니다.';
       const shotPath = `screenshot/quiz_not_found_${Date.now()}.png`;
       await page.screenshot({ path: shotPath, fullPage: true }).catch(() => {});
       await sendTelegram(message, shotPath);
       return { success: true, hasQuizResult: false, message };
     }
 
-    // 족보 로드
     const cheatsheet = await loadCheatsheet();
 
-    if (Object.keys(cheatsheet).length === 0) {
-      // 족보가 비어있으면 문제만 보고
-      let message = '📝 퀴즈 발견 (족보 비어있음):\n\n';
-      for (let i = 0; i < questions.length; i++) {
-        const q = questions[i];
-        message += `Q${i + 1}: ${q.questionText.substring(0, 100)}...\n`;
-        for (const opt of q.options) {
-          message += `  ${opt.index}. ${opt.text}\n`;
-        }
-        message += '\n';
-      }
-      await sendTelegram(message);
-      return { success: true, hasQuizResult: false, message };
-    }
-
-    // 각 문제에 대해 정답 찾기
+    // ① 모든 문항에 대해 선택지 결정
     const results: QuizResult[] = [];
-    let _hasUnknown = false;
-    let _hasMultipleMatches = false;
+    const selections: Array<{ name: string; value: string; selectedText: string }> = [];
+    let hasUnknown = false;
+    let hasMultipleMatches = false;
 
     for (let i = 0; i < questions.length; i++) {
       const q = questions[i];
-      const matchingKeywords = findMatchingKeywords(q.questionText, cheatsheet);
 
       let selectedIndex: number | null = null;
       let selectedText: string | null = null;
       let matchedKeyword: string | null = null;
       let multipleMatches: string[] | null = null;
 
-      if (matchingKeywords.length === 0) {
-        // 족보에 없음
-        _hasUnknown = true;
-      } else {
+      const selection = await resolveSelection(q, cheatsheet);
+
+      if (selection) {
+        selectedIndex = selection.optionIndex;
+        selectedText = selection.selectedText;
+        selections.push({ name: q.name, value: q.options[selection.optionIndex - 1].value, selectedText });
+      } else if (q.isQuiz) {
+        hasUnknown = true;
+      }
+
+      if (q.isQuiz && Object.keys(cheatsheet).length > 0) {
+        const matchingKeywords = findMatchingKeywords(q.questionText, cheatsheet);
         if (matchingKeywords.length > 1) {
-          _hasMultipleMatches = true;
+          hasMultipleMatches = true;
           multipleMatches = matchingKeywords;
         }
-
-        const bestMatch = resolveBestKeywordMatch(q.questionText, q.options, cheatsheet);
-        if (bestMatch) {
-          matchedKeyword = bestMatch.keyword;
-          selectedIndex = bestMatch.option.index;
-          selectedText = bestMatch.option.text;
-        } else {
-          _hasUnknown = true;
+        if (!selection) {
+          hasUnknown = true;
+        }
+        if (matchingKeywords.length > 0 && !selectedText) {
+          matchedKeyword = matchingKeywords[0];
         }
       }
 
-      results.push({
-        questionIndex: i + 1,
-        questionText: q.questionText,
-        selectedIndex,
-        selectedText,
-        matchedKeyword,
-        multipleMatches,
-      });
+      results.push({ questionIndex: i + 1, questionText: q.questionText, selectedIndex, selectedText, matchedKeyword, multipleMatches });
     }
 
-    // 결과 메시지 생성 및 전송
-    const resultMessage = formatQuizResults(results, _hasUnknown, _hasMultipleMatches);
+    // ② 라디오 버튼 클릭
+    for (const sel of selections) {
+      const radio = page.locator(`input[type="radio"][name="${sel.name}"][value="${sel.value}"]`).first();
+      if (await radio.count() > 0) {
+        await radio.check({ force: true }).catch(() => {});
+        console.log(`[seminar_quiz] Selected Q (name=${sel.name}, value=${sel.value}, text=${sel.selectedText})`);
+      } else {
+        console.warn(`[seminar_quiz] Radio not found: [name=${sel.name}][value=${sel.value}]`);
+      }
+      await page.waitForTimeout(300);
+    }
 
-    // 퀴즈 결과는 세미나 종료 메시지에 붙여서 보냅니다.
+    // ③ 제출 버튼 클릭
+    const submitBtn = page.locator('input[type="submit"][value="제출하기"]').first();
+    const submitExists = await submitBtn.count() > 0;
+    if (submitExists) {
+      await submitBtn.click({ force: true }).catch(() => {});
+      await page.waitForTimeout(1000);
 
-    // 미등록 문제가 있으면 추가 정보 전송 (admin_bot에)
-    if (_hasUnknown) {
+      // ④ 확인 버튼 (심화설문 아닐 때만)
+      if (!isAdvancedSurvey) {
+        const confirmBtn = page.locator('button[type="button"]:text("확인")').first();
+        if (await confirmBtn.count() > 0) {
+          console.log('[seminar_quiz] 확인 버튼 발견, 클릭');
+          await confirmBtn.click({ force: true }).catch(() => {});
+          await page.waitForTimeout(500);
+        }
+
+        // ⑤ outro 페이지 도착 시 스크린샷 전송
+        await page.waitForURL('**/outro**', { timeout: 10000 }).catch(() => {});
+        const currentUrl = page.url();
+        if (currentUrl.includes('/outro')) {
+          const outroShotPath = `screenshot/quiz_outro_${Date.now()}.png`;
+          await page.screenshot({ path: outroShotPath, fullPage: true }).catch(() => {});
+          const msg = `${seminarName ? `${seminarName} ` : ''}설문 완료 (outro 확인)`;
+          await sendTelegram(msg, outroShotPath).catch(() => {});
+        }
+      }
+    } else {
+      console.warn('[seminar_quiz] 제출하기 버튼을 찾지 못했습니다.');
+    }
+
+    // ⑥ 결과 메시지 생성
+    const resultMessage = formatQuizResults(results, hasUnknown, hasMultipleMatches);
+    if (hasUnknown) {
       const unknownMessage = formatUnknownQuestions(questions, results);
       await sendTelegram(unknownMessage);
     }
@@ -334,4 +386,4 @@ async function processSeminarQuiz(page: Page, seminarName?: string): Promise<Sem
   }
 }
 
-export { processSeminarQuiz, loadCheatsheet, CHEATSHEET_PATH };
+export { processSeminarQuiz, resolveSelection, loadCheatsheet, CHEATSHEET_PATH };

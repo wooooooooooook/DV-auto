@@ -128,6 +128,7 @@ async function handleSeminarEndAndQuiz(
   context: BrowserContext,
   seminar: { name: string; seminarId: string | null },
   fallbackUrl: string,
+  isAdvancedSurvey = false,
 ): Promise<{ message: string | null; foundSurveyButton: boolean }> {
   const targetUrl = seminar.seminarId ? `${SEMINAR_DETAIL_PAGE}${seminar.seminarId}` : fallbackUrl;
   const surveyPage = await context.newPage();
@@ -212,14 +213,14 @@ async function handleSeminarEndAndQuiz(
       await quizPage.waitForTimeout(5000);
 
       // 퀴즈 처리 (댓글로 결과 전송)
-      const quizResult = await processSeminarQuiz(quizPage, seminar.seminarId);
+      const quizResult = await processSeminarQuiz(quizPage, seminar.seminarId ?? undefined, isAdvancedSurvey);
       if (quizResult.success && quizResult.hasQuizResult) {
         quizResultMessage = quizResult.message;
       }
     } else {
       console.log(`[monitor_seminars] "설문참여" 버튼을 찾지 못함 (${seminar.seminarId})`);
       // 버튼이 없어도 현재 페이지에서 퀴즈 찾기 시도
-      const quizResult = await processSeminarQuiz(quizPage, seminar.seminarId);
+      const quizResult = await processSeminarQuiz(quizPage, seminar.seminarId ?? undefined, isAdvancedSurvey);
       if (quizResult.success && quizResult.hasQuizResult) {
         quizResultMessage = quizResult.message;
       }
@@ -590,6 +591,7 @@ async function monitorSeminars(
             context,
             mergedSeminarInfo,
             url,
+            mergedSeminarInfo.isAdvancedSurvey ?? false,
           );
 
           // If we knew it had a survey, OR if we just found one (even if we thought it didn't have one)
