@@ -894,6 +894,7 @@ if (adminBot) {
 - /today_links: 오늘의 세미나와 퀴즈 링크, 출석 링크를 한 번에 가져옵니다.
 - /monitor_lunch_seminar_now: 즉시 점심 세미나 모니터링을 시작합니다.
 - /monitor_dinner_seminar_now: 즉시 저녁 세미나 모니터링을 시작합니다.
+- /run_seminar_quiz <seminarId> [advanced]: 특정 세미나의 설문 퀴즈를 수동 실행합니다. (advanced: 심화설문)
 
 📚 세미나 퀴즈 족보:
 - /add_seminar_quiz <키워드> | <정답>: 족보 등록
@@ -982,6 +983,69 @@ if (adminBot) {
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       ctx.reply(`Failed to start monitor_dinner_seminars: ${message}`);
+    }
+  });
+
+  // /run_seminar_quiz <seminarId> [advanced] — 수동 세미나 퀴즈 실행
+  // advanced 인자가 있으면 심화설문 (제출 후 확인/outro 스킵)
+  adminBot.command('run_seminar_quiz', async (ctx) => {
+    logger.info('User requested to run seminar_quiz manually', { from: ctx.from?.username });
+    const messageText = ctx.message?.text || '';
+    const parts = messageText.split(/\s+/).slice(1);
+    const seminarId = parts[0]?.trim() || '';
+    const isAdvancedSurvey = parts[1]?.toLowerCase() === 'advanced' || parts[1]?.toLowerCase() === '심화';
+
+    if (!seminarId) {
+      return ctx.reply('사용법: /run_seminar_quiz <seminarId> [advanced]\n예) /run_seminar_quiz 12345\n     /run_seminar_quiz 12345 advanced');
+    }
+
+    const task = taskRegistry.getByName('run_seminar_quiz');
+    if (!task) {
+      logger.error('run_seminar_quiz task not found, cannot run');
+      return ctx.reply('run_seminar_quiz task not found!');
+    }
+
+    try {
+      await ctx.reply(
+        `Starting run_seminar_quiz (seminarId=${seminarId}${isAdvancedSurvey ? ', 심화설문' : ''})... (백그라운드 실행)`,
+      );
+      const args: Record<string, string> = { seminarId };
+      if (isAdvancedSurvey) args.isAdvancedSurvey = 'true';
+      runner
+        .runTask(task, { args })
+        .then(async (result) => {
+          if (result && typeof result === 'object' && (result as { message?: string }).message) {
+            await ctx.reply(
+              (result as { message: string }).message,
+              (result as { options?: Record<string, unknown> }).options,
+            );
+            if ((result as { imagePath?: string }).imagePath) {
+              await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
+              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
+            } else {
+              const shotPaths = (result as { screenshotPaths?: string[] }).screenshotPaths;
+              if (shotPaths) {
+                for (const p of shotPaths) {
+                  await ctx.replyWithPhoto({ source: p });
+                  await fs.unlink(p).catch(() => {});
+                }
+              }
+            }
+          } else if (typeof result === 'string') {
+            await ctx.reply(result);
+          } else if (result === true) {
+            await ctx.reply('run_seminar_quiz finished successfully.');
+          } else {
+            await ctx.reply('run_seminar_quiz finished.');
+          }
+        })
+        .catch((e) => {
+          const message = e instanceof Error ? e.message : String(e);
+          ctx.reply(`run_seminar_quiz failed: ${message}`);
+        });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      ctx.reply(`Failed to start run_seminar_quiz: ${message}`);
     }
   });
 
@@ -1186,6 +1250,7 @@ const adminCommands = [
   { command: 'today_links', description: '오늘의 세미나/퀴즈/출석 링크 모음' },
   { command: 'monitor_lunch_seminar_now', description: '즉시 점심 세미나 모니터링 시작' },
   { command: 'monitor_dinner_seminar_now', description: '즉시 저녁 세미나 모니터링 시작' },
+  { command: 'run_seminar_quiz', description: '특정 세미나 퀴즈 수동 실행 (seminarId, [advanced])' },
   { command: 'add_seminar_quiz', description: '세미나 퀴즈 족보 등록' },
   { command: 'list_seminar_quiz', description: '등록된 족보 목록' },
   { command: 'delete_seminar_quiz', description: '족보 삭제' },

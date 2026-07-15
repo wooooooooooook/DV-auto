@@ -6,6 +6,7 @@ export interface TaskContext {
   notifyAdminOnSuccess?: boolean;
   maxIterations?: number;
   isAutoResume?: boolean;
+  args?: Record<string, string>;
 }
 
 export interface PlaywrightTaskContext extends TaskContext {

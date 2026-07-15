@@ -18,6 +18,7 @@ import * as naverpayPointExchangeTask from '../tasks/naverpay_point_exchange';
 import * as baeminPointExchangeTask from '../tasks/baemin_point_exchange';
 import * as refreshSeminarPointExclusionTaskModule from '../tasks/refresh_seminar_point_exclusion';
 import * as checkPointTaskModule from '../tasks/check_point';
+import * as runSeminarQuizTaskModule from '../tasks/run_seminar_quiz';
 import type { Task, TaskResult } from '../types';
 
 dns.setDefaultResultOrder('ipv4first');
@@ -218,6 +219,27 @@ const checkPointTask: Task = {
   },
 };
 taskRegistry.registerTask(checkPointTask);
+
+// 수동 세미나 퀴즈 — /run_seminar_quiz <seminarId> [advanced]
+// ctx.args.seminarId, ctx.args.isAdvancedSurvey 를 태스크가 읽음
+const runSeminarQuizTask: Task = {
+  name: 'run_seminar_quiz',
+  run: async (ctx) => {
+    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await utils.ensureLoggedIn({ page, context });
+      return await runSeminarQuizTaskModule.run(
+        { page, context },
+        { args: ctx.args ?? {} },
+      );
+    } finally {
+      await browser.close();
+    }
+  },
+};
+taskRegistry.registerTask(runSeminarQuizTask);
 
 const refreshSeminarPointExclusionTask: Task = {
   name: 'refresh_seminar_point_exclusion',
