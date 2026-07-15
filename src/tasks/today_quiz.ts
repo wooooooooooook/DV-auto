@@ -89,6 +89,8 @@ async function parseTodayQuizQuestions(page: PlaywrightRunArgs['page']): Promise
         questionText: questionText.trim(),
         options,
         isQuiz: false,
+        isRequired: false,
+        inputType: 'radio' as const,
         name: '',
       });
     }

@@ -10,8 +10,10 @@ export type Cheatsheet = Record<string, string>;
 export interface QuizQuestion {
   questionText: string;
   options: Array<{ index: number; text: string; value: string; id: string }>;
-  isQuiz: boolean; // [퀴즈] 마커 있으면 true
-  name: string;   // radio group name (e.g. userQuestions.7.optionIds)
+  isQuiz: boolean;          // [퀴즈] 마커 있음
+  isRequired: boolean;     // 필수 문항 (* 표시, 줄 끝에 *)
+  inputType: 'radio' | 'checkbox';
+  name: string;             // radio/checkbox group name
 }
 
 interface QuizResult {
@@ -132,14 +134,24 @@ async function parseQuizQuestions(page: Page): Promise<QuizQuestion[]> {
     // [퀴즈] 마커 확인 (span 태그 내 포함)
     const hasQuizMarker = await outerLabel.locator('span:text("[퀴즈]")').count() > 0;
 
-    // ol > li 안의 label > radio + span.col-start-2
+    // 필수 여부: 질문 텍스트 줄 중 마지막 비어있지 않은 줄 끝에 * 가 있는지 확인
+    const lines = questionText.split('\n').filter((l: string) => l.trim().length > 0);
+    const lastLine = lines[lines.length - 1] || '';
+    const isRequired = lastLine.includes('*');
+
+    // input 타입 감지 (radio 기본값, 첫 번째 input이 checkbox면 checkbox)
+    const firstInput = outerLabel.locator('input').first();
+    const inputTypeRaw = (await firstInput.getAttribute('type') ?? '').toLowerCase();
+    const inputType: 'radio' | 'checkbox' = inputTypeRaw === 'checkbox' ? 'checkbox' : 'radio';
+
+    // ol > li 안의 label > input + span.col-start-2
     const optionElements = outerLabel.locator('ol li label');
     const optionCount = await optionElements.count();
 
     const options: QuizQuestion['options'] = [];
     for (let j = 0; j < optionCount; j++) {
       const label = optionElements.nth(j);
-      const input = label.locator('input[type="radio"]');
+      const input = label.locator(`input[type="${inputType}"]`);
       const span = label.locator('span.col-start-2');
 
       const value = (await input.getAttribute('value')) || '';
@@ -153,6 +165,8 @@ async function parseQuizQuestions(page: Page): Promise<QuizQuestion[]> {
         questionText: firstLine,
         options,
         isQuiz: hasQuizMarker,
+        isRequired,
+        inputType,
         name,
       });
     }
@@ -221,8 +235,10 @@ type SeminarQuizResult = {
 /**
  * 퀴즈 여부에 따라 선택할 선택지 인덱스를 결정
  * - [퀴즈] 마커 있음 → 족보에서 정답 검색 (1-indexed)
- * - 일반 문항   → 2번 옵션 선택 (1-indexed)
- * 반환: null = 선택 안 함 (족보에 없거나 옵션 초과)
+ * - 일반 문항 (필수) → 2번 옵션 선택
+ * - 일반 문항 (선택) → null (건너뜀)
+ * - checkbox 유형 → 2번 선택 (radio와 동일하게 처리)
+ * 반환: null = 선택 안 함
  */
 async function resolveSelection(
   question: QuizQuestion,
@@ -233,8 +249,8 @@ async function resolveSelection(
     if (!bestMatch) return null;
     return { optionIndex: bestMatch.option.index, selectedText: bestMatch.option.text };
   }
-  // 일반 문항: 2번 옵션
-  if (question.options.length >= 2) {
+  // 일반 문항: 필수일 때만 2번 선택
+  if (question.isRequired && question.options.length >= 2) {
     return { optionIndex: 2, selectedText: question.options[1].text };
   }
   return null;
@@ -285,9 +301,8 @@ async function processSeminarQuiz(page: Page, seminarName?: string, isAdvancedSu
 
     const cheatsheet = await loadCheatsheet();
 
-    // ① 모든 문항에 대해 선택지 결정
     const results: QuizResult[] = [];
-    const selections: Array<{ name: string; value: string; selectedText: string }> = [];
+    const selections: Array<{ name: string; value: string; selectedText: string; inputType: 'radio' | 'checkbox' }> = [];
     let hasUnknown = false;
     let hasMultipleMatches = false;
 
@@ -304,7 +319,7 @@ async function processSeminarQuiz(page: Page, seminarName?: string, isAdvancedSu
       if (selection) {
         selectedIndex = selection.optionIndex;
         selectedText = selection.selectedText;
-        selections.push({ name: q.name, value: q.options[selection.optionIndex - 1].value, selectedText });
+        selections.push({ name: q.name, value: q.options[selection.optionIndex - 1].value, selectedText, inputType: q.inputType });
       } else if (q.isQuiz) {
         hasUnknown = true;
       }
@@ -326,14 +341,14 @@ async function processSeminarQuiz(page: Page, seminarName?: string, isAdvancedSu
       results.push({ questionIndex: i + 1, questionText: q.questionText, selectedIndex, selectedText, matchedKeyword, multipleMatches });
     }
 
-    // ② 라디오 버튼 클릭
+    // ② 라디오/체크박스 버튼 클릭
     for (const sel of selections) {
-      const radio = page.locator(`input[type="radio"][name="${sel.name}"][value="${sel.value}"]`).first();
-      if (await radio.count() > 0) {
-        await radio.check({ force: true }).catch(() => {});
-        console.log(`[seminar_quiz] Selected Q (name=${sel.name}, value=${sel.value}, text=${sel.selectedText})`);
+      const input = page.locator(`input[type="${sel.inputType}"][name="${sel.name}"][value="${sel.value}"]`).first();
+      if (await input.count() > 0) {
+        await input.check({ force: true }).catch(() => {});
+        console.log(`[seminar_quiz] Selected (type=${sel.inputType}, name=${sel.name}, value=${sel.value}, text=${sel.selectedText})`);
       } else {
-        console.warn(`[seminar_quiz] Radio not found: [name=${sel.name}][value=${sel.value}]`);
+        console.warn(`[seminar_quiz] Input not found: [type=${sel.inputType}][name=${sel.name}][value=${sel.value}]`);
       }
       await page.waitForTimeout(300);
     }
