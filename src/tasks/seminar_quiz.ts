@@ -376,21 +376,20 @@ async function processSeminarQuiz(
   const seminarName = seminarId;
   try {
     await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
+    // JS(React) 렌더링 완료 대기 - 다이얼로그는 JS 실행 후 나타남
+    await page.waitForLoadState('networkidle', { timeout: 6000 }).catch(() => {});
 
     // '작성 중인 정보를 불러왔습니다' 초안 복원 다이얼로그 처리
-    // 이전에 작성 중이었던 설문이 있으면 이 다이얼로그가 먼저 뜸 → "닫기" 클릭
+    // React 포탈로 렌더링되므로 텍스트로 직접 탐색
     try {
-      await page.waitForSelector('[data-headlessui-state="open"]', { timeout: 3000 });
-      const draftDialogText = await page
-        .locator('[data-headlessui-state="open"]')
-        .first()
-        .innerText()
-        .catch(() => '');
-      if (draftDialogText.includes('작성 중인 정보')) {
+      const draftNotice = page.locator(':text("작성 중인 정보를 불러왔습니다")').first();
+      const hasDraft = await draftNotice.isVisible({ timeout: 3000 }).catch(() => false);
+      if (hasDraft) {
+        console.log('[seminar_quiz] "작성 중인 정보를 불러왔습니다" 다이얼로그 감지');
         const closeBtn = page.getByRole('button', { name: '닫기' }).first();
         await closeBtn.waitFor({ state: 'visible', timeout: 2000 });
         await closeBtn.click({ force: true });
-        console.log('[seminar_quiz] "작성 중인 정보를 불러왔습니다" 다이얼로그 닫기 완료');
+        console.log('[seminar_quiz] 초안 복원 다이얼로그 "닫기" 클릭 완료');
         await page.waitForTimeout(500);
       }
     } catch {
