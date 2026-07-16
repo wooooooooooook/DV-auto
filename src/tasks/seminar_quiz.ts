@@ -563,7 +563,7 @@ async function processSeminarQuiz(
     await page.waitForTimeout(1000);
     const submitBtn = page
       .locator(
-        ':text-matches("제출|완료|제출하기|설문완료|응답완료", "i"):not([disabled]):not([style*="display:none"])',
+        'input[type="submit"].btn-primary, button:text-matches("제출하기|설문완료|응답완료", "i"):not([disabled])',
       )
       .first();
     const submitVisible = await submitBtn.isVisible({ timeout: 3000 }).catch(() => false);
@@ -571,27 +571,21 @@ async function processSeminarQuiz(
       await submitBtn.scrollIntoViewIfNeeded().catch(() => {});
       await submitBtn.click({ force: true }).catch(() => {});
       console.log('[seminar_quiz] "제출하기" 버튼 클릭 완료');
-      await page.waitForTimeout(1000);
     }
 
-    // 헤드리스UI DOM 레이어 확인 다이얼로그 처리
-    // ("답변을 제출하시겠습니까?" 모달의 "확인" 버튼)
-    const confirmBtn = page
-      .locator('[data-headlessui-state="open"] button.btn-primary, [role="dialog"] button.btn-primary')
-      .first();
-    const confirmVisible = await confirmBtn.isVisible({ timeout: 3000 }).catch(() => false);
-    if (confirmVisible) {
-      await confirmBtn.scrollIntoViewIfNeeded().catch(() => {});
-      await confirmBtn.click({ force: true }).catch(() => {});
+    // 헤드리스UI 확인 다이얼로그 대기 및 클릭
+    // 다이얼로그는 #headlessui-portal-root 포탈에 렌더링되므로 waitForSelector로 출현 대기
+    try {
+      await page.waitForSelector('[data-headlessui-state="open"]', { timeout: 5000 });
+      console.log('[seminar_quiz] 설문제출 확인 다이얼로그 감지');
+
+      // "확인" 버튼: getByRole이 가장 신뢰성 높음
+      const confirmBtn = page.getByRole('button', { name: '확인' }).first();
+      await confirmBtn.waitFor({ state: 'visible', timeout: 3000 });
+      await confirmBtn.click({ force: true });
       console.log('[seminar_quiz] 설문제출 모달 "확인" 클릭 완료');
-    } else {
-      // 폴백: 텍스트로 찾기
-      const confirmBtnFallback = page.locator('button:text-is("확인"):not([disabled])').first();
-      const fallbackVisible = await confirmBtnFallback.isVisible({ timeout: 2000 }).catch(() => false);
-      if (fallbackVisible) {
-        await confirmBtnFallback.click({ force: true }).catch(() => {});
-        console.log('[seminar_quiz] 설문제출 모달 "확인" 클릭 완료 (fallback)');
-      }
+    } catch {
+      console.warn('[seminar_quiz] 설문제출 확인 다이얼로그 미감지 또는 "확인" 클릭 실패');
     }
 
     // /outro 페이지로 이동 대기 (최대 10초)
