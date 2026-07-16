@@ -590,6 +590,7 @@ async function processSeminarQuiz(
       await submitBtn.scrollIntoViewIfNeeded().catch(() => {});
       await submitBtn.click({ force: true }).catch(() => {});
       console.log('[seminar_quiz] "제출하기" 버튼 클릭 완료');
+      await page.waitForTimeout(5000); // 제출 처리 대기 5초
     }
 
     // 헤드리스UI 확인 다이얼로그 대기 및 클릭
