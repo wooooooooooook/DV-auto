@@ -13,7 +13,16 @@ export interface QuizQuestion {
   /** 페이지에서 발견된 마커 (예: "[퀴즈]", "[OX]", "[주관식]"). 없으면 분류 불가 → 채널 누출 방지용. */
   marker: string | null;
   /** 마커로 추론한 문항 타입 */
-  kind: 'quiz' | 'ox' | 'subjective' | 'poll' | 'unknown';
+  kind: 'quiz' | 'poll';
+}
+
+export interface SurveyQuestion extends QuizQuestion {
+  /** 필수 문항 여부 (문제 끝 * 여부) */
+  isRequired: boolean;
+  /** 입력 타입: radio | checkbox | text */
+  inputType: 'radio' | 'checkbox' | 'text';
+  /** 문항 번호 (data-question-number) */
+  questionNumber: number;
 }
 
 interface QuizResult {
@@ -155,157 +164,130 @@ export function resolveBestKeywordMatch(
   return null;
 }
 
-/**
- * 페이지에서 퀴즈 문제들을 파싱
- */
-// 마커 정규식: 페이지 패턴이 다양함. 대소문자 무시, 공백 유연.
-const MARKER_PATTERNS: Array<{ regex: RegExp; kind: QuizQuestion['kind']; label: string }> = [
-  { regex: /\[\s*퀴즈\s*\]/i, kind: 'quiz', label: '[퀴즈]' },
-  { regex: /\[\s*O\s*X\s*\]/i, kind: 'ox', label: '[OX]' },
-  { regex: /\[\s*주관식\s*\]/i, kind: 'subjective', label: '[주관식]' },
-  { regex: /\[\s*설문\s*\]/i, kind: 'poll', label: '[설문]' },
-  { regex: /\[\s*일반\s*\]/i, kind: 'poll', label: '[일반]' },
-  { regex: /\[\s*poll\s*\]/i, kind: 'poll', label: '[poll]' },
-];
-
-function detectMarker(text: string): { marker: string | null; kind: QuizQuestion['kind'] } {
-  for (const { regex, kind, label } of MARKER_PATTERNS) {
-    if (regex.test(text)) return { marker: label, kind };
-  }
-  return { marker: null, kind: 'unknown' };
+function markerKind(marker: string | null): QuizQuestion['kind'] {
+  if (marker && /퀴즈/i.test(marker)) return 'quiz';
+  return 'poll';
 }
 
 /**
- * 다양한 quiz 박스 패턴을 흡수:
- * - 표준: .whitespace-pre-wrap 안에 [퀴즈] span + ol > li label
- * - 변형 1: 마커가 같은 줄 텍스트로만 존재하고 span 분리 안 됨
- * - 변형 2: ol 안에 input[type=radio]만 있고 label 텍스트가 형제 노드
- * - 변형 3: 마커 박스와 보기 박스가 형제로 분리됨 (.gap-3 패턴)
+ * 페이지의 모든 설문 문항 파싱 (퀴즈/일반 포함)
+ * - li[data-question-number] 단위로 파싱하여 중복 방지
+ * - 마커([퀴즈] 등) 있으면 kind 분류, 없으면 'poll'
+ * - 필수 여부(*), inputType(radio/checkbox/text) 추출
  */
-async function parseQuizQuestions(page: Page): Promise<QuizQuestion[]> {
-  const questions: QuizQuestion[] = [];
+async function parseAllSurveyQuestions(page: Page): Promise<SurveyQuestion[]> {
+  const parsed = await page.evaluate(() => {
+    type Option = { index: number; text: string; value: string };
+    type ParsedQ = {
+      questionNumber: number;
+      questionLine: string;
+      marker: string | null;
+      isRequired: boolean;
+      inputType: 'radio' | 'checkbox' | 'text';
+      options: Option[];
+    };
 
-  // 1) 표준 셀렉터: 마커 span이 자식으로 있는 컨테이너
-  const standardContainers = page.locator(
-    '.whitespace-pre-wrap:has(span:text-matches("\\\\[\\\\s*(퀴즈|O\\\\s*X|주관식|설문|일반|poll)\\\\s*\\\\]", "i"))',
-  );
-  // 2) 폴백 셀렉터: 마커가 텍스트로만 있는 컨테이너 (span 분리 없음)
-  const fallbackContainers = page.locator('.whitespace-pre-wrap', {
-    hasText: /^\s*\[\s*(퀴즈|O\s*X|주관식|설문|일반|poll)\s*\]/i,
+    const items = document.querySelectorAll('li[data-question-number]');
+    const result: ParsedQ[] = [];
+
+    items.forEach((li) => {
+      const questionNumber = parseInt((li as HTMLElement).dataset['questionNumber'] ?? '0', 10);
+
+      // 마커 span ([퀴즈] 등): 색상으로 구분된 스팬 탐색
+      // 실제 HTML에서 [퀴즈] 마커는 span.text-\[#28BCAA\] 로 렌더링됨
+      const allSpans = li.querySelectorAll('span');
+      let marker: string | null = null;
+      for (const span of Array.from(allSpans)) {
+        const t = (span as HTMLElement).innerText?.trim() ?? '';
+        const m = t.match(/^\[[\s\S]*?\]$/);
+        if (m && /퀴즈|OX|주관식|설문|일반|poll/i.test(t)) {
+          marker = t;
+          break;
+        }
+      }
+
+      // 문제 텍스트: whitespace-pre-wrap 컨테이너의 innerText에서 첫 실질 라인
+      const labelEl = li.querySelector('label.block') as HTMLElement | null;
+      const preWrap = labelEl?.querySelector('.whitespace-pre-wrap') as HTMLElement | null;
+      let questionLine = '';
+      if (preWrap) {
+        const fullText = preWrap.innerText?.trim() ?? '';
+        const lines = fullText
+          .split('\n')
+          .map((l) => l.trim())
+          .filter((l) => l.length > 0);
+        // 첫 번째 줄에서 마커([퀴즈] 등) 부분만 제거하고 나머지를 문제 텍스트로 사용
+        // 마커와 문제 텍스트가 같은 줄에 있는 경우를 올바르게 처리
+        const firstLine = lines[0] ?? '';
+        questionLine = firstLine.replace(/^\[[\s\S]*?\]\s*/, '').trim();
+        // 끝의 * 제거 (필수 표시)
+        questionLine = questionLine.replace(/\s*\*\s*(\(최소.*?\))?\s*$/, '').trim();
+      }
+
+      if (!questionLine) return;
+
+      // 필수 여부: label 내 span.text-red-600 중 '*' 가 있으면 필수
+      const redSpans = li.querySelectorAll('label .text-red-600');
+      let isRequired = false;
+      for (const s of Array.from(redSpans)) {
+        if ((s as HTMLElement).innerText?.trim() === '*') {
+          isRequired = true;
+          break;
+        }
+      }
+
+      // 입력 타입 판별
+      const hasCheckbox = li.querySelector('input[type="checkbox"]') !== null;
+      const hasText = li.querySelector('input[type="text"], textarea') !== null;
+      const inputType: 'radio' | 'checkbox' | 'text' = hasCheckbox ? 'checkbox' : hasText ? 'text' : 'radio';
+
+      // 보기 추출 (sr-only hidden input 제외)
+      const options: Option[] = [];
+      if (hasCheckbox) {
+        const checkboxes = Array.from(li.querySelectorAll('input[type="checkbox"]')).filter(
+          (inp) => !(inp as HTMLElement).classList.contains('sr-only'),
+        );
+        checkboxes.forEach((inp, idx) => {
+          const input = inp as HTMLInputElement;
+          const labelParent = input.closest('label') as HTMLElement | null;
+          const span = labelParent?.querySelector('span.col-start-2, span') as HTMLElement | null;
+          options.push({
+            index: idx + 1,
+            text: (span?.innerText ?? labelParent?.innerText ?? '').trim(),
+            value: input.value ?? '',
+          });
+        });
+      } else if (hasText) {
+        options.push({ index: 1, text: '[주관식]', value: '' });
+      } else {
+        const radios = Array.from(li.querySelectorAll('input[type="radio"]'));
+        radios.forEach((inp, idx) => {
+          const input = inp as HTMLInputElement;
+          const labelParent = input.closest('label') as HTMLElement | null;
+          const span = labelParent?.querySelector('span.col-start-2, span') as HTMLElement | null;
+          options.push({
+            index: idx + 1,
+            text: (span?.innerText ?? labelParent?.innerText ?? '').trim(),
+            value: input.value ?? '',
+          });
+        });
+      }
+
+      result.push({ questionNumber, questionLine, marker, isRequired, inputType, options });
+    });
+
+    return result;
   });
 
-  const standardCount = await standardContainers.count();
-  const fallbackCount = await fallbackContainers.count();
-  const seenHandles = new WeakSet<Element>();
-  const containers: Array<{
-    handle: Awaited<ReturnType<typeof standardContainers.nth>>['elementHandle'] extends () => Promise<infer H>
-      ? H
-      : never;
-  }> = [];
-
-  for (let i = 0; i < standardCount; i++) {
-    const h = await standardContainers
-      .nth(i)
-      .elementHandle()
-      .catch(() => null);
-    if (h) {
-      const el = h.asElement();
-      if (el && !seenHandles.has(el)) {
-        seenHandles.add(el);
-        containers.push({ handle: h });
-      }
-    }
-  }
-  for (let i = 0; i < fallbackCount; i++) {
-    const h = await fallbackContainers
-      .nth(i)
-      .elementHandle()
-      .catch(() => null);
-    if (h) {
-      const el = h.asElement();
-      if (el && !seenHandles.has(el)) {
-        seenHandles.add(el);
-        containers.push({ handle: h });
-      }
-    }
-  }
-
-  for (const { handle } of containers) {
-    if (!handle) continue;
-    const container = handle; // elementHandle 자체를 locator 컨텍스트로 쓸 수 없으므로 evaluate 사용
-    const parsed = await page
-      .evaluate((el) => {
-        type Option = { index: number; text: string; value: string };
-        const text = (el as HTMLElement).innerText?.trim() ?? '';
-        if (!text) return null;
-
-        const firstLine =
-          text
-            .split('\n')
-            .map((l) => l.trim())
-            .find((l) => l.length > 0) ?? text.trim();
-
-        // 마커 추출: 가장 먼저 나타난 [..] 매칭
-        const m = text.match(/\[\s*(퀴즈|O\s*X|주관식|설문|일반|poll)\s*\]/i);
-        const marker = m ? `[${m[1].replace(/\s+/g, ' ').trim()}]` : null;
-
-        // 보기 추출: 다양한 패턴 시도
-        const options: Option[] = [];
-
-        // 패턴 A: ol > li label > span.col-start-2
-        const labelsA = el.querySelectorAll('ol li label');
-        if (labelsA.length > 0) {
-          for (let i = 0; i < labelsA.length; i++) {
-            const label = labelsA[i] as HTMLElement;
-            const input = label.querySelector('input[type="radio"]') as HTMLInputElement | null;
-            const span = label.querySelector('span.col-start-2, span') as HTMLElement | null;
-            options.push({
-              index: i + 1,
-              text: (span?.innerText ?? label.innerText ?? '').trim(),
-              value: input?.value ?? '',
-            });
-          }
-        }
-
-        // 패턴 B: input[type=radio]이 ol 바깥에 있을 때 - 텍스트 형제노드
-        if (options.length === 0) {
-          const radios = el.querySelectorAll('input[type="radio"]');
-          for (let i = 0; i < radios.length; i++) {
-            const radio = radios[i] as HTMLInputElement;
-            const parent = radio.closest('label, li, div') as HTMLElement | null;
-            const text = (parent?.innerText ?? parent?.textContent ?? '').trim();
-            options.push({ index: i + 1, text, value: radio.value ?? '' });
-          }
-        }
-
-        // 패턴 C: input은 없고 li/div에 텍스트만 - (주관식 가능성)
-        if (options.length === 0) {
-          const directTexts = el.querySelectorAll('ol > li, ul > li, .gap-3 > *');
-          for (let i = 0; i < directTexts.length; i++) {
-            const node = directTexts[i] as HTMLElement;
-            const t = (node.innerText ?? node.textContent ?? '').trim();
-            if (t) options.push({ index: i + 1, text: t, value: '' });
-          }
-        }
-
-        return { questionLine: firstLine, marker, options };
-      }, handle.asElement() ?? null)
-      .catch(() => null);
-
-    if (!parsed) continue;
-
-    const detected = detectMarker(`${parsed.marker ?? ''}\n${parsed.questionLine}`);
-    const finalMarker = detected.marker ?? parsed.marker;
-
-    questions.push({
-      questionText: parsed.questionLine,
-      options: parsed.options,
-      marker: finalMarker,
-      kind: detected.kind,
-    });
-  }
-
-  return questions;
+  return parsed.map((q) => ({
+    questionText: q.questionLine,
+    options: q.options,
+    marker: q.marker,
+    kind: markerKind(q.marker),
+    isRequired: q.isRequired,
+    inputType: q.inputType,
+    questionNumber: q.questionNumber,
+  }));
 }
 
 /**
@@ -352,12 +334,12 @@ function formatQuizResults(results: QuizResult[], _hasUnknown: boolean, _hasMult
 /**
  * 미등록 문제를 텔레그램 메시지 형식으로 포맷
  */
-function formatUnknownQuestions(questions: QuizQuestion[], results: QuizResult[]): string {
+function formatUnknownQuestions(questions: SurveyQuestion[], results: QuizResult[]): string {
   let message = '❓ 족보에 없는 퀴즈:\n\n';
 
   for (let i = 0; i < results.length; i++) {
     const result = results[i];
-    if (result.selectedIndex === null) {
+    if (result.selectedIndex === null && result.kind === 'quiz') {
       const q = questions[i];
       message += `Q${result.questionIndex}: ${q.questionText.substring(0, 100)}...\n`;
       for (const opt of q.options) {
@@ -379,6 +361,12 @@ type SeminarQuizResult = {
 /**
  * 세미나 퀴즈 처리 메인 함수
  * 설문참여 페이지에서 퀴즈를 감지하고 정답을 찾아 보고
+ *
+ * 자동 클릭 규칙:
+ *   - [퀴즈] 문항: 족보 정답 인덱스로 클릭 (족보 미매칭 시 스킵)
+ *   - 비퀴즈 필수(*) 문항: radio는 1번째, checkbox는 1번째만 클릭
+ *   - 비필수(*없음) 문항: 스킵
+ *   - 주관식: 족보에 있으면 입력
  */
 async function processSeminarQuiz(
   page: Page,
@@ -389,18 +377,28 @@ async function processSeminarQuiz(
   try {
     await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
 
-    // 다양한 마커 ([퀴즈]/[OX]/[주관식]/[설문] 등) 셀렉터 — span 버전 + 텍스트 버전
-    const markerSel = ':text-matches("\\\\[\\\\s*(퀴즈|O\\\\s*X|주관식|설문|일반|poll)\\\\s*\\\\]", "i")';
+    // 마커 또는 일반 설문 문항 감지
+    const markerSel = ':text-matches("\\[\\s*(퀴즈|O\\s*X|주관식|설문|일반|poll)\\s*\\]", "i")';
     const quizSelector = `.whitespace-pre-wrap:has(${markerSel})`;
     let isQuizVisible = false;
 
     for (let attempt = 1; attempt <= 3; attempt++) {
-      isQuizVisible = await page
+      // 마커 있는 [퀴즈] 문항 OR li[data-question-number] 형태의 설문 문항 중 하나라도 있으면 진행
+      const hasMarker = await page
         .locator(quizSelector)
         .first()
         .waitFor({ state: 'visible', timeout: 5000 })
         .then(() => true)
         .catch(() => false);
+
+      const hasSurveyItems = await page
+        .locator('li[data-question-number]')
+        .first()
+        .waitFor({ state: 'visible', timeout: 3000 })
+        .then(() => true)
+        .catch(() => false);
+
+      isQuizVisible = hasMarker || hasSurveyItems;
 
       if (isQuizVisible) {
         break;
@@ -416,8 +414,8 @@ async function processSeminarQuiz(
       }
     }
 
-    // 퀴즈 문제 파싱
-    const questions = await parseQuizQuestions(page);
+    // 설문 문항 파싱 (퀴즈/일반 모두 포함)
+    const questions = await parseAllSurveyQuestions(page);
 
     if (questions.length === 0) {
       const message = seminarName
@@ -437,20 +435,19 @@ async function processSeminarQuiz(
       let message = '📝 퀴즈 발견 (족보 비어있음):\n\n';
       for (let i = 0; i < questions.length; i++) {
         const q = questions[i];
-        message += `Q${i + 1}: ${q.questionText.substring(0, 100)}...\n`;
-        for (const opt of q.options) {
-          message += `  ${opt.index}. ${opt.text}\n`;
+        if (q.kind === 'quiz') {
+          message += `Q${i + 1}: ${q.questionText.substring(0, 100)}...\n`;
+          for (const opt of q.options) {
+            message += `  ${opt.index}. ${opt.text}\n`;
+          }
+          message += '\n';
         }
-        message += '\n';
       }
       await sendTelegram(message);
       return { success: true, hasQuizResult: false, message };
     }
 
-    // 각 문제에 대해 정답 찾기 (마커별 분기)
     // 채널 송신 자격: quiz ONLY ([퀴즈] 마커만)
-    // 제출 태스크는 별도로 모든 마커 박스([퀴즈]/[OX]/[주관식]/[설문]/[poll])를 처리한다.
-    // → processSeminarQuiz는 파싱까지만 담당하고, 실제 클릭·제출은 별도 태스크에서 한다.
     const CHANNEL_ELIGIBLE_KINDS: ReadonlySet<QuizQuestion['kind']> = new Set(['quiz']);
 
     const results: QuizResult[] = [];
@@ -465,27 +462,29 @@ async function processSeminarQuiz(
       let matchedKeyword: string | null = null;
       let multipleMatches: string[] | null = null;
 
-      // 모든 종류의 문항에 대해 족보 매칭 시도
-      const matchingKeywords = findMatchingKeywords(q.questionText, cheatsheet);
-      if (matchingKeywords.length === 0) {
-        _hasUnknown = true;
-      } else {
-        if (matchingKeywords.length > 1) {
-          _hasMultipleMatches = true;
-          multipleMatches = matchingKeywords;
-        }
-        const bestMatch = resolveBestKeywordMatch(q.questionText, q.options, cheatsheet);
-        if (bestMatch) {
-          matchedKeyword = bestMatch.keyword;
-          selectedIndex = bestMatch.option.index;
-          selectedText = bestMatch.option.text;
-        } else {
+      // [퀴즈] 문항만 족보 매칭
+      if (q.kind === 'quiz') {
+        const matchingKeywords = findMatchingKeywords(q.questionText, cheatsheet);
+        if (matchingKeywords.length === 0) {
           _hasUnknown = true;
+        } else {
+          if (matchingKeywords.length > 1) {
+            _hasMultipleMatches = true;
+            multipleMatches = matchingKeywords;
+          }
+          const bestMatch = resolveBestKeywordMatch(q.questionText, q.options, cheatsheet);
+          if (bestMatch) {
+            matchedKeyword = bestMatch.keyword;
+            selectedIndex = bestMatch.option.index;
+            selectedText = bestMatch.option.text;
+          } else {
+            _hasUnknown = true;
+          }
         }
       }
 
       results.push({
-        questionIndex: i + 1,
+        questionIndex: q.questionNumber > 0 ? q.questionNumber : i + 1,
         questionText: q.questionText,
         selectedIndex,
         selectedText,
@@ -496,51 +495,60 @@ async function processSeminarQuiz(
       });
     }
 
-    // 채널용 결과: 채널 자격이 있는 문항만 포함
+    // 채널용 결과: [퀴즈] 문항만
     const channelResults = results.filter((r) => CHANNEL_ELIGIBLE_KINDS.has(r.kind));
-
-    // 결과 메시지 생성 및 전송
-    // 채널 메시지는 [퀴즈] 문항만, ??? 대신 - 로 미해결 표시
     const resultMessage = formatQuizResults(channelResults, _hasUnknown, _hasMultipleMatches);
 
     // ── 자동 클릭·제출 ───────────────────────────────────────────────
-    // 모든 마커 종류([퀴즈]/[OX]/[설문]/[주관식] 등)의 문항을 처리
+    // 규칙:
+    //   - [퀴즈] 문항: 족보 정답 인덱스로 클릭 (족보 미매칭 시 스킵)
+    //   - 비퀴즈 필수(*) 문항: radio는 1번째, checkbox는 1번째만 클릭
+    //   - 비필수(*없음) 문항: 스킵
+    //   - 주관식: 족보에 있으면 입력
     for (let i = 0; i < questions.length; i++) {
       const q = questions[i];
       const result = results[i];
+      const qNum = q.questionNumber > 0 ? q.questionNumber : i + 1;
 
       await page.waitForTimeout(300); // UI 안정화
 
-      // 각 문항 영역 로케이터: questionText 근처의 .whitespace-pre-wrap 또는 .question_area
-      // 문제 텍스트 앞 30자로 영역 축소
-      const qKey = q.questionText
-        .substring(0, 30)
-        .replace(/[^\w가-힣]/g, '')
-        .trim();
-      const areaLocator = page
-        .locator(`.whitespace-pre-wrap:has-text("${qKey}"), .question_area:has-text("${qKey}")`)
-        .first();
-
+      // 문항 영역 로케이터: data-question-number 속성 활용
+      const areaLocator = page.locator(`li[data-question-number="${qNum}"]`).first();
       const hasArea = await areaLocator.count().catch(() => 0);
       const area = hasArea > 0 ? areaLocator : page.locator('body').first();
 
-      if (q.kind === 'subjective' && result.matchedKeyword) {
-        // 주관식: 족보 텍스트를 input[type=text]에 입력
-        const answerText = cheatsheet[result.matchedKeyword] ?? '';
-        if (answerText) {
-          const textInput = area.locator('input[type="text"], input[type="search"], textarea').first();
-          if ((await textInput.count()) > 0) {
-            await textInput.scrollIntoViewIfNeeded().catch(() => {});
-            await textInput.fill(answerText).catch(() => {});
-            console.log(`[seminar_quiz] 주관식 입력: Q${i + 1} → "${answerText}"`);
+      if (q.kind === 'quiz' && q.options.length > 0) {
+        // [퀴즈] 문항: 족보 정답으로 클릭 (미매칭 시 스킵)
+        if (result.selectedIndex !== null) {
+          const clicked = await clickOptionByIndex(page, area, result.selectedIndex, qNum);
+          if (!clicked) {
+            console.warn(`[seminar_quiz] Q${qNum} [퀴즈] 선택 실패 (index=${result.selectedIndex})`);
           }
+        } else {
+          console.warn(`[seminar_quiz] Q${qNum} [퀴즈] 족보 미매칭 - 선택 건너뜀`);
         }
       } else if (q.options.length > 0) {
-        // 객관식: 정답 인덱스가 있으면 클릭, 없으면 2번째 보기 클릭
-        const targetIndex = result.selectedIndex ?? 2; // 디폴트: 2번째
-        const clicked = await clickOptionByIndex(page, area, targetIndex, i + 1);
-        if (!clicked) {
-          console.warn(`[seminar_quiz] Q${i + 1} 선택 실패 (${q.marker ?? 'unknown'}, index=${targetIndex})`);
+        // 일반 설문 문항
+        if (!q.isRequired) {
+          // 필수 아닌 문항은 스킵
+          console.log(`[seminar_quiz] Q${qNum} 비필수 문항 스킵 (${q.marker ?? 'no-marker'})`);
+          continue;
+        }
+        // 필수 문항: radio/checkbox 모두 1번째 선택지만 클릭
+        if (q.inputType === 'checkbox') {
+          // 체크박스: 1번째만 체크
+          const checkbox = area.locator('input[type="checkbox"]:not(.sr-only)').first();
+          const cbCount = await checkbox.count().catch(() => 0);
+          if (cbCount > 0) {
+            await checkbox.check({ force: true, timeout: 2000 }).catch(() => {});
+            console.log(`[seminar_quiz] Q${qNum} 체크박스 1번째 체크`);
+          }
+        } else {
+          // 라디오: 1번째 선택
+          const clicked = await clickOptionByIndex(page, area, 1, qNum);
+          if (!clicked) {
+            console.warn(`[seminar_quiz] Q${qNum} 일반 문항 1번째 선택 실패`);
+          }
         }
       }
     }
@@ -592,13 +600,13 @@ async function processSeminarQuiz(
     }
     // ── 자동 클릭·제출 끝 ─────────────────────────────────────────────
 
-    // 미등록 문제가 있으면 관리자에게 상세 전송
+    // 미등록 [퀴즈] 문제가 있으면 관리자에게 상세 전송
     if (_hasUnknown) {
       const unknownMessage = formatUnknownQuestions(questions, results);
       await sendTelegram(unknownMessage);
     }
 
-    return { success: true, hasQuizResult: true, message: resultMessage };
+    return { success: true, hasQuizResult: channelResults.length > 0, message: resultMessage };
   } catch (e) {
     console.error('[seminar_quiz] 오류', e && typeof e === 'object' && 'stack' in e ? (e as Error).stack : e);
     const message = e instanceof Error ? e.message : String(e);

@@ -996,7 +996,9 @@ if (adminBot) {
     const isAdvancedSurvey = parts[1]?.toLowerCase() === 'advanced' || parts[1]?.toLowerCase() === '심화';
 
     if (!seminarId) {
-      return ctx.reply('사용법: /run_seminar_quiz <seminarId> [advanced]\n예) /run_seminar_quiz 12345\n     /run_seminar_quiz 12345 advanced');
+      return ctx.reply(
+        '사용법: /run_seminar_quiz <seminarId> [advanced]\n예) /run_seminar_quiz 12345\n     /run_seminar_quiz 12345 advanced',
+      );
     }
 
     const task = taskRegistry.getByName('run_seminar_quiz');

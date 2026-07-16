@@ -230,10 +230,7 @@ const runSeminarQuizTask: Task = {
     const page = await context.newPage();
     try {
       await utils.ensureLoggedIn({ page, context });
-      return await runSeminarQuizTaskModule.run(
-        { page, context },
-        { args: ctx.args ?? {} },
-      );
+      return await runSeminarQuizTaskModule.run({ page, context }, { args: ctx.args ?? {} });
     } finally {
       await browser.close();
     }
