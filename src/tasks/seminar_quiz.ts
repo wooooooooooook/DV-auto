@@ -377,6 +377,26 @@ async function processSeminarQuiz(
   try {
     await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
 
+    // '작성 중인 정보를 불러왔습니다' 초안 복원 다이얼로그 처리
+    // 이전에 작성 중이었던 설문이 있으면 이 다이얼로그가 먼저 뜸 → "닫기" 클릭
+    try {
+      await page.waitForSelector('[data-headlessui-state="open"]', { timeout: 3000 });
+      const draftDialogText = await page
+        .locator('[data-headlessui-state="open"]')
+        .first()
+        .innerText()
+        .catch(() => '');
+      if (draftDialogText.includes('작성 중인 정보')) {
+        const closeBtn = page.getByRole('button', { name: '닫기' }).first();
+        await closeBtn.waitFor({ state: 'visible', timeout: 2000 });
+        await closeBtn.click({ force: true });
+        console.log('[seminar_quiz] "작성 중인 정보를 불러왔습니다" 다이얼로그 닫기 완료');
+        await page.waitForTimeout(500);
+      }
+    } catch {
+      // 다이얼로그 없으면 정상 진행
+    }
+
     // 마커 또는 일반 설문 문항 감지
     const markerSel = ':text-matches("\\[\\s*(퀴즈|O\\s*X|주관식|설문|일반|poll)\\s*\\]", "i")';
     const quizSelector = `.whitespace-pre-wrap:has(${markerSel})`;
