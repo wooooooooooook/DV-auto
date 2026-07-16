@@ -553,7 +553,7 @@ async function processSeminarQuiz(
       }
     }
 
-    // 제출하기 버튼 클릭 및 dialog/alert 처리 자동 수락 등록
+    // 제출하기 버튼 클릭 및 native dialog/alert 처리 자동 수락 등록
     page.on('dialog', async (dialog) => {
       console.log(`[seminar_quiz] Dialog detected: [${dialog.type()}] "${dialog.message()}". Accepting...`);
       await dialog.accept().catch(() => {});
@@ -571,28 +571,48 @@ async function processSeminarQuiz(
       await submitBtn.scrollIntoViewIfNeeded().catch(() => {});
       await submitBtn.click({ force: true }).catch(() => {});
       console.log('[seminar_quiz] "제출하기" 버튼 클릭 완료');
-      await page.waitForTimeout(1500);
+      await page.waitForTimeout(1000);
     }
 
-    // "확인" 모달/알럿 처리 (레이어 팝업으로 뜬 경우도 대비)
+    // 헤드리스UI DOM 레이어 확인 다이얼로그 처리
+    // ("답변을 제출하시겠습니까?" 모달의 "확인" 버튼)
     const confirmBtn = page
-      .locator(':text-matches("확인|예", "i"):not([disabled]):not([style*="display:none"])')
+      .locator('[data-headlessui-state="open"] button.btn-primary, [role="dialog"] button.btn-primary')
       .first();
     const confirmVisible = await confirmBtn.isVisible({ timeout: 3000 }).catch(() => false);
     if (confirmVisible) {
       await confirmBtn.scrollIntoViewIfNeeded().catch(() => {});
       await confirmBtn.click({ force: true }).catch(() => {});
-      console.log('[seminar_quiz] 최종 "확인" 클릭 완료');
-      await page.waitForTimeout(2000);
+      console.log('[seminar_quiz] 설문제출 모달 "확인" 클릭 완료');
+    } else {
+      // 폴백: 텍스트로 찾기
+      const confirmBtnFallback = page.locator('button:text-is("확인"):not([disabled])').first();
+      const fallbackVisible = await confirmBtnFallback.isVisible({ timeout: 2000 }).catch(() => false);
+      if (fallbackVisible) {
+        await confirmBtnFallback.click({ force: true }).catch(() => {});
+        console.log('[seminar_quiz] 설문제출 모달 "확인" 클릭 완료 (fallback)');
+      }
     }
 
-    // 제출 완료 후 최종 화면 스크린샷 → 관리자에게 전송
+    // /outro 페이지로 이동 대기 (최대 10초)
     const baseDir = path.join(process.cwd(), 'screenshot');
     const submitShotPath = path.join(baseDir, `quiz_submit_${seminarName ?? 'unknown'}_${Date.now()}.png`);
     try {
       await fs.mkdir(baseDir, { recursive: true });
+      const navigatedToOutro = await page
+        .waitForURL('**/outro', { timeout: 10000 })
+        .then(() => true)
+        .catch(() => false);
+
+      if (navigatedToOutro) {
+        console.log('[seminar_quiz] /outro 페이지 이동 확인 완료');
+      } else {
+        console.warn('[seminar_quiz] /outro 이동 미확인, 현재 페이지 스크린샷 전송');
+      }
+
       await page.screenshot({ path: submitShotPath, fullPage: true }).catch(() => {});
-      await sendTelegram(`📋 세미나 설문/퀴즈 제출 완료\n${resultMessage}`, submitShotPath).catch(() => {});
+      const submitStatus = navigatedToOutro ? '✅ 설문 제출 완료' : '⚠️ 설문 제출 결과 불확실';
+      await sendTelegram(`📋 ${submitStatus}\n${resultMessage}`, submitShotPath).catch(() => {});
     } catch (_ssErr) {
       /* ignore */
     } finally {
