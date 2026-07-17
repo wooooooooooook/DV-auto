@@ -604,8 +604,11 @@ async function processSeminarQuiz(
       try {
         await confirmBtn.waitFor({ state: 'visible', timeout: 3000 });
       } catch {
-        // fallback: "확인" 텍스트를 가진 button이나 div
-        confirmBtn = page.locator('button:has-text("확인"), div:has-text("확인")').first();
+        // fallback: 정확히 "확인" 텍스트를 가진 button, div, span
+        confirmBtn = page
+          .locator('button, div, span')
+          .filter({ hasText: /^확인$/ })
+          .first();
         await confirmBtn.waitFor({ state: 'visible', timeout: 2000 });
       }
       await confirmBtn.click({ force: true });
