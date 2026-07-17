@@ -600,8 +600,14 @@ async function processSeminarQuiz(
       console.log('[seminar_quiz] 설문제출 확인 다이얼로그 감지');
 
       // "확인" 버튼: getByRole이 가장 신뢰성 높음
-      const confirmBtn = page.getByRole('button', { name: '확인' }).first();
-      await confirmBtn.waitFor({ state: 'visible', timeout: 3000 });
+      let confirmBtn = page.getByRole('button', { name: '확인' }).first();
+      try {
+        await confirmBtn.waitFor({ state: 'visible', timeout: 3000 });
+      } catch {
+        // fallback: "확인" 텍스트를 가진 button이나 div
+        confirmBtn = page.locator('button:has-text("확인"), div:has-text("확인")').first();
+        await confirmBtn.waitFor({ state: 'visible', timeout: 2000 });
+      }
       await confirmBtn.click({ force: true });
       console.log('[seminar_quiz] 설문제출 모달 "확인" 클릭 완료');
     } catch {
