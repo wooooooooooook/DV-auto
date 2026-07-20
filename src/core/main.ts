@@ -1,5 +1,4 @@
 import dns from 'dns';
-import https from 'https';
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
@@ -47,32 +46,6 @@ type PointConversionResponse = {
   data?: { available?: boolean; availablePlannedAt?: string; meridiem?: string };
 };
 
-function fetchPointConversionAvailability(): Promise<PointConversionResponse | null> {
-  return new Promise((resolve) => {
-    const req = https.get(POINT_CONVERSION_API_URL, { family: 4 }, (res) => {
-      let body = '';
-      res.on('data', (chunk) => (body += chunk));
-      res.on('end', () => {
-        try {
-          resolve(JSON.parse(body) as PointConversionResponse);
-        } catch (err) {
-          logger.warn('point conversion availability 응답 파싱 실패', err);
-          resolve(null);
-        }
-      });
-    });
-    req.on('error', (err) => {
-      logger.warn('point conversion availability 요청 실패', err);
-      resolve(null);
-    });
-    req.setTimeout(15_000, () => {
-      logger.warn('point conversion availability 요청 타임아웃');
-      req.destroy();
-      resolve(null);
-    });
-  });
-}
-
 function readConversionState(): boolean | null {
   try {
     const raw = fs.readFileSync(POINT_CONVERSION_STATE_FILE, 'utf8');
@@ -92,29 +65,76 @@ function writeConversionState(available: boolean): void {
   }
 }
 
+// 오늘 날짜를 "M월 D일" 포맷으로 반환 (availablePlannedAt과 비교)
+function getTodayKoreanString(): string {
+  const now = new Date();
+  // Asia/Seoul: UTC+9
+  const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const month = kst.getUTCMonth() + 1;
+  const day = kst.getUTCDate();
+  return `${month}월 ${day}일`;
+}
+
 async function checkAndNotifyPointConversion(): Promise<void> {
-  const response = await fetchPointConversionAvailability();
-  const available = response?.data?.available === true;
-  if (response === null || available === undefined) {
-    console.log('[point-conversion] API 응답 실패 또는 유효하지 않음');
-    return;
-  }
+  const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  try {
+    await utils.ensureLoggedIn({ page, context });
+    // 메인 페이지 로드 후 브라우저 컨텍스트에서 API 호출
+    await page
+      .goto('https://www.doctorville.co.kr/main', { waitUntil: 'domcontentloaded', timeout: 15000 })
+      .catch(() => {});
 
-  console.log(
-    `[point-conversion] available=${available}, plannedAt=${response?.data?.availablePlannedAt ?? ''}, meridiem=${response?.data?.meridiem ?? ''}`,
-  );
+    let response: PointConversionResponse | null = null;
+    try {
+      response = (await page.evaluate(async (apiUrl: string) => {
+        const res = await fetch(apiUrl, { credentials: 'include' });
+        const text = await res.text();
+        console.log(`[browser fetch] HTTP ${res.status}, body: ${text.slice(0, 300)}`);
+        if (!res.ok || !text) return null;
+        try {
+          return JSON.parse(text);
+        } catch {
+          return null;
+        }
+      }, POINT_CONVERSION_API_URL)) as PointConversionResponse | null;
+    } catch (err) {
+      console.log(`[point-conversion] browser evaluate 실패: ${(err as Error).message}`);
+    }
 
-  const prev = readConversionState();
-  if (prev === available) return; // 상태 변화 없으면 알림 안 보냄
+    if (!response || response.data === undefined) {
+      console.log('[point-conversion] API 응답 실패 또는 유효하지 않음');
+      return;
+    }
 
-  writeConversionState(available);
-  if (available) {
-    const message =
-      '네이버페이포인트 전환이 가능해졌습니다\nhttps://www.doctorville.co.kr/my/point/pointUseHistoryList';
-    await utils.sendNotificationToChannel(message);
-    logger.info('네이버페이포인트 전환 가능 - 공지방 알림 전송 완료');
-  } else {
-    logger.info('네이버페이포인트 전환 불가로 전환 (알림 없음)');
+    const available = response.data.available === true;
+    const plannedAt = response.data.availablePlannedAt ?? '';
+    const meridiem = response.data.meridiem ?? '';
+
+    console.log(`[point-conversion] available=${available}, plannedAt=${plannedAt}, meridiem=${meridiem}`);
+
+    // 수신한 날짜가 오늘과 불일치하면 오늘 태스크는 실행하지 않음
+    const todayStr = getTodayKoreanString();
+    if (plannedAt && plannedAt !== todayStr) {
+      console.log(`[point-conversion] 날짜 불일치 (오늘=${todayStr}, 응답=${plannedAt}) - 오늘 태스크 스킵`);
+      return;
+    }
+
+    const prev = readConversionState();
+    if (prev === available) return; // 상태 변화 없으면 알림 안 보냄
+
+    writeConversionState(available);
+    if (available) {
+      const message =
+        '네이버페이포인트 전환이 가능해졌습니다\nhttps://www.doctorville.co.kr/my/point/pointUseHistoryList';
+      await utils.sendNotificationToChannel(message);
+      logger.info('네이버페이포인트 전환 가능 - 공지방 알림 전송 완료');
+    } else {
+      logger.info('네이버페이포인트 전환 불가로 전환 (알림 없음)');
+    }
+  } finally {
+    await browser.close();
   }
 }
 
@@ -220,7 +240,7 @@ taskRegistry.registerTask(applySeminarExtraTask);
 scheduler.scheduleTaskCron(applySeminarExtraTask);
 
 // --- Point conversion availability checker (every minute, 09:00-17:00) ---
-const POINT_CONVERSION_CHECK_CRON = '*/1 9-16 * * *';
+const POINT_CONVERSION_CHECK_CRON = '*/2 9-16 * * *';
 const pointConversionCheckTask: Task = {
   name: 'point_conversion_check',
   schedule: POINT_CONVERSION_CHECK_CRON,
