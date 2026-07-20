@@ -49,11 +49,13 @@ async function loadCheatsheet(): Promise<Cheatsheet> {
 /**
  * 문제 텍스트에서 족보 키워드 검색
  * 여러 개가 매칭되면 모두 반환
+ * 양쪽을 normalizeForMatch로 정규화 후 비교 (공백, 특수문자, * 등 무시)
  */
 export function findMatchingKeywords(questionText: string, cheatsheet: Cheatsheet): string[] {
+  const normalizedQuestion = normalizeForMatch(questionText);
   const matches: string[] = [];
   for (const keyword of Object.keys(cheatsheet)) {
-    if (questionText.includes(keyword)) {
+    if (normalizedQuestion.includes(normalizeForMatch(keyword))) {
       matches.push(keyword);
     }
   }
@@ -91,8 +93,8 @@ export function findOptionByAnswer(
 function normalizeForMatch(text: string): string {
   return text
     .normalize('NFKC')
-    .replace(/\s+/g, ' ')
-    .replace(/[.,!?"'`~·•…]/g, '')
+    .replace(/\s+/g, '')
+    .replace(/[.,!?"'`~·•…*]/g, '')
     .trim()
     .toLowerCase();
 }
@@ -590,7 +592,7 @@ async function processSeminarQuiz(
       await submitBtn.scrollIntoViewIfNeeded().catch(() => {});
       await submitBtn.click({ force: true }).catch(() => {});
       console.log('[seminar_quiz] "제출하기" 버튼 클릭 완료');
-      await page.waitForTimeout(5000); // 제출 처리 대기 5초
+      await page.waitForTimeout(20000); // 제출 처리 대기 20초 (확인 버튼 대기용)
     }
 
     // 헤드리스UI 확인 다이얼로그 대기 및 클릭
@@ -635,7 +637,10 @@ async function processSeminarQuiz(
 
       await page.screenshot({ path: submitShotPath, fullPage: true }).catch(() => {});
       const submitStatus = navigatedToOutro ? '✅ 설문 제출 완료' : '⚠️ 설문 제출 결과 불확실';
-      await sendTelegram(`📋 ${submitStatus}\n${resultMessage}`, submitShotPath).catch(() => {});
+      const surveyUrl = page.url();
+      await sendTelegram(`📋 ${submitStatus}\n${resultMessage}\n\n🔗 설문 URL: ${surveyUrl}`, submitShotPath).catch(
+        () => {},
+      );
     } catch (_ssErr) {
       /* ignore */
     } finally {
