@@ -65,13 +65,13 @@ function writeConversionState(available: boolean): void {
   }
 }
 
-// 오늘 날짜를 "M월 D일" 포맷으로 반환 (availablePlannedAt과 비교)
+// 오늘 날짜를 "MM월 DD일" 포맷으로 반환 (availablePlannedAt과 비교, 예: "07월 20일")
 function getTodayKoreanString(): string {
   const now = new Date();
   // Asia/Seoul: UTC+9
   const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
-  const month = kst.getUTCMonth() + 1;
-  const day = kst.getUTCDate();
+  const month = String(kst.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(kst.getUTCDate()).padStart(2, '0');
   return `${month}월 ${day}일`;
 }
 
