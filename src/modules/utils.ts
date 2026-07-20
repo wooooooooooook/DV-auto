@@ -307,15 +307,18 @@ async function ensureLoggedIn({ page, context }: { page: Page; context: BrowserC
     await safeGoto(page, LOGIN_URL);
   }
 
+  // 쿠키/로컬스토리지를 네비게이션 이후에 로드하고, 쿠키 적용을 위해 페이지 리로드
+  let cookiesLoaded = false;
   try {
     await loadCookies(context).catch(() => {});
+    await loadLocalStorage(page, LOGIN_URL).catch(() => {});
+    cookiesLoaded = true;
   } catch (_e) {
     /* ignore */
   }
-  try {
-    await loadLocalStorage(page, LOGIN_URL).catch(() => {});
-  } catch (_e) {
-    /* ignore */
+  if (cookiesLoaded) {
+    // 쿠키를 새로 넣었으면 페이지에 반영하기 위해 리로드
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
   }
 
   const loginButtonCount = await page.locator(':text("로그인")').count();
