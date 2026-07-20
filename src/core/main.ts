@@ -95,7 +95,14 @@ function writeConversionState(available: boolean): void {
 async function checkAndNotifyPointConversion(): Promise<void> {
   const response = await fetchPointConversionAvailability();
   const available = response?.data?.available === true;
-  if (response === null || available === undefined) return;
+  if (response === null || available === undefined) {
+    console.log('[point-conversion] API 응답 실패 또는 유효하지 않음');
+    return;
+  }
+
+  console.log(
+    `[point-conversion] available=${available}, plannedAt=${response?.data?.availablePlannedAt ?? ''}, meridiem=${response?.data?.meridiem ?? ''}`,
+  );
 
   const prev = readConversionState();
   if (prev === available) return; // 상태 변화 없으면 알림 안 보냄
