@@ -46,6 +46,9 @@ type PointConversionResponse = {
   data?: { available?: boolean; availablePlannedAt?: string; meridiem?: string };
 };
 
+let isFastPolling = false;
+let fastPollingInterval: NodeJS.Timeout | null = null;
+
 function readConversionState(): boolean | null {
   try {
     const raw = fs.readFileSync(POINT_CONVERSION_STATE_FILE, 'utf8');
@@ -75,7 +78,22 @@ function getTodayKoreanString(): string {
   return `${month}월 ${day}일`;
 }
 
+// 현재 서울 시간이 오후 5시(17:00 KST) 이상인지 확인
+function isAfterFivePMKST(): boolean {
+  const now = new Date();
+  const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  return kst.getUTCHours() >= 17;
+}
+
 async function checkAndNotifyPointConversion(): Promise<void> {
+  // 서울 시간 17시 이후면 고속 폴링 해제
+  if (isAfterFivePMKST()) {
+    if (isFastPolling) {
+      console.log('[point-conversion] 17:00 KST 도달. 고속 폴링 해제');
+      stopFastPolling();
+    }
+  }
+
   const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
   const context = await browser.newContext();
   const page = await context.newPage();
@@ -114,27 +132,63 @@ async function checkAndNotifyPointConversion(): Promise<void> {
 
     console.log(`[point-conversion] available=${available}, plannedAt=${plannedAt}, meridiem=${meridiem}`);
 
-    // 수신한 날짜가 오늘과 불일치하면 오늘 태스크는 실행하지 않음
+    // 수신한 날짜가 오늘과 일치하는지 확인
     const todayStr = getTodayKoreanString();
-    if (plannedAt && plannedAt !== todayStr) {
-      console.log(`[point-conversion] 날짜 불일치 (오늘=${todayStr}, 응답=${plannedAt}) - 오늘 태스크 스킵`);
-      return;
+    const isToday = plannedAt === todayStr;
+
+    if (!isToday) {
+      console.log(`[point-conversion] 날짜 불일치 (오늘=${todayStr}, 응답=${plannedAt})`);
+      if (isFastPolling) {
+        console.log('[point-conversion] 날짜 불일치로 고속 폴링 해제');
+        stopFastPolling();
+      }
+    } else {
+      // 오늘 날짜 일치하면 2분 주기 고속 폴링 활성화 (아직 안 켜진 경우)
+      if (!isFastPolling && !isAfterFivePMKST()) {
+        console.log(`[point-conversion] 오늘 예정 확인 (${plannedAt}). 2분 주기 고속 폴링 시작.`);
+        startFastPolling();
+      }
     }
 
     const prev = readConversionState();
     if (prev === available) return; // 상태 변화 없으면 알림 안 보냄
 
     writeConversionState(available);
-    if (available) {
-      const message =
-        '네이버페이포인트 전환이 가능해졌습니다\nhttps://www.doctorville.co.kr/my/point/pointUseHistoryList';
-      await utils.sendNotificationToChannel(message);
-      logger.info('네이버페이포인트 전환 가능 - 공지방 알림 전송 완료');
-    } else {
-      logger.info('네이버페이포인트 전환 불가로 전환 (알림 없음)');
+    if (prev !== null) {
+      if (available) {
+        const message =
+          '네이버페이포인트 전환이 가능해졌습니다\nhttps://www.doctorville.co.kr/my/point/pointUseHistoryList';
+        await utils.sendNotificationToChannel(message);
+        logger.info('네이버페이포인트 전환 가능 - 공지방 알림 전송 완료');
+      } else {
+        const message = `네이버페이포인트 전환 마감되었습니다. 다음 전환 가능 예정: ${plannedAt} ${meridiem}`;
+        await utils.sendNotificationToChannel(message);
+        logger.info('네이버페이포인트 전환 마감 - 공지방 알림 전송 완료');
+      }
     }
   } finally {
     await browser.close();
+  }
+}
+
+function startFastPolling(): void {
+  isFastPolling = true;
+  if (fastPollingInterval) clearInterval(fastPollingInterval);
+  fastPollingInterval = setInterval(
+    () => {
+      checkAndNotifyPointConversion().catch((err) => {
+        logger.error('point_conversion_check 고속 폴링 에러:', err);
+      });
+    },
+    2 * 60 * 1000,
+  ); // 2분 간격
+}
+
+function stopFastPolling(): void {
+  isFastPolling = false;
+  if (fastPollingInterval) {
+    clearInterval(fastPollingInterval);
+    fastPollingInterval = null;
   }
 }
 
@@ -239,8 +293,8 @@ const applySeminarExtraTask: Task = {
 taskRegistry.registerTask(applySeminarExtraTask);
 scheduler.scheduleTaskCron(applySeminarExtraTask);
 
-// --- Point conversion availability checker (every minute, 09:00-17:00) ---
-const POINT_CONVERSION_CHECK_CRON = '*/2 9-16 * * *';
+// --- Point conversion availability checker (hourly 09-16 KST, today일 때 2분 고속 폴링) ---
+const POINT_CONVERSION_CHECK_CRON = '0 9-16 * * *';
 const pointConversionCheckTask: Task = {
   name: 'point_conversion_check',
   schedule: POINT_CONVERSION_CHECK_CRON,
