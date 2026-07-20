@@ -207,12 +207,10 @@ const applySeminarExtraTask: Task = {
     const page = await context.newPage();
     try {
       await utils.ensureLoggedIn({ page, context });
-      const result = await applySeminarTask.run(
+      return await applySeminarTask.run(
         { page, context },
         { notifyNewSeminarsToChannel: true, notifyNewSeminarsToTelegram: true, silentIfNoNew: true },
       );
-      await checkAndNotifyPointConversion();
-      return result;
     } finally {
       await browser.close();
     }
@@ -220,6 +218,19 @@ const applySeminarExtraTask: Task = {
 };
 taskRegistry.registerTask(applySeminarExtraTask);
 scheduler.scheduleTaskCron(applySeminarExtraTask);
+
+// --- Point conversion availability checker (every minute, 09:00-17:00) ---
+const POINT_CONVERSION_CHECK_CRON = '*/1 9-16 * * *';
+const pointConversionCheckTask: Task = {
+  name: 'point_conversion_check',
+  schedule: POINT_CONVERSION_CHECK_CRON,
+  timezone: TIMEZONE,
+  run: async () => {
+    await checkAndNotifyPointConversion();
+  },
+};
+taskRegistry.registerTask(pointConversionCheckTask);
+scheduler.scheduleTaskCron(pointConversionCheckTask);
 
 const applySeminarTaskStandalone: Task = {
   name: 'apply_seminar',
