@@ -1,4 +1,7 @@
 import dns from 'dns';
+import https from 'https';
+import fs from 'fs';
+import path from 'path';
 import dotenv from 'dotenv';
 import { chromium } from 'playwright';
 import * as scheduler from './scheduler';
@@ -35,6 +38,78 @@ const APPLY_SEMINAR_EXTRA_CRON = '*/10 6-23 * * *';
 const LUNCH_MONITOR_CRON = '0 11 * * *';
 const DINNER_MONITOR_CRON = '0 16 * * *';
 const MONITOR_RESUME_DURATION_HOURS = 5;
+
+// --- NaverPay point conversion availability checker ---
+const POINT_CONVERSION_API_URL = 'https://api.doctorville.co.kr/api/point/conversion/availability';
+const POINT_CONVERSION_STATE_FILE = path.join(process.cwd(), 'storage', 'point_conversion_state.json');
+
+type PointConversionResponse = {
+  data?: { available?: boolean; availablePlannedAt?: string; meridiem?: string };
+};
+
+function fetchPointConversionAvailability(): Promise<PointConversionResponse | null> {
+  return new Promise((resolve) => {
+    const req = https.get(POINT_CONVERSION_API_URL, { family: 4 }, (res) => {
+      let body = '';
+      res.on('data', (chunk) => (body += chunk));
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(body) as PointConversionResponse);
+        } catch (err) {
+          logger.warn('point conversion availability 응답 파싱 실패', err);
+          resolve(null);
+        }
+      });
+    });
+    req.on('error', (err) => {
+      logger.warn('point conversion availability 요청 실패', err);
+      resolve(null);
+    });
+    req.setTimeout(15_000, () => {
+      logger.warn('point conversion availability 요청 타임아웃');
+      req.destroy();
+      resolve(null);
+    });
+  });
+}
+
+function readConversionState(): boolean | null {
+  try {
+    const raw = fs.readFileSync(POINT_CONVERSION_STATE_FILE, 'utf8');
+    const parsed = JSON.parse(raw) as { lastAvailable?: boolean };
+    return typeof parsed.lastAvailable === 'boolean' ? parsed.lastAvailable : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeConversionState(available: boolean): void {
+  try {
+    fs.mkdirSync(path.dirname(POINT_CONVERSION_STATE_FILE), { recursive: true });
+    fs.writeFileSync(POINT_CONVERSION_STATE_FILE, JSON.stringify({ lastAvailable: available }, null, 2));
+  } catch (err) {
+    logger.warn('point conversion state 저장 실패', err);
+  }
+}
+
+async function checkAndNotifyPointConversion(): Promise<void> {
+  const response = await fetchPointConversionAvailability();
+  const available = response?.data?.available === true;
+  if (response === null || available === undefined) return;
+
+  const prev = readConversionState();
+  if (prev === available) return; // 상태 변화 없으면 알림 안 보냄
+
+  writeConversionState(available);
+  if (available) {
+    const message =
+      '네이버페이포인트 전환이 가능해졌습니다\nhttps://www.doctorville.co.kr/my/point/pointUseHistoryList';
+    await utils.sendNotificationToChannel(message);
+    logger.info('네이버페이포인트 전환 가능 - 공지방 알림 전송 완료');
+  } else {
+    logger.info('네이버페이포인트 전환 불가로 전환 (알림 없음)');
+  }
+}
 
 function getStartHourFromCron(cronExpr: string): number | null {
   const parts = cronExpr.trim().split(/\s+/);
@@ -125,10 +200,12 @@ const applySeminarExtraTask: Task = {
     const page = await context.newPage();
     try {
       await utils.ensureLoggedIn({ page, context });
-      return await applySeminarTask.run(
+      const result = await applySeminarTask.run(
         { page, context },
         { notifyNewSeminarsToChannel: true, notifyNewSeminarsToTelegram: true, silentIfNoNew: true },
       );
+      await checkAndNotifyPointConversion();
+      return result;
     } finally {
       await browser.close();
     }
