@@ -585,6 +585,13 @@ function checkAndResumeTasks(): void {
   }
 }
 
+// Boot kick: cover the gap between app start and the next point-conversion cron tick.
+// The hourly `*/1 9-16` cron is the canonical schedule; this ensures we don't sit idle
+// for up to 59 minutes after a restart.
+checkAndNotifyPointConversion().catch((err) => {
+  logger.error('Startup point-conversion check failed:', err);
+});
+
 checkAndResumeTasks();
 
 // Launch the Telegram bot
