@@ -582,6 +582,7 @@ async function processSeminarQuiz(
 
     // 제출 버튼 탐지·클릭
     await page.waitForTimeout(1000);
+    const initialUrl = page.url(); // 초기 설문 URL (세미나주소) 보존
     const submitBtn = page
       .locator(
         'input[type="submit"].btn-primary, button:text-matches("제출하기|설문완료|응답완료", "i"):not([disabled])',
@@ -592,31 +593,43 @@ async function processSeminarQuiz(
       await submitBtn.scrollIntoViewIfNeeded().catch(() => {});
       await submitBtn.click({ force: true }).catch(() => {});
       console.log('[seminar_quiz] "제출하기" 버튼 클릭 완료');
-      await page.waitForTimeout(20000); // 제출 처리 대기 20초 (확인 버튼 대기용)
     }
 
-    // 헤드리스UI 확인 다이얼로그 대기 및 클릭
-    // 다이얼로그는 #headlessui-portal-root 포탈에 렌더링되므로 waitForSelector로 출현 대기
+    // 제출하기 클릭 후 모달/다이얼로그 및 페이지 이동 대기
+    // 다이얼로그(HeadlessUI 포탈 또는 DOM) 출현 또는 /outro 이동 대기
     try {
-      await page.waitForSelector('[data-headlessui-state="open"]', { timeout: 5000 });
-      console.log('[seminar_quiz] 설문제출 확인 다이얼로그 감지');
+      const modalOrOutro = await Promise.race([
+        page.waitForSelector('[data-headlessui-state="open"]', { timeout: 10000 }).then(() => 'modal' as const),
+        page
+          .waitForSelector('button:text-matches("^확인$", "i")', { timeout: 10000 })
+          .then(() => 'confirm_btn' as const),
+        page.waitForURL('**/outro', { timeout: 10000 }).then(() => 'outro' as const),
+      ]).catch(() => null);
 
-      // "확인" 버튼: getByRole이 가장 신뢰성 높음
-      let confirmBtn = page.getByRole('button', { name: '확인' }).first();
-      try {
-        await confirmBtn.waitFor({ state: 'visible', timeout: 3000 });
-      } catch {
-        // fallback: 정확히 "확인" 텍스트를 가진 button, div, span
-        confirmBtn = page
-          .locator('button, div, span')
-          .filter({ hasText: /^확인$/ })
-          .first();
-        await confirmBtn.waitFor({ state: 'visible', timeout: 2000 });
+      console.log(`[seminar_quiz] 제출 후 상태 감지: ${modalOrOutro ?? 'timeout/none'}`);
+
+      if (modalOrOutro === 'modal' || modalOrOutro === 'confirm_btn') {
+        // "확인" 버튼 탐지 및 클릭
+        let confirmBtn = page.getByRole('button', { name: '확인' }).first();
+        let isConfirmVisible = await confirmBtn.isVisible().catch(() => false);
+
+        if (!isConfirmVisible) {
+          confirmBtn = page
+            .locator('button, div, span, a')
+            .filter({ hasText: /^확인$/ })
+            .first();
+          isConfirmVisible = await confirmBtn.isVisible().catch(() => false);
+        }
+
+        if (isConfirmVisible) {
+          await confirmBtn.click({ force: true });
+          console.log('[seminar_quiz] 설문제출 모달 "확인" 클릭 완료');
+        } else {
+          console.warn('[seminar_quiz] 모달 감지되었으나 "확인" 버튼 탐지 실패');
+        }
       }
-      await confirmBtn.click({ force: true });
-      console.log('[seminar_quiz] 설문제출 모달 "확인" 클릭 완료');
-    } catch {
-      console.warn('[seminar_quiz] 설문제출 확인 다이얼로그 미감지 또는 "확인" 클릭 실패');
+    } catch (e) {
+      console.warn('[seminar_quiz] 제출 후 모달/다이얼로그 처리 중 예외 발생:', e);
     }
 
     // /outro 페이지로 이동 대기 (최대 10초)
@@ -637,8 +650,8 @@ async function processSeminarQuiz(
 
       await page.screenshot({ path: submitShotPath, fullPage: true }).catch(() => {});
       const submitStatus = navigatedToOutro ? '✅ 설문 제출 완료' : '⚠️ 설문 제출 결과 불확실';
-      const surveyUrl = page.url();
-      await sendTelegram(`📋 ${submitStatus}\n${resultMessage}\n\n🔗 설문 URL: ${surveyUrl}`, submitShotPath).catch(
+      // outro 주소가 아닌 initialUrl(세미나주소)을 전송
+      await sendTelegram(`📋 ${submitStatus}\n${resultMessage}\n\n🔗 설문 URL: ${initialUrl}`, submitShotPath).catch(
         () => {},
       );
     } catch (_ssErr) {
