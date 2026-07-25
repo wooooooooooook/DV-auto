@@ -18,9 +18,13 @@ async function run({ page, context }: { page: Page; context: BrowserContext }) {
     const needsLogin = currentUrl.includes('/member/login');
 
     if (!needsLogin) {
-      // 이미 로그인되어 있음
-      await safeGoto(page, TARGET_PAGE, { waitUntil: 'load', timeout: 30000 }, 2);
-      await page.screenshot({ path: 'screenshot/login_success.png' }).catch(() => {});
+      // 이미 로그인되어 있음 — main 이동 실패는 로그인 판단과 무관
+      try {
+        await safeGoto(page, TARGET_PAGE, { waitUntil: 'load', timeout: 30000 }, 2);
+        await page.screenshot({ path: 'screenshot/login_success.png' }).catch(() => {});
+      } catch (navErr) {
+        console.warn('main 페이지 이동 실패 (로그인 성공 상태 유지):', (navErr as Error).message);
+      }
       await saveCookies(context);
       await saveLocalStorage(page).catch(() => {});
       return { success: true, message: '로그인 성공했습니다. (이미 로그인 됨)' };
@@ -60,8 +64,13 @@ async function run({ page, context }: { page: Page; context: BrowserContext }) {
       return { success: false, message: `로그인 실패 (스크린샷: ${shot})`, imagePath: shot };
     }
 
-    await safeGoto(page, TARGET_PAGE, { waitUntil: 'load', timeout: 30000 }, 2);
-    await page.screenshot({ path: 'screenshot/login_success.png' }).catch(() => {});
+    // main 이동 실패는 로그인 판단과 무관
+    try {
+      await safeGoto(page, TARGET_PAGE, { waitUntil: 'load', timeout: 30000 }, 2);
+      await page.screenshot({ path: 'screenshot/login_success.png' }).catch(() => {});
+    } catch (navErr) {
+      console.warn('main 페이지 이동 실패 (로그인 성공 상태 유지):', (navErr as Error).message);
+    }
     await saveCookies(context);
     await saveLocalStorage(page).catch(() => {});
     return { success: true, message: '로그인 성공했습니다.' };
