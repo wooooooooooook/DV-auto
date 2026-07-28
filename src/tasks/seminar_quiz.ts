@@ -650,10 +650,12 @@ async function processSeminarQuiz(
 
       await page.screenshot({ path: submitShotPath, fullPage: true }).catch(() => {});
       const submitStatus = navigatedToOutro ? '✅ 설문 제출 완료' : '⚠️ 설문 제출 결과 불확실';
-      // outro 주소가 아닌 initialUrl(세미나주소)을 전송
-      await sendTelegram(`📋 ${submitStatus}\n${resultMessage}\n\n🔗 설문 URL: ${initialUrl}`, submitShotPath).catch(
-        () => {},
-      );
+      // 세미나 ID가 포함된 세미나 페이지 URL을 사용
+      const seminarPageUrl = seminarId ? `https://m.doctorville.co.kr/cme/seminar/${seminarId}` : initialUrl;
+      await sendTelegram(
+        `📋 ${submitStatus}\n${resultMessage}\n\n🔗 세미나 URL: ${seminarPageUrl}`,
+        submitShotPath,
+      ).catch(() => {});
     } catch (_ssErr) {
       /* ignore */
     } finally {
