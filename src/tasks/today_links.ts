@@ -246,18 +246,82 @@ async function findAnswersByCheatsheet(page: PlaywrightRunArgs['page']): Promise
   }
 }
 
-function getTodayDateStrings() {
-  const opts = { timeZone: 'Asia/Seoul' as const };
+function parseTargetDate(input?: string): Date {
   const now = new Date();
-  const month = now.toLocaleDateString('en-US', { month: 'numeric', ...opts });
-  const day = now.toLocaleDateString('en-US', { day: 'numeric', ...opts });
-  const iso = now.toLocaleDateString('en-CA', opts);
+  if (!input) return now;
 
-  const yesterday = new Date(now);
+  const trimmed = input.trim().toLowerCase();
+  if (trimmed === 'today' || trimmed === '오늘') {
+    return now;
+  }
+  if (trimmed === 'tomorrow' || trimmed === '내일') {
+    const d = new Date(now);
+    d.setDate(d.getDate() + 1);
+    return d;
+  }
+  if (trimmed === 'yesterday' || trimmed === '어제') {
+    const d = new Date(now);
+    d.setDate(d.getDate() - 1);
+    return d;
+  }
+  if (trimmed === '모레') {
+    const d = new Date(now);
+    d.setDate(d.getDate() + 2);
+    return d;
+  }
+
+  // YYYY-MM-DD 또는 YYYY/MM/DD 또는 YYYY.MM.DD 또는 YYYYMMDD
+  const ymdMatch = trimmed.match(/^(\d{4})[-/.]?(\d{1,2})[-/.]?(\d{1,2})$/);
+  if (ymdMatch) {
+    const year = parseInt(ymdMatch[1], 10);
+    const month = parseInt(ymdMatch[2], 10) - 1;
+    const day = parseInt(ymdMatch[3], 10);
+    return new Date(year, month, day, 12, 0, 0);
+  }
+
+  // MM-DD 또는 M/D 또는 MM.DD
+  const mdMatch = trimmed.match(/^(\d{1,2})[-/.](\d{1,2})$/);
+  if (mdMatch) {
+    const currentYear = now.getFullYear();
+    const month = parseInt(mdMatch[1], 10) - 1;
+    const day = parseInt(mdMatch[2], 10);
+    return new Date(currentYear, month, day, 12, 0, 0);
+  }
+
+  // MMDD (4자리)
+  const mmddMatch = trimmed.match(/^(\d{2})(\d{2})$/);
+  if (mmddMatch) {
+    const currentYear = now.getFullYear();
+    const month = parseInt(mmddMatch[1], 10) - 1;
+    const day = parseInt(mmddMatch[2], 10);
+    return new Date(currentYear, month, day, 12, 0, 0);
+  }
+
+  const parsed = new Date(input);
+  if (!isNaN(parsed.getTime())) {
+    return parsed;
+  }
+
+  return now;
+}
+
+function getTodayDateStrings(customDateInput?: string) {
+  const opts = { timeZone: 'Asia/Seoul' as const };
+  const targetDate = parseTargetDate(customDateInput);
+  const now = new Date();
+
+  const month = targetDate.toLocaleDateString('en-US', { month: 'numeric', ...opts });
+  const day = targetDate.toLocaleDateString('en-US', { day: 'numeric', ...opts });
+  const iso = targetDate.toLocaleDateString('en-CA', opts);
+
+  const yesterday = new Date(targetDate);
   yesterday.setDate(yesterday.getDate() - 1);
   const yesterdayIso = yesterday.toLocaleDateString('en-CA', opts);
 
-  return { todayString: `${month}/${day}`, isoDate: iso, yesterdayIso };
+  const nowIso = now.toLocaleDateString('en-CA', opts);
+  const isCustomDate = Boolean(customDateInput && iso !== nowIso);
+
+  return { todayString: `${month}/${day}`, isoDate: iso, yesterdayIso, isCustomDate };
 }
 
 function getStoredNewSeminars(isoDate: string, yesterdayIso: string): StoredNewSeminars['seminars'] {
@@ -365,10 +429,14 @@ async function collectQuizInfo(page: PlaywrightRunArgs['page']): Promise<QuizInf
   }
 }
 
-async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Promise<SeminarMessageResult> {
-  const { todayString, isoDate } = getTodayDateStrings();
+async function collectTodaySeminarMessage(
+  page: PlaywrightRunArgs['page'],
+  customDateInput?: string,
+): Promise<SeminarMessageResult> {
+  const { todayString, isoDate, isCustomDate } = getTodayDateStrings(customDateInput);
   const lunchSeminarIds: string[] = [];
   const dinnerSeminarIds: string[] = [];
+  const seminarTitlePrefix = isCustomDate ? `[${todayString}]` : '오늘의';
 
   try {
     await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'domcontentloaded', timeout: 30000 }, 1);
@@ -428,7 +496,7 @@ async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Prom
 
     if (!parsedSeminars || parsedSeminars.length === 0) {
       return {
-        message: '<b>오늘의 세미나:</b> 오늘은 세미나가 없습니다.',
+        message: `<b>${seminarTitlePrefix} 세미나:</b> 세미나가 없습니다.`,
         date: isoDate,
         lunchSeminarIds: [],
         dinnerSeminarIds: [],
@@ -483,7 +551,7 @@ async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Prom
     }
 
     if (lunchSeminars.length > 0 || dinnerSeminars.length > 0) {
-      let message = `<b>오늘의 세미나 리스트:</b>\n`;
+      let message = `<b>${seminarTitlePrefix} 세미나 리스트:</b>\n`;
 
       if (lunchSeminars.length > 0) {
         message += `🍴 <b>[점심 세미나]</b>\n- `;
@@ -502,7 +570,7 @@ async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Prom
       };
     }
     return {
-      message: '<b>오늘의 세미나 리스트:</b> 오늘은 세미나가 없습니다.',
+      message: `<b>${seminarTitlePrefix} 세미나 리스트:</b> 세미나가 없습니다.`,
       date: isoDate,
       lunchSeminarIds: [],
       dinnerSeminarIds: [],
@@ -514,7 +582,7 @@ async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Prom
       _e && typeof _e === 'object' && 'stack' in _e ? (_e as Error).stack : _e,
     );
     return {
-      message: `<b>오늘의 세미나 확인 실패:</b> ${escapeHtml(message)}`,
+      message: `<b>${seminarTitlePrefix} 세미나 확인 실패:</b> ${escapeHtml(message)}`,
       date: isoDate,
       lunchSeminarIds: [],
       dinnerSeminarIds: [],
@@ -564,6 +632,8 @@ export type TodayLinksFormatInput = {
   seminarMessage: SeminarMessageResult | null;
   storedNewSeminars: StoredNewSeminars['seminars'];
   pointConversionInfo: PointConversionInfo | null;
+  targetDate?: string;
+  isCustomDate?: boolean;
 };
 
 export type TodayLinksFormattedResult = {
@@ -579,10 +649,15 @@ export type TodayLinksFormattedResult = {
   };
 };
 
-export function formatTodayLinksBroadcast(input: TodayLinksFormatInput): TodayLinksFormattedResult {
-  const { quizInfo, seminarMessage, storedNewSeminars, pointConversionInfo } = input;
+function formatTodayLinksBroadcast(input: TodayLinksFormatInput): TodayLinksFormattedResult {
+  const { quizInfo, seminarMessage, storedNewSeminars, pointConversionInfo, targetDate, isCustomDate } = input;
 
-  let message = '✨ <b>출석체크:</b> https://m.doctorville.co.kr/mypage/attendance\n\n';
+  let message = '';
+  if (isCustomDate && targetDate) {
+    message += `📅 <b>[${escapeHtml(targetDate)} 링크 및 세미나]</b>\n\n`;
+  }
+
+  message += '✨ <b>출석체크:</b> https://m.doctorville.co.kr/mypage/attendance\n\n';
 
   let quizMessage = '오늘은 퀴즈가 없습니다.';
   if (quizInfo?.link) {
@@ -651,12 +726,20 @@ https://t.me/+J1UGmvLA9jU4NjQ1`;
   return { message, options };
 }
 
-async function run({ page }: PlaywrightRunArgs) {
+async function run({ page, args }: PlaywrightRunArgs, taskOptions?: Record<string, unknown>) {
   try {
+    const inputDate = (
+      args?.date ||
+      args?.targetDate ||
+      (taskOptions?.targetDate as string) ||
+      (taskOptions?.date as string)
+    )?.trim();
+    const { todayString, isoDate, yesterdayIso, isCustomDate } = getTodayDateStrings(inputDate);
+
     const quizInfo = await collectQuizInfo(page);
-    const seminarMessage = await collectTodaySeminarMessage(page);
+    const seminarMessage = await collectTodaySeminarMessage(page, inputDate);
     const pointConversionInfo = await collectPointConversionInfo(page);
-    const { isoDate, yesterdayIso } = getTodayDateStrings();
+
     let storedNewSeminars = getStoredNewSeminars(isoDate, yesterdayIso);
     if (storedNewSeminars.length > 0) {
       let updatedMissingPointFlag = false;
@@ -712,6 +795,8 @@ async function run({ page }: PlaywrightRunArgs) {
       seminarMessage,
       storedNewSeminars,
       pointConversionInfo,
+      targetDate: isCustomDate ? `${isoDate} (${todayString})` : undefined,
+      isCustomDate,
     });
 
     const newSeminarIds = storedNewSeminars.map((item) => item.seminarId).filter((id): id is string => Boolean(id));
@@ -725,11 +810,14 @@ async function run({ page }: PlaywrightRunArgs) {
         )
       : [...newSeminarIds];
 
-    storage.set(TODAY_SEMINAR_KEY, {
-      date: seminarMessage.date,
-      lunchSeminarIds: seminarMessage.lunchSeminarIds,
-      dinnerSeminarIds: seminarMessage.dinnerSeminarIds,
-    });
+    // 당일 세미나인 경우에만 storage 갱신
+    if (!isCustomDate) {
+      storage.set(TODAY_SEMINAR_KEY, {
+        date: seminarMessage.date,
+        lunchSeminarIds: seminarMessage.lunchSeminarIds,
+        dinnerSeminarIds: seminarMessage.dinnerSeminarIds,
+      });
+    }
 
     return {
       success: true,
@@ -749,5 +837,5 @@ async function run({ page }: PlaywrightRunArgs) {
   }
 }
 
-export { run };
+export { run, formatTodayLinksBroadcast, getTodayDateStrings, parseTargetDate };
 export type { SeminarData, SeminarTaskData };

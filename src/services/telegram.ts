@@ -237,10 +237,23 @@ const todayLinks = async (ctx: Context) => {
     return ctx.reply('today_links task not found!');
   }
 
+  let targetDate: string | undefined;
+  if (ctx.message && 'text' in ctx.message) {
+    const text = ctx.message.text.trim();
+    const match = text.match(/^\/today_links(?:\s+(.+))?$/);
+    if (match && match[1]) {
+      targetDate = match[1].trim();
+    }
+  }
+
+  const promptMsg = targetDate
+    ? `[${targetDate}] 링크를 수집합니다... (백그라운드 실행)`
+    : '오늘의 링크를 수집합니다... (백그라운드 실행)';
+
   try {
-    await ctx.reply('오늘의 링크를 수집합니다... (백그라운드 실행)');
+    await ctx.reply(promptMsg);
     runner
-      .runTask(task)
+      .runTask(task, { args: targetDate ? { date: targetDate } : undefined })
       .then(async (result) => {
         if (result && typeof result === 'object' && (result as { message?: string }).message) {
           await ctx.reply(
@@ -1214,7 +1227,7 @@ if (adminBot) {
 
 🔄 루틴 / 실행:
 - /run_routine_now: 즉시 daily_routine 작업을 실행합니다.
-- /today_links: 오늘의 세미나/퀴즈/출석 링크를 한 번에 가져옵니다.
+- /today_links [날짜]: 오늘의 세미나/퀴즈/출석 링크를 가져옵니다. (날짜 지정 가능: 예 /today_links 8/20, /today_links 내일)
 - /broadcast_today_links: 즉시 오늘의 링크를 채널에 공지합니다.
 - /apply_seminar_now: 즉시 세미나 신청 작업(apply_seminar)을 실행합니다.
 - /run_quiz_now: 즉시 오늘의 퀴즈 작업(today_quiz)을 실행합니다.
@@ -1253,7 +1266,7 @@ if (noticeBot) {
   noticeBot.command('help', (ctx) => {
     const message = `사용 가능한 명령어:
 
-- /today_links: 오늘의 세미나와 퀴즈 링크, 출석 링크를 한 번에 가져옵니다.`;
+- /today_links [날짜]: 오늘의 세미나/퀴즈/출석 링크 모음 (날짜 지정 가능: 예 /today_links 8/20, /today_links 내일)`;
     ctx.reply(message);
   });
 }
@@ -1261,7 +1274,7 @@ if (noticeBot) {
 const adminCommands = [
   // 1. 루틴 / 실행
   { command: 'run_routine_now', description: '즉시 daily_routine 실행' },
-  { command: 'today_links', description: '오늘의 세미나/퀴즈/출석 링크 모음' },
+  { command: 'today_links', description: '세미나/퀴즈 링크 모음 [날짜 지정 가능]' },
   { command: 'broadcast_today_links', description: '오늘의 링크 채널 공지' },
   { command: 'apply_seminar_now', description: '즉시 세미나 신청(apply_seminar) 실행' },
   { command: 'run_quiz_now', description: '즉시 오늘의 퀴즈(today_quiz) 실행' },
@@ -1288,7 +1301,7 @@ const adminCommands = [
 ];
 
 const noticeCommands = [
-  { command: 'today_links', description: '오늘의 세미나/퀴즈/출석 링크 모음' },
+  { command: 'today_links', description: '세미나/퀴즈 링크 모음 [날짜 지정 가능]' },
   { command: 'help', description: '도움말' },
 ];
 

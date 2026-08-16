@@ -110,7 +110,54 @@ function testTodayLinksFormatWithUserExample() {
     'https://www.doctorville.co.kr/my/point/pointUseHistoryList',
   );
 
-  console.log('\n✅ [Pass] 모든 테스트 검증을 성공적으로 통과했습니다!');
+  console.log('\n✅ [Pass] 예시 문구 포맷팅 검증을 성공적으로 통과했습니다!\n');
+}
+
+function testDateParsingAndCustomDateFormat() {
+  console.log('--- [Test] 날짜 파싱 및 지정 날짜 포맷팅 테스트 시작 ---\n');
+
+  const { getTodayDateStrings, parseTargetDate } = require('../src/tasks/today_links');
+
+  // 1. 기본 오늘
+  const todayResult = getTodayDateStrings();
+  assert.strictEqual(todayResult.isCustomDate, false);
+
+  // 2. M/D 형식
+  const mdResult = getTodayDateStrings('8/20');
+  assert.strictEqual(mdResult.todayString, '8/20');
+  assert.strictEqual(mdResult.isCustomDate, true);
+
+  // 3. YYYY-MM-DD 형식
+  const ymdResult = getTodayDateStrings('2026-09-01');
+  assert.strictEqual(ymdResult.todayString, '9/1');
+  assert.strictEqual(ymdResult.isoDate, '2026-09-01');
+  assert.strictEqual(ymdResult.isCustomDate, true);
+
+  // 4. 내일 / tomorrow
+  const tomorrowResult = getTodayDateStrings('내일');
+  assert.strictEqual(tomorrowResult.isCustomDate, true);
+
+  // 5. 커스텀 날짜 포맷팅 검증
+  const customInput: TodayLinksFormatInput = {
+    quizInfo: null,
+    seminarMessage: {
+      date: '2026-08-20',
+      lunchSeminarIds: ['5573'],
+      dinnerSeminarIds: [],
+      message: '<b>[8/20] 세미나 리스트:</b>\n🍴 <b>[점심 세미나]</b>\n- 13:00~14:00. AI 실용 입문 https://m.doctorville.co.kr/cme/seminar/5573',
+    },
+    storedNewSeminars: [],
+    pointConversionInfo: null,
+    targetDate: '2026-08-20 (8/20)',
+    isCustomDate: true,
+  };
+
+  const { message } = formatTodayLinksBroadcast(customInput);
+  assert(message.includes('📅 <b>[2026-08-20 (8/20) 링크 및 세미나]</b>'));
+  assert(message.includes('<b>[8/20] 세미나 리스트:</b>'));
+
+  console.log('✅ [Pass] 날짜 파싱 및 지정 날짜 포맷팅 검증을 성공적으로 통과했습니다!');
 }
 
 testTodayLinksFormatWithUserExample();
+testDateParsingAndCustomDateFormat();
