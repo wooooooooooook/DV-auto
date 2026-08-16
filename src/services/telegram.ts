@@ -13,59 +13,12 @@ import { sendNotificationToChannel } from '../modules/utils';
 
 const ADMIN_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const NOTICE_BOT_TOKEN = process.env.NOTICE_BOT_TOKEN;
-const QUIZ_DATA_FILE = 'data/quiz.json';
 const SEMINAR_QUIZ_CHEATSHEET_FILE = 'data/seminar_quiz_cheatsheet.json';
-const QUIZ_DATA_PATH = path.join(process.cwd(), QUIZ_DATA_FILE);
 const SEMINAR_QUIZ_CHEATSHEET_PATH = path.join(process.cwd(), SEMINAR_QUIZ_CHEATSHEET_FILE);
 
-type QuizMapping = Record<string, Array<string | number>>;
 type SeminarQuizCheatsheet = Record<string, string>;
 type CommandResult = { stdout: string; stderr: string };
 type CommandResultWithExitCode = CommandResult & { exitCode?: number };
-
-async function loadQuizData(): Promise<QuizMapping> {
-  try {
-    const raw = await fs.readFile(QUIZ_DATA_PATH, 'utf8');
-    return JSON.parse(raw) as QuizMapping;
-  } catch (error) {
-    logger.error('퀴즈 데이터 로드 실패', error);
-    throw new Error('퀴즈 데이터 파일을 읽을 수 없습니다.');
-  }
-}
-
-async function saveQuizData(data: QuizMapping): Promise<void> {
-  try {
-    await fs.writeFile(QUIZ_DATA_PATH, `${JSON.stringify(data, null, 4)}\n`, 'utf8');
-  } catch (error) {
-    logger.error('퀴즈 데이터 저장 실패', error);
-    throw new Error('퀴즈 데이터 파일을 저장할 수 없습니다.');
-  }
-}
-
-function parseQuizAnswers(answerText: string): Array<string | number> {
-  try {
-    const parsed = JSON.parse(answerText);
-    if (!Array.isArray(parsed)) {
-      throw new Error('배열 형식이 아닙니다.');
-    }
-    return parsed.map((item) => {
-      const num = Number(item);
-      return Number.isNaN(num) ? item : num;
-    });
-  } catch (_e) {
-    const parts = answerText
-      .split(',')
-      .map((part) => part.trim())
-      .filter(Boolean);
-    if (!parts.length) {
-      throw new Error('정답 배열을 해석할 수 없습니다. 예) [1,2,3] 또는 1,2,3');
-    }
-    return parts.map((part) => {
-      const num = Number(part);
-      return Number.isNaN(num) ? part : num;
-    });
-  }
-}
 
 function truncateMessage(text: string, maxLength = 3500): string {
   if (text.length <= maxLength) return text;
@@ -184,23 +137,48 @@ if (noticeBot) {
   noticeBot.start((ctx) => ctx.reply('Welcome!'));
 }
 
+// --- Shared Handlers ---
+const todayLinks = async (ctx: Context) => {
+  logger.info('User requested to run today_links now', { from: ctx.from?.username });
+  const task = taskRegistry.getByName('today_links');
+  if (!task) {
+    logger.error('today_links task not found, cannot run');
+    return ctx.reply('today_links task not found!');
+  }
+
+  try {
+    await ctx.reply('오늘의 링크를 수집합니다... (백그라운드 실행)');
+    runner
+      .runTask(task)
+      .then(async (result) => {
+        if (result && typeof result === 'object' && (result as { message?: string }).message) {
+          await ctx.reply(
+            (result as { message: string }).message,
+            (result as { options?: Record<string, unknown> }).options,
+          );
+        } else if (typeof result === 'string') {
+          await ctx.reply(result);
+        } else if (result === true) {
+          await ctx.reply('작업이 완료되었습니다.');
+        } else {
+          await ctx.reply('작업이 완료되었습니다.');
+        }
+      })
+      .catch((e) => {
+        const message = e instanceof Error ? e.message : String(e);
+        ctx.reply(`링크 수집 중 오류 발생: ${message}`);
+      });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    ctx.reply(`Failed to start 링크 수집: ${message}`);
+  }
+};
+
 // --- Admin Bot Commands ---
 if (adminBot) {
-  adminBot.command('schedules', (ctx) => {
-    const tasks = scheduler.getScheduledTasks();
-    if (tasks.length === 0) {
-      return ctx.reply('No scheduled tasks.');
-    }
-
-    let message = 'Scheduled Tasks:\n\n';
-    tasks.forEach((task) => {
-      message += `Name: ${task.name}\n`;
-      message += `Schedule: ${task.schedule}\n`;
-      message += `Timezone: ${task.timezone}\n\n`;
-    });
-
-    ctx.reply(message);
-  });
+  // ==========================================
+  // 1. 루틴 / 실행 (Routine & Execution)
+  // ==========================================
 
   adminBot.command('run_routine_now', async (ctx) => {
     logger.info('User requested to run daily_routine now', { from: ctx.from?.username });
@@ -212,7 +190,6 @@ if (adminBot) {
 
     try {
       await ctx.reply('Starting daily_routine...');
-      // Run in background to avoid timeout
       runner
         .runTask(task)
         .then(async (result) => {
@@ -243,84 +220,39 @@ if (adminBot) {
     }
   });
 
-  adminBot.command('run_quiz_now', async (ctx) => {
-    logger.info('User requested to run today_quiz now', { from: ctx.from?.username });
-    const task = taskRegistry.getByName('today_quiz');
+  adminBot.command('today_links', todayLinks);
+
+  adminBot.command('broadcast_today_links', async (ctx) => {
+    logger.info('Admin requested to broadcast today_links', { from: ctx.from?.username });
+    const task = taskRegistry.getByName('today_links');
     if (!task) {
-      logger.error('today_quiz task not found, cannot run');
-      return ctx.reply('today_quiz task not found!');
+      logger.error('today_links task not found, cannot run broadcast');
+      return ctx.reply('today_links task not found!');
     }
 
     try {
-      await ctx.reply('Starting today_quiz...');
+      await ctx.reply('Running today_links and broadcasting to channel... (백그라운드 실행)');
       runner
         .runTask(task)
         .then(async (result) => {
-          if (result && typeof result === 'object' && (result as { message?: string }).message) {
-            await ctx.reply(
+          if (result && (result as { message?: string }).message) {
+            await sendNotificationToChannel(
               (result as { message: string }).message,
+              null,
               (result as { options?: Record<string, unknown> }).options,
             );
-            if ((result as { imagePath?: string }).imagePath) {
-              await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
-            }
-          } else if (typeof result === 'string') {
-            await ctx.reply(result);
-          } else if (result === true) {
-            await ctx.reply('today_quiz finished successfully.');
+            await ctx.reply('Broadcast successful.');
           } else {
-            await ctx.reply('today_quiz finished successfully.');
+            await ctx.reply('Task ran, but no message was produced to broadcast.');
           }
         })
         .catch((e) => {
           const message = e instanceof Error ? e.message : String(e);
-          ctx.reply(`today_quiz failed: ${message}`);
+          ctx.reply(`Broadcast failed: ${message}`);
         });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Failed to start today_quiz: ${message}`);
-    }
-  });
-
-  adminBot.command('refresh_seminar_point_exclusion', async (ctx) => {
-    logger.info('User requested to refresh seminar point exclusion flags', { from: ctx.from?.username });
-    const task = taskRegistry.getByName('refresh_seminar_point_exclusion');
-    if (!task) {
-      logger.error('refresh_seminar_point_exclusion task not found, cannot run');
-      return ctx.reply('refresh_seminar_point_exclusion task not found!');
-    }
-
-    try {
-      await ctx.reply('세미나 포인트미지급 여부를 전체 재확인합니다... (백그라운드 실행)');
-      runner
-        .runTask(task)
-        .then(async (result) => {
-          if (result && typeof result === 'object' && (result as { message?: string }).message) {
-            await ctx.reply(
-              (result as { message: string }).message,
-              (result as { options?: Record<string, unknown> }).options,
-            );
-            const screenshotPaths = (result as { screenshotPaths?: string[] }).screenshotPaths || [];
-            for (const screenshotPath of screenshotPaths) {
-              await ctx.replyWithPhoto({ source: screenshotPath });
-              await fs.unlink(screenshotPath).catch(() => {});
-            }
-          } else if (typeof result === 'string') {
-            await ctx.reply(result);
-          } else if (result === true) {
-            await ctx.reply('세미나 포인트미지급 여부 재확인이 완료되었습니다.');
-          } else {
-            await ctx.reply('세미나 포인트미지급 여부 재확인이 완료되었습니다.');
-          }
-        })
-        .catch((e) => {
-          const message = e instanceof Error ? e.message : String(e);
-          ctx.reply(`세미나 포인트미지급 여부 재확인 실패: ${message}`);
-        });
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Failed to start 세미나 포인트미지급 여부 재확인: ${message}`);
+      ctx.reply(`Failed to start broadcast: ${message}`);
     }
   });
 
@@ -364,110 +296,18 @@ if (adminBot) {
     }
   });
 
-  adminBot.command('add_quiz_answer', async (ctx) => {
-    logger.info('User requested to add quiz answer', { from: ctx.from?.username });
-    const messageText = ctx.message?.text || '';
-    const args = messageText.split(' ').slice(1);
-
-    if (args.length < 2) {
-      return ctx.reply('사용법: /add_quiz_answer <제품명> <정답 배열(JSON)>\n예) /add_quiz_answer 시너지아정 [1,2,3]');
-    }
-
-    const productName = args[0];
-    const answerText = args.slice(1).join(' ');
-
-    let answers: Array<string | number>;
-    try {
-      answers = parseQuizAnswers(answerText);
-      if (!answers.length) {
-        throw new Error('정답 배열이 비어있습니다.');
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return ctx.reply(`정답 배열을 해석하지 못했습니다. ${message}`);
-    }
-
-    try {
-      const data = await loadQuizData();
-      data[productName] = answers;
-      await saveQuizData(data);
-      let gitNotice = '';
-      try {
-        const result = await commitAndPushIfChanged([QUIZ_DATA_FILE], 'update quiz data');
-        gitNotice = `\n\n${result.notice}`;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        logger.error('퀴즈 정답 Git 커밋/푸시 실패', error);
-        gitNotice = `\n\n⚠️ Git 커밋/푸시 실패: ${message}`;
-      }
-
-      await ctx.reply(
-        `퀴즈 정답이 등록되었습니다.\n제품: ${productName}\n정답: ${JSON.stringify(answers)}${gitNotice}`,
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      logger.error('퀴즈 정답 등록 실패', error);
-      await ctx.reply(`퀴즈 정답을 저장하지 못했습니다: ${message}`);
-    }
-  });
-
-  adminBot.command('broadcast_today_links', async (ctx) => {
-    logger.info('Admin requested to broadcast today_links', { from: ctx.from?.username });
-    const task = taskRegistry.getByName('today_links');
+  adminBot.command('run_quiz_now', async (ctx) => {
+    logger.info('User requested to run today_quiz now', { from: ctx.from?.username });
+    const task = taskRegistry.getByName('today_quiz');
     if (!task) {
-      logger.error('today_links task not found, cannot run broadcast');
-      return ctx.reply('today_links task not found!');
+      logger.error('today_quiz task not found, cannot run');
+      return ctx.reply('today_quiz task not found!');
     }
 
     try {
-      await ctx.reply('Running today_links and broadcasting to channel... (백그라운드 실행)');
+      await ctx.reply('Starting today_quiz...');
       runner
         .runTask(task)
-        .then(async (result) => {
-          if (result && (result as { message?: string }).message) {
-            await sendNotificationToChannel(
-              (result as { message: string }).message,
-              null,
-              (result as { options?: Record<string, unknown> }).options,
-            );
-            await ctx.reply('Broadcast successful.');
-          } else {
-            await ctx.reply('Task ran, but no message was produced to broadcast.');
-          }
-        })
-        .catch((e) => {
-          const message = e instanceof Error ? e.message : String(e);
-          ctx.reply(`Broadcast failed: ${message}`);
-        });
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Failed to start broadcast: ${message}`);
-    }
-  });
-
-  adminBot.command('naverpay_point_exchange', async (ctx) => {
-    logger.info('User requested to run naverpay_point_exchange now', { from: ctx.from?.username });
-    const task = taskRegistry.getByName('네이버페이포인트교환');
-    if (!task) {
-      logger.error('네이버페이포인트교환 task not found, cannot run');
-      return ctx.reply('네이버페이포인트교환 task not found!');
-    }
-
-    const messageText = ctx.message?.text || '';
-    const args = messageText.split(' ').slice(1);
-    let attempts = 10;
-    if (args.length > 0) {
-      const parsedAttempts = parseInt(args[0], 10);
-      if (!isNaN(parsedAttempts) && parsedAttempts > 0) {
-        attempts = parsedAttempts;
-      }
-    }
-
-    try {
-      await ctx.reply(`네이버페이포인트교환 작업을 시작합니다... (${attempts}회 시도, 백그라운드 실행)`);
-      // Run in background to avoid timeout
-      runner
-        .runTask(task, { maxIterations: attempts })
         .then(async (result) => {
           if (result && typeof result === 'object' && (result as { message?: string }).message) {
             await ctx.reply(
@@ -481,44 +321,33 @@ if (adminBot) {
           } else if (typeof result === 'string') {
             await ctx.reply(result);
           } else if (result === true) {
-            await ctx.reply('네이버페이포인트교환 작업이 완료되었습니다.');
+            await ctx.reply('today_quiz finished successfully.');
           } else {
-            await ctx.reply('네이버페이포인트교환 작업이 완료되었습니다.');
+            await ctx.reply('today_quiz finished successfully.');
           }
         })
         .catch((e) => {
           const message = e instanceof Error ? e.message : String(e);
-          ctx.reply(`네이버페이포인트교환 실패: ${message}`);
+          ctx.reply(`today_quiz failed: ${message}`);
         });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Failed to start 네이버페이포인트교환: ${message}`);
+      ctx.reply(`Failed to start today_quiz: ${message}`);
     }
   });
 
-  adminBot.command('baemin_point_exchange', async (ctx) => {
-    logger.info('User requested to run baemin_point_exchange now', { from: ctx.from?.username });
-    const task = taskRegistry.getByName('배민포인트교환');
+  adminBot.command('monitor_lunch_seminar_now', async (ctx) => {
+    logger.info('User requested to run monitor_lunch_seminars now', { from: ctx.from?.username });
+    const task = taskRegistry.getByName('monitor_lunch_seminars');
     if (!task) {
-      logger.error('배민포인트교환 task not found, cannot run');
-      return ctx.reply('배민포인트교환 task not found!');
-    }
-
-    const messageText = ctx.message?.text || '';
-    const args = messageText.split(' ').slice(1);
-    let attempts = 1;
-    if (args.length > 0) {
-      const parsedAttempts = parseInt(args[0], 10);
-      if (!isNaN(parsedAttempts) && parsedAttempts > 0) {
-        attempts = parsedAttempts;
-      }
+      logger.error('monitor_lunch_seminars task not found, cannot run');
+      return ctx.reply('monitor_lunch_seminars task not found!');
     }
 
     try {
-      await ctx.reply(`배민포인트교환 작업을 시작합니다... (${attempts}회 시도, 백그라운드 실행)`);
-      // Run in background to avoid timeout
+      await ctx.reply('Starting monitor_lunch_seminars... (백그라운드 실행)');
       runner
-        .runTask(task, { maxIterations: attempts })
+        .runTask(task)
         .then(async (result) => {
           if (result && typeof result === 'object' && (result as { message?: string }).message) {
             await ctx.reply(
@@ -532,256 +361,126 @@ if (adminBot) {
           } else if (typeof result === 'string') {
             await ctx.reply(result);
           } else if (result === true) {
-            await ctx.reply('배민포인트교환 작업이 완료되었습니다.');
+            await ctx.reply('monitor_lunch_seminars finished successfully.');
           } else {
-            await ctx.reply('배민포인트교환 작업이 완료되었습니다.');
+            await ctx.reply('monitor_lunch_seminars finished successfully.');
           }
         })
         .catch((e) => {
           const message = e instanceof Error ? e.message : String(e);
-          ctx.reply(`배민포인트교환 실패: ${message}`);
+          ctx.reply(`monitor_lunch_seminars failed: ${message}`);
         });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Failed to start 배민포인트교환: ${message}`);
+      ctx.reply(`Failed to start monitor_lunch_seminars: ${message}`);
     }
   });
 
-  adminBot.command('check_point', async (ctx) => {
-    logger.info('User requested to check point now', { from: ctx.from?.username });
-    const task = taskRegistry.getByName('check_point');
+  adminBot.command('monitor_dinner_seminar_now', async (ctx) => {
+    logger.info('User requested to run monitor_dinner_seminars now', { from: ctx.from?.username });
+    const task = taskRegistry.getByName('monitor_dinner_seminars');
     if (!task) {
-      logger.error('check_point task not found, cannot run');
-      return ctx.reply('check_point task not found!');
+      logger.error('monitor_dinner_seminars task not found, cannot run');
+      return ctx.reply('monitor_dinner_seminars task not found!');
     }
 
     try {
-      await ctx.reply('포인트를 확인하는 중입니다... (백그라운드 실행)');
+      await ctx.reply('Starting monitor_dinner_seminars... (백그라운드 실행)');
       runner
         .runTask(task)
         .then(async (result) => {
           if (result && typeof result === 'object' && (result as { message?: string }).message) {
-            const msg = (result as { message: string }).message;
-            const imagePath = (result as { imagePath?: string }).imagePath;
-            if (imagePath) {
-              await ctx.replyWithPhoto({ source: imagePath }, { caption: msg });
-              await fs.unlink(imagePath).catch(() => {});
-            } else {
-              await ctx.reply(msg);
+            await ctx.reply(
+              (result as { message: string }).message,
+              (result as { options?: Record<string, unknown> }).options,
+            );
+            if ((result as { imagePath?: string }).imagePath) {
+              await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
+              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
             }
           } else if (typeof result === 'string') {
             await ctx.reply(result);
+          } else if (result === true) {
+            await ctx.reply('monitor_dinner_seminars finished successfully.');
           } else {
-            await ctx.reply('포인트 확인 완료 (메시지 없음)');
+            await ctx.reply('monitor_dinner_seminars finished successfully.');
           }
         })
         .catch((e) => {
           const message = e instanceof Error ? e.message : String(e);
-          ctx.reply(`포인트 확인 실패: ${message}`);
+          ctx.reply(`monitor_dinner_seminars failed: ${message}`);
         });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Failed to start check_point: ${message}`);
+      ctx.reply(`Failed to start monitor_dinner_seminars: ${message}`);
     }
   });
 
-  adminBot.command('update_app', async (ctx) => {
-    logger.info('User requested to run pnpm update:app', { from: ctx.from?.username });
-    try {
-      await ctx.reply(
-        'Starting pnpm update:app... (백그라운드 실행)\n' +
-          '⚠️ 업데이트 중 서비스가 재시작되어 봇 응답이 잠시 끊길 수 있습니다.',
-      );
-      runShellCommand('pnpm run update:app')
-        .then(async ({ stdout, stderr }) => {
-          let message = 'pnpm update:app 완료';
-          if (stdout.trim()) {
-            message += `\n\nstdout:\n${truncateMessage(stdout.trim())}`;
-          }
-          if (stderr.trim()) {
-            message += `\n\nstderr:\n${truncateMessage(stderr.trim())}`;
-          }
-          await ctx.reply(message);
-        })
-        .catch(async (error) => {
-          const message = error instanceof Error ? error.message : String(error);
-          const stdout = (error as Error & { stdout?: string }).stdout ?? '';
-          const stderr = (error as Error & { stderr?: string }).stderr ?? '';
-          logger.error('pnpm update:app failed', error);
-          let reply = `pnpm update:app 실패: ${message}`;
-          if (stdout.trim()) {
-            reply += `\n\nstdout:\n${truncateMessage(stdout.trim())}`;
-          }
-          if (stderr.trim()) {
-            reply += `\n\nstderr:\n${truncateMessage(stderr.trim())}`;
-          }
-          await ctx.reply(reply);
-        });
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Failed to start pnpm update:app: ${message}`);
-    }
-  });
+  // ==========================================
+  // 2. 세미나 & 퀴즈 족보 (Seminar & Cheatsheet)
+  // ==========================================
 
-  adminBot.command('log', async (ctx) => {
+  // /run_seminar_quiz <seminarId> [advanced] — 수동 세미나 퀴즈 실행
+  adminBot.command('run_seminar_quiz', async (ctx) => {
+    logger.info('User requested to run seminar_quiz manually', { from: ctx.from?.username });
     const messageText = ctx.message?.text || '';
-    const args = messageText.split(' ').slice(1);
+    const parts = messageText.split(/\s+/).slice(1);
+    const seminarId = parts[0]?.trim() || '';
+    const isAdvancedSurvey = parts[1]?.toLowerCase() === 'advanced' || parts[1]?.toLowerCase() === '심화';
 
-    let lineCount = 20; // 기본값
-    if (args.length > 0) {
-      const parsedCount = parseInt(args[0], 10);
-      if (!isNaN(parsedCount) && parsedCount > 0) {
-        lineCount = parsedCount;
-      }
-    }
-
-    logger.info(`User requested to fetch recent ${lineCount} logs`, { from: ctx.from?.username });
-
-    try {
-      await ctx.reply(`최근 ${lineCount}개 로그를 불러옵니다... (최대 5초)`);
-
-      const cmd = `journalctl --no-pager -u doctorville-auto.service -n ${lineCount}`;
-      const { stdout, stderr, exitCode } = await runShellCommandWithAllowedExitCodes(`timeout 5s ${cmd}`, [124, 143]);
-
-      let message = `로그 결과 (${lineCount}줄)`;
-      if (exitCode) {
-        message += ' (시간 제한으로 일부 로그만 표시됩니다)';
-      }
-
-      if (stdout.trim()) {
-        // 불필요한 정보(예: 호스트명과 프로세스명) 제거
-        // 원본 예시: Mar 04 00:51:55 CT105 env[48145]: [info] ...
-        // 결과 예시: Mar 04 00:51:55 [info] ...
-        const cleanedStdout = stdout
-          .split('\n')
-          .map((line) => line.replace(/([A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\s+[^:]+:\s*/, '$1 '))
-          .join('\n')
-          .trim();
-
-        message += `\n\nstdout:\n${cleanedStdout}`;
-      }
-      if (stderr.trim()) {
-        message += `\n\nstderr:\n${stderr.trim()}`;
-      }
-      if (!stdout.trim() && !stderr.trim()) {
-        message += '\n\n출력된 로그가 없습니다.';
-      }
-      await ctx.reply(truncateMessage(message));
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      logger.error('log fetch failed', e);
-      await ctx.reply(`로그 가져오기 실패: ${message}`);
-    }
-  });
-
-  // --- Seminar Quiz Cheatsheet Commands ---
-  adminBot.command('add_seminar_quiz', async (ctx) => {
-    logger.info('User requested to add seminar quiz answer', { from: ctx.from?.username });
-    const messageText = ctx.message?.text || '';
-    const argsText = messageText.replace(/^\/add_seminar_quiz\s*/, '');
-
-    // Format: /add_seminar_quiz <키워드> | <정답>
-    const parts = argsText.split('|').map((p) => p.trim());
-    if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    if (!seminarId) {
       return ctx.reply(
-        '사용법: /add_seminar_quiz <문제 키워드> | <정답 키워드>\n예) /add_seminar_quiz 펙수클루의 적응증이 아닌 | 과민성 대장증후군',
+        '사용법: /run_seminar_quiz <seminarId> [advanced]\n예) /run_seminar_quiz 12345\n     /run_seminar_quiz 12345 advanced',
       );
     }
 
-    const [keyword, answer] = parts;
-
-    try {
-      const data = await loadSeminarQuizCheatsheet();
-      data[keyword] = answer;
-      await saveSeminarQuizCheatsheet(data);
-      let gitNotice = '';
-      try {
-        const result = await commitAndPushIfChanged([SEMINAR_QUIZ_CHEATSHEET_FILE], 'update seminar quiz cheatsheet');
-        gitNotice = `\n\n${result.notice}`;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        logger.error('세미나 퀴즈 족보 Git 커밋/푸시 실패', error);
-        gitNotice = `\n\n⚠️ Git 커밋/푸시 실패: ${message}`;
-      }
-
-      await ctx.reply(`✅ 세미나 퀴즈 족보 등록 완료\n\n키워드: ${keyword}\n정답: ${answer}${gitNotice}`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      logger.error('세미나 퀴즈 족보 등록 실패', error);
-      await ctx.reply(`❌ 족보 등록 실패: ${message}`);
-    }
-  });
-
-  adminBot.command('list_seminar_quiz', async (ctx) => {
-    logger.info('User requested to list seminar quiz cheatsheet', { from: ctx.from?.username });
-
-    const messageText = ctx.message?.text || '';
-    const searchKeyword = messageText.replace(/^\/list_seminar_quiz\s*/, '').trim();
-
-    try {
-      const data = await loadSeminarQuizCheatsheet();
-      let entries = Object.entries(data);
-
-      if (searchKeyword) {
-        entries = entries.filter(([k, a]) => k.includes(searchKeyword) || String(a).includes(searchKeyword));
-      }
-
-      if (entries.length === 0) {
-        if (searchKeyword) {
-          return ctx.reply(`📋 "${searchKeyword}" 검색 결과가 없습니다.`);
-        } else {
-          return ctx.reply('📋 등록된 세미나 퀴즈 족보가 없습니다.');
-        }
-      }
-
-      let message = searchKeyword
-        ? `📋 "${searchKeyword}" 검색 결과 (${entries.length}개)\n\n`
-        : `📋 세미나 퀴즈 족보 (${entries.length}개)\n\n`;
-
-      for (const [keyword, answer] of entries) {
-        message += `• ${keyword} → ${answer}\n`;
-      }
-
-      await ctx.reply(truncateMessage(message));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      await ctx.reply(`❌ 족보 조회 실패: ${message}`);
-    }
-  });
-
-  adminBot.command('delete_seminar_quiz', async (ctx) => {
-    logger.info('User requested to delete seminar quiz answer', { from: ctx.from?.username });
-    const messageText = ctx.message?.text || '';
-    const keyword = messageText.replace(/^\/delete_seminar_quiz\s*/, '').trim();
-
-    if (!keyword) {
-      return ctx.reply('사용법: /delete_seminar_quiz <문제 키워드>\n예) /delete_seminar_quiz 펙수클루의 적응증이 아닌');
+    const task = taskRegistry.getByName('run_seminar_quiz');
+    if (!task) {
+      logger.error('run_seminar_quiz task not found, cannot run');
+      return ctx.reply('run_seminar_quiz task not found!');
     }
 
     try {
-      const data = await loadSeminarQuizCheatsheet();
-      if (!(keyword in data)) {
-        return ctx.reply(`❌ 해당 키워드가 족보에 없습니다: ${keyword}`);
-      }
-
-      const deletedAnswer = data[keyword];
-      delete data[keyword];
-      await saveSeminarQuizCheatsheet(data);
-      let gitNotice = '';
-      try {
-        const result = await commitAndPushIfChanged([SEMINAR_QUIZ_CHEATSHEET_FILE], 'update seminar quiz cheatsheet');
-        gitNotice = `\n\n${result.notice}`;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        logger.error('세미나 퀴즈 족보 삭제 Git 커밋/푸시 실패', error);
-        gitNotice = `\n\n⚠️ Git 커밋/푸시 실패: ${message}`;
-      }
-
-      await ctx.reply(`🗑️ 세미나 퀴즈 족보 삭제 완료\n\n키워드: ${keyword}\n정답: ${deletedAnswer}${gitNotice}`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      logger.error('세미나 퀴즈 족보 삭제 실패', error);
-      await ctx.reply(`❌ 족보 삭제 실패: ${message}`);
+      await ctx.reply(
+        `Starting run_seminar_quiz (seminarId=${seminarId}${isAdvancedSurvey ? ', 심화설문' : ''})... (백그라운드 실행)`,
+      );
+      const args: Record<string, string> = { seminarId };
+      if (isAdvancedSurvey) args.isAdvancedSurvey = 'true';
+      runner
+        .runTask(task, { args })
+        .then(async (result) => {
+          if (result && typeof result === 'object' && (result as { message?: string }).message) {
+            await ctx.reply(
+              (result as { message: string }).message,
+              (result as { options?: Record<string, unknown> }).options,
+            );
+            if ((result as { imagePath?: string }).imagePath) {
+              await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
+              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
+            } else {
+              const shotPaths = (result as { screenshotPaths?: string[] }).screenshotPaths;
+              if (shotPaths) {
+                for (const p of shotPaths) {
+                  await ctx.replyWithPhoto({ source: p });
+                  await fs.unlink(p).catch(() => {});
+                }
+              }
+            }
+          } else if (typeof result === 'string') {
+            await ctx.reply(result);
+          } else if (result === true) {
+            await ctx.reply('run_seminar_quiz finished successfully.');
+          } else {
+            await ctx.reply('run_seminar_quiz finished.');
+          }
+        })
+        .catch((e) => {
+          const message = e instanceof Error ? e.message : String(e);
+          ctx.reply(`run_seminar_quiz failed: ${message}`);
+        });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      ctx.reply(`Failed to start run_seminar_quiz: ${message}`);
     }
   });
 
@@ -875,179 +574,365 @@ if (adminBot) {
     }
   });
 
-  adminBot.command('help', (ctx) => {
-    const message = `사용 가능한 명령어:
+  adminBot.command('list_seminar_quiz', async (ctx) => {
+    logger.info('User requested to list seminar quiz cheatsheet', { from: ctx.from?.username });
 
-- /schedules: 스케줄된 작업 목록을 확인합니다.
-- /run_routine_now: 즉시 daily_routine 작업을 실행합니다.
-- /run_quiz_now: 즉시 오늘의 퀴즈 작업(today_quiz)을 실행합니다.
-- /apply_seminar_now: 즉시 세미나 신청 작업(apply_seminar)을 실행합니다.
-- /refresh_seminar_point_exclusion: 모든 세미나의 포인트미지급 여부를 다시 확인해 캐시를 갱신합니다.
-- /naverpay_point_exchange [횟수]: 네이버페이포인트교환 작업을 실행합니다. (기본값: 10)
-- /baemin_point_exchange [횟수]: 배민포인트교환 작업을 실행합니다. (기본값: 1)
-- /add_quiz_answer: 오늘의 퀴즈 정답을 등록합니다. 예) /add_quiz_answer 시너지아정 [1,2,3]
-- /broadcast_today_links: 즉시 오늘의 링크를 채널에 공지합니다.
-- /update_app: pnpm update:app 명령어를 실행합니다. (서버 권한 필요, 재시작으로 응답 중단 가능)
-- /log [수량]: 최근 로그를 가져옵니다. (기본값: 20)
-- /inspect <url> <selector> [waitUntil]: 지정한 URL에서 셀렉터에 해당하는 요소를 검사하고 스크린샷을 전송합니다.
-- /5days_seminar_check: 향후 5일간의 세미나 일정을 확인합니다.
-- /today_links: 오늘의 세미나와 퀴즈 링크, 출석 링크를 한 번에 가져옵니다.
-- /monitor_lunch_seminar_now: 즉시 점심 세미나 모니터링을 시작합니다.
-- /monitor_dinner_seminar_now: 즉시 저녁 세미나 모니터링을 시작합니다.
-- /run_seminar_quiz <seminarId> [advanced]: 특정 세미나의 설문 퀴즈를 수동 실행합니다. (advanced: 심화설문)
+    const messageText = ctx.message?.text || '';
+    const searchKeyword = messageText.replace(/^\/list_seminar_quiz\s*/, '').trim();
 
-📚 세미나 퀴즈 족보:
-- /add_seminar_quiz <키워드> | <정답>: 족보 등록
-- /list_seminar_quiz: 등록된 족보 목록
-- /delete_seminar_quiz <키워드>: 족보 삭제
-- /add_seminar_answer_batch: 알림 내용을 복사하여 일괄 등록 (마지막 줄에 정답번호 포함)
+    try {
+      const data = await loadSeminarQuizCheatsheet();
+      let entries = Object.entries(data);
 
-명령어 사용 예: /inspect https://example.com "div.article" networkidle`;
+      if (searchKeyword) {
+        entries = entries.filter(([k, a]) => k.includes(searchKeyword) || String(a).includes(searchKeyword));
+      }
+
+      if (entries.length === 0) {
+        if (searchKeyword) {
+          return ctx.reply(`📋 "${searchKeyword}" 검색 결과가 없습니다.`);
+        } else {
+          return ctx.reply('📋 등록된 세미나 퀴즈 족보가 없습니다.');
+        }
+      }
+
+      let message = searchKeyword
+        ? `📋 "${searchKeyword}" 검색 결과 (${entries.length}개)\n\n`
+        : `📋 세미나 퀴즈 족보 (${entries.length}개)\n\n`;
+
+      for (const [keyword, answer] of entries) {
+        message += `• ${keyword} → ${answer}\n`;
+      }
+
+      await ctx.reply(truncateMessage(message));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await ctx.reply(`❌ 족보 조회 실패: ${message}`);
+    }
+  });
+
+  adminBot.command('delete_seminar_quiz', async (ctx) => {
+    logger.info('User requested to delete seminar quiz answer', { from: ctx.from?.username });
+    const messageText = ctx.message?.text || '';
+    const keyword = messageText.replace(/^\/delete_seminar_quiz\s*/, '').trim();
+
+    if (!keyword) {
+      return ctx.reply('사용법: /delete_seminar_quiz <문제 키워드>\n예) /delete_seminar_quiz 펙수클루의 적응증이 아닌');
+    }
+
+    try {
+      const data = await loadSeminarQuizCheatsheet();
+      if (!(keyword in data)) {
+        return ctx.reply(`❌ 해당 키워드가 족보에 없습니다: ${keyword}`);
+      }
+
+      const deletedAnswer = data[keyword];
+      delete data[keyword];
+      await saveSeminarQuizCheatsheet(data);
+      let gitNotice = '';
+      try {
+        const result = await commitAndPushIfChanged([SEMINAR_QUIZ_CHEATSHEET_FILE], 'update seminar quiz cheatsheet');
+        gitNotice = `\n\n${result.notice}`;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.error('세미나 퀴즈 족보 삭제 Git 커밋/푸시 실패', error);
+        gitNotice = `\n\n⚠️ Git 커밋/푸시 실패: ${message}`;
+      }
+
+      await ctx.reply(`🗑️ 세미나 퀴즈 족보 삭제 완료\n\n키워드: ${keyword}\n정답: ${deletedAnswer}${gitNotice}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error('세미나 퀴즈 족보 삭제 실패', error);
+      await ctx.reply(`❌ 족보 삭제 실패: ${message}`);
+    }
+  });
+
+  adminBot.command('refresh_seminar_point_exclusion', async (ctx) => {
+    logger.info('User requested to refresh seminar point exclusion flags', { from: ctx.from?.username });
+    const task = taskRegistry.getByName('refresh_seminar_point_exclusion');
+    if (!task) {
+      logger.error('refresh_seminar_point_exclusion task not found, cannot run');
+      return ctx.reply('refresh_seminar_point_exclusion task not found!');
+    }
+
+    try {
+      await ctx.reply('세미나 포인트미지급 여부를 전체 재확인합니다... (백그라운드 실행)');
+      runner
+        .runTask(task)
+        .then(async (result) => {
+          if (result && typeof result === 'object' && (result as { message?: string }).message) {
+            await ctx.reply(
+              (result as { message: string }).message,
+              (result as { options?: Record<string, unknown> }).options,
+            );
+            const screenshotPaths = (result as { screenshotPaths?: string[] }).screenshotPaths || [];
+            for (const screenshotPath of screenshotPaths) {
+              await ctx.replyWithPhoto({ source: screenshotPath });
+              await fs.unlink(screenshotPath).catch(() => {});
+            }
+          } else if (typeof result === 'string') {
+            await ctx.reply(result);
+          } else if (result === true) {
+            await ctx.reply('세미나 포인트미지급 여부 재확인이 완료되었습니다.');
+          } else {
+            await ctx.reply('세미나 포인트미지급 여부 재확인이 완료되었습니다.');
+          }
+        })
+        .catch((e) => {
+          const message = e instanceof Error ? e.message : String(e);
+          ctx.reply(`세미나 포인트미지급 여부 재확인 실패: ${message}`);
+        });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      ctx.reply(`Failed to start 세미나 포인트미지급 여부 재확인: ${message}`);
+    }
+  });
+
+  // ==========================================
+  // 3. 포인트 & 교환 (Points & Exchange)
+  // ==========================================
+
+  adminBot.command('check_point', async (ctx) => {
+    logger.info('User requested to check point now', { from: ctx.from?.username });
+    const task = taskRegistry.getByName('check_point');
+    if (!task) {
+      logger.error('check_point task not found, cannot run');
+      return ctx.reply('check_point task not found!');
+    }
+
+    try {
+      await ctx.reply('포인트를 확인하는 중입니다... (백그라운드 실행)');
+      runner
+        .runTask(task)
+        .then(async (result) => {
+          if (result && typeof result === 'object' && (result as { message?: string }).message) {
+            const msg = (result as { message: string }).message;
+            const imagePath = (result as { imagePath?: string }).imagePath;
+            if (imagePath) {
+              await ctx.replyWithPhoto({ source: imagePath }, { caption: msg });
+              await fs.unlink(imagePath).catch(() => {});
+            } else {
+              await ctx.reply(msg);
+            }
+          } else if (typeof result === 'string') {
+            await ctx.reply(result);
+          } else {
+            await ctx.reply('포인트 확인 완료 (메시지 없음)');
+          }
+        })
+        .catch((e) => {
+          const message = e instanceof Error ? e.message : String(e);
+          ctx.reply(`포인트 확인 실패: ${message}`);
+        });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      ctx.reply(`Failed to start check_point: ${message}`);
+    }
+  });
+
+  adminBot.command('naverpay_point_exchange', async (ctx) => {
+    logger.info('User requested to run naverpay_point_exchange now', { from: ctx.from?.username });
+    const task = taskRegistry.getByName('네이버페이포인트교환');
+    if (!task) {
+      logger.error('네이버페이포인트교환 task not found, cannot run');
+      return ctx.reply('네이버페이포인트교환 task not found!');
+    }
+
+    const messageText = ctx.message?.text || '';
+    const args = messageText.split(' ').slice(1);
+    let attempts = 10;
+    if (args.length > 0) {
+      const parsedAttempts = parseInt(args[0], 10);
+      if (!isNaN(parsedAttempts) && parsedAttempts > 0) {
+        attempts = parsedAttempts;
+      }
+    }
+
+    try {
+      await ctx.reply(`네이버페이포인트교환 작업을 시작합니다... (${attempts}회 시도, 백그라운드 실행)`);
+      runner
+        .runTask(task, { maxIterations: attempts })
+        .then(async (result) => {
+          if (result && typeof result === 'object' && (result as { message?: string }).message) {
+            await ctx.reply(
+              (result as { message: string }).message,
+              (result as { options?: Record<string, unknown> }).options,
+            );
+            if ((result as { imagePath?: string }).imagePath) {
+              await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
+              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
+            }
+          } else if (typeof result === 'string') {
+            await ctx.reply(result);
+          } else if (result === true) {
+            await ctx.reply('네이버페이포인트교환 작업이 완료되었습니다.');
+          } else {
+            await ctx.reply('네이버페이포인트교환 작업이 완료되었습니다.');
+          }
+        })
+        .catch((e) => {
+          const message = e instanceof Error ? e.message : String(e);
+          ctx.reply(`네이버페이포인트교환 실패: ${message}`);
+        });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      ctx.reply(`Failed to start 네이버페이포인트교환: ${message}`);
+    }
+  });
+
+  adminBot.command('baemin_point_exchange', async (ctx) => {
+    logger.info('User requested to run baemin_point_exchange now', { from: ctx.from?.username });
+    const task = taskRegistry.getByName('배민포인트교환');
+    if (!task) {
+      logger.error('배민포인트교환 task not found, cannot run');
+      return ctx.reply('배민포인트교환 task not found!');
+    }
+
+    const messageText = ctx.message?.text || '';
+    const args = messageText.split(' ').slice(1);
+    let attempts = 1;
+    if (args.length > 0) {
+      const parsedAttempts = parseInt(args[0], 10);
+      if (!isNaN(parsedAttempts) && parsedAttempts > 0) {
+        attempts = parsedAttempts;
+      }
+    }
+
+    try {
+      await ctx.reply(`배민포인트교환 작업을 시작합니다... (${attempts}회 시도, 백그라운드 실행)`);
+      runner
+        .runTask(task, { maxIterations: attempts })
+        .then(async (result) => {
+          if (result && typeof result === 'object' && (result as { message?: string }).message) {
+            await ctx.reply(
+              (result as { message: string }).message,
+              (result as { options?: Record<string, unknown> }).options,
+            );
+            if ((result as { imagePath?: string }).imagePath) {
+              await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
+              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
+            }
+          } else if (typeof result === 'string') {
+            await ctx.reply(result);
+          } else if (result === true) {
+            await ctx.reply('배민포인트교환 작업이 완료되었습니다.');
+          } else {
+            await ctx.reply('배민포인트교환 작업이 완료되었습니다.');
+          }
+        })
+        .catch((e) => {
+          const message = e instanceof Error ? e.message : String(e);
+          ctx.reply(`배민포인트교환 실패: ${message}`);
+        });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      ctx.reply(`Failed to start 배민포인트교환: ${message}`);
+    }
+  });
+
+  // ==========================================
+  // 4. 시스템 & 관리 (System & Management)
+  // ==========================================
+
+  adminBot.command('schedules', (ctx) => {
+    const tasks = scheduler.getScheduledTasks();
+    if (tasks.length === 0) {
+      return ctx.reply('No scheduled tasks.');
+    }
+
+    let message = 'Scheduled Tasks:\n\n';
+    tasks.forEach((task) => {
+      message += `Name: ${task.name}\n`;
+      message += `Schedule: ${task.schedule}\n`;
+      message += `Timezone: ${task.timezone}\n\n`;
+    });
+
     ctx.reply(message);
   });
 
-  adminBot.command('monitor_lunch_seminar_now', async (ctx) => {
-    logger.info('User requested to run monitor_lunch_seminars now', { from: ctx.from?.username });
-    const task = taskRegistry.getByName('monitor_lunch_seminars');
-    if (!task) {
-      logger.error('monitor_lunch_seminars task not found, cannot run');
-      return ctx.reply('monitor_lunch_seminars task not found!');
-    }
-
-    try {
-      await ctx.reply('Starting monitor_lunch_seminars... (백그라운드 실행)');
-      runner
-        .runTask(task)
-        .then(async (result) => {
-          if (result && typeof result === 'object' && (result as { message?: string }).message) {
-            await ctx.reply(
-              (result as { message: string }).message,
-              (result as { options?: Record<string, unknown> }).options,
-            );
-            if ((result as { imagePath?: string }).imagePath) {
-              await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
-            }
-          } else if (typeof result === 'string') {
-            await ctx.reply(result);
-          } else if (result === true) {
-            await ctx.reply('monitor_lunch_seminars finished successfully.');
-          } else {
-            await ctx.reply('monitor_lunch_seminars finished successfully.');
-          }
-        })
-        .catch((e) => {
-          const message = e instanceof Error ? e.message : String(e);
-          ctx.reply(`monitor_lunch_seminars failed: ${message}`);
-        });
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Failed to start monitor_lunch_seminars: ${message}`);
-    }
-  });
-
-  adminBot.command('monitor_dinner_seminar_now', async (ctx) => {
-    logger.info('User requested to run monitor_dinner_seminars now', { from: ctx.from?.username });
-    const task = taskRegistry.getByName('monitor_dinner_seminars');
-    if (!task) {
-      logger.error('monitor_dinner_seminars task not found, cannot run');
-      return ctx.reply('monitor_dinner_seminars task not found!');
-    }
-
-    try {
-      await ctx.reply('Starting monitor_dinner_seminars... (백그라운드 실행)');
-      runner
-        .runTask(task)
-        .then(async (result) => {
-          if (result && typeof result === 'object' && (result as { message?: string }).message) {
-            await ctx.reply(
-              (result as { message: string }).message,
-              (result as { options?: Record<string, unknown> }).options,
-            );
-            if ((result as { imagePath?: string }).imagePath) {
-              await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
-            }
-          } else if (typeof result === 'string') {
-            await ctx.reply(result);
-          } else if (result === true) {
-            await ctx.reply('monitor_dinner_seminars finished successfully.');
-          } else {
-            await ctx.reply('monitor_dinner_seminars finished successfully.');
-          }
-        })
-        .catch((e) => {
-          const message = e instanceof Error ? e.message : String(e);
-          ctx.reply(`monitor_dinner_seminars failed: ${message}`);
-        });
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Failed to start monitor_dinner_seminars: ${message}`);
-    }
-  });
-
-  // /run_seminar_quiz <seminarId> [advanced] — 수동 세미나 퀴즈 실행
-  // advanced 인자가 있으면 심화설문 (제출 후 확인/outro 스킵)
-  adminBot.command('run_seminar_quiz', async (ctx) => {
-    logger.info('User requested to run seminar_quiz manually', { from: ctx.from?.username });
+  adminBot.command('log', async (ctx) => {
     const messageText = ctx.message?.text || '';
-    const parts = messageText.split(/\s+/).slice(1);
-    const seminarId = parts[0]?.trim() || '';
-    const isAdvancedSurvey = parts[1]?.toLowerCase() === 'advanced' || parts[1]?.toLowerCase() === '심화';
+    const args = messageText.split(' ').slice(1);
 
-    if (!seminarId) {
-      return ctx.reply(
-        '사용법: /run_seminar_quiz <seminarId> [advanced]\n예) /run_seminar_quiz 12345\n     /run_seminar_quiz 12345 advanced',
-      );
+    let lineCount = 20;
+    if (args.length > 0) {
+      const parsedCount = parseInt(args[0], 10);
+      if (!isNaN(parsedCount) && parsedCount > 0) {
+        lineCount = parsedCount;
+      }
     }
 
-    const task = taskRegistry.getByName('run_seminar_quiz');
-    if (!task) {
-      logger.error('run_seminar_quiz task not found, cannot run');
-      return ctx.reply('run_seminar_quiz task not found!');
-    }
+    logger.info(`User requested to fetch recent ${lineCount} logs`, { from: ctx.from?.username });
 
+    try {
+      await ctx.reply(`최근 ${lineCount}개 로그를 불러옵니다... (최대 5초)`);
+
+      const cmd = `journalctl --no-pager -u doctorville-auto.service -n ${lineCount}`;
+      const { stdout, stderr, exitCode } = await runShellCommandWithAllowedExitCodes(`timeout 5s ${cmd}`, [124, 143]);
+
+      let message = `로그 결과 (${lineCount}줄)`;
+      if (exitCode) {
+        message += ' (시간 제한으로 일부 로그만 표시됩니다)';
+      }
+
+      if (stdout.trim()) {
+        const cleanedStdout = stdout
+          .split('\n')
+          .map((line) => line.replace(/([A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\s+[^:]+:\s*/, '$1 '))
+          .join('\n')
+          .trim();
+
+        message += `\n\nstdout:\n${cleanedStdout}`;
+      }
+      if (stderr.trim()) {
+        message += `\n\nstderr:\n${stderr.trim()}`;
+      }
+      if (!stdout.trim() && !stderr.trim()) {
+        message += '\n\n출력된 로그가 없습니다.';
+      }
+      await ctx.reply(truncateMessage(message));
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      logger.error('log fetch failed', e);
+      await ctx.reply(`로그 가져오기 실패: ${message}`);
+    }
+  });
+
+  adminBot.command('update_app', async (ctx) => {
+    logger.info('User requested to run pnpm update:app', { from: ctx.from?.username });
     try {
       await ctx.reply(
-        `Starting run_seminar_quiz (seminarId=${seminarId}${isAdvancedSurvey ? ', 심화설문' : ''})... (백그라운드 실행)`,
+        'Starting pnpm update:app... (백그라운드 실행)\n' +
+          '⚠️ 업데이트 중 서비스가 재시작되어 봇 응답이 잠시 끊길 수 있습니다.',
       );
-      const args: Record<string, string> = { seminarId };
-      if (isAdvancedSurvey) args.isAdvancedSurvey = 'true';
-      runner
-        .runTask(task, { args })
-        .then(async (result) => {
-          if (result && typeof result === 'object' && (result as { message?: string }).message) {
-            await ctx.reply(
-              (result as { message: string }).message,
-              (result as { options?: Record<string, unknown> }).options,
-            );
-            if ((result as { imagePath?: string }).imagePath) {
-              await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
-            } else {
-              const shotPaths = (result as { screenshotPaths?: string[] }).screenshotPaths;
-              if (shotPaths) {
-                for (const p of shotPaths) {
-                  await ctx.replyWithPhoto({ source: p });
-                  await fs.unlink(p).catch(() => {});
-                }
-              }
-            }
-          } else if (typeof result === 'string') {
-            await ctx.reply(result);
-          } else if (result === true) {
-            await ctx.reply('run_seminar_quiz finished successfully.');
-          } else {
-            await ctx.reply('run_seminar_quiz finished.');
+      runShellCommand('pnpm run update:app')
+        .then(async ({ stdout, stderr }) => {
+          let message = 'pnpm update:app 완료';
+          if (stdout.trim()) {
+            message += `\n\nstdout:\n${truncateMessage(stdout.trim())}`;
           }
+          if (stderr.trim()) {
+            message += `\n\nstderr:\n${truncateMessage(stderr.trim())}`;
+          }
+          await ctx.reply(message);
         })
-        .catch((e) => {
-          const message = e instanceof Error ? e.message : String(e);
-          ctx.reply(`run_seminar_quiz failed: ${message}`);
+        .catch(async (error) => {
+          const message = error instanceof Error ? error.message : String(error);
+          const stdout = (error as Error & { stdout?: string }).stdout ?? '';
+          const stderr = (error as Error & { stderr?: string }).stderr ?? '';
+          logger.error('pnpm update:app failed', error);
+          let reply = `pnpm update:app 실패: ${message}`;
+          if (stdout.trim()) {
+            reply += `\n\nstdout:\n${truncateMessage(stdout.trim())}`;
+          }
+          if (stderr.trim()) {
+            reply += `\n\nstderr:\n${truncateMessage(stderr.trim())}`;
+          }
+          await ctx.reply(reply);
         });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Failed to start run_seminar_quiz: ${message}`);
+      ctx.reply(`Failed to start pnpm update:app: ${message}`);
     }
   });
 
@@ -1074,7 +959,6 @@ if (adminBot) {
       selector = args.slice(1).join(' ');
     }
 
-    // Remove quotes from selector if present
     if ((selector.startsWith('"') && selector.endsWith('"')) || (selector.startsWith("'") && selector.endsWith("'"))) {
       selector = selector.substring(1, selector.length - 1);
     }
@@ -1134,134 +1018,82 @@ if (adminBot) {
       }
     }
   });
+
+  adminBot.command('help', (ctx) => {
+    const message = `사용 가능한 명령어:
+
+🔄 루틴 / 실행:
+- /run_routine_now: 즉시 daily_routine 작업을 실행합니다.
+- /today_links: 오늘의 세미나/퀴즈/출석 링크를 한 번에 가져옵니다.
+- /broadcast_today_links: 즉시 오늘의 링크를 채널에 공지합니다.
+- /apply_seminar_now: 즉시 세미나 신청 작업(apply_seminar)을 실행합니다.
+- /run_quiz_now: 즉시 오늘의 퀴즈 작업(today_quiz)을 실행합니다.
+- /monitor_lunch_seminar_now: 즉시 점심 세미나 모니터링을 시작합니다.
+- /monitor_dinner_seminar_now: 즉시 저녁 세미나 모니터링을 시작합니다.
+
+📚 세미나 & 퀴즈 족보:
+- /run_seminar_quiz <seminarId> [advanced]: 특정 세미나의 설문 퀴즈를 수동 실행합니다. (advanced: 심화설문)
+- /add_seminar_answer_batch: 알림 내용을 복사하여 일괄 등록 (마지막 줄에 정답번호 포함)
+- /list_seminar_quiz: 등록된 족보 목록
+- /delete_seminar_quiz <키워드>: 족보 삭제
+- /refresh_seminar_point_exclusion: 모든 세미나의 포인트미지급 여부를 다시 확인해 캐시를 갱신합니다.
+
+💰 포인트 & 교환:
+- /check_point: 현재 포인트를 확인합니다.
+- /naverpay_point_exchange [횟수]: 네이버페이포인트교환 작업을 실행합니다. (기본값: 10)
+- /baemin_point_exchange [횟수]: 배민포인트교환 작업을 실행합니다. (기본값: 1)
+
+⚙️ 시스템 & 관리:
+- /schedules: 스케줄된 작업 목록을 확인합니다.
+- /log [수량]: 최근 로그를 가져옵니다. (기본값: 20)
+- /update_app: pnpm update:app 명령어를 실행합니다. (서버 권한 필요, 재시작으로 응답 중단 가능)
+- /inspect <url> <selector> [waitUntil]: 지정한 URL에서 셀렉터에 해당하는 요소를 검사하고 스크린샷을 전송합니다.
+
+명령어 사용 예: /inspect https://example.com "div.article" networkidle`;
+    ctx.reply(message);
+  });
 }
 
-// --- Shared Commands ---
-const seminarCheck5Days = async (ctx: Context) => {
-  logger.info('User requested to run 5days_seminar_check now', { from: ctx.from?.username });
-  const task = taskRegistry.getByName('5days_seminar_check');
-  if (!task) {
-    logger.error('5days_seminar_check task not found, cannot run');
-    return ctx.reply('5days_seminar_check task not found!');
-  }
-
-  try {
-    await ctx.reply('5일간의 세미나를 확인합니다... (백그라운드 실행)');
-    runner
-      .runTask(task)
-      .then(async (result) => {
-        if (result && typeof result === 'object' && (result as { message?: string }).message) {
-          await ctx.reply(
-            (result as { message: string }).message,
-            (result as { options?: Record<string, unknown> }).options,
-          );
-          if ((result as { imagePath?: string }).imagePath) {
-            await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-            await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
-          }
-        } else if (typeof result === 'string') {
-          await ctx.reply(result);
-        } else if (result === true) {
-          await ctx.reply('세미나 확인이 완료되었습니다.');
-        } else {
-          await ctx.reply('세미나 확인이 완료되었습니다.');
-        }
-      })
-      .catch((e) => {
-        const message = e instanceof Error ? e.message : String(e);
-        ctx.reply(`세미나 확인 중 오류 발생: ${message}`);
-      });
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    ctx.reply(`Failed to start 세미나 확인: ${message}`);
-  }
-};
-
-const todayLinks = async (ctx: Context) => {
-  logger.info('User requested to run today_links now', { from: ctx.from?.username });
-  const task = taskRegistry.getByName('today_links');
-  if (!task) {
-    logger.error('today_links task not found, cannot run');
-    return ctx.reply('today_links task not found!');
-  }
-
-  try {
-    await ctx.reply('오늘의 링크를 수집합니다... (백그라운드 실행)');
-    runner
-      .runTask(task)
-      .then(async (result) => {
-        if (result && typeof result === 'object' && (result as { message?: string }).message) {
-          await ctx.reply(
-            (result as { message: string }).message,
-            (result as { options?: Record<string, unknown> }).options,
-          );
-        } else if (typeof result === 'string') {
-          await ctx.reply(result);
-        } else if (result === true) {
-          await ctx.reply('작업이 완료되었습니다.');
-        } else {
-          await ctx.reply('작업이 완료되었습니다.');
-        }
-      })
-      .catch((e) => {
-        const message = e instanceof Error ? e.message : String(e);
-        ctx.reply(`링크 수집 중 오류 발생: ${message}`);
-      });
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    ctx.reply(`Failed to start 링크 수집: ${message}`);
-  }
-};
-
-if (adminBot) {
-  adminBot.command('5days_seminar_check', seminarCheck5Days);
-  adminBot.command('today_links', todayLinks);
-}
-
+// --- Notice Bot Commands ---
 if (noticeBot) {
-  noticeBot.command('5days_seminar_check', seminarCheck5Days);
   noticeBot.command('today_links', todayLinks);
-}
 
-// Help command for notice bot (limited)
-if (noticeBot) {
   noticeBot.command('help', (ctx) => {
     const message = `사용 가능한 명령어:
 
-- /5days_seminar_check: 향후 5일간의 세미나 일정을 확인합니다.
 - /today_links: 오늘의 세미나와 퀴즈 링크, 출석 링크를 한 번에 가져옵니다.`;
     ctx.reply(message);
   });
 }
 
 const adminCommands = [
-  { command: 'schedules', description: '스케줄된 작업 목록 확인' },
+  // 1. 루틴 / 실행
   { command: 'run_routine_now', description: '즉시 daily_routine 실행' },
-  { command: 'run_quiz_now', description: '즉시 오늘의 퀴즈(today_quiz) 실행' },
-  { command: 'apply_seminar_now', description: '즉시 세미나 신청(apply_seminar) 실행' },
-  { command: 'refresh_seminar_point_exclusion', description: '세미나 포인트미지급 캐시 재확인' },
-  { command: 'naverpay_point_exchange', description: '네이버페이포인트교환 실행' },
-  { command: 'baemin_point_exchange', description: '배민포인트교환 실행' },
-  { command: 'check_point', description: '현재 포인트 확인' },
-  { command: 'add_quiz_answer', description: '오늘의 퀴즈 정답 등록' },
-  { command: 'broadcast_today_links', description: '오늘의 링크 채널 공지' },
-  { command: 'update_app', description: '앱 업데이트 (pnpm update:app)' },
-  { command: 'log', description: '최근 로그 확인' },
-  { command: 'inspect', description: '페이지 요소 검사' },
-  { command: '5days_seminar_check', description: '향후 5일간 세미나 일정 확인' },
   { command: 'today_links', description: '오늘의 세미나/퀴즈/출석 링크 모음' },
+  { command: 'broadcast_today_links', description: '오늘의 링크 채널 공지' },
+  { command: 'apply_seminar_now', description: '즉시 세미나 신청(apply_seminar) 실행' },
+  { command: 'run_quiz_now', description: '즉시 오늘의 퀴즈(today_quiz) 실행' },
   { command: 'monitor_lunch_seminar_now', description: '즉시 점심 세미나 모니터링 시작' },
   { command: 'monitor_dinner_seminar_now', description: '즉시 저녁 세미나 모니터링 시작' },
+  // 2. 세미나 & 퀴즈 족보
   { command: 'run_seminar_quiz', description: '특정 세미나 퀴즈 수동 실행 (seminarId, [advanced])' },
-  { command: 'add_seminar_quiz', description: '세미나 퀴즈 족보 등록' },
+  { command: 'add_seminar_answer_batch', description: '족보 일괄 등록' },
   { command: 'list_seminar_quiz', description: '등록된 족보 목록' },
   { command: 'delete_seminar_quiz', description: '족보 삭제' },
-  { command: 'add_seminar_answer_batch', description: '족보 일괄 등록' },
+  { command: 'refresh_seminar_point_exclusion', description: '세미나 포인트미지급 캐시 재확인' },
+  // 3. 포인트 & 교환
+  { command: 'check_point', description: '현재 포인트 확인' },
+  { command: 'naverpay_point_exchange', description: '네이버페이포인트교환 실행' },
+  { command: 'baemin_point_exchange', description: '배민포인트교환 실행' },
+  // 4. 시스템 & 관리
+  { command: 'schedules', description: '스케줄된 작업 목록 확인' },
+  { command: 'log', description: '최근 로그 확인' },
+  { command: 'update_app', description: '앱 업데이트 (pnpm update:app)' },
+  { command: 'inspect', description: '페이지 요소 검사' },
   { command: 'help', description: '도움말' },
 ];
 
 const noticeCommands = [
-  { command: '5days_seminar_check', description: '향후 5일간 세미나 일정 확인' },
   { command: 'today_links', description: '오늘의 세미나/퀴즈/출석 링크 모음' },
   { command: 'help', description: '도움말' },
 ];

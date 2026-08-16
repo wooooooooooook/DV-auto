@@ -347,7 +347,7 @@ function formatUnknownQuestions(questions: SurveyQuestion[], results: QuizResult
       for (const opt of q.options) {
         message += `  ${opt.index}. ${opt.text}\n`;
       }
-      message += `\n등록: /add_seminar_quiz <키워드> | <정답>\n\n`;
+      message += '\n';
     }
   }
 

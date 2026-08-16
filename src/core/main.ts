@@ -12,7 +12,6 @@ import * as utils from '../modules/utils';
 import * as attendanceTask from '../tasks/attendance';
 import * as applySeminarTask from '../tasks/apply_seminar';
 import * as todayQuizTaskModule from '../tasks/today_quiz';
-import * as fiveDaysSeminarTaskModule from '../tasks/5days_seminar_check';
 import * as todayLinksTaskModule from '../tasks/today_links';
 import * as monitorLunchSeminars from '../tasks/monitor_lunch_seminars';
 import * as monitorDinnerSeminars from '../tasks/monitor_dinner_seminars';
@@ -340,22 +339,6 @@ const todayQuizTask: Task = {
   },
 };
 taskRegistry.registerTask(todayQuizTask);
-
-const fiveDaysSeminarCheckTask: Task = {
-  name: '5days_seminar_check',
-  run: async () => {
-    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    try {
-      await utils.ensureLoggedIn({ page, context });
-      return await fiveDaysSeminarTaskModule.run({ page, context });
-    } finally {
-      await browser.close();
-    }
-  },
-};
-taskRegistry.registerTask(fiveDaysSeminarCheckTask);
 
 const todayLinksTask: Task = {
   name: 'today_links',
