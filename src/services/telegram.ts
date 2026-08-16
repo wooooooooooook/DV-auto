@@ -15,8 +15,11 @@ const ADMIN_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const NOTICE_BOT_TOKEN = process.env.NOTICE_BOT_TOKEN;
 const SEMINAR_QUIZ_CHEATSHEET_FILE = 'data/seminar_quiz_cheatsheet.json';
 const SEMINAR_QUIZ_CHEATSHEET_PATH = path.join(process.cwd(), SEMINAR_QUIZ_CHEATSHEET_FILE);
+const QUIZ_FILE = 'data/quiz.json';
+const QUIZ_PATH = path.join(process.cwd(), QUIZ_FILE);
 
 type SeminarQuizCheatsheet = Record<string, string>;
+type QuizMapping = Record<string, Array<string | number>>;
 type CommandResult = { stdout: string; stderr: string };
 type CommandResultWithExitCode = CommandResult & { exitCode?: number };
 
@@ -104,6 +107,26 @@ async function saveSeminarQuizCheatsheet(data: SeminarQuizCheatsheet): Promise<v
   } catch (error) {
     logger.error('세미나 퀴즈 족보 저장 실패', error);
     throw new Error('세미나 퀴즈 족보 파일을 저장할 수 없습니다.');
+  }
+}
+
+// --- Quiz Mapping (quiz.json) Functions ---
+async function loadQuizMapping(): Promise<QuizMapping> {
+  try {
+    const raw = await fs.readFile(QUIZ_PATH, 'utf8');
+    return JSON.parse(raw) as QuizMapping;
+  } catch (error) {
+    logger.warn('quiz.json 로드 실패, 빈 객체 반환', error);
+    return {};
+  }
+}
+
+async function saveQuizMapping(data: QuizMapping): Promise<void> {
+  try {
+    await fs.writeFile(QUIZ_PATH, `${JSON.stringify(data, null, 4)}\n`, 'utf8');
+  } catch (error) {
+    logger.error('quiz.json 저장 실패', error);
+    throw new Error('quiz.json 파일을 저장할 수 없습니다.');
   }
 }
 
@@ -737,6 +760,83 @@ if (adminBot) {
     }
   });
 
+  adminBot.command('list_quiz', async (ctx) => {
+    logger.info('User requested to list quiz.json', { from: ctx.from?.username });
+    const messageText = ctx.message?.text || '';
+    const searchKeyword = messageText.replace(/^\/list_quiz\s*/, '').trim();
+
+    try {
+      const data = await loadQuizMapping();
+      let entries = Object.entries(data);
+
+      if (searchKeyword) {
+        entries = entries.filter(
+          ([product, answers]) => product.includes(searchKeyword) || JSON.stringify(answers).includes(searchKeyword),
+        );
+      }
+
+      if (entries.length === 0) {
+        if (searchKeyword) {
+          return ctx.reply(`📋 quiz.json "${searchKeyword}" 검색 결과가 없습니다.`);
+        } else {
+          return ctx.reply('📋 quiz.json에 등록된 항목이 없습니다.');
+        }
+      }
+
+      let message = searchKeyword
+        ? `📋 quiz.json "${searchKeyword}" 검색 결과 (${entries.length}개)\n\n`
+        : `📋 quiz.json 목록 (${entries.length}개)\n\n`;
+
+      for (const [product, answers] of entries) {
+        message += `• ${product} → [${answers.join(', ')}]\n`;
+      }
+
+      await ctx.reply(truncateMessage(message));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await ctx.reply(`❌ quiz.json 목록 조회 실패: ${message}`);
+    }
+  });
+
+  adminBot.command('delete_quiz', async (ctx) => {
+    logger.info('User requested to delete quiz mapping', { from: ctx.from?.username });
+    const messageText = ctx.message?.text || '';
+    const target = messageText.replace(/^\/delete_quiz\s*/, '').trim();
+
+    if (!target) {
+      return ctx.reply('사용법: /delete_quiz <제품명>\n예) /delete_quiz 글리아타민');
+    }
+
+    try {
+      const data = await loadQuizMapping();
+
+      if (!(target in data)) {
+        return ctx.reply(`❌ "${target}" 제품이 quiz.json에 없습니다.`);
+      }
+
+      const deletedAnswer = data[target];
+      delete data[target];
+      await saveQuizMapping(data);
+      let gitNotice = '';
+      try {
+        const result = await commitAndPushIfChanged([QUIZ_FILE], `delete ${target} from quiz.json`);
+        gitNotice = `\n\n${result.notice}`;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.error('quiz.json 삭제 Git 커밋/푸시 실패', error);
+        gitNotice = `\n\n⚠️ Git 커밋/푸시 실패: ${message}`;
+      }
+
+      await ctx.reply(
+        `🗑️ quiz.json 항목 삭제 완료\n\n제품: ${target}\n정답: ${JSON.stringify(deletedAnswer)}${gitNotice}`,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error('quiz.json 삭제 실패', error);
+      await ctx.reply(`❌ quiz.json 삭제 실패: ${message}`);
+    }
+  });
+
   adminBot.command('refresh_seminar_point_exclusion', async (ctx) => {
     logger.info('User requested to refresh seminar point exclusion flags', { from: ctx.from?.username });
     const task = taskRegistry.getByName('refresh_seminar_point_exclusion');
@@ -1126,6 +1226,8 @@ if (adminBot) {
 - /add_seminar_answer_batch: 알림 내용을 복사하여 일괄 등록 (마지막 줄에 정답번호 포함)
 - /list_seminar_quiz: 등록된 족보 목록
 - /delete_seminar_quiz <키워드>: 족보 삭제
+- /list_quiz: quiz.json 등록 제품 목록
+- /delete_quiz <제품명>: quiz.json 항목 삭제
 - /refresh_seminar_point_exclusion: 모든 세미나의 포인트미지급 여부를 다시 확인해 캐시를 갱신합니다.
 
 💰 포인트 & 교환:
@@ -1170,6 +1272,8 @@ const adminCommands = [
   { command: 'add_seminar_answer_batch', description: '족보 일괄 등록' },
   { command: 'list_seminar_quiz', description: '등록된 족보 목록' },
   { command: 'delete_seminar_quiz', description: '족보 삭제' },
+  { command: 'list_quiz', description: 'quiz.json 등록 제품 목록' },
+  { command: 'delete_quiz', description: 'quiz.json 항목 삭제' },
   { command: 'refresh_seminar_point_exclusion', description: '세미나 포인트미지급 캐시 재확인' },
   // 3. 포인트 & 교환
   { command: 'check_point', description: '현재 포인트 확인' },

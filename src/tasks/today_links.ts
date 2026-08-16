@@ -498,7 +498,7 @@ async function run({ page }: PlaywrightRunArgs) {
     }
     message += `✏️ 오늘의 퀴즈:${quizMessage}\n`;
     if (seminarMessage?.message) {
-      message += `\n📖${seminarMessage.message}`;
+      message += `\n📖${seminarMessage.message}\n`;
     }
 
     if (storedNewSeminars.length > 0) {
@@ -512,16 +512,24 @@ async function run({ page }: PlaywrightRunArgs) {
         })
         .join('\n');
 
-      message += `\n\n🆕 어제 추가된 신규 세미나\n${newSeminarList}`;
+      message += `\n\n🆕 어제 추가된 신규 세미나\n${newSeminarList}\n`;
     }
 
     const pointConversionMessage = formatPointConversionMessage(pointConversionInfo);
     if (pointConversionMessage) {
-      message += `\n\n${pointConversionMessage}\n`;
+      message += `\n${pointConversionMessage}\n`;
     }
 
     message +=
-      '\n🤖텔레그램 봇이 자동으로 전송한 메시지입니다.\n★☆ 매일오전9시 ☆★\n▶▷ 링크모음 발송 ◁◀\n☞ 세미나 시작알림\n☞ 세미나 종료알림\n☞ 퀴즈정답 ★즉시★\n☞ 신규세미나 알림!!\n§지금가입하세요§\nhttps://t.me/+J1UGmvLA9jU4NjQ1';
+      `\n🤖텔레그램 봇이 자동으로 전송한 메시지입니다.\n
+      ★☆ 매일오전9시 ☆★\n
+      ▶▷ 링크모음 발송 ◁◀\n
+      ☞ 세미나 시작알림\n
+      ☞ 세미나 종료알림\n
+      ☞ 퀴즈정답 ★즉시★\n
+      ☞ 신규세미나 알림!!\n
+      §지금가입하세요§\n
+      https://t.me/+J1UGmvLA9jU4NjQ1`;
 
     const newSeminarIds = storedNewSeminars.map((item) => item.seminarId).filter((id): id is string => Boolean(id));
     const allSeminarIds = seminarMessage
