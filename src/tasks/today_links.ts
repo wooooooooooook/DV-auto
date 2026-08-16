@@ -11,7 +11,15 @@ const QUIZ_LIST_URLS = [
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const BASE_URL = 'https://www.doctorville.co.kr/';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
+const POINT_CONVERSION_API_URL = 'https://api.doctorville.co.kr/api/point/conversion/availability';
+const POINT_CONVERSION_URL = 'https://www.doctorville.co.kr/my/point/pointUseHistoryList';
 const TODAY_QUIZ_TEMP_KEY = 'today_quiz:temp_answers';
+
+type PointConversionInfo = {
+  available?: boolean;
+  availablePlannedAt?: string;
+  meridiem?: string;
+};
 
 type QuizInfo = { link: string; productTitle?: string; answers?: Array<string | number> };
 type SeminarData = {
@@ -373,10 +381,48 @@ async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Prom
   }
 }
 
+async function collectPointConversionInfo(page: PlaywrightRunArgs['page']): Promise<PointConversionInfo | null> {
+  try {
+    const currentUrl = page.url();
+    if (!currentUrl.includes('doctorville.co.kr')) {
+      await safeGoto(page, BASE_URL, { waitUntil: 'domcontentloaded', timeout: 15000 }, 1);
+    }
+    const response = (await page.evaluate(async (apiUrl: string) => {
+      try {
+        const res = await fetch(apiUrl, { credentials: 'include' });
+        if (!res.ok) return null;
+        const text = await res.text();
+        if (!text) return null;
+        return JSON.parse(text);
+      } catch {
+        return null;
+      }
+    }, POINT_CONVERSION_API_URL)) as { data?: PointConversionInfo } | null;
+
+    return response?.data ?? null;
+  } catch (err) {
+    console.error('[today_links] 포인트 전환 정보 조회 실패:', err);
+    return null;
+  }
+}
+
+function formatPointConversionMessage(info: PointConversionInfo | null): string {
+  if (!info) return '';
+  if (info.available) {
+    return `💳 오늘 네이버페이포인트 전환 가능 예정입니다. 전환 가능 알림을 기다려주세요!\n${POINT_CONVERSION_URL}`;
+  }
+  const plannedParts = [info.availablePlannedAt, info.meridiem].map((s) => s?.trim()).filter(Boolean);
+  if (plannedParts.length > 0) {
+    return `💳 다음 네이버페이포인트 전환가능일: ${plannedParts.join(' ')}`;
+  }
+  return '';
+}
+
 async function run({ page }: PlaywrightRunArgs) {
   try {
     const quizInfo = await collectQuizInfo(page);
     const seminarMessage = await collectTodaySeminarMessage(page);
+    const pointConversionInfo = await collectPointConversionInfo(page);
     const { isoDate, yesterdayIso } = getTodayDateStrings();
     let storedNewSeminars = getStoredNewSeminars(isoDate, yesterdayIso);
     if (storedNewSeminars.length > 0) {
@@ -431,7 +477,6 @@ async function run({ page }: PlaywrightRunArgs) {
       quizMessage += `\n${quizInfo.link}`;
     }
     message += `✏️ 오늘의 퀴즈:${quizMessage}\n`;
-
     if (seminarMessage?.message) {
       message += `\n📖${seminarMessage.message}`;
     }
@@ -448,6 +493,12 @@ async function run({ page }: PlaywrightRunArgs) {
         .join('\n');
 
       message += `\n\n🆕 어제 추가된 신규 세미나\n${newSeminarList}`;
+    }
+
+
+    const pointConversionMessage = formatPointConversionMessage(pointConversionInfo);
+    if (pointConversionMessage) {
+      message += `\n${pointConversionMessage}\n`;
     }
 
     message +=
