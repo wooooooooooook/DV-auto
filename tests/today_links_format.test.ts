@@ -21,7 +21,7 @@ function testTodayLinksFormatWithUserExample() {
       dinnerSeminarIds: ['5543', '5542', '5544'],
       message: `<b>오늘의 세미나 리스트:</b>
 🍴 <b>[점심 세미나]</b>
-- 13:00~14:00. 입시를 몰라도 자녀와 대화가 통하게 되는 50분 🚫<b>[포인트미지급]</b> https://m.doctorville.co.kr/cme/seminar/5538
+- 13:00~14:00. <s>입시를 몰라도 자녀와 대화가 통하게 되는 50분</s> 🚫<b>[포인트미지급]</b> https://m.doctorville.co.kr/cme/seminar/5538
 - 13:00~14:00. 눈에서 시작하는 심혈관 위험 평가와 AI의 미래 📝<b>[심화설문]</b> https://m.doctorville.co.kr/cme/seminar/5565
 - 13:00~14:00. Hypertension and Cardiovascular Protection From Guidelines to Clinical Practice https://m.doctorville.co.kr/cme/seminar/5531
 
@@ -73,7 +73,7 @@ function testTodayLinksFormatWithUserExample() {
   assert(message.includes('https://www.doctorville.co.kr/product/productView?pId=161'));
 
   // 3. 오늘의 세미나 목록 및 강조된 플래그
-  assert(message.includes('입시를 몰라도 자녀와 대화가 통하게 되는 50분 🚫<b>[포인트미지급]</b>'));
+  assert(message.includes('<s>입시를 몰라도 자녀와 대화가 통하게 되는 50분</s> 🚫<b>[포인트미지급]</b>'));
   assert(message.includes('https://m.doctorville.co.kr/cme/seminar/5538'));
   assert(message.includes('엔블로 Web Symposium 📝<b>[심화설문]</b>'));
 
@@ -82,7 +82,7 @@ function testTodayLinksFormatWithUserExample() {
   assert(message.includes('1. [9/1 13:00~13:40] 척수성 근위축증(SMA) 조기 진단과 전원'));
   assert(
     message.includes(
-      '2. [8/20 13:00~14:00] ChatGPT 실용 입문 — AI로 알아보고, 읽고, 만들고, 검증하기 🚫<b>[포인트미지급]</b>',
+      '2. [8/20 13:00~14:00] <s>ChatGPT 실용 입문 — AI로 알아보고, 읽고, 만들고, 검증하기</s> 🚫<b>[포인트미지급]</b>',
     ),
   );
 

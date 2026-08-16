@@ -576,7 +576,8 @@ async function collectTodaySeminarMessage(
       const isPointExcluded = pointExcludedCache.get(pointExcludedKey) || false;
       const pointExcludedSuffix = isPointExcluded ? ' 🚫<b>[포인트미지급]</b>' : '';
       const advancedSurveySuffix = item.isAdvancedSurvey ? ' 📝<b>[심화설문]</b>' : '';
-      const seminarInfo = ` ${item.time}. ${escapeHtml(item.title)}${pointExcludedSuffix}${advancedSurveySuffix} ${item.seminarLink}`;
+      const titleDisplay = isPointExcluded ? `<s>${escapeHtml(item.title)}</s>` : escapeHtml(item.title);
+      const seminarInfo = ` ${item.time}. ${titleDisplay}${pointExcludedSuffix}${advancedSurveySuffix} ${item.seminarLink}`;
 
       if (isDinnerSeminar(item.classAttr, item.time)) {
         dinnerSeminars.push(seminarInfo);
@@ -719,7 +720,8 @@ function formatTodayLinksBroadcast(input: TodayLinksFormatInput): TodayLinksForm
         const pointExcludedSuffix = item.isPointExcluded ? ' 🚫<b>[포인트미지급]</b>' : '';
         const advancedSurveySuffix = item.isAdvancedSurvey ? ' 📝<b>[심화설문]</b>' : '';
         const dateTimePrefix = item.date || item.time ? `[${item.date}${item.time ? ' ' + item.time : ''}] ` : '';
-        return `${index + 1}. ${dateTimePrefix}${escapeHtml(item.name)}${pointExcludedSuffix}${advancedSurveySuffix}\n${link}`;
+        const nameDisplay = item.isPointExcluded ? `<s>${escapeHtml(item.name)}</s>` : escapeHtml(item.name);
+        return `${index + 1}. ${dateTimePrefix}${nameDisplay}${pointExcludedSuffix}${advancedSurveySuffix}\n${link}`;
       })
       .join('\n');
 
