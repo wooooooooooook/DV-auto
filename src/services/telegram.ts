@@ -107,6 +107,74 @@ async function saveSeminarQuizCheatsheet(data: SeminarQuizCheatsheet): Promise<v
   }
 }
 
+type ParsedQuizQuestion = { keyword: string; options: string[] };
+
+function parseQuizQuestionsFromText(content: string): ParsedQuizQuestion[] {
+  const lines = content.split('\n').map((l) => l.trim());
+  const questions: ParsedQuizQuestion[] = [];
+  let currentQuestion: ParsedQuizQuestion | null = null;
+
+  for (const line of lines) {
+    if (line.match(/^Q\d+:/)) {
+      const keywordMatch = line.match(/^Q\d+:\s*(?:\[퀴즈\]\s*)?(.*)$/);
+      if (keywordMatch) {
+        const rawKeyword = keywordMatch[1].trim();
+        const normalizedKeyword = rawKeyword
+          .replace(/^["'“”]/, '')
+          .replace(/["'“”]$/, '')
+          .replace(/\.\.\.$/, '')
+          .trim();
+
+        if (normalizedKeyword) {
+          currentQuestion = { keyword: normalizedKeyword, options: [] };
+          questions.push(currentQuestion);
+        }
+      }
+    } else if (currentQuestion && line.match(/^\d+\./)) {
+      const optionText = line.replace(/^\d+\.\s*/, '').trim();
+      currentQuestion.options.push(optionText);
+    }
+  }
+
+  return questions;
+}
+
+async function registerQuizAnswersToCheatsheet(
+  questions: ParsedQuizQuestion[],
+  answers: number[],
+): Promise<{ registered: string[]; gitNotice: string }> {
+  const data = await loadSeminarQuizCheatsheet();
+  const registered: string[] = [];
+
+  for (let i = 0; i < questions.length; i++) {
+    const q = questions[i];
+    const answerIndex = answers[i];
+    const selectedOption = q.options[answerIndex - 1];
+
+    if (selectedOption) {
+      data[q.keyword] = selectedOption;
+      registered.push(`• ${q.keyword} → ${selectedOption}`);
+    }
+  }
+
+  await saveSeminarQuizCheatsheet(data);
+
+  let gitNotice = '';
+  try {
+    const result = await commitAndPushIfChanged(
+      [SEMINAR_QUIZ_CHEATSHEET_FILE],
+      'update seminar quiz cheatsheet (batch)',
+    );
+    gitNotice = `\n\n${result.notice}`;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error('세미나 퀴즈 족보 Git 커밋/푸시 실패', error);
+    gitNotice = `\n\n⚠️ Git 커밋/푸시 실패: ${message}`;
+  }
+
+  return { registered, gitNotice };
+}
+
 if (!ADMIN_BOT_TOKEN) {
   logger.warn('TELEGRAM_BOT_TOKEN is not set. The admin bot will not be initialized.');
 }
@@ -496,37 +564,19 @@ if (adminBot) {
     const lines = content.split('\n').map((l) => l.trim());
     const lastLine = lines[lines.length - 1];
 
-    if (!/^\d+$/.test(lastLine)) {
-      return ctx.reply('❌ 마지막 줄에 숫자 형식의 정답(예: 3313)이 포함되어야 합니다.');
+    let answers: number[] = [];
+    if (/^\d+$/.test(lastLine)) {
+      answers = lastLine.split('').map(Number);
+    } else if (/^[\d\s,-]+$/.test(lastLine)) {
+      const digits = lastLine.match(/\d/g);
+      if (digits) answers = digits.map(Number);
     }
 
-    const answers = lastLine.split('').map(Number);
-    const questions: { keyword: string; options: string[] }[] = [];
-    let currentQuestion: { keyword: string; options: string[] } | null = null;
-
-    for (const line of lines) {
-      if (line.match(/^Q\d+:/)) {
-        // New question block
-        const keywordMatch = line.match(/^Q\d+:\s*(?:\[퀴즈\]\s*)?(.*)$/);
-        if (keywordMatch) {
-          const rawKeyword = keywordMatch[1].trim();
-          const normalizedKeyword = rawKeyword
-            .replace(/^["'“”]/, '')
-            .replace(/["'“”]$/, '')
-            .replace(/\.\.\.$/, '')
-            .trim();
-
-          if (normalizedKeyword) {
-            currentQuestion = { keyword: normalizedKeyword, options: [] };
-            questions.push(currentQuestion);
-          }
-        }
-      } else if (currentQuestion && line.match(/^\d+\./)) {
-        // Option line
-        const optionText = line.replace(/^\d+\.\s*/, '').trim();
-        currentQuestion.options.push(optionText);
-      }
+    if (answers.length === 0) {
+      return ctx.reply('❌ 마지막 줄에 숫자 형식의 정답(예: 3313 또는 3 3 1 3)이 포함되어야 합니다.');
     }
+
+    const questions = parseQuizQuestionsFromText(content);
 
     if (questions.length === 0) {
       return ctx.reply('❌ 퀴즈 내용을 파싱하지 못했습니다. 형식을 확인해주세요.');
@@ -537,40 +587,80 @@ if (adminBot) {
     }
 
     try {
-      const data = await loadSeminarQuizCheatsheet();
-      const registered: string[] = [];
-
-      for (let i = 0; i < questions.length; i++) {
-        const q = questions[i];
-        const answerIndex = answers[i];
-        const selectedOption = q.options[answerIndex - 1];
-
-        if (selectedOption) {
-          data[q.keyword] = selectedOption;
-          registered.push(`• ${q.keyword} → ${selectedOption}`);
-        }
-      }
-
-      await saveSeminarQuizCheatsheet(data);
-
-      let gitNotice = '';
-      try {
-        const result = await commitAndPushIfChanged(
-          [SEMINAR_QUIZ_CHEATSHEET_FILE],
-          'update seminar quiz cheatsheet (batch)',
-        );
-        gitNotice = `\n\n${result.notice}`;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        logger.error('세미나 퀴즈 족보 Git 커밋/푸시 실패', error);
-        gitNotice = `\n\n⚠️ Git 커밋/푸시 실패: ${message}`;
-      }
-
+      const { registered, gitNotice } = await registerQuizAnswersToCheatsheet(questions, answers);
       await ctx.reply(`✅ 세미나 퀴즈 ${registered.length}개 일괄 등록 완료\n\n${registered.join('\n')}${gitNotice}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.error('세미나 퀴즈 족보 일괄 등록 실패', error);
       await ctx.reply(`❌ 일괄 등록 실패: ${message}`);
+    }
+  });
+
+  // 답장(Reply)을 통한 퀴즈 정답 번호 일괄 등록 핸들러
+  adminBot.on('text', async (ctx, next) => {
+    const messageText = ctx.message.text.trim();
+    // 명령어인 경우 telegraf command 핸들러에 위임
+    if (messageText.startsWith('/')) {
+      return next();
+    }
+
+    const replyToMessage = ctx.message.reply_to_message;
+    if (!replyToMessage) {
+      return next();
+    }
+
+    const replyText =
+      'text' in replyToMessage && replyToMessage.text
+        ? replyToMessage.text
+        : 'caption' in replyToMessage && replyToMessage.caption
+          ? replyToMessage.caption
+          : '';
+
+    if (!replyText) {
+      return next();
+    }
+
+    // 숫자로만 구성되어 있는지 확인 (예: "234", "1 2 3", "1, 2, 3", "1-2-3")
+    let answers: number[] = [];
+    if (/^\d+$/.test(messageText)) {
+      answers = messageText.split('').map(Number);
+    } else if (/^[\d\s,-]+$/.test(messageText)) {
+      const digits = messageText.match(/\d/g);
+      if (digits) {
+        answers = digits.map(Number);
+      }
+    }
+
+    if (answers.length === 0) {
+      return next();
+    }
+
+    // 답장 대상 메시지가 퀴즈 문제인지 파싱
+    const questions = parseQuizQuestionsFromText(replyText);
+    if (questions.length === 0) {
+      return next();
+    }
+
+    if (questions.length !== answers.length) {
+      return ctx.reply(
+        `❌ 퀴즈 개수(${questions.length}개)와 전송한 정답 개수(${answers.length}개)가 일치하지 않습니다.\n확인 후 다시 답장을 보내주세요.`,
+      );
+    }
+
+    try {
+      logger.info('Registering quiz cheatsheet via reply', {
+        from: ctx.from?.username,
+        questionCount: questions.length,
+        answers,
+      });
+      const { registered, gitNotice } = await registerQuizAnswersToCheatsheet(questions, answers);
+      await ctx.reply(
+        `✅ 세미나/오늘의 퀴즈 ${registered.length}개 족보 등록 완료 (답장 등록)\n\n${registered.join('\n')}${gitNotice}\n\n재실행: /run_quiz_now`,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error('답장을 통한 퀴즈 족보 등록 실패', error);
+      await ctx.reply(`❌ 족보 등록 실패: ${message}`);
     }
   });
 

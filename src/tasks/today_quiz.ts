@@ -81,18 +81,18 @@ async function parseTodayQuizQuestions(page: PlaywrightRunArgs['page']): Promise
 }
 
 function formatTodayQuizUnknownQuestions(productTitle: string, questions: QuizQuestion[], href: string): string {
-  let message = `❓ 오늘의 퀴즈 정답 미등록\n제품: ${productTitle}\n링크: ${href}\n\n`;
+  let message = `❓ 오늘의 퀴즈 족보 미등록\n제품: ${productTitle}\n링크: ${href}\n\n`;
 
   for (let i = 0; i < questions.length; i++) {
     const q = questions[i];
-    message += `Q${i + 1}: ${q.questionText.substring(0, 100)}...\n`;
+    message += `Q${i + 1}: ${q.questionText}\n`;
     for (const opt of q.options) {
       message += `  ${opt.index}. ${opt.text}\n`;
     }
     message += '\n';
   }
 
-  message += '등록 후 재실행: /run_quiz_now';
+  message += `💡 족보 등록 방법:\n• 이 메시지에 답장(Reply)으로 정답 번호(예: 123)만 전송\n• 또는 /add_seminar_answer_batch 사용\n\n재실행: /run_quiz_now`;
   return message;
 }
 
@@ -247,36 +247,33 @@ async function run({ page }: PlaywrightRunArgs) {
       return { success: false, message: '제품 제목을 찾을 수 없습니다. 직접 퀴즈를 풀어주세요. ' + href };
     }
 
-    // Load mapping from data/quiz.json, fallback to cheatsheet if missing
-    const mapping = quizMapping as Record<string, Array<string | number>>;
-    let answers = mapping[productTitle];
-    let answersSource: 'mapping' | 'cheatsheet' | 'none' = answers && answers.length > 0 ? 'mapping' : 'none';
+    // 1. seminar_quiz_cheatsheet(족보)에서 먼저 정답 탐색
+    console.log(`[today_quiz] "${productTitle}" 족보(seminar_quiz_cheatsheet)에서 정답 찾기를 먼저 시도합니다.`);
+    const cheatsheetResult = await findAnswersByCheatsheet(page);
+    let answers = cheatsheetResult.answers || [];
+    let answersSource: 'cheatsheet' | 'mapping' | 'none' = answers.length > 0 ? 'cheatsheet' : 'none';
 
-    if (!answers || !Array.isArray(answers) || answers.length === 0) {
-      console.log(`[today_quiz] "${productTitle}"에 대한 정답이 quiz.json에 없습니다. 족보에서 찾기를 시도합니다.`);
-      const cheatsheetResult = await findAnswersByCheatsheet(page);
-      answers = cheatsheetResult.answers || [];
-      if (answers.length > 0) {
-        answersSource = 'cheatsheet';
-      } else if (cheatsheetResult.reason === 'keyword_matched_but_option_not_found') {
-        const opts = cheatsheetResult.availableOptions.map((o) => `  ${o.index}. ${o.text}`).join('\n');
-        return {
-          success: true,
-          message:
-            `❌ 등록된 정답 키워드를 찾았지만 보기와 일치하지 않아 자동 선택에 실패했습니다.\n` +
-            `매칭 키워드: "${cheatsheetResult.keyword}" (답변 텍스트: "${cheatsheetResult.answerText}")\n` +
-            `보기에 해당 키워드가 없음. 현재 보기:\n${opts}\n` +
-            `👉 직접 퀴즈를 풀어주세요.\n${href}`,
-        };
+    // 2. 족보에서 정답을 찾지 못한 경우 -> 관리자 봇에 등록 메시지 전송 후 quiz.json에서 탐색
+    if (answers.length === 0) {
+      console.log(
+        `[today_quiz] "${productTitle}" 족보에서 정답을 찾지 못했습니다 (이유: ${cheatsheetResult.reason}). 관리자 알림을 발송하고 quiz.json에서 찾기를 시도합니다.`,
+      );
+      await notifyTodayQuizUnknownQuestions(page, productTitle, href);
+
+      const mapping = quizMapping as Record<string, Array<string | number>>;
+      const mappingAnswers = mapping[productTitle];
+      if (mappingAnswers && Array.isArray(mappingAnswers) && mappingAnswers.length > 0) {
+        console.log(`[today_quiz] quiz.json에서 "${productTitle}"에 대한 정답을 찾았습니다:`, mappingAnswers);
+        answers = mappingAnswers;
+        answersSource = 'mapping';
       }
     }
 
     if (!answers || answers.length === 0) {
-      await notifyTodayQuizUnknownQuestions(page, productTitle, href);
       return { success: true, message: `정답이 등록되지 않았습니다. 직접 퀴즈를 풀어주세요. ${href}` };
     }
 
-    if (answersSource === 'cheatsheet' && productTitle) {
+    if (productTitle) {
       storage.set<TempQuizAnswers>(TODAY_QUIZ_TEMP_KEY, {
         date: getTodayIsoDate(),
         productTitle,

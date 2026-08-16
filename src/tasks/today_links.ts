@@ -2,7 +2,13 @@ import quizMapping from '../../data/quiz.json';
 import type { PlaywrightRunArgs } from '../types';
 import { safeGoto, getSeminarIdFromUrl, isSurveyPointExcludedSeminar } from '../modules/utils';
 import * as storage from '../services/storage';
-import { loadCheatsheet, findMatchingKeywords, findOptionByAnswer, type QuizQuestion } from './seminar_quiz';
+import {
+  loadCheatsheet,
+  findMatchingKeywords,
+  resolveBestKeywordMatch,
+  findOptionByAnswer,
+  type QuizQuestion,
+} from './seminar_quiz';
 
 const QUIZ_LIST_URLS = [
   'https://www.doctorville.co.kr/product/medicineList',
@@ -125,6 +131,14 @@ async function findAnswersByCheatsheet(page: PlaywrightRunArgs['page']): Promise
     const result: Array<string | number> = [];
     for (const q of questions) {
       console.log(`[today_links] 매칭 시도 문제: ${q.questionText.substring(0, 30)}...`);
+      const bestMatch = resolveBestKeywordMatch(q.questionText, q.options, cheatsheet);
+      if (bestMatch) {
+        console.log(
+          `[today_links] 매칭 성공: ${bestMatch.keyword} -> ${cheatsheet[bestMatch.keyword]} (보기 ${bestMatch.option.index}번)`,
+        );
+        result.push(bestMatch.option.index);
+        continue;
+      }
       const matches = findMatchingKeywords(q.questionText, cheatsheet);
       if (matches.length > 0) {
         const chosenKeyword = matches[0];
@@ -234,17 +248,23 @@ async function collectQuizInfo(page: PlaywrightRunArgs['page']): Promise<QuizInf
               .catch(() => '')
           ).trim()
         : '';
-    const mapping = quizMapping as Record<string, Array<string | number>>;
-    let answers = productTitle && mapping[productTitle];
     const { isoDate } = getTodayDateStrings();
 
-    if (!answers || !Array.isArray(answers) || answers.length === 0) {
+    // 1. seminar_quiz_cheatsheet(족보)에서 먼저 탐색
+    let answers: Array<string | number> = (await findAnswersByCheatsheet(page)) || [];
+
+    // 2. 족보에 없으면 임시 캐시 또는 quiz.json 매핑에서 탐색
+    if (answers.length === 0) {
       const tempAnswers = productTitle ? getTempQuizAnswers(isoDate, productTitle) : null;
       if (tempAnswers) {
         answers = tempAnswers;
-      } else {
-        console.log(`[today_links] "${productTitle}"에 대한 정답이 quiz.json에 없습니다. 족보에서 찾기를 시도합니다.`);
-        answers = (await findAnswersByCheatsheet(page)) || [];
+      } else if (productTitle) {
+        const mapping = quizMapping as Record<string, Array<string | number>>;
+        const mappingAnswers = mapping[productTitle];
+        if (mappingAnswers && Array.isArray(mappingAnswers) && mappingAnswers.length > 0) {
+          console.log(`[today_links] "${productTitle}" 족보 미매칭으로 quiz.json에서 정답을 참조합니다.`);
+          answers = mappingAnswers;
+        }
       }
     }
 
@@ -495,14 +515,13 @@ async function run({ page }: PlaywrightRunArgs) {
       message += `\n\n🆕 어제 추가된 신규 세미나\n${newSeminarList}`;
     }
 
-
     const pointConversionMessage = formatPointConversionMessage(pointConversionInfo);
     if (pointConversionMessage) {
-      message += `\n${pointConversionMessage}\n`;
+      message += `\n\n${pointConversionMessage}\n`;
     }
 
     message +=
-      '\n\n🤖텔레그램 봇이 자동으로 전송한 메시지입니다.\n★☆ 매일오전9시 ☆★\n▶▷ 링크모음 발송 ◁◀\n☞ 세미나 시작알림\n☞ 세미나 종료알림\n☞ 퀴즈정답 ★즉시★\n☞ 신규세미나 알림!!\n§지금가입하세요§\nhttps://t.me/+J1UGmvLA9jU4NjQ1';
+      '\n🤖텔레그램 봇이 자동으로 전송한 메시지입니다.\n★☆ 매일오전9시 ☆★\n▶▷ 링크모음 발송 ◁◀\n☞ 세미나 시작알림\n☞ 세미나 종료알림\n☞ 퀴즈정답 ★즉시★\n☞ 신규세미나 알림!!\n§지금가입하세요§\nhttps://t.me/+J1UGmvLA9jU4NjQ1';
 
     const newSeminarIds = storedNewSeminars.map((item) => item.seminarId).filter((id): id is string => Boolean(id));
     const allSeminarIds = seminarMessage

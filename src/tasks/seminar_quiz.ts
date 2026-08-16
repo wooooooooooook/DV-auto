@@ -343,7 +343,7 @@ function formatUnknownQuestions(questions: SurveyQuestion[], results: QuizResult
     const result = results[i];
     if (result.selectedIndex === null && result.kind === 'quiz') {
       const q = questions[i];
-      message += `Q${result.questionIndex}: ${q.questionText.substring(0, 100)}...\n`;
+      message += `Q${result.questionIndex}: ${q.questionText}\n`;
       for (const opt of q.options) {
         message += `  ${opt.index}. ${opt.text}\n`;
       }
@@ -351,6 +351,7 @@ function formatUnknownQuestions(questions: SurveyQuestion[], results: QuizResult
     }
   }
 
+  message += `💡 족보 등록 방법:\n• 이 메시지에 답장(Reply)으로 정답 번호(예: 123)만 전송\n• 또는 /add_seminar_answer_batch 사용`;
   return message;
 }
 
