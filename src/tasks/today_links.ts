@@ -57,6 +57,10 @@ const TODAY_SEMINAR_KEY = 'today_seminars';
 const NEW_SEMINAR_KEY = 'apply_seminar:new_seminars';
 const SEMINAR_LIST_KEY = 'apply_seminar:seminar_list';
 
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 function findPointExcludedFromStoredSeminars(
   storedSeminars: Array<{ url: string; seminarId?: string | null; isPointExcluded?: boolean }>,
   seminarId: string | null,
@@ -76,6 +80,31 @@ function findPointExcludedFromStoredSeminars(
   });
 
   return matched?.isPointExcluded;
+}
+
+/**
+ * 텍스트에서 괄호 안의 내용을 정리합니다.
+ */
+function cleanBrackets(text: string): string {
+  let prev = text;
+  let cur = text;
+  do {
+    prev = cur;
+    cur = cur
+      .replace(/\([^)()]*\)/g, '')
+      .replace(/\[[^[\]]*\]/g, '')
+      .trim();
+  } while (cur !== prev);
+  return cur;
+}
+
+/**
+ * 문제 텍스트를 검색용으로 정규화합니다.
+ */
+function normalizeQuestionText(text: string): string {
+  return cleanBrackets(text)
+    .replace(/[^가-힣a-zA-Z0-9]/g, '')
+    .trim();
 }
 
 async function parseTodayQuizQuestions(page: PlaywrightRunArgs['page']): Promise<QuizQuestion[]> {
@@ -289,9 +318,39 @@ async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Prom
 
     const listConts = await page.locator('.list_cont');
     const count = await listConts.count();
+    let todayTarget: ReturnType<PlaywrightRunArgs['page']['locator']> | null = null;
+
+    for (let i = 0; i < count; i++) {
+      const item = listConts.nth(i);
+      const isVisible = await item.isVisible().catch(() => false);
+      if (!isVisible) continue;
+
+      const dateText = await item
+        .locator('.list_time .txt_date')
+        .innerText()
+        .catch(() => '');
+      if (dateText.includes(todayString)) {
+        todayTarget = item;
+        break;
+      }
+    }
+
+    if (!todayTarget) {
+      return {
+        message: '<b>오늘의 세미나:</b> 오늘은 세미나가 없습니다.',
+        date: isoDate,
+        lunchSeminarIds: [],
+        dinnerSeminarIds: [],
+      };
+    }
+
+    const seminarListItems = await todayTarget.locator('.list_seminar > li');
+    const seminarCount = await seminarListItems.count();
 
     const lunchSeminars: string[] = [];
     const dinnerSeminars: string[] = [];
+    const storedSeminars =
+      storage.get<Array<{ url: string; seminarId?: string | null; isPointExcluded?: boolean }>>(SEMINAR_LIST_KEY) || [];
     const pointExcludedCache = new Map<string, boolean>();
 
     const isDinnerSeminar = (classAttr: string, time: string): boolean => {
@@ -304,39 +363,40 @@ async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Prom
       return Number.isFinite(hour) && hour >= 16;
     };
 
-    for (let i = 0; i < count; i++) {
-      const container = listConts.nth(i);
-      const seminarDay = await container
-        .locator('.seminar_day .date')
-        .innerText()
-        .catch(() => '');
-      if (seminarDay !== todayString) continue;
+    for (let j = 0; j < seminarCount; j++) {
+      const seminar = seminarListItems.nth(j);
+      const isVisible = await seminar.isVisible().catch(() => false);
+      if (!isVisible) continue;
 
-      const seminarDetails = await container.locator('.list_detail');
-      const dcount = await seminarDetails.count();
+      const title = (
+        await seminar
+          .locator('.txt_tit')
+          .innerText()
+          .catch(() => '')
+      ).trim();
+      const time = (
+        await seminar
+          .locator('.time')
+          .innerText()
+          .catch(() => '')
+      ).trim();
+      const seminarLink =
+        (await seminar
+          .locator('.btn_wrap a')
+          .getAttribute('href')
+          .catch(() => '')) || '';
+      const fullUrl = seminarLink.startsWith('http') ? seminarLink : `${BASE_URL.replace(/\/$/, '')}${seminarLink}`;
+      const seminarId = getSeminarIdFromUrl(seminarLink);
 
-      for (let j = 0; j < dcount; j++) {
-        const detail = seminarDetails.nth(j);
-        const timeElem = detail.locator('.txt_num.time').first();
-        const timeRaw = await timeElem.innerText();
-        const time = timeRaw.replace(/\n/g, '').trim();
-        const title = await detail.locator('.list_tit .tit').innerText();
-        const isAdvancedSurvey = (await detail.locator('.ic_survey').count()) > 0;
-        const classAttr = (await timeElem.getAttribute('class')) || '';
-        const href = await detail.getAttribute('href');
-        if (!href) continue;
-        const fullUrl = new URL(href, BASE_URL).toString();
-        const seminarId = getSeminarIdFromUrl(fullUrl);
-        const seminarLink = seminarId ? `${SEMINAR_DETAIL_PAGE}${seminarId}` : fullUrl;
-        const pointExcludedKey = seminarId || seminarLink;
-        let isPointExcluded = pointExcludedCache.get(pointExcludedKey);
+      const classAttr = (await seminar.getAttribute('class').catch(() => '')) || '';
+      const isAdvancedSurvey = (await seminar.locator('.advanced-survey, [class*="advanced"]').count()) > 0;
 
-        if (typeof isPointExcluded !== 'boolean') {
-          // Check storage first
-          const storedSeminars =
-            storage.get<Array<{ url: string; seminarId?: string | null; isPointExcluded?: boolean }>>(
-              SEMINAR_LIST_KEY,
-            ) || [];
+      if (title && seminarLink) {
+        let isPointExcluded = false;
+        const pointExcludedKey = seminarId || fullUrl;
+        if (pointExcludedCache.has(pointExcludedKey)) {
+          isPointExcluded = pointExcludedCache.get(pointExcludedKey) || false;
+        } else {
           const storedPointExcluded = findPointExcludedFromStoredSeminars(storedSeminars, seminarId, fullUrl);
           if (typeof storedPointExcluded === 'boolean') {
             isPointExcluded = storedPointExcluded;
@@ -348,7 +408,7 @@ async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Prom
 
         const pointExcludedSuffix = isPointExcluded ? ' [포인트미지급]' : '';
         const advancedSurveySuffix = isAdvancedSurvey ? ' [심화설문]' : '';
-        const seminarInfo = ` ${time}. ${title}${pointExcludedSuffix}${advancedSurveySuffix} ${seminarLink}`;
+        const seminarInfo = ` ${time}. ${escapeHtml(title)}${pointExcludedSuffix}${advancedSurveySuffix} ${seminarLink}`;
 
         // `night_time` 클래스가 없어도 17시 이후 세미나는 저녁 세미나로 처리
         if (isDinnerSeminar(classAttr, time)) {
@@ -362,15 +422,15 @@ async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Prom
     }
 
     if (lunchSeminars.length > 0 || dinnerSeminars.length > 0) {
-      let message = `오늘의 세미나 리스트:\n`;
+      let message = `<b>오늘의 세미나 리스트:</b>\n`;
 
       if (lunchSeminars.length > 0) {
-        message += `🍴[점심 세미나]\n- `;
+        message += `🍴 <b>[점심 세미나]</b>\n- `;
         message += lunchSeminars.join('\n- ');
       }
       message += '\n';
       if (dinnerSeminars.length > 0) {
-        message += `\n🍴[저녁 세미나]\n- `;
+        message += `\n🍴 <b>[저녁 세미나]</b>\n- `;
         message += dinnerSeminars.join('\n- ');
       }
       return {
@@ -381,7 +441,7 @@ async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Prom
       };
     }
     return {
-      message: '오늘의 세미나 리스트: 오늘은 세미나가 없습니다.',
+      message: '<b>오늘의 세미나 리스트:</b> 오늘은 세미나가 없습니다.',
       date: isoDate,
       lunchSeminarIds: [],
       dinnerSeminarIds: [],
@@ -393,7 +453,7 @@ async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Prom
       _e && typeof _e === 'object' && 'stack' in _e ? (_e as Error).stack : _e,
     );
     return {
-      message: `오늘의 세미나 확인 실패: ${message}`,
+      message: `<b>오늘의 세미나 확인 실패:</b> ${escapeHtml(message)}`,
       date: isoDate,
       lunchSeminarIds: [],
       dinnerSeminarIds: [],
@@ -429,13 +489,105 @@ async function collectPointConversionInfo(page: PlaywrightRunArgs['page']): Prom
 function formatPointConversionMessage(info: PointConversionInfo | null): string {
   if (!info) return '';
   if (info.available) {
-    return `💳 오늘 네이버페이포인트 전환 가능 예정입니다. 전환 가능 알림을 기다려주세요!\n${POINT_CONVERSION_URL}`;
+    return `💳 <b>오늘 네이버페이포인트 전환 가능 예정입니다. 전환 가능 알림을 기다려주세요!</b>\n${POINT_CONVERSION_URL}`;
   }
   const plannedParts = [info.availablePlannedAt, info.meridiem].map((s) => s?.trim()).filter(Boolean);
   if (plannedParts.length > 0) {
-    return `💳 다음 네이버페이포인트 전환가능일: ${plannedParts.join(' ')}`;
+    return `💳 <b>다음 네이버페이포인트 전환가능일:</b> ${escapeHtml(plannedParts.join(' '))}`;
   }
   return '';
+}
+
+export type TodayLinksFormatInput = {
+  quizInfo: QuizInfo | null;
+  seminarMessage: SeminarMessageResult | null;
+  storedNewSeminars: StoredNewSeminars['seminars'];
+  pointConversionInfo: PointConversionInfo | null;
+};
+
+export type TodayLinksFormattedResult = {
+  message: string;
+  options: {
+    parse_mode: 'HTML';
+    reply_markup: {
+      inline_keyboard: Array<Array<{ text: string; url: string }>>;
+    };
+  };
+};
+
+export function formatTodayLinksBroadcast(input: TodayLinksFormatInput): TodayLinksFormattedResult {
+  const { quizInfo, seminarMessage, storedNewSeminars, pointConversionInfo } = input;
+
+  let message = '✨ <b>출석체크:</b> https://m.doctorville.co.kr/mypage/attendance\n\n';
+
+  let quizMessage = '오늘은 퀴즈가 없습니다.';
+  if (quizInfo?.link) {
+    if (quizInfo.productTitle) {
+      const answersText = quizInfo.answers?.map(String).join('');
+      const answerNote = answersText
+        ? `, 정답: <code>${escapeHtml(answersText)}</code>`
+        : ' (저장된 정답이 없습니다. 댓글로 알려주세요.)';
+      quizMessage = `<b>${escapeHtml(quizInfo.productTitle)}</b>${answerNote}`;
+    }
+    quizMessage += `\n${quizInfo.link}`;
+  }
+  message += `✏️ <b>오늘의 퀴즈:</b> ${quizMessage}\n`;
+  if (seminarMessage?.message) {
+    message += `\n📖 ${seminarMessage.message}\n`;
+  }
+
+  if (storedNewSeminars.length > 0) {
+    const newSeminarList = storedNewSeminars
+      .map((item, index) => {
+        const link = item.seminarId ? `${SEMINAR_DETAIL_PAGE}${item.seminarId}` : item.url;
+        const pointExcludedSuffix = item.isPointExcluded ? ' [포인트미지급]' : '';
+        const advancedSurveySuffix = item.isAdvancedSurvey ? ' [심화설문]' : '';
+        const dateTimePrefix = item.date || item.time ? `[${item.date}${item.time ? ' ' + item.time : ''}] ` : '';
+        return `${index + 1}. ${dateTimePrefix}${escapeHtml(item.name)}${pointExcludedSuffix}${advancedSurveySuffix}\n${link}`;
+      })
+      .join('\n');
+
+    message += `\n🆕 <b>어제 추가된 신규 세미나</b>\n${newSeminarList}\n`;
+  }
+
+  const pointConversionMessage = formatPointConversionMessage(pointConversionInfo);
+  if (pointConversionMessage) {
+    message += `\n${pointConversionMessage}\n`;
+  }
+
+  message += `\n<blockquote>🤖 <b>텔레그램 봇이 자동으로 전송한 메시지입니다.</b>
+★☆ 매일오전9시 ☆★
+▶▷ 링크모음 발송 ◁◀
+☞ 세미나 시작알림
+☞ 세미나 종료알림
+☞ 퀴즈정답 ★즉시★
+☞ 신규세미나 알림!!
+§지금가입하세요§
+https://t.me/+J1UGmvLA9jU4NjQ1</blockquote>`;
+
+  const inlineKeyboard: Array<Array<{ text: string; url: string }>> = [];
+
+  const actionRow: Array<{ text: string; url: string }> = [
+    { text: '✨ 출석체크 바로가기', url: 'https://m.doctorville.co.kr/mypage/attendance' },
+  ];
+  if (quizInfo?.link) {
+    actionRow.push({ text: '✏️ 오늘의 퀴즈 풀기', url: quizInfo.link });
+  }
+  inlineKeyboard.push(actionRow);
+
+  // 포인트 전환 가능일(당일 전환 가능)인 경우 포인트 전환 바로가기 버튼 추가
+  if (pointConversionInfo?.available) {
+    inlineKeyboard.push([{ text: '💳 포인트 전환하러 가기', url: POINT_CONVERSION_URL }]);
+  }
+
+  const options = {
+    parse_mode: 'HTML' as const,
+    reply_markup: {
+      inline_keyboard: inlineKeyboard,
+    },
+  };
+
+  return { message, options };
 }
 
 async function run({ page }: PlaywrightRunArgs) {
@@ -483,53 +635,12 @@ async function run({ page }: PlaywrightRunArgs) {
       }
     }
 
-    const options: Record<string, unknown> = {};
-
-    let message = '✨ 출석체크: https://m.doctorville.co.kr/mypage/attendance\n';
-
-    let quizMessage = '오늘은 퀴즈가 없습니다.';
-    if (quizInfo?.link) {
-      if (quizInfo.productTitle) {
-        const answersText = quizInfo.answers?.map(String).join('');
-        const answerNote = answersText ? `, 정답: *${answersText}*` : ' (저장된 정답이 없습니다. 댓글로 알려주세요.)';
-        quizMessage = `${quizInfo.productTitle}${answerNote}`;
-      }
-      quizMessage += `\n${quizInfo.link}`;
-    }
-    message += `✏️ 오늘의 퀴즈:${quizMessage}\n`;
-    if (seminarMessage?.message) {
-      message += `\n📖${seminarMessage.message}\n`;
-    }
-
-    if (storedNewSeminars.length > 0) {
-      const newSeminarList = storedNewSeminars
-        .map((item, index) => {
-          const link = item.seminarId ? `${SEMINAR_DETAIL_PAGE}${item.seminarId}` : item.url;
-          const pointExcludedSuffix = item.isPointExcluded ? ' [포인트미지급]' : '';
-          const advancedSurveySuffix = item.isAdvancedSurvey ? ' [심화설문]' : '';
-          const dateTimePrefix = item.date || item.time ? `[${item.date}${item.time ? ' ' + item.time : ''}] ` : '';
-          return `${index + 1}. ${dateTimePrefix}${item.name}${pointExcludedSuffix}${advancedSurveySuffix}\n${link}`;
-        })
-        .join('\n');
-
-      message += `\n\n🆕 어제 추가된 신규 세미나\n${newSeminarList}\n`;
-    }
-
-    const pointConversionMessage = formatPointConversionMessage(pointConversionInfo);
-    if (pointConversionMessage) {
-      message += `\n${pointConversionMessage}\n`;
-    }
-
-    message +=
-      `\n🤖텔레그램 봇이 자동으로 전송한 메시지입니다.\n
-      ★☆ 매일오전9시 ☆★\n
-      ▶▷ 링크모음 발송 ◁◀\n
-      ☞ 세미나 시작알림\n
-      ☞ 세미나 종료알림\n
-      ☞ 퀴즈정답 ★즉시★\n
-      ☞ 신규세미나 알림!!\n
-      §지금가입하세요§\n
-      https://t.me/+J1UGmvLA9jU4NjQ1`;
+    const { message, options } = formatTodayLinksBroadcast({
+      quizInfo,
+      seminarMessage,
+      storedNewSeminars,
+      pointConversionInfo,
+    });
 
     const newSeminarIds = storedNewSeminars.map((item) => item.seminarId).filter((id): id is string => Boolean(id));
     const allSeminarIds = seminarMessage
