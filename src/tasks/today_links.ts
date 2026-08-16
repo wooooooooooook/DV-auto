@@ -533,7 +533,7 @@ async function collectTodaySeminarMessage(
 
     if (!parsedSeminars || parsedSeminars.length === 0) {
       return {
-        message: `<b>${seminarTitlePrefix} 세미나:</b> 세미나가 없습니다.`,
+        message: `<b>${seminarTitlePrefix} 세미나:</b> 세미나가 없습니다. ☕`,
         date: isoDate,
         lunchSeminarIds: [],
         dinnerSeminarIds: [],
@@ -608,7 +608,7 @@ async function collectTodaySeminarMessage(
       };
     }
     return {
-      message: `<b>${seminarTitlePrefix} 세미나 리스트:</b> 세미나가 없습니다.`,
+      message: `<b>${seminarTitlePrefix} 세미나 리스트:</b> 세미나가 없습니다. ☕`,
       date: isoDate,
       lunchSeminarIds: [],
       dinnerSeminarIds: [],
@@ -697,7 +697,7 @@ function formatTodayLinksBroadcast(input: TodayLinksFormatInput): TodayLinksForm
 
   message += '✨ <b>출석체크:</b> https://m.doctorville.co.kr/mypage/attendance\n\n';
 
-  let quizMessage = '오늘은 퀴즈가 없습니다.';
+  let quizMessage = '오늘은 퀴즈가 없습니다. ☕';
   if (quizInfo?.link) {
     if (quizInfo.productTitle) {
       const answersText = quizInfo.answers?.map(String).join('');
@@ -717,8 +717,8 @@ function formatTodayLinksBroadcast(input: TodayLinksFormatInput): TodayLinksForm
     const newSeminarList = storedNewSeminars
       .map((item, index) => {
         const link = item.seminarId ? `${SEMINAR_DETAIL_PAGE}${item.seminarId}` : item.url;
-        const pointExcludedSuffix = item.isPointExcluded ? ' 🚫<b>[포인트미지급]</b>' : '';
-        const advancedSurveySuffix = item.isAdvancedSurvey ? ' 📝<b>[심화설문]</b>' : '';
+        const pointExcludedSuffix = item.isPointExcluded ? ' 🚫[포인트미지급]' : '';
+        const advancedSurveySuffix = item.isAdvancedSurvey ? ' ✨<b>[심화설문]</b>' : '';
         const dateTimePrefix = item.date || item.time ? `[${item.date}${item.time ? ' ' + item.time : ''}] ` : '';
         const nameDisplay = item.isPointExcluded ? `<s>${escapeHtml(item.name)}</s>` : escapeHtml(item.name);
         return `${index + 1}. ${dateTimePrefix}${nameDisplay}${pointExcludedSuffix}${advancedSurveySuffix}\n${link}`;
@@ -734,8 +734,8 @@ function formatTodayLinksBroadcast(input: TodayLinksFormatInput): TodayLinksForm
   }
 
   message += `\n<blockquote>🤖 <b>닥터빌 텔레그램방에 전송된 메시지입니다.</b>
-매일 오전 9시 링크모음 발송, 세미나 시작/종료, 퀴즈 정답 알림, 지금 가입하세요!</blockquote>
-https://t.me/+J1UGmvLA9jU4NjQ1`;
+매일 오전 9시 링크모음 발송, 세미나 시작/종료, 퀴즈 정답 알림, 지금 가입하세요!
+https://t.me/+J1UGmvLA9jU4NjQ1</blockquote>`;
 
   const inlineKeyboard: Array<Array<{ text: string; url: string }>> = [];
 

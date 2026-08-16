@@ -82,17 +82,17 @@ function testTodayLinksFormatWithUserExample() {
   assert(message.includes('1. [9/1 13:00~13:40] 척수성 근위축증(SMA) 조기 진단과 전원'));
   assert(
     message.includes(
-      '2. [8/20 13:00~14:00] <s>ChatGPT 실용 입문 — AI로 알아보고, 읽고, 만들고, 검증하기</s> 🚫<b>[포인트미지급]</b>',
+      '2. [8/20 13:00~14:00] <s>ChatGPT 실용 입문 — AI로 알아보고, 읽고, 만들고, 검증하기</s> 🚫[포인트미지급]',
     ),
   );
 
   // 5. 포인트 전환 안내
   assert(message.includes('💳 <b>오늘 네이버페이포인트 전환 가능 예정입니다. 전환 가능 알림을 기다려주세요!</b>'));
 
-  // 6. 하단 봇 안내 인용구 및 링크 (링크는 blockquote 밖)
+  // 6. 하단 봇 안내 인용구
   assert(
     message.includes(
-      '<blockquote>🤖 <b>닥터빌 텔레그램방에 전송된 메시지입니다.</b>\n매일 오전 9시 링크모음 발송, 세미나 시작/종료, 퀴즈 정답 알림, 지금 가입하세요!</blockquote>\nhttps://t.me/+J1UGmvLA9jU4NjQ1',
+      '<blockquote>🤖 <b>닥터빌 텔레그램방에 전송된 메시지입니다.</b>\n매일 오전 9시 링크모음 발송, 세미나 시작/종료, 퀴즈 정답 알림, 지금 가입하세요!\nhttps://t.me/+J1UGmvLA9jU4NjQ1</blockquote>',
     ),
   );
 
@@ -116,7 +116,7 @@ function testTodayLinksFormatWithUserExample() {
 function testDateParsingAndCustomDateFormat() {
   console.log('--- [Test] 날짜 파싱 및 지정 날짜 포맷팅 테스트 시작 ---\n');
 
-  const { getTodayDateStrings, parseTargetDate } = require('../src/tasks/today_links');
+  const { getTodayDateStrings } = require('../src/tasks/today_links');
 
   // 1. 기본 오늘
   const todayResult = getTodayDateStrings();
@@ -137,7 +137,7 @@ function testDateParsingAndCustomDateFormat() {
   const tomorrowResult = getTodayDateStrings('내일');
   assert.strictEqual(tomorrowResult.isCustomDate, true);
 
-  // 5. 커스텀 날짜 포맷팅 검증
+  // 5. 커스텀 날짜 포맷팅 검증 (퀴즈 없음 메시지 포함)
   const customInput: TodayLinksFormatInput = {
     quizInfo: null,
     seminarMessage: {
@@ -154,6 +154,7 @@ function testDateParsingAndCustomDateFormat() {
 
   const { message } = formatTodayLinksBroadcast(customInput);
   assert(message.includes('📅 <b>[2026-08-20 (8/20) 링크 및 세미나]</b>'));
+  assert(message.includes('✏️ <b>오늘의 퀴즈:</b> 오늘은 퀴즈가 없습니다. ☕'));
   assert(message.includes('<b>[8/20] 세미나 리스트:</b>'));
 
   // 6. 2026-08-18 형식 검증
