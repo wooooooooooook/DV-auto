@@ -1,6 +1,7 @@
+import type { BrowserContext } from 'playwright';
 import quizMapping from '../../data/quiz.json';
 import type { PlaywrightRunArgs } from '../types';
-import { safeGoto, getSeminarIdFromUrl, isSurveyPointExcludedSeminar } from '../modules/utils';
+import { safeGoto, getSeminarIdFromUrl, hasSurveyPointExcludedNotice } from '../modules/utils';
 import * as storage from '../services/storage';
 import {
   loadCheatsheet,
@@ -59,6 +60,53 @@ const SEMINAR_LIST_KEY = 'apply_seminar:seminar_list';
 
 function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/**
+ * today_links 전용: networkidle 대기 없이 빠른 DOM 로드로 포인트미지급 여부 검사
+ */
+async function checkPointExcludedFast(context: BrowserContext, url: string): Promise<boolean> {
+  const page = await context.newPage();
+  try {
+    await safeGoto(page, url, { waitUntil: 'domcontentloaded', timeout: 8000 }, 1);
+    await page
+      .locator('text=공유, .detail_cont, .seminar_info, body')
+      .first()
+      .waitFor({ state: 'attached', timeout: 3000 })
+      .catch(() => {});
+    return await hasSurveyPointExcludedNotice(page);
+  } catch (_e) {
+    return false;
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
+
+/**
+ * 미확인 세미나 목록을 병렬(concurrency=4)로 빠르게 일괄 확인
+ */
+async function batchCheckPointExcluded(
+  context: BrowserContext,
+  items: Array<{ link: string; cacheKey: string }>,
+  cache: Map<string, boolean>,
+): Promise<void> {
+  const targets = items.filter((item) => !cache.has(item.cacheKey));
+  if (targets.length === 0) return;
+
+  const concurrency = 4;
+  for (let i = 0; i < targets.length; i += concurrency) {
+    const batch = targets.slice(i, i + concurrency);
+    await Promise.all(
+      batch.map(async (target) => {
+        try {
+          const isExcluded = await checkPointExcludedFast(context, target.link);
+          cache.set(target.cacheKey, isExcluded);
+        } catch {
+          cache.set(target.cacheKey, false);
+        }
+      }),
+    );
+  }
 }
 
 function findPointExcludedFromStoredSeminars(
@@ -363,6 +411,16 @@ async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Prom
       return Number.isFinite(hour) && hour >= 16;
     };
 
+    const parsedSeminars: Array<{
+      title: string;
+      time: string;
+      seminarLink: string;
+      fullUrl: string;
+      seminarId: string | null;
+      classAttr: string;
+      isAdvancedSurvey: boolean;
+    }> = [];
+
     for (let j = 0; j < seminarCount; j++) {
       const seminar = seminarListItems.nth(j);
       const isVisible = await seminar.isVisible().catch(() => false);
@@ -392,32 +450,46 @@ async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Prom
       const isAdvancedSurvey = (await seminar.locator('.advanced-survey, [class*="advanced"]').count()) > 0;
 
       if (title && seminarLink) {
-        let isPointExcluded = false;
-        const pointExcludedKey = seminarId || fullUrl;
-        if (pointExcludedCache.has(pointExcludedKey)) {
-          isPointExcluded = pointExcludedCache.get(pointExcludedKey) || false;
-        } else {
-          const storedPointExcluded = findPointExcludedFromStoredSeminars(storedSeminars, seminarId, fullUrl);
-          if (typeof storedPointExcluded === 'boolean') {
-            isPointExcluded = storedPointExcluded;
-          } else {
-            isPointExcluded = await isSurveyPointExcludedSeminar(page.context(), seminarLink);
-          }
-          pointExcludedCache.set(pointExcludedKey, isPointExcluded);
-        }
+        parsedSeminars.push({
+          title,
+          time,
+          seminarLink,
+          fullUrl,
+          seminarId,
+          classAttr,
+          isAdvancedSurvey,
+        });
+      }
+    }
 
-        const pointExcludedSuffix = isPointExcluded ? ' 🚫<b>[포인트미지급]</b>' : '';
-        const advancedSurveySuffix = isAdvancedSurvey ? ' 📝<b>[심화설문]</b>' : '';
-        const seminarInfo = ` ${time}. ${escapeHtml(title)}${pointExcludedSuffix}${advancedSurveySuffix} ${seminarLink}`;
+    const uncachedSeminarItems: Array<{ link: string; cacheKey: string }> = [];
+    for (const item of parsedSeminars) {
+      const pointExcludedKey = item.seminarId || item.fullUrl;
+      const storedPointExcluded = findPointExcludedFromStoredSeminars(storedSeminars, item.seminarId, item.fullUrl);
+      if (typeof storedPointExcluded === 'boolean') {
+        pointExcludedCache.set(pointExcludedKey, storedPointExcluded);
+      } else {
+        uncachedSeminarItems.push({ link: item.seminarLink, cacheKey: pointExcludedKey });
+      }
+    }
 
-        // `night_time` 클래스가 없어도 17시 이후 세미나는 저녁 세미나로 처리
-        if (isDinnerSeminar(classAttr, time)) {
-          dinnerSeminars.push(seminarInfo);
-          if (seminarId) dinnerSeminarIds.push(seminarId);
-        } else {
-          lunchSeminars.push(seminarInfo);
-          if (seminarId) lunchSeminarIds.push(seminarId);
-        }
+    if (uncachedSeminarItems.length > 0) {
+      await batchCheckPointExcluded(page.context(), uncachedSeminarItems, pointExcludedCache);
+    }
+
+    for (const item of parsedSeminars) {
+      const pointExcludedKey = item.seminarId || item.fullUrl;
+      const isPointExcluded = pointExcludedCache.get(pointExcludedKey) || false;
+      const pointExcludedSuffix = isPointExcluded ? ' 🚫<b>[포인트미지급]</b>' : '';
+      const advancedSurveySuffix = item.isAdvancedSurvey ? ' 📝<b>[심화설문]</b>' : '';
+      const seminarInfo = ` ${item.time}. ${escapeHtml(item.title)}${pointExcludedSuffix}${advancedSurveySuffix} ${item.seminarLink}`;
+
+      if (isDinnerSeminar(item.classAttr, item.time)) {
+        dinnerSeminars.push(seminarInfo);
+        if (item.seminarId) dinnerSeminarIds.push(item.seminarId);
+      } else {
+        lunchSeminars.push(seminarInfo);
+        if (item.seminarId) lunchSeminarIds.push(item.seminarId);
       }
     }
 
@@ -605,27 +677,38 @@ async function run({ page }: PlaywrightRunArgs) {
         storage.get<Array<{ url: string; seminarId?: string | null; isPointExcluded?: boolean }>>(SEMINAR_LIST_KEY) ||
         [];
 
-      storedNewSeminars = await Promise.all(
-        storedNewSeminars.map(async (item) => {
-          if (typeof item.isPointExcluded === 'boolean') return item;
+      const uncachedItems: Array<{ link: string; cacheKey: string }> = [];
 
-          const link = item.seminarId ? `${SEMINAR_DETAIL_PAGE}${item.seminarId}` : item.url;
-          const storedPointExcluded = findPointExcludedFromStoredSeminars(storedSeminars, item.seminarId, link);
-          if (typeof storedPointExcluded === 'boolean') {
-            updatedMissingPointFlag = true;
-            return { ...item, isPointExcluded: storedPointExcluded };
-          }
+      for (const item of storedNewSeminars) {
+        const link = item.seminarId ? `${SEMINAR_DETAIL_PAGE}${item.seminarId}` : item.url;
+        const cacheKey = item.seminarId || item.url;
 
-          const cacheKey = item.seminarId || item.url;
-          let isPointExcluded = pointExcludedCache.get(cacheKey);
-          if (typeof isPointExcluded !== 'boolean') {
-            isPointExcluded = await isSurveyPointExcludedSeminar(page.context(), link);
-            pointExcludedCache.set(cacheKey, isPointExcluded);
-          }
+        if (typeof item.isPointExcluded === 'boolean') {
+          pointExcludedCache.set(cacheKey, item.isPointExcluded);
+          continue;
+        }
+
+        const storedPointExcluded = findPointExcludedFromStoredSeminars(storedSeminars, item.seminarId, link);
+        if (typeof storedPointExcluded === 'boolean') {
+          pointExcludedCache.set(cacheKey, storedPointExcluded);
+        } else {
+          uncachedItems.push({ link, cacheKey });
+        }
+      }
+
+      if (uncachedItems.length > 0) {
+        await batchCheckPointExcluded(page.context(), uncachedItems, pointExcludedCache);
+      }
+
+      storedNewSeminars = storedNewSeminars.map((item) => {
+        const cacheKey = item.seminarId || item.url;
+        const isPointExcluded = pointExcludedCache.get(cacheKey);
+        if (typeof isPointExcluded === 'boolean' && item.isPointExcluded !== isPointExcluded) {
           updatedMissingPointFlag = true;
           return { ...item, isPointExcluded };
-        }),
-      );
+        }
+        return item;
+      });
 
       if (updatedMissingPointFlag) {
         storage.set(NEW_SEMINAR_KEY, {
