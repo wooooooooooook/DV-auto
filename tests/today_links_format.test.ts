@@ -21,14 +21,14 @@ function testTodayLinksFormatWithUserExample() {
       dinnerSeminarIds: ['5543', '5542', '5544'],
       message: `<b>오늘의 세미나 리스트:</b>
 🍴 <b>[점심 세미나]</b>
-- 13:00~14:00. <s>입시를 몰라도 자녀와 대화가 통하게 되는 50분</s> 🚫<b>[포인트미지급]</b> https://m.doctorville.co.kr/cme/seminar/5538
-- 13:00~14:00. 눈에서 시작하는 심혈관 위험 평가와 AI의 미래 📝<b>[심화설문]</b> https://m.doctorville.co.kr/cme/seminar/5565
+- 13:00~14:00. <s>입시를 몰라도 자녀와 대화가 통하게 되는 50분</s> 🚫[포인트미지급] https://m.doctorville.co.kr/cme/seminar/5538
+- 13:00~14:00. 눈에서 시작하는 심혈관 위험 평가와 AI의 미래 ✨<b>[심화설문]</b> https://m.doctorville.co.kr/cme/seminar/5565
 - 13:00~14:00. Hypertension and Cardiovascular Protection From Guidelines to Clinical Practice https://m.doctorville.co.kr/cme/seminar/5531
 
 🍴 <b>[저녁 세미나]</b>
-- 17:00~18:30. 엔블로 Web Symposium 📝<b>[심화설문]</b> https://m.doctorville.co.kr/cme/seminar/5543
-- 17:00~18:30. 진심(心), Symposium 📝<b>[심화설문]</b> https://m.doctorville.co.kr/cme/seminar/5542
-- 18:30~19:30. AI와 함께하는 차세대 내시경 WAYMED ENDO로 완성하는 명의의 진단 노하우 📝<b>[심화설문]</b> https://m.doctorville.co.kr/cme/seminar/5544`,
+- 17:00~18:30. 엔블로 Web Symposium ✨<b>[심화설문]</b> https://m.doctorville.co.kr/cme/seminar/5543
+- 17:00~18:30. 진심(心), Symposium ✨<b>[심화설문]</b> https://m.doctorville.co.kr/cme/seminar/5542
+- 18:30~19:30. AI와 함께하는 차세대 내시경 WAYMED ENDO로 완성하는 명의의 진단 노하우 ✨<b>[심화설문]</b> https://m.doctorville.co.kr/cme/seminar/5544`,
     },
     // 어제 추가된 신규 세미나
     storedNewSeminars: [
@@ -73,9 +73,9 @@ function testTodayLinksFormatWithUserExample() {
   assert(message.includes('https://www.doctorville.co.kr/product/productView?pId=161'));
 
   // 3. 오늘의 세미나 목록 및 강조된 플래그
-  assert(message.includes('<s>입시를 몰라도 자녀와 대화가 통하게 되는 50분</s> 🚫<b>[포인트미지급]</b>'));
+  assert(message.includes('<s>입시를 몰라도 자녀와 대화가 통하게 되는 50분</s> 🚫[포인트미지급]'));
   assert(message.includes('https://m.doctorville.co.kr/cme/seminar/5538'));
-  assert(message.includes('엔블로 Web Symposium 📝<b>[심화설문]</b>'));
+  assert(message.includes('엔블로 Web Symposium ✨<b>[심화설문]</b>'));
 
   // 4. 신규 세미나 및 강조된 플래그
   assert(message.includes('🆕 <b>어제 추가된 신규 세미나</b>'));
