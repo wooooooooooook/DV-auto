@@ -21,14 +21,14 @@ function testTodayLinksFormatWithUserExample() {
       dinnerSeminarIds: ['5543', '5542', '5544'],
       message: `<b>오늘의 세미나 리스트:</b>
 🍴 <b>[점심 세미나]</b>
-- 13:00~14:00. 입시를 몰라도 자녀와 대화가 통하게 되는 50분 [포인트미지급] https://m.doctorville.co.kr/cme/seminar/5538
-- 13:00~14:00. 눈에서 시작하는 심혈관 위험 평가와 AI의 미래 [심화설문] https://m.doctorville.co.kr/cme/seminar/5565
+- 13:00~14:00. 입시를 몰라도 자녀와 대화가 통하게 되는 50분 🚫<b>[포인트미지급]</b> https://m.doctorville.co.kr/cme/seminar/5538
+- 13:00~14:00. 눈에서 시작하는 심혈관 위험 평가와 AI의 미래 📝<b>[심화설문]</b> https://m.doctorville.co.kr/cme/seminar/5565
 - 13:00~14:00. Hypertension and Cardiovascular Protection From Guidelines to Clinical Practice https://m.doctorville.co.kr/cme/seminar/5531
 
 🍴 <b>[저녁 세미나]</b>
-- 17:00~18:30. 엔블로 Web Symposium [심화설문] https://m.doctorville.co.kr/cme/seminar/5543
-- 17:00~18:30. 진심(心), Symposium [심화설문] https://m.doctorville.co.kr/cme/seminar/5542
-- 18:30~19:30. AI와 함께하는 차세대 내시경 WAYMED ENDO로 완성하는 명의의 진단 노하우 [심화설문] https://m.doctorville.co.kr/cme/seminar/5544`,
+- 17:00~18:30. 엔블로 Web Symposium 📝<b>[심화설문]</b> https://m.doctorville.co.kr/cme/seminar/5543
+- 17:00~18:30. 진심(心), Symposium 📝<b>[심화설문]</b> https://m.doctorville.co.kr/cme/seminar/5542
+- 18:30~19:30. AI와 함께하는 차세대 내시경 WAYMED ENDO로 완성하는 명의의 진단 노하우 📝<b>[심화설문]</b> https://m.doctorville.co.kr/cme/seminar/5544`,
     },
     // 어제 추가된 신규 세미나
     storedNewSeminars: [
@@ -72,25 +72,33 @@ function testTodayLinksFormatWithUserExample() {
   assert(message.includes('✏️ <b>오늘의 퀴즈:</b> <b>세벨머</b>, 정답: <code>111</code>'));
   assert(message.includes('https://www.doctorville.co.kr/product/productView?pId=161'));
 
-  // 3. 오늘의 세미나 목록
-  assert(message.includes('입시를 몰라도 자녀와 대화가 통하게 되는 50분 [포인트미지급]'));
+  // 3. 오늘의 세미나 목록 및 강조된 플래그
+  assert(message.includes('입시를 몰라도 자녀와 대화가 통하게 되는 50분 🚫<b>[포인트미지급]</b>'));
   assert(message.includes('https://m.doctorville.co.kr/cme/seminar/5538'));
-  assert(message.includes('엔블로 Web Symposium [심화설문]'));
+  assert(message.includes('엔블로 Web Symposium 📝<b>[심화설문]</b>'));
 
-  // 4. 신규 세미나
+  // 4. 신규 세미나 및 강조된 플래그
   assert(message.includes('🆕 <b>어제 추가된 신규 세미나</b>'));
   assert(message.includes('1. [9/1 13:00~13:40] 척수성 근위축증(SMA) 조기 진단과 전원'));
-  assert(message.includes('2. [8/20 13:00~14:00] ChatGPT 실용 입문 — AI로 알아보고, 읽고, 만들고, 검증하기 [포인트미지급]'));
+  assert(
+    message.includes(
+      '2. [8/20 13:00~14:00] ChatGPT 실용 입문 — AI로 알아보고, 읽고, 만들고, 검증하기 🚫<b>[포인트미지급]</b>',
+    ),
+  );
 
   // 5. 포인트 전환 안내
   assert(message.includes('💳 <b>오늘 네이버페이포인트 전환 가능 예정입니다. 전환 가능 알림을 기다려주세요!</b>'));
 
-  // 6. 하단 봇 안내 인용구
-  assert(message.includes('<blockquote>🤖 <b>텔레그램 봇이 자동으로 전송한 메시지입니다.</b>'));
-  assert(message.includes('https://t.me/+J1UGmvLA9jU4NjQ1</blockquote>'));
+  // 6. 하단 봇 안내 인용구 및 링크 (링크는 blockquote 밖)
+  assert(
+    message.includes(
+      '<blockquote>🤖 <b>닥터빌 텔레그램방에 전송된 메시지입니다.</b>\n매일 오전 9시 링크모음 발송, 세미나 시작/종료, 퀴즈 정답 알림, 지금 가입하세요!</blockquote>\nhttps://t.me/+J1UGmvLA9jU4NjQ1',
+    ),
+  );
 
-  // 7. 인라인 키보드 버튼 검증 (스포일러/텍스트링크 없음, 출석체크, 퀴즈, 포인트 전환 버튼 포함)
+  // 7. 인라인 키보드 버튼 및 링크 미리보기 비활성화 검증
   assert.strictEqual(options.parse_mode, 'HTML');
+  assert.strictEqual(options.link_preview_options?.is_disabled, true);
   assert.strictEqual(options.reply_markup.inline_keyboard.length, 2);
   assert.strictEqual(options.reply_markup.inline_keyboard[0][0].text, '✨ 출석체크 바로가기');
   assert.strictEqual(options.reply_markup.inline_keyboard[0][0].url, 'https://m.doctorville.co.kr/mypage/attendance');

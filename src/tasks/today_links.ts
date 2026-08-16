@@ -406,8 +406,8 @@ async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Prom
           pointExcludedCache.set(pointExcludedKey, isPointExcluded);
         }
 
-        const pointExcludedSuffix = isPointExcluded ? ' [포인트미지급]' : '';
-        const advancedSurveySuffix = isAdvancedSurvey ? ' [심화설문]' : '';
+        const pointExcludedSuffix = isPointExcluded ? ' 🚫<b>[포인트미지급]</b>' : '';
+        const advancedSurveySuffix = isAdvancedSurvey ? ' 📝<b>[심화설문]</b>' : '';
         const seminarInfo = ` ${time}. ${escapeHtml(title)}${pointExcludedSuffix}${advancedSurveySuffix} ${seminarLink}`;
 
         // `night_time` 클래스가 없어도 17시 이후 세미나는 저녁 세미나로 처리
@@ -509,6 +509,9 @@ export type TodayLinksFormattedResult = {
   message: string;
   options: {
     parse_mode: 'HTML';
+    link_preview_options?: {
+      is_disabled: boolean;
+    };
     reply_markup: {
       inline_keyboard: Array<Array<{ text: string; url: string }>>;
     };
@@ -540,8 +543,8 @@ export function formatTodayLinksBroadcast(input: TodayLinksFormatInput): TodayLi
     const newSeminarList = storedNewSeminars
       .map((item, index) => {
         const link = item.seminarId ? `${SEMINAR_DETAIL_PAGE}${item.seminarId}` : item.url;
-        const pointExcludedSuffix = item.isPointExcluded ? ' [포인트미지급]' : '';
-        const advancedSurveySuffix = item.isAdvancedSurvey ? ' [심화설문]' : '';
+        const pointExcludedSuffix = item.isPointExcluded ? ' 🚫<b>[포인트미지급]</b>' : '';
+        const advancedSurveySuffix = item.isAdvancedSurvey ? ' 📝<b>[심화설문]</b>' : '';
         const dateTimePrefix = item.date || item.time ? `[${item.date}${item.time ? ' ' + item.time : ''}] ` : '';
         return `${index + 1}. ${dateTimePrefix}${escapeHtml(item.name)}${pointExcludedSuffix}${advancedSurveySuffix}\n${link}`;
       })
@@ -555,15 +558,9 @@ export function formatTodayLinksBroadcast(input: TodayLinksFormatInput): TodayLi
     message += `\n${pointConversionMessage}\n`;
   }
 
-  message += `\n<blockquote>🤖 <b>텔레그램 봇이 자동으로 전송한 메시지입니다.</b>
-★☆ 매일오전9시 ☆★
-▶▷ 링크모음 발송 ◁◀
-☞ 세미나 시작알림
-☞ 세미나 종료알림
-☞ 퀴즈정답 ★즉시★
-☞ 신규세미나 알림!!
-§지금가입하세요§
-https://t.me/+J1UGmvLA9jU4NjQ1</blockquote>`;
+  message += `\n<blockquote>🤖 <b>닥터빌 텔레그램방에 전송된 메시지입니다.</b>
+매일 오전 9시 링크모음 발송, 세미나 시작/종료, 퀴즈 정답 알림, 지금 가입하세요!</blockquote>
+https://t.me/+J1UGmvLA9jU4NjQ1`;
 
   const inlineKeyboard: Array<Array<{ text: string; url: string }>> = [];
 
@@ -582,6 +579,9 @@ https://t.me/+J1UGmvLA9jU4NjQ1</blockquote>`;
 
   const options = {
     parse_mode: 'HTML' as const,
+    link_preview_options: {
+      is_disabled: true,
+    },
     reply_markup: {
       inline_keyboard: inlineKeyboard,
     },
