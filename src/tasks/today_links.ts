@@ -321,7 +321,17 @@ function getTodayDateStrings(customDateInput?: string) {
   const nowIso = now.toLocaleDateString('en-CA', opts);
   const isCustomDate = Boolean(customDateInput && iso !== nowIso);
 
-  return { todayString: `${month}/${day}`, isoDate: iso, yesterdayIso, isCustomDate };
+  const targetMonth = parseInt(month, 10);
+  const targetDay = parseInt(day, 10);
+
+  return {
+    todayString: `${month}/${day}`,
+    isoDate: iso,
+    yesterdayIso,
+    isCustomDate,
+    targetMonth,
+    targetDay,
+  };
 }
 
 function getStoredNewSeminars(isoDate: string, yesterdayIso: string): StoredNewSeminars['seminars'] {
@@ -433,7 +443,7 @@ async function collectTodaySeminarMessage(
   page: PlaywrightRunArgs['page'],
   customDateInput?: string,
 ): Promise<SeminarMessageResult> {
-  const { todayString, isoDate, isCustomDate } = getTodayDateStrings(customDateInput);
+  const { todayString, isoDate, isCustomDate, targetMonth, targetDay } = getTodayDateStrings(customDateInput);
   const lunchSeminarIds: string[] = [];
   const dinnerSeminarIds: string[] = [];
   const seminarTitlePrefix = isCustomDate ? `[${todayString}]` : '오늘의';
@@ -441,58 +451,85 @@ async function collectTodaySeminarMessage(
   try {
     await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'domcontentloaded', timeout: 30000 }, 1);
 
-    const parsedSeminars = await page.locator('.list_cont').evaluateAll((nodes, targetTodayString) => {
-      const results: Array<{
-        title: string;
-        time: string;
-        seminarLink: string;
-        fullUrl: string;
-        seminarId: string | null;
-        classAttr: string;
-        isAdvancedSurvey: boolean;
-      }> = [];
+    const parsedSeminars = await page.locator('.list_cont').evaluateAll(
+      (nodes, target) => {
+        const results: Array<{
+          title: string;
+          time: string;
+          seminarLink: string;
+          fullUrl: string;
+          seminarId: string | null;
+          classAttr: string;
+          isAdvancedSurvey: boolean;
+        }> = [];
 
-      nodes.forEach((node) => {
-        const date =
-          node.querySelector('.seminar_day .date')?.textContent?.trim() ||
-          node.querySelector('.list_time .txt_date')?.textContent?.trim() ||
-          '';
-        if (!date.includes(targetTodayString)) return;
+        function isDateMatching(dateText: string): boolean {
+          if (!dateText) return false;
+          if (dateText.includes(target.todayString)) return true;
+          if (dateText.includes(target.isoDate)) return true;
 
-        const links = node.querySelectorAll('a.list_detail, .list_seminar > li');
-        links.forEach((link) => {
-          const anchor = link.tagName.toLowerCase() === 'a' ? link : link.querySelector('a');
-          const href = anchor?.getAttribute('href') || link.getAttribute('href') || '';
-          if (!href) return;
+          // M.D, MM.DD, M/D, MM/DD, M월 D일, YYYY.MM.DD, YYYY-MM-DD 등 매칭
+          const match = dateText.match(/(\d{1,4})[./월\s-](\d{1,2})(?:[./일\s-](\d{1,2}))?/);
+          if (match) {
+            let m: number;
+            let d: number;
+            if (match[3]) {
+              // YYYY.MM.DD 또는 YYYY-MM-DD
+              m = parseInt(match[2], 10);
+              d = parseInt(match[3], 10);
+            } else {
+              // MM.DD 또는 M/D
+              m = parseInt(match[1], 10);
+              d = parseInt(match[2], 10);
+            }
+            if (m === target.targetMonth && d === target.targetDay) return true;
+          }
+          return false;
+        }
 
-          const title =
-            link.querySelector('.list_tit .tit')?.textContent?.trim() ||
-            link.querySelector('.txt_tit')?.textContent?.trim() ||
-            link.textContent?.trim() ||
-            '세미나';
-          const timeElem = link.querySelector('.txt_num.time') || link.querySelector('.time');
-          const time = timeElem?.textContent?.replace(/\n/g, '').trim() || '';
-          const classAttr = link.getAttribute('class') || timeElem?.getAttribute('class') || '';
-          const isAdvancedSurvey = !!link.querySelector('.advanced-survey, [class*="advanced"], .ic_survey');
+        nodes.forEach((node) => {
+          const date =
+            node.querySelector('.seminar_day .date')?.textContent?.trim() ||
+            node.querySelector('.list_time .txt_date')?.textContent?.trim() ||
+            '';
+          if (!isDateMatching(date)) return;
 
-          const urlObj = new URL(href, 'https://www.doctorville.co.kr/');
-          const seminarId = urlObj.searchParams.get('seminarId') || (href.match(/\/seminar\/(\d+)/)?.[1] ?? null);
-          const seminarLink = seminarId ? `https://m.doctorville.co.kr/cme/seminar/${seminarId}` : urlObj.toString();
+          const links = node.querySelectorAll('a.list_detail, .list_seminar > li');
+          links.forEach((link) => {
+            const anchor = link.tagName.toLowerCase() === 'a' ? link : link.querySelector('a');
+            const href = anchor?.getAttribute('href') || link.getAttribute('href') || '';
+            if (!href) return;
 
-          results.push({
-            title,
-            time,
-            seminarLink,
-            fullUrl: urlObj.toString(),
-            seminarId,
-            classAttr,
-            isAdvancedSurvey,
+            const title =
+              link.querySelector('.list_tit .tit')?.textContent?.trim() ||
+              link.querySelector('.txt_tit')?.textContent?.trim() ||
+              link.textContent?.trim() ||
+              '세미나';
+            const timeElem = link.querySelector('.txt_num.time') || link.querySelector('.time');
+            const time = timeElem?.textContent?.replace(/\n/g, '').trim() || '';
+            const classAttr = link.getAttribute('class') || timeElem?.getAttribute('class') || '';
+            const isAdvancedSurvey = !!link.querySelector('.advanced-survey, [class*="advanced"], .ic_survey');
+
+            const urlObj = new URL(href, 'https://www.doctorville.co.kr/');
+            const seminarId = urlObj.searchParams.get('seminarId') || (href.match(/\/seminar\/(\d+)/)?.[1] ?? null);
+            const seminarLink = seminarId ? `https://m.doctorville.co.kr/cme/seminar/${seminarId}` : urlObj.toString();
+
+            results.push({
+              title,
+              time,
+              seminarLink,
+              fullUrl: urlObj.toString(),
+              seminarId,
+              classAttr,
+              isAdvancedSurvey,
+            });
           });
         });
-      });
 
-      return results;
-    }, todayString);
+        return results;
+      },
+      { todayString, isoDate, targetMonth, targetDay },
+    );
 
     if (!parsedSeminars || parsedSeminars.length === 0) {
       return {

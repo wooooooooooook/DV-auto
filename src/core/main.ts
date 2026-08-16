@@ -342,13 +342,13 @@ taskRegistry.registerTask(todayQuizTask);
 
 const todayLinksTask: Task = {
   name: 'today_links',
-  run: async () => {
+  run: async (ctx, options) => {
     const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
     const context = await browser.newContext();
     const page = await context.newPage();
     try {
       await utils.ensureLoggedIn({ page, context });
-      return await todayLinksTaskModule.run({ page, context });
+      return await todayLinksTaskModule.run({ page, context, args: ctx.args }, options);
     } finally {
       await browser.close();
     }

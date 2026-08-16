@@ -156,8 +156,17 @@ function testDateParsingAndCustomDateFormat() {
   assert(message.includes('📅 <b>[2026-08-20 (8/20) 링크 및 세미나]</b>'));
   assert(message.includes('<b>[8/20] 세미나 리스트:</b>'));
 
+  // 6. 2026-08-18 형식 검증
+  const aug18Result = getTodayDateStrings('2026-08-18');
+  assert.strictEqual(aug18Result.todayString, '8/18');
+  assert.strictEqual(aug18Result.isoDate, '2026-08-18');
+  assert.strictEqual(aug18Result.targetMonth, 8);
+  assert.strictEqual(aug18Result.targetDay, 18);
+  assert.strictEqual(aug18Result.isCustomDate, true);
+
   console.log('✅ [Pass] 날짜 파싱 및 지정 날짜 포맷팅 검증을 성공적으로 통과했습니다!');
 }
 
 testTodayLinksFormatWithUserExample();
 testDateParsingAndCustomDateFormat();
+
