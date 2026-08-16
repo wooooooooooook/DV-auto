@@ -66,6 +66,7 @@ function escapeHtml(text: string): string {
  * today_links 전용: networkidle 대기 없이 빠른 DOM 로드로 포인트미지급 여부 검사
  */
 async function checkPointExcludedFast(context: BrowserContext, url: string): Promise<boolean> {
+  const start = Date.now();
   const page = await context.newPage();
   try {
     await safeGoto(page, url, { waitUntil: 'domcontentloaded', timeout: 8000 }, 1);
@@ -74,8 +75,11 @@ async function checkPointExcludedFast(context: BrowserContext, url: string): Pro
       .first()
       .waitFor({ state: 'attached', timeout: 3000 })
       .catch(() => {});
-    return await hasSurveyPointExcludedNotice(page);
+    const isExcluded = await hasSurveyPointExcludedNotice(page);
+    console.log(`[today_links] 포인트미지급 확인 완료 (${Date.now() - start}ms, 결과: ${isExcluded}): ${url}`);
+    return isExcluded;
   } catch (_e) {
+    console.warn(`[today_links] 포인트미지급 확인 실패 (${Date.now() - start}ms): ${url}`);
     return false;
   } finally {
     await page.close().catch(() => {});
@@ -93,6 +97,9 @@ async function batchCheckPointExcluded(
   const targets = items.filter((item) => !cache.has(item.cacheKey));
   if (targets.length === 0) return;
 
+  console.log(`[today_links] 포인트미지급 병렬 일괄 확인 시작 (총 ${targets.length}건)`);
+  const startTime = Date.now();
+
   const concurrency = 4;
   for (let i = 0; i < targets.length; i += concurrency) {
     const batch = targets.slice(i, i + concurrency);
@@ -107,6 +114,8 @@ async function batchCheckPointExcluded(
       }),
     );
   }
+
+  console.log(`[today_links] 포인트미지급 병렬 일괄 확인 완료 (총 소요시간: ${Date.now() - startTime}ms)`);
 }
 
 function findPointExcludedFromStoredSeminars(
@@ -362,28 +371,62 @@ async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Prom
   const dinnerSeminarIds: string[] = [];
 
   try {
-    await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'load', timeout: 30000 }, 1);
+    await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'domcontentloaded', timeout: 30000 }, 1);
 
-    const listConts = await page.locator('.list_cont');
-    const count = await listConts.count();
-    let todayTarget: ReturnType<PlaywrightRunArgs['page']['locator']> | null = null;
+    const parsedSeminars = await page.locator('.list_cont').evaluateAll((nodes, targetTodayString) => {
+      const results: Array<{
+        title: string;
+        time: string;
+        seminarLink: string;
+        fullUrl: string;
+        seminarId: string | null;
+        classAttr: string;
+        isAdvancedSurvey: boolean;
+      }> = [];
 
-    for (let i = 0; i < count; i++) {
-      const item = listConts.nth(i);
-      const isVisible = await item.isVisible().catch(() => false);
-      if (!isVisible) continue;
+      nodes.forEach((node) => {
+        const date =
+          node.querySelector('.seminar_day .date')?.textContent?.trim() ||
+          node.querySelector('.list_time .txt_date')?.textContent?.trim() ||
+          '';
+        if (!date.includes(targetTodayString)) return;
 
-      const dateText = await item
-        .locator('.list_time .txt_date')
-        .innerText()
-        .catch(() => '');
-      if (dateText.includes(todayString)) {
-        todayTarget = item;
-        break;
-      }
-    }
+        const links = node.querySelectorAll('a.list_detail, .list_seminar > li');
+        links.forEach((link) => {
+          const anchor = link.tagName.toLowerCase() === 'a' ? link : link.querySelector('a');
+          const href = anchor?.getAttribute('href') || link.getAttribute('href') || '';
+          if (!href) return;
 
-    if (!todayTarget) {
+          const title =
+            link.querySelector('.list_tit .tit')?.textContent?.trim() ||
+            link.querySelector('.txt_tit')?.textContent?.trim() ||
+            link.textContent?.trim() ||
+            '세미나';
+          const timeElem = link.querySelector('.txt_num.time') || link.querySelector('.time');
+          const time = timeElem?.textContent?.replace(/\n/g, '').trim() || '';
+          const classAttr = link.getAttribute('class') || timeElem?.getAttribute('class') || '';
+          const isAdvancedSurvey = !!link.querySelector('.advanced-survey, [class*="advanced"], .ic_survey');
+
+          const urlObj = new URL(href, 'https://www.doctorville.co.kr/');
+          const seminarId = urlObj.searchParams.get('seminarId') || (href.match(/\/seminar\/(\d+)/)?.[1] ?? null);
+          const seminarLink = seminarId ? `https://m.doctorville.co.kr/cme/seminar/${seminarId}` : urlObj.toString();
+
+          results.push({
+            title,
+            time,
+            seminarLink,
+            fullUrl: urlObj.toString(),
+            seminarId,
+            classAttr,
+            isAdvancedSurvey,
+          });
+        });
+      });
+
+      return results;
+    }, todayString);
+
+    if (!parsedSeminars || parsedSeminars.length === 0) {
       return {
         message: '<b>오늘의 세미나:</b> 오늘은 세미나가 없습니다.',
         date: isoDate,
@@ -391,9 +434,6 @@ async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Prom
         dinnerSeminarIds: [],
       };
     }
-
-    const seminarListItems = await todayTarget.locator('.list_seminar > li');
-    const seminarCount = await seminarListItems.count();
 
     const lunchSeminars: string[] = [];
     const dinnerSeminars: string[] = [];
@@ -410,57 +450,6 @@ async function collectTodaySeminarMessage(page: PlaywrightRunArgs['page']): Prom
       const hour = Number(hourMatch[1]);
       return Number.isFinite(hour) && hour >= 16;
     };
-
-    const parsedSeminars: Array<{
-      title: string;
-      time: string;
-      seminarLink: string;
-      fullUrl: string;
-      seminarId: string | null;
-      classAttr: string;
-      isAdvancedSurvey: boolean;
-    }> = [];
-
-    for (let j = 0; j < seminarCount; j++) {
-      const seminar = seminarListItems.nth(j);
-      const isVisible = await seminar.isVisible().catch(() => false);
-      if (!isVisible) continue;
-
-      const title = (
-        await seminar
-          .locator('.txt_tit')
-          .innerText()
-          .catch(() => '')
-      ).trim();
-      const time = (
-        await seminar
-          .locator('.time')
-          .innerText()
-          .catch(() => '')
-      ).trim();
-      const seminarLink =
-        (await seminar
-          .locator('.btn_wrap a')
-          .getAttribute('href')
-          .catch(() => '')) || '';
-      const fullUrl = seminarLink.startsWith('http') ? seminarLink : `${BASE_URL.replace(/\/$/, '')}${seminarLink}`;
-      const seminarId = getSeminarIdFromUrl(seminarLink);
-
-      const classAttr = (await seminar.getAttribute('class').catch(() => '')) || '';
-      const isAdvancedSurvey = (await seminar.locator('.advanced-survey, [class*="advanced"]').count()) > 0;
-
-      if (title && seminarLink) {
-        parsedSeminars.push({
-          title,
-          time,
-          seminarLink,
-          fullUrl,
-          seminarId,
-          classAttr,
-          isAdvancedSurvey,
-        });
-      }
-    }
 
     const uncachedSeminarItems: Array<{ link: string; cacheKey: string }> = [];
     for (const item of parsedSeminars) {
