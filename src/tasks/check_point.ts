@@ -5,6 +5,8 @@ import type { PlaywrightRunArgs } from '../types';
 import { safeGoto } from '../modules/utils';
 import * as logger from '../services/logger';
 
+const POINT_PAGE_URL = 'https://www.doctorville.co.kr/my/point/pointUseHistoryList';
+
 async function getPoint(context: BrowserContext): Promise<string> {
   const page = await context.newPage();
   try {
@@ -46,7 +48,7 @@ async function run({ page, context }: PlaywrightRunArgs) {
 
     return {
       success: true,
-      message: `현재 포인트: ${pointText}`,
+      message: `현재 포인트: ${pointText}\n${POINT_PAGE_URL}`,
     };
   } catch (error) {
     logger.error(

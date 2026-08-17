@@ -911,5 +911,5 @@ async function run({ page, args }: PlaywrightRunArgs, taskOptions?: Record<strin
   }
 }
 
-export { run, formatTodayLinksBroadcast, getTodayDateStrings, parseTargetDate, isDateMatching, parseSeminarsFromNodes };
+export { run, formatTodayLinksBroadcast, getTodayDateStrings, parseTargetDate, isDateMatching, parseSeminarsFromNodes, collectTodaySeminarMessage };
 export type { SeminarData, SeminarTaskData, DateTarget, ParsedSeminarItem };
