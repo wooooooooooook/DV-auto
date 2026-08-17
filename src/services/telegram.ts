@@ -1278,7 +1278,6 @@ if (noticeBot) {
           if (result && typeof result === 'object') {
             const r = result as { message?: string };
             if (r.message) {
-              // 메시지에서 세미나 부분만 추출 (📖 이후, 🆕 이전)
               const seminarMatch = r.message.match(/📖[\s\S]*?(?=\n\n🆕|\n\n💳|\n\n<blockquote>|$)/);
               if (seminarMatch) {
                 await ctx.reply(seminarMatch[0].trim());
@@ -1311,10 +1310,53 @@ if (noticeBot) {
   });
 }
 
+// adminBot에도 동일 핸들러 등록 (관리자도 사용 가능)
+if (adminBot) {
+  const currentSeminarsHandler = async (ctx: Context) => {
+    logger.info('User requested current seminars', { from: ctx.from?.username });
+    const task = taskRegistry.getByName('today_links');
+    if (!task) {
+      logger.error('today_links task not found, cannot run');
+      return ctx.reply('today_links task not found!');
+    }
+    try {
+      await ctx.reply('현재 예정된 세미나를 수집합니다... (백그라운드 실행)');
+      runner
+        .runTask(task)
+        .then(async (result) => {
+          if (result && typeof result === 'object') {
+            const r = result as { message?: string };
+            if (r.message) {
+              const seminarMatch = r.message.match(/📖[\s\S]*?(?=\n\n🆕|\n\n💳|\n\n<blockquote>|$)/);
+              if (seminarMatch) {
+                await ctx.reply(seminarMatch[0].trim());
+              } else {
+                await ctx.reply('예정된 세미나가 없습니다. ☕');
+              }
+            } else {
+              await ctx.reply('예정된 세미나가 없습니다. ☕');
+            }
+          } else {
+            await ctx.reply('예정된 세미나가 없습니다. ☕');
+          }
+        })
+        .catch((e) => {
+          const message = e instanceof Error ? e.message : String(e);
+          ctx.reply(`세미나 수집 중 오류 발생: ${message}`);
+        });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      ctx.reply(`Failed to start 세미나 수집: ${message}`);
+    }
+  };
+  adminBot.command('current_seminars', currentSeminarsHandler);
+}
+
 const adminCommands = [
   // 1. 루틴 / 실행
   { command: 'run_routine_now', description: '즉시 daily_routine 실행' },
   { command: 'today_links', description: '세미나/퀴즈 링크 모음 [날짜 지정 가능]' },
+  { command: 'current_seminars', description: '현재 예정된 세미나 목록 표시' },
   { command: 'broadcast_today_links', description: '오늘의 링크 채널 공지' },
   { command: 'apply_seminar_now', description: '즉시 세미나 신청(apply_seminar) 실행' },
   { command: 'run_quiz_now', description: '즉시 오늘의 퀴즈(today_quiz) 실행' },
