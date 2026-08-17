@@ -15,6 +15,7 @@ import { processSeminarQuiz } from './seminar_quiz';
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const BASE_URL = 'https://www.doctorville.co.kr';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
+const SEMINAR_DETAIL_PC_PAGE = 'https://www.doctorville.co.kr/seminar/seminarDetail';
 
 // Helper function for random delay
 const randomDelay = (): Promise<void> => {
@@ -364,7 +365,8 @@ async function performAutoEnter(
       // Fallback: URL 패턴 확인 (https://m.doctorville.co.kr/cme/seminar/attend?seminarId=...)
       const currentUrl = activePage.url();
       const urlPattern = /https:\/\/m\.doctorville\.co\.kr\/cme\/seminar\/attend\?seminarId=\d+/;
-      if (urlPattern.test(currentUrl)) {
+      const on24Pattern = /https:\/\/event\.on24\.com\/eventRegistration\/console\/apollox\/mainEvent/;
+      if (urlPattern.test(currentUrl) || on24Pattern.test(currentUrl)) {
         isQnaVisible = true;
         console.log(`[monitor_seminars] Entry confirmed via URL pattern for ${seminarId}: ${currentUrl}`);
       } else {
@@ -376,6 +378,44 @@ async function performAutoEnter(
       console.warn(
         `[monitor_seminars] Q&A section not found after entry attempt for ${seminarId}. Entry may have failed.`,
       );
+
+      // 불확실 시 → PC 도메인 상세 페이지로 fallback 후 '입장하기' 클릭
+      if (seminarId) {
+        const pcFallbackUrl = `${SEMINAR_DETAIL_PC_PAGE}?seminarId=${seminarId}`;
+        console.log(`[monitor_seminars] PC fallback for ${seminarId} -> ${pcFallbackUrl}`);
+        try {
+          await ensureLoggedIn({ page: activePage, context });
+          await safeGoto(activePage, pcFallbackUrl, { waitUntil: 'networkidle', timeout: 15000 });
+          const pcEnterBtn = activePage.locator('text="입장하기"').first();
+          if (await pcEnterBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
+            const pcPopupPromise = context.waitForEvent('page', { timeout: 5000 }).catch(() => null);
+            await pcEnterBtn.click().catch((e) => {
+              console.warn(`[monitor_seminars] PC fallback '입장하기' click failed for ${seminarId}`, e);
+            });
+            const pcPopup = await pcPopupPromise;
+            const pcActive = pcPopup ?? activePage;
+            if (pcPopup) await pcActive.waitForLoadState('domcontentloaded').catch(() => {});
+            await pcActive.waitForTimeout(5000);
+            const pcChatFrame = pcActive
+              .frames()
+              .find((f) => f.url().includes('socialstream') || f.url().includes('video.ibm.com'));
+            const pcUrlPattern = /https:\/\/m\.doctorville\.co\.kr\/cme\/seminar\/attend\?seminarId=\d+/;
+            const pcOn24Pattern = /https:\/\/event\.on24\.com\/eventRegistration\/console\/apollox\/mainEvent/;
+            if (pcChatFrame || pcUrlPattern.test(pcActive.url()) || pcOn24Pattern.test(pcActive.url())) {
+              isQnaVisible = true;
+              activePage = pcActive;
+              console.log(`[monitor_seminars] PC fallback entry confirmed for ${seminarId}.`);
+            } else {
+              console.warn(`[monitor_seminars] PC fallback also failed for ${seminarId}: ${pcActive.url()}`);
+            }
+            if (pcPopup) await pcPopup.close().catch(() => {});
+          } else {
+            console.warn(`[monitor_seminars] PC fallback '입장하기' button not found for ${seminarId}`);
+          }
+        } catch (pcErr) {
+          console.error(`[monitor_seminars] PC fallback threw for ${seminarId}`, pcErr);
+        }
+      }
     } else {
       console.log(`[monitor_seminars] Q&A section confirmed. Seminar entry successful for ${seminarId}.`);
     }

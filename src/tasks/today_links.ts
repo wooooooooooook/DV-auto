@@ -483,6 +483,28 @@ function isDateMatching(dateText: string, target: DateTarget): boolean {
 function parseSeminarsFromNodes(nodes: Array<Element>, target: DateTarget): ParsedSeminarItem[] {
   const results: ParsedSeminarItem[] = [];
 
+  function isDateMatching(dateText: string, t: DateTarget): boolean {
+    if (!dateText) return false;
+    if (dateText.includes(t.todayString)) return true;
+    if (dateText.includes(t.isoDate)) return true;
+
+    const ymdMatch = dateText.match(/(\d{4})[^\d]+(\d{1,2})[^\d]+(\d{1,2})/);
+    if (ymdMatch) {
+      const m = parseInt(ymdMatch[2], 10);
+      const d = parseInt(ymdMatch[3], 10);
+      if (m === t.targetMonth && d === t.targetDay) return true;
+    }
+
+    const mdMatch = dateText.match(/(\d{1,2})[^\d]+(\d{1,2})/);
+    if (mdMatch) {
+      const m = parseInt(mdMatch[1], 10);
+      const d = parseInt(mdMatch[2], 10);
+      if (m === t.targetMonth && d === t.targetDay) return true;
+    }
+
+    return false;
+  }
+
   nodes.forEach((node) => {
     const date =
       node.querySelector('.seminar_day .date')?.textContent?.trim() ||
