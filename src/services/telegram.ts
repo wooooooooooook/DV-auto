@@ -933,7 +933,7 @@ if (adminBot) {
     }
   });
 
-  // 세미나 번호로 포인트 지급 여부 조회
+  // 세미나 번호로 포인트 지급 여부 조회 (단일/복수 지원)
   adminBot.command('check_seminar_point', async (ctx) => {
     logger.info('User requested to check seminar point', { from: ctx.from?.username });
     const task = taskRegistry.getByName('check_seminar_point');
@@ -943,23 +943,31 @@ if (adminBot) {
     }
 
     try {
-      const seminarId = ctx.message?.text?.split(/\s+/)[1];
-      if (!seminarId) {
-        return ctx.reply('사용법: /check_seminar_point <세미나번호>\n예: /check_seminar_point 12345');
+      // 메시지에서 모든 숫자(세미나 번호) 추출
+      const text = ctx.message?.text || '';
+      const seminarIds = text.match(/\d+/g) || [];
+      if (seminarIds.length === 0) {
+        return ctx.reply(
+          '사용법: /check_seminar_point <세미나번호> [세미나번호...]\n예: /check_seminar_point 5517\n   또는 여러 줄 입력:\n8/12 5525\n8/13 5526\n8/14 5542 5543 5544 5565',
+        );
       }
-      await ctx.reply(`세미나 ${seminarId} 포인트 내역을 확인 중입니다... (백그라운드 실행)`);
-      runner
-        .runTask(task, { args: { seminarId } })
-        .then(async (result) => {
-          if (result && typeof result === 'object') {
-            const r = result as { message?: string };
-            if (r.message) await ctx.reply(r.message);
-          }
-        })
-        .catch((e) => {
-          const message = e instanceof Error ? e.message : String(e);
-          ctx.reply(`세미나 포인트 확인 실패: ${message}`);
-        });
+
+      await ctx.reply(`${seminarIds.length}개 세미나 포인트 내역 확인 중... (백그라운드 실행)`);
+
+      for (const seminarId of seminarIds) {
+        await runner
+          .runTask(task, { args: { seminarId } })
+          .then(async (result) => {
+            if (result && typeof result === 'object') {
+              const r = result as { message?: string };
+              if (r.message) await ctx.reply(`[${seminarId}] ${r.message}`);
+            }
+          })
+          .catch((e) => {
+            const message = e instanceof Error ? e.message : String(e);
+            ctx.reply(`[${seminarId}] 확인 실패: ${message}`);
+          });
+      }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       ctx.reply(`Failed to start check_seminar_point: ${message}`);
