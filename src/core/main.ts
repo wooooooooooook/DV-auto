@@ -393,6 +393,8 @@ const checkSeminarPointTask: Task = {
     }
   },
 };
+taskRegistry.registerTask(checkSeminarPointTask);
+
 const checkAdvancedSeminarsTask: Task = {
   name: 'check_advanced_seminars',
   run: async () => {
