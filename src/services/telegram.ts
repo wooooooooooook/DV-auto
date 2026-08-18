@@ -933,6 +933,68 @@ if (adminBot) {
     }
   });
 
+  // 세미나 번호로 포인트 지급 여부 조회
+  adminBot.command('check_seminar_point', async (ctx) => {
+    logger.info('User requested to check seminar point', { from: ctx.from?.username });
+    const task = taskRegistry.getByName('check_seminar_point');
+    if (!task) {
+      logger.error('check_seminar_point task not found, cannot run');
+      return ctx.reply('check_seminar_point task not found!');
+    }
+
+    try {
+      const seminarId = ctx.message?.text?.split(/\s+/)[1];
+      if (!seminarId) {
+        return ctx.reply('사용법: /check_seminar_point <세미나번호>\n예: /check_seminar_point 12345');
+      }
+      await ctx.reply(`세미나 ${seminarId} 포인트 내역을 확인 중입니다... (백그라운드 실행)`);
+      runner
+        .runTask(task, { args: { seminarId } })
+        .then(async (result) => {
+          if (result && typeof result === 'object') {
+            const r = result as { message?: string };
+            if (r.message) await ctx.reply(r.message);
+          }
+        })
+        .catch((e) => {
+          const message = e instanceof Error ? e.message : String(e);
+          ctx.reply(`세미나 포인트 확인 실패: ${message}`);
+        });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      ctx.reply(`Failed to start check_seminar_point: ${message}`);
+    }
+  });
+
+  // 최근 2주 심화 세미나 포인트 지급 일괄 확인
+  adminBot.command('check_advanced_seminars', async (ctx) => {
+    logger.info('User requested to check advanced seminars point', { from: ctx.from?.username });
+    const task = taskRegistry.getByName('check_advanced_seminars');
+    if (!task) {
+      logger.error('check_advanced_seminars task not found, cannot run');
+      return ctx.reply('check_advanced_seminars task not found!');
+    }
+
+    try {
+      await ctx.reply('최근 2주간 심화 세미나 포인트 지급 여부를 일괄 조회합니다... (약 1분 소요, 백그라운드 실행)');
+      runner
+        .runTask(task)
+        .then(async (result) => {
+          if (result && typeof result === 'object') {
+            const r = result as { message?: string };
+            if (r.message) await ctx.reply(r.message);
+          }
+        })
+        .catch((e) => {
+          const message = e instanceof Error ? e.message : String(e);
+          ctx.reply(`심화 세미나 포인트 일괄 조회 실패: ${message}`);
+        });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      ctx.reply(`Failed to start check_advanced_seminars: ${message}`);
+    }
+  });
+
   adminBot.command('naverpay_point_exchange', async (ctx) => {
     logger.info('User requested to run naverpay_point_exchange now', { from: ctx.from?.username });
     const task = taskRegistry.getByName('네이버페이포인트교환');
@@ -1372,6 +1434,8 @@ const adminCommands = [
   { command: 'refresh_seminar_point_exclusion', description: '세미나 포인트미지급 캐시 재확인' },
   // 3. 포인트 & 교환
   { command: 'check_point', description: '현재 포인트 확인' },
+  { command: 'check_seminar_point', description: '세미나 번호로 포인트 지급 확인' },
+  { command: 'check_advanced_seminars', description: '최근 2주 심화 세미나 포인트 일괄 확인' },
   { command: 'naverpay_point_exchange', description: '네이버페이포인트교환 실행' },
   { command: 'baemin_point_exchange', description: '배민포인트교환 실행' },
   // 4. 시스템 & 관리

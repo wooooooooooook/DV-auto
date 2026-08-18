@@ -19,6 +19,8 @@ import * as naverpayPointExchangeTask from '../tasks/naverpay_point_exchange';
 import * as baeminPointExchangeTask from '../tasks/baemin_point_exchange';
 import * as refreshSeminarPointExclusionTaskModule from '../tasks/refresh_seminar_point_exclusion';
 import * as checkPointTaskModule from '../tasks/check_point';
+import * as checkSeminarPointTaskModule from '../tasks/check_seminar_point';
+import * as checkAdvancedSeminarsTaskModule from '../tasks/check_advanced_seminars';
 import * as runSeminarQuizTaskModule from '../tasks/run_seminar_quiz';
 import type { Task, TaskResult } from '../types';
 
@@ -371,6 +373,41 @@ const checkPointTask: Task = {
   },
 };
 taskRegistry.registerTask(checkPointTask);
+
+// 세미나 번호로 포인트 지급 여부 조회 — /check_seminar_point <seminarId>
+const checkSeminarPointTask: Task = {
+  name: 'check_seminar_point',
+  run: async (ctx) => {
+    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await utils.ensureLoggedIn({ page, context });
+      const seminarId = ctx.args?.seminarId;
+      if (!seminarId) {
+        return { success: false, message: '세미나 번호가 필요합니다. 예: /check_seminar_point 12345' };
+      }
+      return await checkSeminarPointTaskModule.run({ page, context }, seminarId);
+    } finally {
+      await browser.close();
+    }
+  },
+};
+const checkAdvancedSeminarsTask: Task = {
+  name: 'check_advanced_seminars',
+  run: async () => {
+    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await utils.ensureLoggedIn({ page, context });
+      return await checkAdvancedSeminarsTaskModule.run({ context });
+    } finally {
+      await browser.close();
+    }
+  },
+};
+taskRegistry.registerTask(checkAdvancedSeminarsTask);
 
 // 수동 세미나 퀴즈 — /run_seminar_quiz <seminarId> [advanced]
 // ctx.args.seminarId, ctx.args.isAdvancedSurvey 를 태스크가 읽음

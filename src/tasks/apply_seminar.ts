@@ -14,6 +14,8 @@ const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
 const SEMINAR_LIST_KEY = 'apply_seminar:seminar_list';
 const NEW_SEMINAR_KEY = 'apply_seminar:new_seminars';
+export const NEW_SEMINAR_HISTORY_KEY = 'apply_seminar:new_seminars_history';
+const NEW_SEMINAR_HISTORY_RETENTION_DAYS = 60; // 개최일 기준 60일 보관 (1개월+여유)
 
 type SeminarListItem = {
   name: string;
@@ -32,6 +34,38 @@ type StoredNewSeminars = {
     SeminarListItem & { seminarId: string | null; isPointExcluded?: boolean; isAdvancedSurvey?: boolean }
   >;
 };
+
+type NewSeminarHistoryEntry = {
+  detectedDate: string; // Asia/Seoul en-CA (YYYY-MM-DD)
+  detectedAt: string; // ISO timestamp
+  seminar: SeminarListItem & { seminarId: string | null; isPointExcluded?: boolean; isAdvancedSurvey?: boolean };
+};
+
+function appendNewSeminarsToHistory(
+  items: Array<SeminarListItem & { seminarId: string | null; isPointExcluded?: boolean; isAdvancedSurvey?: boolean }>,
+  detectedDate: string,
+): void {
+  if (items.length === 0) return;
+  const history = storage.get<NewSeminarHistoryEntry[]>(NEW_SEMINAR_HISTORY_KEY, []) || [];
+  const existingUrls = new Set(history.map((entry) => entry.seminar.url));
+  const detectedAt = new Date().toISOString();
+  for (const seminar of items) {
+    if (existingUrls.has(seminar.url)) continue;
+    history.push({ detectedDate, detectedAt, seminar });
+    existingUrls.add(seminar.url);
+  }
+  // 만료 정리: 개최일(seminar.date) 기준 NEW_SEMINAR_HISTORY_RETENTION_DAYS 경과 시 삭제
+  const todayMs = Date.parse(`${detectedDate}T00:00:00+09:00`);
+  const retentionMs = NEW_SEMINAR_HISTORY_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  const pruned = history.filter((entry) => {
+    const seminarDate = entry.seminar.date || entry.detectedDate;
+    if (!seminarDate) return true; // 날짜 없으면 보관
+    const entryMs = Date.parse(`${seminarDate}T00:00:00+09:00`);
+    if (Number.isNaN(entryMs) || Number.isNaN(todayMs)) return true;
+    return todayMs - entryMs <= retentionMs;
+  });
+  storage.set(NEW_SEMINAR_HISTORY_KEY, pruned);
+}
 
 type ApplySeminarOptions = {
   notifyNewSeminarsToChannel?: boolean;
@@ -205,6 +239,7 @@ async function run({ page }: PlaywrightRunArgs, options: ApplySeminarOptions = {
           date: todayIso,
           seminars: merged,
         });
+        appendNewSeminarsToHistory(newlyAddedWithFlags, todayIso);
       }
     }
     const finalSeminarsToStore: SeminarListItem[] = normalizedCurrentSeminars.map((item) => {
