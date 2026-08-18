@@ -943,9 +943,9 @@ if (adminBot) {
     }
 
     try {
-      // 메시지에서 모든 숫자(세미나 번호) 추출
+      // 메시지에서 4~5자리 숫자만 세미나 번호로 추출 (날짜의 월/일 제외)
       const text = ctx.message?.text || '';
-      const seminarIds = text.match(/\d+/g) || [];
+      const seminarIds = text.match(/\b\d{4,5}\b/g) || [];
       if (seminarIds.length === 0) {
         return ctx.reply(
           '사용법: /check_seminar_point <세미나번호> [세미나번호...]\n예: /check_seminar_point 5517\n   또는 여러 줄 입력:\n8/12 5525\n8/13 5526\n8/14 5542 5543 5544 5565',
@@ -954,20 +954,25 @@ if (adminBot) {
 
       await ctx.reply(`${seminarIds.length}개 세미나 포인트 내역 확인 중... (백그라운드 실행)`);
 
-      for (const seminarId of seminarIds) {
-        await runner
-          .runTask(task, { args: { seminarId } })
-          .then(async (result) => {
+      // 모든 태스크 병렬 실행 후 결과 수집
+      const results = await Promise.all(
+        seminarIds.map(async (seminarId) => {
+          try {
+            const result = await runner.runTask(task, { args: { seminarId } });
             if (result && typeof result === 'object') {
               const r = result as { message?: string };
-              if (r.message) await ctx.reply(`[${seminarId}] ${r.message}`);
+              if (r.message) return `[${seminarId}] ${r.message}`;
             }
-          })
-          .catch((e) => {
+            return `[${seminarId}] 결과 없음`;
+          } catch (e) {
             const message = e instanceof Error ? e.message : String(e);
-            ctx.reply(`[${seminarId}] 확인 실패: ${message}`);
-          });
-      }
+            return `[${seminarId}] 확인 실패: ${message}`;
+          }
+        }),
+      );
+
+      // 한 번에 전송
+      await ctx.reply(results.join('\n'));
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       ctx.reply(`Failed to start check_seminar_point: ${message}`);
