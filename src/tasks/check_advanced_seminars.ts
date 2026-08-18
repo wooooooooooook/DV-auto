@@ -1,6 +1,6 @@
 import type { BrowserContext } from 'playwright';
 import * as storage from '../services/storage';
-import { searchSeminarPoint } from './check_seminar_point';
+import { searchSeminarPoints } from './check_seminar_point';
 import { NEW_SEMINAR_HISTORY_KEY } from './apply_seminar';
 
 interface AdvancedSeminarResult {
@@ -34,19 +34,33 @@ export async function checkAdvancedSeminars(context: BrowserContext): Promise<Ad
     return seminarDate >= pastStr && seminarDate <= todayStr;
   });
 
-  const results: AdvancedSeminarResult[] = [];
-
+  // 세미나 ID 수집
+  const seminarInfos: { date: string; id: string }[] = [];
   for (const entry of advancedEntries) {
     const sem = entry.seminar;
     const seminarDate = sem.date || entry.detectedDate;
     const seminarId = sem.seminarId || (sem.url && sem.url.match(/(\d+)$/)?.[1]) || '';
-    if (!seminarId) {
-      results.push({ date: seminarDate, found: false });
+    if (seminarId) {
+      seminarInfos.push({ date: seminarDate, id: seminarId });
+    } else {
+      // ID가 없는 경우
+      seminarInfos.push({ date: seminarDate, id: '' });
+    }
+  }
+
+  // 일괄 검색 (한 번 로그인 후 반복 검색)
+  const validIds = seminarInfos.filter((s) => s.id).map((s) => s.id);
+  const resultsMap = await searchSeminarPoints(context, validIds, 60);
+
+  const results: AdvancedSeminarResult[] = [];
+  for (const info of seminarInfos) {
+    if (!info.id) {
+      results.push({ date: info.date, found: false });
       continue;
     }
-    const pointRes = await searchSeminarPoint(context, seminarId, 60);
+    const pointRes = resultsMap.get(info.id) || { found: false };
     results.push({
-      date: seminarDate,
+      date: info.date,
       found: pointRes.found,
       point: pointRes.point,
       pointText: pointRes.pointText,

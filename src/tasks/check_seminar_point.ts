@@ -17,44 +17,32 @@ interface SeminarPointResult {
 }
 
 /**
- * 포인트 사용/적립 내역 페이지에서 특정 세미나 번호로 검색
- * @param context 브라우저 컨텍스트
- * @param seminarId 세미나 번호 (예: '12345')
- * @param daysBack 검색 기간(일), 기본 30일
+ * 포인트 내역 페이지에서 단일 세미나 번호 검색 (페이지는 이미 로드되어 있다고 가정)
+ * @param page 이미 포인트 내역 페이지에 있는 Page 객체
+ * @param seminarId 세미나 번호
+ * @param daysBack 검색 기간(일)
  */
-export async function searchSeminarPoint(
-  context: BrowserContext,
-  seminarId: string,
-  daysBack = 30,
-): Promise<SeminarPointResult> {
-  const page = await context.newPage();
+async function searchSingleSeminarPoint(page: Page, seminarId: string, daysBack = 30): Promise<SeminarPointResult> {
   try {
-    // 오늘 날짜와 N일 전 날짜 계산 (YYYY-MM-DD)
     const endDate = new Date();
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - daysBack);
 
     const formatDate = (d: Date) => d.toISOString().split('T')[0];
 
-    // 포인트 내역 페이지로 이동
-    await safeGoto(page, POINT_HISTORY_URL, { waitUntil: 'domcontentloaded', timeout: 30000 }, 1);
-    await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
-
     // 검색 폼 채우기
-    // 시작일
     await page.fill('input[name="startDt"], input#startDt', formatDate(startDate));
-    // 종료일
     await page.fill('input[name="endDt"], input#endDt', formatDate(endDate));
-    // 검색어 (세미나 번호)
     await page.fill('input[name="keyword"], input#keyword', seminarId);
-    // 검색 버튼 클릭 (form submit)
+
+    // 검색 버튼 클릭
     await page.click('button[type="submit"], input[type="submit"], button:has-text("검색")').catch(async () => {
       await page.keyboard.press('Enter');
     });
 
     // 결과 로딩 대기
     await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(500);
 
     // 테이블 파싱
     const result = await page.evaluate((targetSeminarId: string) => {
@@ -70,7 +58,6 @@ export async function searchSeminarPoint(
         const pointText = cells[4]?.textContent?.trim() || '';
         const expiry = cells[5]?.textContent?.trim() || '';
 
-        // 세미나 번호가 내용에 포함되는지 확인
         if (content.includes(targetSeminarId) || service.includes(targetSeminarId)) {
           const pointMatch = pointText.match(/([\d,]+)/);
           const point = pointMatch ? parseInt(pointMatch[1].replace(/,/g, ''), 10) : undefined;
@@ -92,15 +79,47 @@ export async function searchSeminarPoint(
 
     return result;
   } catch (error) {
-    logger.error('searchSeminarPoint error', error);
+    logger.error(`searchSingleSeminarPoint error for ${seminarId}`, error);
     return { found: false };
+  }
+}
+
+/**
+ * 여러 세미나 번호 일괄 검색 (한 번 로그인/페이지 진입 후 반복 검색)
+ * @param context 브라우저 컨텍스트
+ * @param seminarIds 세미나 번호 배열
+ * @param daysBack 검색 기간(일)
+ */
+export async function searchSeminarPoints(
+  context: BrowserContext,
+  seminarIds: string[],
+  daysBack = 30,
+): Promise<Map<string, SeminarPointResult>> {
+  const page = await context.newPage();
+  const results = new Map<string, SeminarPointResult>();
+
+  try {
+    // 1회만 페이지 이동 + 로그인 대기
+    await safeGoto(page, POINT_HISTORY_URL, { waitUntil: 'domcontentloaded', timeout: 30000 }, 1);
+    await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+
+    // 각 세미나 번호별 검색 반복
+    for (const seminarId of seminarIds) {
+      const result = await searchSingleSeminarPoint(page, seminarId, daysBack);
+      results.set(seminarId, result);
+    }
+
+    return results;
+  } catch (error) {
+    logger.error('searchSeminarPoints error', error);
+    return results;
   } finally {
     await page.close().catch(() => {});
   }
 }
 
 /**
- * Task runner용 wrapper
+ * Task runner용 wrapper (단일/복수 모두 지원)
  */
 export async function run(
   { context }: PlaywrightRunArgs,
@@ -115,9 +134,10 @@ export async function run(
   }
 
   try {
-    const result = await searchSeminarPoint(context, seminarId, 60); // 60일간 검색
+    const results = await searchSeminarPoints(context, [seminarId], 60);
+    const result = results.get(seminarId);
 
-    if (result.found) {
+    if (result?.found) {
       const status = result.type === '적립' ? '지급됨' : '사용됨';
       return {
         success: true,

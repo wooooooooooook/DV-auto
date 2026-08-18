@@ -10,6 +10,7 @@ import * as runner from '../core/runner';
 import * as taskRegistry from '../core/taskRegistry';
 import { inspect } from '../modules/inspect';
 import { sendNotificationToChannel } from '../modules/utils';
+import { searchSeminarPoints } from '../tasks/check_seminar_point';
 
 const ADMIN_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const NOTICE_BOT_TOKEN = process.env.NOTICE_BOT_TOKEN;
@@ -936,11 +937,6 @@ if (adminBot) {
   // 세미나 번호로 포인트 지급 여부 조회 (단일/복수 지원)
   adminBot.command('check_seminar_point', async (ctx) => {
     logger.info('User requested to check seminar point', { from: ctx.from?.username });
-    const task = taskRegistry.getByName('check_seminar_point');
-    if (!task) {
-      logger.error('check_seminar_point task not found, cannot run');
-      return ctx.reply('check_seminar_point task not found!');
-    }
 
     try {
       // 메시지에서 4~5자리 숫자만 세미나 번호로 추출 (날짜의 월/일 제외)
@@ -954,25 +950,34 @@ if (adminBot) {
 
       await ctx.reply(`${seminarIds.length}개 세미나 포인트 내역 확인 중... (백그라운드 실행)`);
 
-      // 모든 태스크 병렬 실행 후 결과 수집
-      const results = await Promise.all(
-        seminarIds.map(async (seminarId) => {
-          try {
-            const result = await runner.runTask(task, { args: { seminarId } });
-            if (result && typeof result === 'object') {
-              const r = result as { message?: string };
-              if (r.message) return `[${seminarId}] ${r.message}`;
+      // runner를 통해 브라우저 컨텍스트 얻기 후 직접 검색 함수 호출
+      const result = await runner.runTask(
+        {
+          name: 'check_seminar_point_direct',
+          run: async ({ context }) => {
+            const results = await searchSeminarPoints(context, seminarIds, 60);
+            const messages: string[] = [];
+            for (const seminarId of seminarIds) {
+              const r = results.get(seminarId);
+              if (r?.found) {
+                const status = r.type === '적립' ? '지급됨' : '사용됨';
+                messages.push(
+                  `[${seminarId}] 세미나 ${seminarId} 포인트 ${status}: ${r.pointText} (${r.date} / ${r.content})`,
+                );
+              } else {
+                messages.push(`[${seminarId}] 세미나 ${seminarId} 포인트 내역을 찾을 수 없습니다 (최근 60일간).`);
+              }
             }
-            return `[${seminarId}] 결과 없음`;
-          } catch (e) {
-            const message = e instanceof Error ? e.message : String(e);
-            return `[${seminarId}] 확인 실패: ${message}`;
-          }
-        }),
+            return { success: true, message: messages.join('\n') };
+          },
+        },
+        {},
       );
 
-      // 한 번에 전송
-      await ctx.reply(results.join('\n'));
+      if (result && typeof result === 'object') {
+        const r = result as { message?: string };
+        if (r.message) await ctx.reply(r.message);
+      }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       ctx.reply(`Failed to start check_seminar_point: ${message}`);
