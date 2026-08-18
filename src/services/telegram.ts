@@ -937,11 +937,16 @@ if (adminBot) {
   // 세미나 번호로 포인트 지급 여부 조회 (단일/복수 지원)
   adminBot.command('check_seminar_point', async (ctx) => {
     logger.info('User requested to check seminar point', { from: ctx.from?.username });
+    const task = taskRegistry.getByName('check_seminar_point');
+    if (!task) {
+      logger.error('check_seminar_point task not found, cannot run');
+      return ctx.reply('check_seminar_point task not found!');
+    }
 
     try {
       // 메시지에서 4~5자리 숫자만 세미나 번호로 추출 (날짜의 월/일 제외)
       const text = ctx.message?.text || '';
-      const seminarIds = text.match(/\b\d{4,5}\b/g) || [];
+      const seminarIds = (text.match(/\b\d{4,5}\b/g) || []) as string[];
       if (seminarIds.length === 0) {
         return ctx.reply(
           '사용법: /check_seminar_point <세미나번호> [세미나번호...]\n예: /check_seminar_point 5517\n   또는 여러 줄 입력:\n8/12 5525\n8/13 5526\n8/14 5542 5543 5544 5565',
@@ -950,29 +955,7 @@ if (adminBot) {
 
       await ctx.reply(`${seminarIds.length}개 세미나 포인트 내역 확인 중... (백그라운드 실행)`);
 
-      // runner를 통해 브라우저 컨텍스트 얻기 후 직접 검색 함수 호출
-      const result = await runner.runTask(
-        {
-          name: 'check_seminar_point_direct',
-          run: async ({ context }) => {
-            const results = await searchSeminarPoints(context, seminarIds, 60);
-            const messages: string[] = [];
-            for (const seminarId of seminarIds) {
-              const r = results.get(seminarId);
-              if (r?.found) {
-                const status = r.type === '적립' ? '지급됨' : '사용됨';
-                messages.push(
-                  `[${seminarId}] 세미나 ${seminarId} 포인트 ${status}: ${r.pointText} (${r.date} / ${r.content})`,
-                );
-              } else {
-                messages.push(`[${seminarId}] 세미나 ${seminarId} 포인트 내역을 찾을 수 없습니다 (최근 60일간).`);
-              }
-            }
-            return { success: true, message: messages.join('\n') };
-          },
-        },
-        {},
-      );
+      const result = await runner.runTask(task, { args: { seminarIds: seminarIds.join(',') } });
 
       if (result && typeof result === 'object') {
         const r = result as { message?: string };

@@ -374,7 +374,7 @@ const checkPointTask: Task = {
 };
 taskRegistry.registerTask(checkPointTask);
 
-// 세미나 번호로 포인트 지급 여부 조회 — /check_seminar_point <seminarId>
+// 세미나 번호로 포인트 지급 여부 조회 — /check_seminar_point <seminarId> [seminarId...]
 const checkSeminarPointTask: Task = {
   name: 'check_seminar_point',
   run: async (ctx) => {
@@ -383,11 +383,38 @@ const checkSeminarPointTask: Task = {
     const page = await context.newPage();
     try {
       await utils.ensureLoggedIn({ page, context });
-      const seminarId = ctx.args?.seminarId;
-      if (!seminarId) {
+      // 단일 또는 복수 세미나 ID 지원 (comma-separated string 또는 array)
+      const seminarIdsRaw = ctx.args?.seminarIds;
+      let seminarIds: string[] = [];
+      if (seminarIdsRaw) {
+        if (Array.isArray(seminarIdsRaw)) {
+          seminarIds = seminarIdsRaw;
+        } else if (typeof seminarIdsRaw === 'string') {
+          seminarIds = seminarIdsRaw
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
+        }
+      } else if (ctx.args?.seminarId) {
+        seminarIds = [ctx.args.seminarId];
+      }
+      if (seminarIds.length === 0) {
         return { success: false, message: '세미나 번호가 필요합니다. 예: /check_seminar_point 12345' };
       }
-      return await checkSeminarPointTaskModule.run({ page, context }, seminarId);
+      const results = await checkSeminarPointTaskModule.searchSeminarPoints(context, seminarIds, 60);
+      const messages: string[] = [];
+      for (const seminarId of seminarIds) {
+        const r = results.get(seminarId);
+        if (r?.found) {
+          const status = r.type === '적립' ? '지급됨' : '사용됨';
+          messages.push(
+            `[${seminarId}] 세미나 ${seminarId} 포인트 ${status}: ${r.pointText} (${r.date} / ${r.content})`,
+          );
+        } else {
+          messages.push(`[${seminarId}] 세미나 ${seminarId} 포인트 내역을 찾을 수 없습니다 (최근 60일간).`);
+        }
+      }
+      return { success: true, message: messages.join('\n') };
     } finally {
       await browser.close();
     }
