@@ -428,22 +428,13 @@ async function performAutoEnter(
       console.log(`[monitor_seminars] Q&A section confirmed. Seminar entry successful for ${seminarId}.`);
     }
 
-    // Take a screenshot and send to admin
+    // Take a screenshot and return success status (notification moved to checkAndPerformAutoEnter)
     const screenshotPath = path.join(process.cwd(), `seminar_entry_${screenshotKey}.png`);
     try {
-      const entryStatus = isQnaVisible ? '🟢세미나 입장 완료' : '⚠️세미나 입장 불확실 (Q&A 미감지)';
-      const entryMessage = `${entryStatus}\n**${seminarName}**\n${targetUrl}`;
       await activePage.screenshot({ path: screenshotPath, fullPage: false });
-
-      const sentToAdmin = await sendTelegram(entryMessage, screenshotPath);
-      if (!sentToAdmin) {
-        console.error(
-          `[monitor_seminars] Auto-enter screenshot send skipped/failed for ${seminarId}. Check TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID.`,
-        );
-      }
-      didEnter = sentToAdmin && isQnaVisible;
+      didEnter = isQnaVisible;
     } catch (screenshotError) {
-      console.error(`[monitor_seminars] Failed to take/send screenshot for ${seminarId}`, screenshotError);
+      console.error(`[monitor_seminars] Failed to take screenshot for ${seminarId}`, screenshotError);
     } finally {
       // Clean up the screenshot file
       await fs.unlink(screenshotPath).catch(() => {});
@@ -475,7 +466,27 @@ async function checkAndPerformAutoEnter(
 
   const targetUrl = seminarId ? `${SEMINAR_DETAIL_PAGE}${seminarId}` : seminarUrl;
   const screenshotKey = seminarId || `url_${Date.now()}`;
-  return performAutoEnter(context, seminarId, name, targetUrl, screenshotKey);
+  const didEnter = await performAutoEnter(context, seminarId, name, targetUrl, screenshotKey);
+
+  // 첫 성공 시에만 관리자 알림 전송 (중복 방지)
+  if (didEnter) {
+    const entryMessage = `🟢세미나 입장 완료\n**${name}**\n${targetUrl}`;
+    const screenshotPath = path.join(process.cwd(), `seminar_entry_${screenshotKey}.png`);
+    try {
+      // 알림용 스크린샷 별도 캡처
+      const page = await context.newPage();
+      await safeGoto(page, targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+      await page.screenshot({ path: screenshotPath, fullPage: false });
+      await sendTelegram(entryMessage, screenshotPath);
+      await page.close().catch(() => {});
+    } catch (e) {
+      console.error(`[monitor_seminars] Entry notification send failed for ${seminarId}`, e);
+    } finally {
+      await fs.unlink(screenshotPath).catch(() => {});
+    }
+  }
+
+  return didEnter;
 }
 
 async function monitorSeminars(
@@ -528,6 +539,7 @@ async function monitorSeminars(
 
         // 포인트미지급 세미나: 공지봇 알림 없이 입장 후 모니터링 목록에서 제거
         if (isSurveyPointExcluded) {
+          excludedSeminarKeys.add(getSeminarTrackingKey(url, seminarId));
           delete monitoringList[url];
           continue;
         }
@@ -695,6 +707,8 @@ async function monitorSeminars(
 
           // 포인트미지급 세미나: 입장 시도(관리자봇 스크린샷) 후 모니터링 제거, 공지봇 알림 X
           if (isSurveyPointExcluded) {
+            const trackingKey = getSeminarTrackingKey(url, mergedSeminarInfo.seminarId);
+            excludedSeminarKeys.add(trackingKey);
             mergedSeminarInfo.hasSurvey = hasSurvey;
             mergedSeminarInfo.isEntryStarted = true;
             mergedSeminarInfo.autoEnterDone = await checkAndPerformAutoEnter(
