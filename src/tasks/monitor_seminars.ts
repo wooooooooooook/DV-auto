@@ -508,9 +508,8 @@ async function monitorSeminars(
         const { hasSurvey, isSurveyPointExcluded } = await checkSurveyMeta(context, targetUrl);
         if (isSurveyPointExcluded) {
           console.log(
-            `[monitor_seminars] ${name} is point-excluded but will still be monitored for entry. (During Initialization)`,
+            `[monitor_seminars] ${name} is point-excluded. Entry only, no channel notice, no end monitoring. (During Initialization)`,
           );
-          // Don't add to excludedSeminarKeys, just mark for no survey handling
         }
 
         if (monitoringList[url]) {
@@ -526,6 +525,13 @@ async function monitorSeminars(
           monitoringList[url].isSurveyPointExcluded = isSurveyPointExcluded;
           monitoringList[url].isEntryStarted = true;
         }
+
+        // 포인트미지급 세미나: 공지봇 알림 없이 입장 후 모니터링 목록에서 제거
+        if (isSurveyPointExcluded) {
+          delete monitoringList[url];
+          continue;
+        }
+
         const advancedSurveySuffix = monitoringList[url]?.isAdvancedSurvey ? ' [심화설문]' : '';
         let message = `🟢세미나시작\n**${name}**${advancedSurveySuffix}\n${targetUrl}`;
         if (!hasSurvey) {
@@ -678,14 +684,29 @@ async function monitorSeminars(
           const { hasSurvey, isSurveyPointExcluded } = await checkSurveyMeta(context, targetUrl);
           if (isSurveyPointExcluded) {
             console.log(
-              `[monitor_seminars] ${newName} is point-excluded but will still be monitored for entry. (During Loop)`,
+              `[monitor_seminars] ${newName} is point-excluded. Entry only, no channel notice, no end monitoring. (During Loop)`,
             );
-            // Don't add to excludedSeminarKeys, just mark for no survey handling
           }
 
           if (monitoringList[url] && currentInfo) {
             monitoringList[url].isAdvancedSurvey = currentInfo.isAdvancedSurvey;
             monitoringList[url].isSurveyPointExcluded = isSurveyPointExcluded;
+          }
+
+          // 포인트미지급 세미나: 입장 시도(관리자봇 스크린샷) 후 모니터링 제거, 공지봇 알림 X
+          if (isSurveyPointExcluded) {
+            mergedSeminarInfo.hasSurvey = hasSurvey;
+            mergedSeminarInfo.isEntryStarted = true;
+            mergedSeminarInfo.autoEnterDone = await checkAndPerformAutoEnter(
+              context,
+              mergedSeminarInfo.seminarId,
+              url,
+              mergedSeminarInfo.name,
+              newStatus,
+              mergedSeminarInfo.autoEnterDone,
+            );
+            delete monitoringList[url];
+            continue;
           }
 
           const advancedSurveySuffix = currentInfo?.isAdvancedSurvey ? ' [심화설문]' : '';
