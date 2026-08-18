@@ -31,6 +31,7 @@ type SeminarInfo = {
   name: string;
   seminarId: string | null;
   hasSurvey?: boolean;
+  isSurveyPointExcluded?: boolean;
   isAdvancedSurvey?: boolean;
   isEntryStarted?: boolean;
   autoEnterDone?: boolean;
@@ -116,9 +117,16 @@ async function isSeminarEnded(
  */
 async function handleSeminarEndAndQuiz(
   context: BrowserContext,
-  seminar: { name: string; seminarId: string | null },
+  seminar: { name: string; seminarId: string | null; isSurveyPointExcluded?: boolean },
   fallbackUrl: string,
 ): Promise<{ message: string | null; foundSurveyButton: boolean }> {
+  // 포인트미지급 세미나는 설문/퀴즈 처리 건너뛰기
+  if (seminar.isSurveyPointExcluded) {
+    console.log(
+      `[monitor_seminars] Skipping quiz/survey handling for point-excluded seminar: ${seminar.name} (${seminar.seminarId})`,
+    );
+    return { message: null, foundSurveyButton: false };
+  }
   const targetUrl = seminar.seminarId ? `${SEMINAR_DETAIL_PAGE}${seminar.seminarId}` : fallbackUrl;
   const surveyPage = await context.newPage();
   let popupPage: Page | null = null;
@@ -499,12 +507,10 @@ async function monitorSeminars(
         // Check for survey existence
         const { hasSurvey, isSurveyPointExcluded } = await checkSurveyMeta(context, targetUrl);
         if (isSurveyPointExcluded) {
-          excludedSeminarKeys.add(getSeminarTrackingKey(url, seminarId));
           console.log(
-            `[monitor_seminars] Skipping monitoring for ${name} because survey points are excluded. (During Initialization)`,
+            `[monitor_seminars] ${name} is point-excluded but will still be monitored for entry. (During Initialization)`,
           );
-          delete monitoringList[url];
-          continue;
+          // Don't add to excludedSeminarKeys, just mark for no survey handling
         }
 
         if (monitoringList[url]) {
@@ -517,6 +523,7 @@ async function monitorSeminars(
             monitoringList[url]?.autoEnterDone,
           );
           monitoringList[url].hasSurvey = hasSurvey;
+          monitoringList[url].isSurveyPointExcluded = isSurveyPointExcluded;
           monitoringList[url].isEntryStarted = true;
         }
         const advancedSurveySuffix = monitoringList[url]?.isAdvancedSurvey ? ' [심화설문]' : '';
@@ -607,6 +614,7 @@ async function monitorSeminars(
           status: currentInfo?.status || monitoredInfo.status,
           seminarId: currentInfo?.seminarId || monitoredInfo.seminarId,
           hasSurvey: monitoredInfo.hasSurvey, // Preserve hasSurvey state
+          isSurveyPointExcluded: monitoredInfo.isSurveyPointExcluded, // Preserve point-excluded state
           isEntryStarted: monitoredInfo.isEntryStarted, // Preserve isEntryStarted state
           autoEnterDone: monitoredInfo.autoEnterDone, // Preserve autoEnterDone state
           isAdvancedSurvey: monitoredInfo.isAdvancedSurvey, // Preserve isAdvancedSurvey state
@@ -669,16 +677,15 @@ async function monitorSeminars(
           // Check for survey existence
           const { hasSurvey, isSurveyPointExcluded } = await checkSurveyMeta(context, targetUrl);
           if (isSurveyPointExcluded) {
-            excludedSeminarKeys.add(getSeminarTrackingKey(url, mergedSeminarInfo.seminarId));
             console.log(
-              `[monitor_seminars] Skipping monitoring for ${newName} because survey points are excluded. (During Loop)`,
+              `[monitor_seminars] ${newName} is point-excluded but will still be monitored for entry. (During Loop)`,
             );
-            delete monitoringList[url];
-            continue;
+            // Don't add to excludedSeminarKeys, just mark for no survey handling
           }
 
           if (monitoringList[url] && currentInfo) {
             monitoringList[url].isAdvancedSurvey = currentInfo.isAdvancedSurvey;
+            monitoringList[url].isSurveyPointExcluded = isSurveyPointExcluded;
           }
 
           const advancedSurveySuffix = currentInfo?.isAdvancedSurvey ? ' [심화설문]' : '';
