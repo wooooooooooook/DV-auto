@@ -33,15 +33,15 @@ function normalizeSeminarDate(value: string | undefined, referenceDate: string):
     year = Number(iso[1]); month = Number(iso[2]); day = Number(iso[3]);
   } else if (md || korean) {
     month = Number((md || korean)![1]); day = Number((md || korean)![2]);
-    const ref = new Date(`${referenceDate}T00:00:00+09:00`);
-    year = ref.getFullYear();
-    const refMonth = ref.getMonth() + 1;
+    const [refYear, refMonth] = referenceDate.split('-').map(Number);
+    year = refYear;
     if (month - refMonth > 6) year--; else if (refMonth - month > 6) year++;
   } else return null;
-  const normalized = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-  const parsed = new Date(`${normalized}T00:00:00+09:00`);
-  if (Number.isNaN(parsed.getTime()) || parsed.getMonth() + 1 !== month || parsed.getDate() !== day) return null;
-  return normalized;
+
+  // Validate as a calendar date without timezone-dependent Date.getMonth()/getDate().
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  if (month < 1 || month > 12 || day < 1 || day > daysInMonth) return null;
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
 function getSeminarId(seminar: SeminarRecord): string {
