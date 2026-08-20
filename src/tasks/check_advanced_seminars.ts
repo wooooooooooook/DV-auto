@@ -30,15 +30,21 @@ type HistoryEntry = {
   seminar?: SeminarRecord;
 };
 
-function getKstDate(): string {
+function getKstDate(date = new Date()): string {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'Asia/Seoul',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).formatToParts(new Date());
+  }).formatToParts(date);
   const values = Object.fromEntries(parts.map((p) => [p.type, p.value]));
   return `${values.year}-${values.month}-${values.day}`;
+}
+
+function getDateDaysAgo(todayStr: string, days: number): string {
+  const [year, month, day] = todayStr.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day - days));
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
 }
 
 function normalizeSeminarDate(value: string | undefined, referenceDate: string): string | null {
@@ -72,31 +78,26 @@ function getSeminarId(seminar: SeminarRecord): string {
   return seminar.seminarId || seminar.url.match(/(?:seminarId=|\/)(\d+)$/)?.[1] || '';
 }
 
-function getDateDaysAgo(todayStr: string, days: number): string {
-  const date = new Date(`${todayStr}T00:00:00+09:00`);
-  date.setDate(date.getDate() - days);
-  return date.toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+function collectSeminars(todayStr: string, pastStr: string, history: HistoryEntry[], currentSeminars: SeminarRecord[]) {
+  const candidates = new Map<string, { date: string; seminar: SeminarRecord }>();
+  const add = (seminar: SeminarRecord, detectedDate?: string) => {
+    const date = normalizeSeminarDate(seminar.date, detectedDate || todayStr);
+    if (!date || date < pastStr || date > todayStr) return;
+    const id = getSeminarId(seminar);
+    const key = id || seminar.url;
+    if (key) candidates.set(key, { date, seminar });
+  };
+  for (const seminar of currentSeminars) add(seminar, todayStr);
+  for (const entry of history) if (entry.seminar) add(entry.seminar, entry.detectedDate || todayStr);
+  return candidates;
 }
 
 export async function checkAdvancedSeminars(context: BrowserContext): Promise<AdvancedSeminarResult[]> {
   const todayStr = getKstDate();
   const pastStr = getDateDaysAgo(todayStr, LOOKBACK_DAYS);
-
   const history = storage.get<HistoryEntry[]>(NEW_SEMINAR_HISTORY_KEY, []) || [];
   const currentSeminars = storage.get<SeminarRecord[]>(SEMINAR_LIST_KEY, []) || [];
-  const candidates = new Map<string, { date: string; seminar: SeminarRecord }>();
-
-  const addCandidate = (seminar: SeminarRecord, detectedDate?: string) => {
-    const normalizedDate = normalizeSeminarDate(seminar.date, detectedDate || todayStr);
-    if (!normalizedDate || normalizedDate < pastStr || normalizedDate > todayStr) return;
-    const id = getSeminarId(seminar);
-    const key = id || seminar.url;
-    if (!key) return;
-    candidates.set(key, { date: normalizedDate, seminar });
-  };
-
-  for (const seminar of currentSeminars) addCandidate(seminar, todayStr);
-  for (const entry of history) if (entry.seminar) addCandidate(entry.seminar, entry.detectedDate || todayStr);
+  const candidates = collectSeminars(todayStr, pastStr, history, currentSeminars);
 
   const seminarInfos = Array.from(candidates.values()).map(({ date, seminar }) => ({
     date,
@@ -106,11 +107,7 @@ export async function checkAdvancedSeminars(context: BrowserContext): Promise<Ad
   }));
 
   const advancedInfos = seminarInfos.filter((s) => s.isAdvancedSurvey && s.id);
-  const resultsMap = await searchSeminarPoints(
-    context,
-    advancedInfos.map((s) => s.id),
-    POINT_SEARCH_DAYS,
-  );
+  const resultsMap = await searchSeminarPoints(context, advancedInfos.map((s) => s.id), POINT_SEARCH_DAYS);
 
   return seminarInfos
     .filter((s) => s.isAdvancedSurvey)
@@ -135,21 +132,17 @@ export async function run({ context }: { context: BrowserContext }): Promise<{ s
     const pastStr = getDateDaysAgo(todayStr, LOOKBACK_DAYS);
     const history = storage.get<HistoryEntry[]>(NEW_SEMINAR_HISTORY_KEY, []) || [];
     const currentSeminars = storage.get<SeminarRecord[]>(SEMINAR_LIST_KEY, []) || [];
-
-    const allCandidates = new Map<string, { date: string; seminar: SeminarRecord }>();
-    const add = (seminar: SeminarRecord, detectedDate?: string) => {
-      const date = normalizeSeminarDate(seminar.date, detectedDate || todayStr);
-      if (!date || date < pastStr || date > todayStr) return;
-      const id = getSeminarId(seminar);
-      const key = id || seminar.url;
-      if (key) allCandidates.set(key, { date, seminar });
-    };
-    for (const seminar of currentSeminars) add(seminar, todayStr);
-    for (const entry of history) if (entry.seminar) add(entry.seminar, entry.detectedDate || todayStr);
-
-    const all = Array.from(allCandidates.values()).sort((a, b) => (a.date < b.date ? 1 : -1));
+    const candidates = collectSeminars(todayStr, pastStr, history, currentSeminars);
+    const all = Array.from(candidates.values()).sort((a, b) => (a.date < b.date ? 1 : -1));
     const advanced = await checkAdvancedSeminars(context);
     const advancedMap = new Map(advanced.map((r) => [r.id || r.name, r]));
+
+    if (all.length === 0) {
+      return {
+        success: true,
+        message: `최근 2주(${pastStr} ~ ${todayStr}) 세미나 기록이 없습니다.\n\n디버그: 저장된 현재 세미나 ${currentSeminars.length}건, 히스토리 ${history.length}건`,
+      };
+    }
 
     const lines = all.map(({ date, seminar }) => {
       const id = getSeminarId(seminar);
@@ -163,14 +156,9 @@ export async function run({ context }: { context: BrowserContext }): Promise<{ s
       return `${date} | ${seminar.name || '세미나'}${marker}${point}`;
     });
 
-    if (lines.length === 0) {
-      return { success: true, message: `최근 2주(${pastStr} ~ ${todayStr}) 세미나 기록이 없습니다.` };
-    }
-
-    const advancedCount = advanced.length;
     return {
       success: true,
-      message: `🗓️ 최근 2주 전체 세미나 ${lines.length}건 (${pastStr} ~ ${todayStr})\n\n${lines.join('\n')}\n\n⭐ 심화설문 ${advancedCount}건`,
+      message: `🗓️ 최근 2주 전체 세미나 ${lines.length}건 (${pastStr} ~ ${todayStr})\n\n${lines.join('\n')}\n\n⭐ 심화설문 ${advanced.length}건`,
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
