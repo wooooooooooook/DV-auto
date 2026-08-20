@@ -1,7 +1,6 @@
 import * as storage from '../services/storage';
 import { NEW_SEMINAR_HISTORY_KEY } from './apply_seminar';
 
-const SEMINAR_LIST_KEY = 'apply_seminar:seminar_list';
 const LOOKBACK_DAYS = 14;
 
 type SeminarRecord = {
@@ -50,43 +49,48 @@ function normalizeSeminarDate(value: string | undefined, referenceDate: string):
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
-function collectRecentSeminars(todayStr: string, pastStr: string): Array<{ date: string; seminar: SeminarRecord }> {
-  const history = storage.get<HistoryEntry[]>(NEW_SEMINAR_HISTORY_KEY, []) || [];
-  const currentSeminars = storage.get<SeminarRecord[]>(SEMINAR_LIST_KEY, []) || [];
-  const candidates = new Map<string, { date: string; seminar: SeminarRecord }>();
-  const add = (seminar: SeminarRecord, detectedDate?: string) => {
-    const date = normalizeSeminarDate(seminar.date, detectedDate || todayStr);
-    if (!date || date < pastStr || date > todayStr) return;
-    const key = seminar.seminarId || seminar.url;
-    if (key) candidates.set(key, { date, seminar });
-  };
-  for (const seminar of currentSeminars) add(seminar, todayStr);
-  for (const entry of history) if (entry.seminar) add(entry.seminar, entry.detectedDate || todayStr);
-  return Array.from(candidates.values()).sort((a, b) => b.date.localeCompare(a.date));
-}
-
 export function run(): { success: boolean; message: string } {
   try {
     const todayStr = getKstDate();
     const pastStr = getDateDaysAgo(todayStr, LOOKBACK_DAYS);
-    const all = collectRecentSeminars(todayStr, pastStr);
-    if (all.length === 0) return { success: true, message: `최근 2주(${pastStr} ~ ${todayStr}) 세미나 기록이 없습니다.` };
+    const history = storage.get<HistoryEntry[]>(NEW_SEMINAR_HISTORY_KEY, []) || [];
 
-    const advanced = all.filter(({ seminar }) => seminar.isAdvancedSurvey);
-    const lines = all.map(({ date, seminar }) => {
-      if (!seminar.isAdvancedSurvey) return `${date} | ${seminar.name || '세미나'}`;
+    const advanced = new Map<string, { date: string; seminar: SeminarRecord }>();
+    for (const entry of history) {
+      const seminar = entry.seminar;
+      if (!seminar?.isAdvancedSurvey) continue;
+      const date = normalizeSeminarDate(seminar.date, entry.detectedDate || todayStr);
+      if (!date || date < pastStr || date > todayStr) continue;
+      const seminarId = seminar.seminarId || seminar.url.match(/(?:seminarId=|\/)(\d+)$/)?.[1];
+      if (!seminarId) continue;
+      advanced.set(seminarId, { date, seminar: { ...seminar, seminarId } });
+    }
+
+    const entries = Array.from(advanced.values()).sort((a, b) => b.date.localeCompare(a.date));
+    if (entries.length === 0) {
+      return { success: true, message: `최근 2주(${pastStr} ~ ${todayStr}) 심화설문 세미나가 없습니다.` };
+    }
+
+    const lines = entries.map(({ date, seminar }) => {
+      const seminarId = seminar.seminarId!;
       const pointStatus = seminar.pointPaid === true
         ? ` → ✅ ${seminar.pointText ?? `${seminar.point ?? 0}P`} 지급됨`
         : seminar.pointCheckedAt
           ? ' → ❌ 미지급'
           : ' → ⏳ 조회 대기';
-      return `${date} | ${seminar.name || '세미나'} ⭐ 심화설문${pointStatus}`;
+      return `${date} | ${seminar.name || '세미나'} | ID: ${seminarId}${pointStatus}`;
     });
-    return { success: true, message: `🗓️ 최근 2주 전체 세미나 ${lines.length}건 (${pastStr} ~ ${todayStr})\n\n${lines.join('\n')}\n\n⭐ 심화설문 ${advanced.length}건` };
+
+    return {
+      success: true,
+      message: `⭐ 최근 2주 심화설문 ${entries.length}건 (${pastStr} ~ ${todayStr})\n\n${lines.join('\n')}`,
+    };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return { success: false, message: `심화 세미나 포인트 조회 오류: ${msg}` };
   }
 }
 
-export async function checkAdvancedSeminars(): Promise<{ success: boolean; message: string }> { return run(); }
+export async function checkAdvancedSeminars(): Promise<{ success: boolean; message: string }> {
+  return run();
+}
