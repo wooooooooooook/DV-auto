@@ -38,7 +38,6 @@ function appendNewSeminarsToHistory(items: Array<SeminarListItem & { seminarId: 
 
 async function refreshAdvancedPointStatus(context: PlaywrightRunArgs['context']): Promise<Map<string, SeminarPointStatus>> {
   const history = storage.get<NewSeminarHistoryEntry[]>(NEW_SEMINAR_HISTORY_KEY, []) || [];
-  const today = new Date();
   const targets = history
     .map((entry) => entry.seminar)
     .filter((seminar) => seminar.isAdvancedSurvey && !seminar.pointPaid && !seminar.isPointExcluded && getSeminarIdFromUrl(seminar.url));
@@ -47,7 +46,7 @@ async function refreshAdvancedPointStatus(context: PlaywrightRunArgs['context'])
   const ids = [...new Set(targets.map((seminar) => getSeminarIdFromUrl(seminar.url)).filter((id): id is string => !!id))];
   const results = await searchSeminarPoints(context, ids, 60);
   const statuses = new Map<string, SeminarPointStatus>();
-  const checkedAt = today.toISOString();
+  const checkedAt = new Date().toISOString();
   for (const seminar of targets) {
     const id = getSeminarIdFromUrl(seminar.url);
     if (!id) continue;
@@ -65,8 +64,6 @@ function updateStoredPointStatuses(statuses: Map<string, SeminarPointStatus>): v
   if (!statuses.size) return;
   const history = storage.get<NewSeminarHistoryEntry[]>(NEW_SEMINAR_HISTORY_KEY, []) || [];
   storage.set(NEW_SEMINAR_HISTORY_KEY, history.map((entry) => ({ ...entry, seminar: { ...entry.seminar, ...(statuses.get(entry.seminar.url) || {}) } })));
-
-  // seminar_list도 호환성을 위해 지급 결과를 동기화하지만, 포인트 추적의 기준은 history이다.
   const storedSeminars = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
   storage.set(SEMINAR_LIST_KEY, storedSeminars.map((item) => ({ ...item, ...(statuses.get(item.url) || {}) })));
   const storedNew = storage.get<StoredNewSeminars>(NEW_SEMINAR_KEY);
@@ -150,6 +147,27 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
         appendNewSeminarsToHistory(newlyAddedWithFlags, todayIso);
       }
     }
+
+    // History is the archive and must contain every seminar observed in the list,
+    // not only newly-added items. This prevents a restart/initialization from
+    // losing seminars that are already present in seminar_list.
+    const todayIso = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+    const historyItems: Array<SeminarListItem & { seminarId: string | null }> = normalizedCurrentSeminars.map((item) => {
+      const stored = storedSeminars.find((s) => s.url === item.url);
+      const newlyAdded = newlyAddedWithFlags.find((n) => n.url === item.url);
+      return {
+        ...item,
+        seminarId: getSeminarIdFromUrl(item.url),
+        isPointExcluded: stored?.isPointExcluded ?? newlyAdded?.isPointExcluded,
+        pointPaid: stored?.pointPaid,
+        point: stored?.point,
+        pointText: stored?.pointText,
+        pointDate: stored?.pointDate,
+        pointContent: stored?.pointContent,
+        pointCheckedAt: stored?.pointCheckedAt,
+      };
+    });
+    appendNewSeminarsToHistory(historyItems, todayIso);
 
     const finalSeminarsToStore: SeminarListItem[] = normalizedCurrentSeminars.map((item) => {
       const stored = storedSeminars.find((s) => s.url === item.url);
