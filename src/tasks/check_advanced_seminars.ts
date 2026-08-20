@@ -8,7 +8,7 @@ const LOOKBACK_DAYS = 14;
 const POINT_SEARCH_DAYS = 60;
 
 interface AdvancedSeminarResult {
-  date: string; // seminar date (YYYY-MM-DD)
+  date: string;
   found: boolean;
   point?: number;
   pointText?: string;
@@ -26,6 +26,19 @@ type HistoryEntry = {
   detectedDate?: string;
   seminar?: SeminarRecord;
 };
+
+/** Asia/Seoul 기준 오늘 날짜를 항상 YYYY-MM-DD로 반환합니다. */
+function getTodayKstDate(): string {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
 
 /**
  * 세미나 목록에서 사용하는 M/D 날짜를 YYYY-MM-DD로 정규화합니다.
@@ -50,13 +63,12 @@ function normalizeSeminarDate(value: string | undefined, referenceDate: string):
   let year = reference.getFullYear();
   const referenceMonth = reference.getMonth() + 1;
 
-  // 연말/연초의 월 rollover를 고려합니다.
   if (month - referenceMonth > 6) year -= 1;
   else if (referenceMonth - month > 6) year += 1;
 
   const normalized = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   const parsed = new Date(`${normalized}T00:00:00+09:00`);
-  if (Number.isNaN(parsed.getTime()) || parsed.getMonth() + 1 !== month || parsed.getDate() !== day) return null;
+  if (Number.isNaN(parsed.getTime()) || parsed.getUTCMonth() + 1 !== month || parsed.getUTCDate() !== day) return null;
   return normalized;
 }
 
@@ -64,23 +76,14 @@ function getSeminarId(seminar: SeminarRecord): string {
   return seminar.seminarId || (seminar.url && seminar.url.match(/(?:seminarId=|\/)(\d+)$/)?.[1]) || '';
 }
 
-/**
- * 지난 2주간 진행된 심화 세미나들의 포인트 지급 여부를 조회합니다.
- * 현재 세미나 목록과 60일 보관 히스토리를 함께 사용하므로,
- * 기능 추가 이전에 이미 저장된 세미나도 조회할 수 있습니다.
- * @param context Playwright 브라우저 컨텍스트
- */
 export async function checkAdvancedSeminars(context: BrowserContext): Promise<AdvancedSeminarResult[]> {
-  const today = new Date();
-  const todayStr = today.toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+  const todayStr = getTodayKstDate();
   const past = new Date(`${todayStr}T00:00:00+09:00`);
-  past.setDate(past.getDate() - LOOKBACK_DAYS);
-  const pastStr = past.toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+  past.setUTCDate(past.getUTCDate() - LOOKBACK_DAYS);
+  const pastStr = `${past.getUTCFullYear()}-${String(past.getUTCMonth() + 1).padStart(2, '0')}-${String(past.getUTCDate()).padStart(2, '0')}`;
 
   const history = storage.get<HistoryEntry[]>(NEW_SEMINAR_HISTORY_KEY, []) || [];
   const currentSeminars = storage.get<SeminarRecord[]>(SEMINAR_LIST_KEY, []) || [];
-
-  // 현재 목록을 우선 사용하고, 과거에 페이지에서 사라진 세미나는 history로 보완합니다.
   const candidates = new Map<string, { date: string; seminar: SeminarRecord }>();
 
   const addCandidate = (seminar: SeminarRecord, detectedDate?: string) => {
@@ -102,7 +105,6 @@ export async function checkAdvancedSeminars(context: BrowserContext): Promise<Ad
     date,
     id: getSeminarId(seminar),
   }));
-
   const validIds = seminarInfos.filter((s) => s.id).map((s) => s.id);
   const resultsMap = await searchSeminarPoints(context, validIds, POINT_SEARCH_DAYS);
 
@@ -125,9 +127,6 @@ export async function checkAdvancedSeminars(context: BrowserContext): Promise<Ad
   return results;
 }
 
-/**
- * 텔레그램 명령어용 래퍼 Task
- */
 export async function run({ context }: { context: BrowserContext }): Promise<{ success: boolean; message: string }> {
   try {
     const res = await checkAdvancedSeminars(context);
