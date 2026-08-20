@@ -2,6 +2,7 @@ import * as storage from '../services/storage';
 import { NEW_SEMINAR_HISTORY_KEY } from './apply_seminar';
 
 const LOOKBACK_DAYS = 14;
+const SEMINAR_LIST_KEY = 'apply_seminar:seminar_list';
 
 type SeminarRecord = {
   name?: string;
@@ -49,21 +50,42 @@ function normalizeSeminarDate(value: string | undefined, referenceDate: string):
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
+function getSeminarId(seminar: SeminarRecord): string | null {
+  return seminar.seminarId || seminar.url.match(/(?:seminarId=|\/)(\d+)$/)?.[1] || null;
+}
+
 export function run(): { success: boolean; message: string } {
   try {
     const todayStr = getKstDate();
     const pastStr = getDateDaysAgo(todayStr, LOOKBACK_DAYS);
     const history = storage.get<HistoryEntry[]>(NEW_SEMINAR_HISTORY_KEY, []) || [];
+    const seminarList = storage.get<SeminarRecord[]>(SEMINAR_LIST_KEY, []) || [];
+    const currentById = new Map<string, SeminarRecord>();
+    for (const seminar of seminarList) {
+      const id = getSeminarId(seminar);
+      if (id) currentById.set(id, seminar);
+    }
 
     const advanced = new Map<string, { date: string; seminar: SeminarRecord }>();
     for (const entry of history) {
-      const seminar = entry.seminar;
-      if (!seminar?.isAdvancedSurvey) continue;
-      const date = normalizeSeminarDate(seminar.date, entry.detectedDate || todayStr);
-      if (!date || date < pastStr || date > todayStr) continue;
-      const seminarId = seminar.seminarId || seminar.url.match(/(?:seminarId=|\/)(\d+)$/)?.[1];
+      const stored = entry.seminar;
+      if (!stored) continue;
+      const seminarId = getSeminarId(stored);
       if (!seminarId) continue;
-      advanced.set(seminarId, { date, seminar: { ...seminar, seminarId } });
+      const current = currentById.get(seminarId);
+      const isAdvancedSurvey = stored.isAdvancedSurvey === true || current?.isAdvancedSurvey === true;
+      if (!isAdvancedSurvey) continue;
+
+      const date = normalizeSeminarDate(stored.date, entry.detectedDate || todayStr);
+      if (!date || date < pastStr || date > todayStr) continue;
+
+      const merged: SeminarRecord = {
+        ...stored,
+        seminarId,
+        isAdvancedSurvey: true,
+        ...(current?.name && !stored.name ? { name: current.name } : {}),
+      };
+      advanced.set(seminarId, { date, seminar: merged });
     }
 
     const entries = Array.from(advanced.values()).sort((a, b) => b.date.localeCompare(a.date));
