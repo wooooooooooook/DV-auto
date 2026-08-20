@@ -3,54 +3,108 @@ import * as storage from '../services/storage';
 import { searchSeminarPoints } from './check_seminar_point';
 import { NEW_SEMINAR_HISTORY_KEY } from './apply_seminar';
 
+const SEMINAR_LIST_KEY = 'apply_seminar:seminar_list';
+const LOOKBACK_DAYS = 14;
+const POINT_SEARCH_DAYS = 60;
+
 interface AdvancedSeminarResult {
-  date: string; // seminar date (YYYY-MM-DD) or detectedDate fallback
+  date: string; // seminar date (YYYY-MM-DD)
   found: boolean;
   point?: number;
   pointText?: string;
 }
 
+type SeminarRecord = {
+  name?: string;
+  url: string;
+  date?: string;
+  seminarId?: string | null;
+  isAdvancedSurvey?: boolean;
+};
+
+type HistoryEntry = {
+  detectedDate?: string;
+  seminar?: SeminarRecord;
+};
+
 /**
- * 지난 2주(14일) 동안 진행된 심화 세미나들의 포인트 지급 여부를 조회합니다.
+ * 세미나 목록에서 사용하는 M/D 날짜를 YYYY-MM-DD로 정규화합니다.
+ * 이미 ISO 날짜인 경우 그대로 사용합니다.
+ */
+function normalizeSeminarDate(value: string | undefined, referenceDate: string): string | null {
+  if (!value) return null;
+
+  const isoMatch = value.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (isoMatch) {
+    return `${isoMatch[1]}-${isoMatch[2].padStart(2, '0')}-${isoMatch[3].padStart(2, '0')}`;
+  }
+
+  const mdMatch = value.match(/^(\d{1,2})\/(\d{1,2})$/);
+  if (!mdMatch) return null;
+
+  const month = Number(mdMatch[1]);
+  const day = Number(mdMatch[2]);
+  const reference = new Date(`${referenceDate}T00:00:00+09:00`);
+  if (!Number.isFinite(month) || !Number.isFinite(day) || Number.isNaN(reference.getTime())) return null;
+
+  let year = reference.getFullYear();
+  const referenceMonth = reference.getMonth() + 1;
+
+  // 연말/연초의 월 rollover를 고려합니다.
+  if (month - referenceMonth > 6) year -= 1;
+  else if (referenceMonth - month > 6) year += 1;
+
+  const normalized = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  const parsed = new Date(`${normalized}T00:00:00+09:00`);
+  if (Number.isNaN(parsed.getTime()) || parsed.getMonth() + 1 !== month || parsed.getDate() !== day) return null;
+  return normalized;
+}
+
+function getSeminarId(seminar: SeminarRecord): string {
+  return seminar.seminarId || (seminar.url && seminar.url.match(/(?:seminarId=|\/)(\d+)$/)?.[1]) || '';
+}
+
+/**
+ * 지난 2주간 진행된 심화 세미나들의 포인트 지급 여부를 조회합니다.
+ * 현재 세미나 목록과 60일 보관 히스토리를 함께 사용하므로,
+ * 기능 추가 이전에 이미 저장된 세미나도 조회할 수 있습니다.
  * @param context Playwright 브라우저 컨텍스트
  */
 export async function checkAdvancedSeminars(context: BrowserContext): Promise<AdvancedSeminarResult[]> {
   const today = new Date();
-  const past = new Date();
-  past.setDate(past.getDate() - 60); // 60일로 확장 (개최일 기준 보관 기간과 맞춤)
+  const todayStr = today.toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+  const past = new Date(`${todayStr}T00:00:00+09:00`);
+  past.setDate(past.getDate() - LOOKBACK_DAYS);
+  const pastStr = past.toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
 
-  // YYYY-MM-DD 형태 저장/비교용
-  const fmt = (d: Date) => d.toISOString().split('T')[0];
-  const todayStr = fmt(today);
-  const pastStr = fmt(past);
+  const history = storage.get<HistoryEntry[]>(NEW_SEMINAR_HISTORY_KEY, []) || [];
+  const currentSeminars = storage.get<SeminarRecord[]>(SEMINAR_LIST_KEY, []) || [];
 
-  const history = storage.get<any[]>(NEW_SEMINAR_HISTORY_KEY, []) || [];
-  const advancedEntries = history.filter((e) => {
-    const sem = e.seminar ?? {};
-    if (!sem.isAdvancedSurvey) return false;
-    const seminarDate = sem.date || e.detectedDate;
-    if (!seminarDate) return false;
-    // Compare strings YYYY-MM-DD
-    return seminarDate >= pastStr && seminarDate <= todayStr;
-  });
+  // 현재 목록을 우선 사용하고, 과거에 페이지에서 사라진 세미나는 history로 보완합니다.
+  const candidates = new Map<string, { date: string; seminar: SeminarRecord }>();
 
-  // 세미나 ID 수집
-  const seminarInfos: { date: string; id: string }[] = [];
-  for (const entry of advancedEntries) {
-    const sem = entry.seminar;
-    const seminarDate = sem.date || entry.detectedDate;
-    const seminarId = sem.seminarId || (sem.url && sem.url.match(/(\d+)$/)?.[1]) || '';
-    if (seminarId) {
-      seminarInfos.push({ date: seminarDate, id: seminarId });
-    } else {
-      // ID가 없는 경우
-      seminarInfos.push({ date: seminarDate, id: '' });
-    }
+  const addCandidate = (seminar: SeminarRecord, detectedDate?: string) => {
+    if (!seminar.isAdvancedSurvey) return;
+    const normalizedDate = normalizeSeminarDate(seminar.date, detectedDate || todayStr);
+    if (!normalizedDate || normalizedDate < pastStr || normalizedDate > todayStr) return;
+    const id = getSeminarId(seminar);
+    const key = id || seminar.url;
+    if (!key) return;
+    candidates.set(key, { date: normalizedDate, seminar });
+  };
+
+  for (const seminar of currentSeminars) addCandidate(seminar, todayStr);
+  for (const entry of history) {
+    if (entry.seminar) addCandidate(entry.seminar, entry.detectedDate || todayStr);
   }
 
-  // 일괄 검색 (한 번 로그인 후 반복 검색)
+  const seminarInfos = Array.from(candidates.values()).map(({ date, seminar }) => ({
+    date,
+    id: getSeminarId(seminar),
+  }));
+
   const validIds = seminarInfos.filter((s) => s.id).map((s) => s.id);
-  const resultsMap = await searchSeminarPoints(context, validIds, 60);
+  const resultsMap = await searchSeminarPoints(context, validIds, POINT_SEARCH_DAYS);
 
   const results: AdvancedSeminarResult[] = [];
   for (const info of seminarInfos) {
@@ -67,7 +121,6 @@ export async function checkAdvancedSeminars(context: BrowserContext): Promise<Ad
     });
   }
 
-  // 정렬: 최신 날짜부터
   results.sort((a, b) => (a.date < b.date ? 1 : -1));
   return results;
 }
