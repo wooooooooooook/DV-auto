@@ -29,6 +29,7 @@ function normalizeSeminarDate(value: string | undefined, referenceDate: string):
   } else if (md || korean) {
     month = Number((md || korean)![1]); day = Number((md || korean)![2]);
     const [refYear, refMonth] = referenceDate.split('-').map(Number);
+    if (!Number.isFinite(refYear) || !Number.isFinite(refMonth)) return null;
     year = refYear;
     if (month - refMonth > 6) year--;
     else if (refMonth - month > 6) year++;
@@ -48,13 +49,18 @@ function appendNewSeminarsToHistory(items: Array<SeminarListItem & { seminarId: 
     history.push({ detectedDate, detectedAt, seminar });
     existingUrls.add(seminar.url);
   }
+
   const todayMs = Date.parse(`${detectedDate}T00:00:00+09:00`);
   const retentionMs = NEW_SEMINAR_HISTORY_RETENTION_DAYS * 24 * 60 * 60 * 1000;
   const retained = history.filter((entry) => {
+    // Doctorville exposes seminar dates as M/D (for example `8/21`).
+    // Normalize them against the observation date before applying retention.
+    // Fall back to detectedDate when the seminar has no usable date.
     const normalizedDate = normalizeSeminarDate(entry.seminar.date, entry.detectedDate || detectedDate);
-    const referenceMs = normalizedDate ? Date.parse(`${normalizedDate}T00:00:00+09:00`) : NaN;
-    // Keep entries with an invalid/missing seminar date rather than accidentally
-    // deleting them; they can still be matched by seminar ID for point history.
+    const referenceDate = normalizedDate || entry.detectedDate;
+    const referenceMs = referenceDate ? Date.parse(`${referenceDate}T00:00:00+09:00`) : NaN;
+    // Keep entries whose dates cannot be parsed so a transient format change
+    // cannot destroy point-tracking history.
     return Number.isNaN(referenceMs) || Number.isNaN(todayMs) || todayMs - referenceMs <= retentionMs;
   });
   storage.set(NEW_SEMINAR_HISTORY_KEY, retained);
@@ -128,7 +134,9 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
     storage.set(SEMINAR_LIST_KEY, finalSeminarsToStore);
     if (checkAdvancedPointStatus) { const statuses = await refreshAdvancedPointStatus(context); updateStoredPointStatuses(statuses); if (statuses.size > 0) console.log(`advanced seminar point status updated from history: ${statuses.size}`); }
     const appliedCount = await page.locator('a:has(.ico_completion)').count(); let message = `✅ ${appliedCount}개 세미나 신청 완료! (${appliedCount}/${totalSeminarsAvailable})`; const failedToApplyCount = attemptedApplyCount - appliedCount; if (failedToApplyCount > 0) message += `\n (${failedToApplyCount}개는 마감 등의 사유로 신청 실패)`; if (closedCount > 0) message += `\n ${closedCount}개는 신청 마감되어 신청하지 못했습니다.`; const baseScreenshotDir = path.join(process.cwd(), 'screenshot'); await fs.mkdir(baseScreenshotDir, { recursive: true }); screenshotPath = path.join(baseScreenshotDir, 'apply_seminar_result.png'); await page.screenshot({ path: screenshotPath, fullPage: false }); message += `\n${SEMINAR_DETAIL_PAGE}`; const result: TaskResult = { success: true, message, imagePath: screenshotPath }; if (options.silentIfNoNew && newlyAddedCount === 0) result.silent = true; return result;
-  } catch (error) { console.error('seminar task error', error && typeof error === 'object' && 'stack' in error ? (error as Error).stack : error); if (!screenshotPath) { const baseScreenshotDir = path.join(process.cwd(), 'screenshot'); await fs.mkdir(baseScreenshotDir, { recursive: true }); screenshotPath = path.join(baseScreenshotDir, 'apply_seminar_error.png'); await page.screenshot({ path: screenshotPath, fullPage: false }).catch(() => {}); } const message = error instanceof Error ? error.message : String(error); await sendTelegram(`❗ 세미나 신청 작업 오류: ${message}`, screenshotPath).catch(() => {}); return { success: false, message: `세미나 신청 작업 오류: ${message}`, imagePath: screenshotPath }; }
+  } catch (error) { console.error('seminar task error', error && typeof error === 'object' && 'stack' in error ? (error as Error).stack : error); if (!screenshotPath) { const baseScreenshotDir = path.join(process.cwd(), 'screenshot'); await fs.mkdir(baseScreenshotDir, { recursive: true }); screenshotPath = path.join(baseScreenshotDir, 'apply_seminar_error.png'); await page.screenshot({ path: screenshotPath, fullPage: false }).catch(() => {}); } const message = error instanceof Error ? error.message : String(error); await sendTelegram(`❗ 세미나 신청 작업 오류: ${message}`, screenshotPath); return { success: false, message, imagePath: screenshotPath }; }
 }
 
-export { run };
+export const applySeminarTask = { name: 'apply_seminar', description: '세미나 신청 및 목록 저장', run };
+export const applySeminarTaskStandalone = { name: 'apply_seminar', description: '세미나 신청 및 목록 저장', run };
+export const applySeminarExtraTask = { name: 'apply_seminar_extra', description: '세미나 목록 갱신 및 심화 세미나 포인트 확인', schedule: '*/10 6-23 * * *', options: { notifyNewSeminarsToTelegram: false, silentIfNoNew: true, checkAdvancedPointStatus: true }, run };
