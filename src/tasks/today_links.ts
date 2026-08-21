@@ -358,7 +358,13 @@ function getYesterdayAddedSeminars(yesterdayIso: string): StoredNewSeminars['sem
       isAdvancedSurvey: seminar.isAdvancedSurvey,
       date: seminar.date,
       time: seminar.time,
-    }));
+    }))
+    .sort((a, b) => {
+      if (!a.seminarId && !b.seminarId) return 0;
+      if (!a.seminarId) return 1;
+      if (!b.seminarId) return -1;
+      return a.seminarId.localeCompare(b.seminarId, undefined, { numeric: true });
+    });
 }
 
 function getTempQuizAnswers(isoDate: string, productTitle: string): Array<string | number> | null {
