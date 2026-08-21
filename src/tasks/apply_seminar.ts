@@ -41,6 +41,20 @@ type SeminarListItem = {
   detectedAt?: string;
 } & SeminarPointStatus;
 
+type LegacyHistoryEntry = {
+  detectedDate?: string;
+  detectedAt?: string;
+  seminar?: SeminarListItem;
+};
+
+type LegacyNewSeminars = {
+  date?: string;
+  seminars?: SeminarListItem[];
+};
+
+const LEGACY_NEW_SEMINAR_KEY = 'apply_seminar:new_seminars';
+const LEGACY_HISTORY_KEY = 'apply_seminar:new_seminars_history';
+
 type RawSeminarData = {
   url: string;
   name: string;
@@ -98,6 +112,62 @@ export function normalizeParsedSeminars(raw: RawSeminarData[], referenceDate: st
 
 function seminarKey(seminar: Pick<SeminarListItem, 'url' | 'seminarId'>): string {
   return seminar.seminarId || seminar.url;
+}
+
+function mergeSeminar(existing: SeminarListItem | undefined, incoming: SeminarListItem): SeminarListItem {
+  return {
+    ...existing,
+    ...incoming,
+    isPointExcluded: incoming.isPointExcluded ?? existing?.isPointExcluded,
+    pointPaid: incoming.pointPaid ?? existing?.pointPaid,
+    point: incoming.point ?? existing?.point,
+    pointText: incoming.pointText ?? existing?.pointText,
+    pointDate: incoming.pointDate ?? existing?.pointDate,
+    pointContent: incoming.pointContent ?? existing?.pointContent,
+    pointCheckedAt: incoming.pointCheckedAt ?? existing?.pointCheckedAt,
+    detectedDate: incoming.detectedDate ?? existing?.detectedDate,
+    detectedAt: incoming.detectedAt ?? existing?.detectedAt,
+  };
+}
+
+/**
+ * 1회성 legacy 키(`apply_seminar:new_seminars`, `apply_seminar:new_seminars_history`)를
+ * seminar_list로 흡수하고 legacy 키를 삭제한다. 이후 run 흐름에서는
+ * SEMINAR_LIST_KEY만 사용한다.
+ */
+function migrateLegacySeminarStorage(referenceDate: string): SeminarListItem[] {
+  const current = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
+  const merged = new Map<string, SeminarListItem>();
+  for (const seminar of current) merged.set(seminarKey(seminar), seminar);
+
+  const legacyHistory = storage.get<LegacyHistoryEntry[]>(LEGACY_HISTORY_KEY, []) || [];
+  for (const entry of legacyHistory) {
+    if (!entry.seminar) continue;
+    const seminar = {
+      ...entry.seminar,
+      detectedDate: entry.seminar.detectedDate ?? entry.detectedDate,
+      detectedAt: entry.seminar.detectedAt ?? entry.detectedAt,
+    };
+    const key = seminarKey(seminar);
+    merged.set(key, mergeSeminar(merged.get(key), seminar));
+  }
+
+  const legacyNew = storage.get<LegacyNewSeminars>(LEGACY_NEW_SEMINAR_KEY);
+  for (const seminar of legacyNew?.seminars || []) {
+    const key = seminarKey(seminar);
+    merged.set(
+      key,
+      mergeSeminar(merged.get(key), {
+        ...seminar,
+        detectedDate: seminar.detectedDate ?? legacyNew?.date,
+      }),
+    );
+  }
+
+  storage.set(SEMINAR_LIST_KEY, [...merged.values()]);
+  storage.deleteKey(LEGACY_NEW_SEMINAR_KEY);
+  storage.deleteKey(LEGACY_HISTORY_KEY);
+  return [...merged.values()];
 }
 
 /**
@@ -396,7 +466,8 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
     const referenceDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
     const normalizedCurrentSeminars = normalizeParsedSeminars(currentSeminars, referenceDate);
 
-    const storedSeminars = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
+    // 1회성 legacy 키 마이그레이션: seminar_list로 흡수 후 legacy 키 삭제
+    const storedSeminars = migrateLegacySeminarStorage(referenceDate);
     const storedByUrl = new Map(storedSeminars.map((s) => [s.url, s]));
 
     let newlyAddedCount = 0;
