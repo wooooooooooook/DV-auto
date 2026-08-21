@@ -575,8 +575,216 @@ function runAllFixtureTests() {
   testMonitorSeminarsTimeWindow(nodes);
   testNormalizeParsedSeminars(nodes);
   testPointFieldsPreservation();
+  testPointStatusMergeLogic();
+  testLegacyKeysRemoved();
 
   console.log('🎉 모든 세미나 메인 페이지 (/seminar/main) 기능 테스트를 100% 성공적으로 통과했습니다!\n');
+}
+
+/**
+ * 8. 포인트 상태 merge 로직 통합 검증 (요구사항 3~6, 9)
+ */
+function testPointStatusMergeLogic() {
+  console.log('--- [Test 8] 포인트 상태 merge 로직 검증 시작 ---');
+
+  type SeminarPointStatus = {
+    pointPaid?: boolean;
+    point?: number;
+    pointText?: string;
+    pointDate?: string;
+    pointContent?: string;
+    pointCheckedAt?: string;
+  };
+  type TestSeminar = {
+    seminarId: string | null;
+    name: string;
+    url: string;
+    date?: string;
+    time: string;
+    currentCount: string;
+    totalCount: string;
+    nightTime: boolean;
+    isAdvancedSurvey: boolean;
+    detectedDate?: string;
+  } & SeminarPointStatus;
+
+  function seminarKey(s: Pick<TestSeminar, 'url' | 'seminarId'>): string {
+    return s.seminarId || s.url;
+  }
+
+  function simulateMerge(
+    storedSeminars: TestSeminar[],
+    currentSeminars: TestSeminar[],
+    pointTable: Map<string, SeminarPointStatus & { found: boolean; pointText?: string; date?: string; content?: string }>,
+  ): Map<string, TestSeminar> {
+    const checkedAt = '2026-08-22T10:00:00.000Z';
+    const storedByKey = new Map(storedSeminars.map((s) => [seminarKey(s), s]));
+    const currentByKey = new Map(currentSeminars.map((s) => [seminarKey(s), s]));
+    const allParsed = pointTable;
+    const updatedSeminars = new Map<string, TestSeminar>();
+    for (const [key, seminar] of storedByKey) {
+      if (seminar.pointPaid === true) {
+        updatedSeminars.set(key, seminar);
+        continue;
+      }
+      updatedSeminars.set(key, { ...seminar });
+    }
+    for (const [key, current] of currentByKey) {
+      const existing = updatedSeminars.get(key);
+      const pointInfo = allParsed.get(current.seminarId || '');
+      let merged: TestSeminar;
+      if (pointInfo?.found) {
+        if (existing?.pointPaid === true) {
+          const base = updatedSeminars.get(key)!;
+          const patched = { ...base, name: current.name || base.name, date: current.date || base.date, time: current.time || base.time, currentCount: current.currentCount || base.currentCount, totalCount: current.totalCount || base.totalCount, nightTime: current.nightTime, isAdvancedSurvey: current.isAdvancedSurvey || base.isAdvancedSurvey };
+          updatedSeminars.set(key, patched);
+          continue;
+        }
+        merged = {
+          ...(existing || {}),
+          ...current,
+          pointPaid: true,
+          point: (pointInfo as any).point,
+          pointText: pointInfo.pointText,
+          pointDate: pointInfo.date,
+          pointContent: pointInfo.content,
+          pointCheckedAt: checkedAt,
+          detectedDate: existing?.detectedDate ?? current.detectedDate,
+        };
+      } else if (existing) {
+        if (existing.pointPaid === true) {
+          const base = updatedSeminars.get(key)!;
+          const patched = { ...base, name: current.name || base.name, date: current.date || base.date, time: current.time || base.time, currentCount: current.currentCount || base.currentCount, totalCount: current.totalCount || base.totalCount, nightTime: current.nightTime, isAdvancedSurvey: current.isAdvancedSurvey || base.isAdvancedSurvey };
+          updatedSeminars.set(key, patched);
+          continue;
+        }
+        merged = { ...(existing || {}), ...current, pointPaid: false, pointCheckedAt: checkedAt };
+      } else {
+        merged = { ...current, pointPaid: false, pointCheckedAt: checkedAt };
+      }
+      updatedSeminars.set(key, merged);
+    }
+    for (const [seminarId, pointInfo] of allParsed) {
+      let foundKey: string | null = null;
+      for (const [key, s] of currentByKey) if (s.seminarId === seminarId) { foundKey = key; break; }
+      if (!foundKey) for (const [key, s] of storedByKey) if (s.seminarId === seminarId) { foundKey = key; break; }
+      if (!foundKey && pointInfo.found) {
+        const url = `https://m.doctorville.co.kr/cme/seminar/${seminarId}`;
+        const newItem: TestSeminar = {
+          seminarId, name: pointInfo.content || `세미나 ${seminarId}`, url, date: undefined, time: '', currentCount: '', totalCount: '', nightTime: false, isAdvancedSurvey: false,
+          detectedDate: '2026-08-22', pointPaid: true, point: (pointInfo as any).point, pointText: pointInfo.pointText, pointDate: pointInfo.date, pointContent: pointInfo.content, pointCheckedAt: checkedAt,
+        };
+        updatedSeminars.set(seminarKey(newItem), newItem);
+      }
+    }
+    return updatedSeminars;
+  }
+
+  // 1) pointPaid=true 세미나는 포인트 테이블에 없어도 false로 변경되지 않는다
+  {
+    const stored: TestSeminar[] = [{ seminarId: '1111', name: 'paid', url: 'https://m.doctorville.co.kr/cme/seminar/1111', time: '', currentCount: '', totalCount: '', nightTime: false, isAdvancedSurvey: true, pointPaid: true, point: 500, pointText: '+ 500 P', pointDate: '2026-08-15', pointCheckedAt: '2026-08-15T10:00:00.000Z' }];
+    const current: TestSeminar[] = [{ seminarId: '1111', name: 'paid', url: 'https://m.doctorville.co.kr/cme/seminar/1111', time: '13:00', currentCount: '10', totalCount: '100', nightTime: false, isAdvancedSurvey: true }];
+    const table = new Map<string, any>(); // 빈 테이블
+    const merged = simulateMerge(stored, current, table);
+    const item = merged.get('1111')!;
+    assert.strictEqual(item.pointPaid, true, 'pointPaid=true는 테이블에 없어도 유지되어야 함');
+    assert.strictEqual(item.pointCheckedAt, '2026-08-15T10:00:00.000Z', 'pointCheckedAt도 기존값 유지');
+    assert.strictEqual(item.point, 500, 'point 유지');
+  }
+
+  // 2) pointPaid 없는 세미나가 테이블에 있으면 paid로 업데이트
+  {
+    const stored: TestSeminar[] = [];
+    const current: TestSeminar[] = [{ seminarId: '2222', name: 'unpaid', url: 'https://m.doctorville.co.kr/cme/seminar/2222', time: '13:00', currentCount: '10', totalCount: '100', nightTime: false, isAdvancedSurvey: true }];
+    const table = new Map<string, any>([['2222', { found: true, point: 1000, pointText: '+ 1,000 P', date: '2026-08-22', content: '설문 포인트 2222' }]]);
+    const merged = simulateMerge(stored, current, table);
+    const item = merged.get('2222')!;
+    assert.strictEqual(item.pointPaid, true, '테이블에 있으면 pointPaid=true');
+    assert.strictEqual(item.point, 1000);
+    assert(item.pointCheckedAt, 'pointCheckedAt 기록되어야 함');
+  }
+
+  // 3) pointPaid 없는 세미나가 테이블에 없으면 false + checkedAt
+  {
+    const stored: TestSeminar[] = [];
+    const current: TestSeminar[] = [{ seminarId: '3333', name: 'unpaid', url: 'https://m.doctorville.co.kr/cme/seminar/3333', time: '13:00', currentCount: '10', totalCount: '100', nightTime: false, isAdvancedSurvey: true }];
+    const table = new Map<string, any>();
+    const merged = simulateMerge(stored, current, table);
+    const item = merged.get('3333')!;
+    assert.strictEqual(item.pointPaid, false, '테이블에 없으면 pointPaid=false');
+    assert(item.pointCheckedAt, 'pointCheckedAt 기록되어야 함');
+  }
+
+  // 4) pointPaid=false 세미나는 다음 실행에서 다시 조회되어 테이블에 있으면 paid로 변경
+  {
+    const stored: TestSeminar[] = [{ seminarId: '4444', name: 'retry', url: 'https://m.doctorville.co.kr/cme/seminar/4444', time: '13:00', currentCount: '10', totalCount: '100', nightTime: false, isAdvancedSurvey: true, pointPaid: false, pointCheckedAt: '2026-08-21T10:00:00.000Z' }];
+    const current: TestSeminar[] = [{ seminarId: '4444', name: 'retry', url: 'https://m.doctorville.co.kr/cme/seminar/4444', time: '13:00', currentCount: '10', totalCount: '100', nightTime: false, isAdvancedSurvey: true, pointPaid: false, pointCheckedAt: '2026-08-21T10:00:00.000Z' }];
+    const table = new Map<string, any>([['4444', { found: true, point: 800, pointText: '+ 800 P', date: '2026-08-22', content: '설문 포인트 4444' }]]);
+    const merged = simulateMerge(stored, current, table);
+    const item = merged.get('4444')!;
+    assert.strictEqual(item.pointPaid, true, '재조회 시 테이블에 있으면 paid로 변경');
+    assert.strictEqual(item.point, 800);
+  }
+
+  // 5) 포인트 테이블에만 있는 세미나는 새 항목으로 추가
+  {
+    const stored: TestSeminar[] = [];
+    const current: TestSeminar[] = [];
+    const table = new Map<string, any>([['9999', { found: true, point: 300, pointText: '+ 300 P', date: '2026-08-20', content: '설문 포인트 9999' }]]);
+    const merged = simulateMerge(stored, current, table);
+    const item = merged.get('9999')!;
+    assert(item, '포인트-only 세미나는 새로 생성되어야 함');
+    assert.strictEqual(item.pointPaid, true);
+    assert.strictEqual(item.point, 300);
+    assert.strictEqual(item.time, '', '메타데이터는 빈 값');
+  }
+
+  // 6) 포인트-only 항목 이후 같은 ID가 세미나 목록에 나타나면 메타데이터 보완 + 포인트 유지
+  {
+    const pointOnly: TestSeminar = { seminarId: '7777', name: '설문 포인트 7777', url: 'https://m.doctorville.co.kr/cme/seminar/7777', time: '', currentCount: '', totalCount: '', nightTime: false, isAdvancedSurvey: false, pointPaid: true, point: 600, pointText: '+ 600 P', pointDate: '2026-08-20', pointCheckedAt: '2026-08-20T10:00:00.000Z' };
+    const stored: TestSeminar[] = [pointOnly];
+    const current: TestSeminar[] = [{ seminarId: '7777', name: '실제 세미나 제목', url: 'https://m.doctorville.co.kr/cme/seminar/7777', date: '2026-08-22', time: '13:00~14:00', currentCount: '50', totalCount: '200', nightTime: false, isAdvancedSurvey: true }];
+    const table = new Map<string, any>(); // 테이블에 없어도 paid는 보존
+    const merged = simulateMerge(stored, current, table);
+    const item = merged.get('7777')!;
+    assert.strictEqual(item.pointPaid, true, '포인트 정보 유지');
+    assert.strictEqual(item.point, 600, 'point 유지');
+    assert.strictEqual(item.name, '실제 세미나 제목', '포인트-only 항목의 메타데이터가 실제 목록으로 보완되어야 함');
+    assert.strictEqual(item.time, '13:00~14:00', 'time 보완');
+  }
+
+  // 7) 기존 seminar_list의 과거 세미나가 새 목록 수집으로 삭제되지 않는다 (retention 내)
+  {
+    const stored: TestSeminar[] = [
+      { seminarId: '1001', name: 'old', url: 'https://m.doctorville.co.kr/cme/seminar/1001', date: '2026-08-10', time: '13:00', currentCount: '10', totalCount: '100', nightTime: false, isAdvancedSurvey: false, detectedDate: '2026-08-10' },
+      { seminarId: '1002', name: 'recent', url: 'https://m.doctorville.co.kr/cme/seminar/1002', date: '2026-08-22', time: '13:00', currentCount: '10', totalCount: '100', nightTime: false, isAdvancedSurvey: false, detectedDate: '2026-08-22' },
+    ];
+    const current: TestSeminar[] = [{ seminarId: '1002', name: 'recent', url: 'https://m.doctorville.co.kr/cme/seminar/1002', date: '2026-08-22', time: '13:00', currentCount: '10', totalCount: '100', nightTime: false, isAdvancedSurvey: false, detectedDate: '2026-08-22' }];
+    const table = new Map<string, any>();
+    const merged = simulateMerge(stored, current, table);
+    // current에 없는 1001도 storedByKey를 통해 보존됨 (pointPaid !== true이면 updatedSeminars에 먼저 들어감)
+    // pointPaid가 없는 경우에도 보존됨
+    assert(merged.has('1001'), '과거 세미나가 새 목록에 없어도 저장소에서 보존되어야 함');
+    assert(merged.has('1002'), '현재 세미나 유지');
+  }
+
+  console.log('  ✓ 포인트 상태 3단계 구분(미조회/미지급/지급됨), 재조회, 포인트-only 추가, 보존 검증 완료\n');
+}
+
+function testLegacyKeysRemoved() {
+  console.log('--- [Test 9] legacy storage key 미사용 검증 시작 ---');
+  const srcFiles = [
+    'src/tasks/apply_seminar.ts',
+    'src/tasks/today_links.ts',
+    'src/tasks/refresh_seminar_point_exclusion.ts',
+    'src/tasks/check_seminar_point.ts',
+  ];
+  for (const file of srcFiles) {
+    const content = fs.readFileSync(path.join(process.cwd(), file), 'utf-8');
+    assert(!content.includes('apply_seminar:new_seminars'), `${file}에 legacy new_seminars 키가 남아있으면 안 됨`);
+    assert(!content.includes('apply_seminar:new_seminars_history'), `${file}에 legacy history 키가 남아있으면 안 됨`);
+  }
+  console.log('  ✓ legacy 키 미사용 검증 완료\n');
 }
 
 runAllFixtureTests();

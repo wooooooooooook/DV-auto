@@ -9,15 +9,13 @@ import {
   isSurveyPointExcludedSeminar,
   ensureLoggedIn,
 } from '../modules/utils';
-import { searchSeminarPoints } from './check_seminar_point';
+import { searchSeminarPoints, type ParsedPointTable, type SeminarPointResult } from './check_seminar_point';
 import * as storage from '../services/storage';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
-const SEMINAR_LIST_KEY = 'apply_seminar:seminar_list';
-const NEW_SEMINAR_KEY = 'apply_seminar:new_seminars';
-export const NEW_SEMINAR_HISTORY_KEY = 'apply_seminar:new_seminars_history';
-const NEW_SEMINAR_HISTORY_RETENTION_DAYS = 60;
+export const SEMINAR_LIST_KEY = 'apply_seminar:seminar_list';
+const SEMINAR_RETENTION_DAYS = 60;
 
 type SeminarPointStatus = {
   pointPaid?: boolean;
@@ -27,6 +25,7 @@ type SeminarPointStatus = {
   pointContent?: string;
   pointCheckedAt?: string;
 };
+
 type SeminarListItem = {
   seminarId: string | null;
   name: string;
@@ -38,18 +37,10 @@ type SeminarListItem = {
   nightTime: boolean;
   isPointExcluded?: boolean;
   isAdvancedSurvey: boolean;
+  detectedDate?: string;
+  detectedAt?: string;
 } & SeminarPointStatus;
-type StoredNewSeminars = { date: string; seminars: Array<SeminarListItem & { seminarId: string | null }> };
-type NewSeminarHistoryEntry = {
-  detectedDate: string;
-  detectedAt: string;
-  seminar: SeminarListItem & { seminarId: string | null };
-};
 
-/**
- * Raw data extracted from the seminar/main page DOM.
- * Produced by evaluateAll() inside the browser context.
- */
 type RawSeminarData = {
   url: string;
   name: string;
@@ -88,10 +79,6 @@ function normalizeSeminarDate(value: string | undefined, referenceDate: string):
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
-/**
- * Convert raw DOM-parsed seminar data into SeminarListItem[] with canonical dates.
- * Exported for testability — pure function, no side effects.
- */
 export function normalizeParsedSeminars(raw: RawSeminarData[], referenceDate: string): SeminarListItem[] {
   return raw.map((item) => {
     const url = new URL(item.url, SEMINAR_PAGE).toString();
@@ -109,82 +96,235 @@ export function normalizeParsedSeminars(raw: RawSeminarData[], referenceDate: st
   });
 }
 
-function appendNewSeminarsToHistory(
-  items: Array<SeminarListItem & { seminarId: string | null }>,
-  detectedDate: string,
-): void {
-  if (!items.length) return;
-  const history = storage.get<NewSeminarHistoryEntry[]>(NEW_SEMINAR_HISTORY_KEY, []) || [];
-  const existingUrls = new Set(history.map((entry) => entry.seminar.url));
-  const detectedAt = new Date().toISOString();
-  for (const seminar of items) {
-    if (existingUrls.has(seminar.url)) continue;
-    history.push({ detectedDate, detectedAt, seminar });
-    existingUrls.add(seminar.url);
-  }
-  const todayMs = Date.parse(`${detectedDate}T00:00:00+09:00`);
-  const retentionMs = NEW_SEMINAR_HISTORY_RETENTION_DAYS * 24 * 60 * 60 * 1000;
-  const retained = history.filter((entry) => {
-    const normalizedDate = normalizeSeminarDate(entry.seminar.date, entry.detectedDate || detectedDate);
-    const referenceDate = normalizedDate || entry.detectedDate;
-    const entryMs = referenceDate ? Date.parse(`${referenceDate}T00:00:00+09:00`) : NaN;
-    return Number.isNaN(entryMs) || Number.isNaN(todayMs) || todayMs - entryMs <= retentionMs;
-  });
-  storage.set(NEW_SEMINAR_HISTORY_KEY, retained);
+function seminarKey(seminar: Pick<SeminarListItem, 'url' | 'seminarId'>): string {
+  return seminar.seminarId || seminar.url;
 }
 
-async function refreshAdvancedPointStatus(
+/**
+ * 포인트 지급 테이블을 조회하여 seminar_list에 반영한다.
+ * - pointPaid === true인 세미나는 재조회하지 않음 (기존 정보 보존)
+ * - pointPaid가 없거나 false인 세미나는 테이블과 대조하여 업데이트
+ * - 테이블에만 있는 세미나는 새 항목으로 추가
+ * - 모든 조회 대상에 pointCheckedAt 기록
+ */
+async function refreshPointStatusFromTable(
   context: PlaywrightRunArgs['context'],
-): Promise<Map<string, SeminarPointStatus>> {
-  const history = storage.get<NewSeminarHistoryEntry[]>(NEW_SEMINAR_HISTORY_KEY, []) || [];
-  const targets = history
-    .map((entry) => entry.seminar)
-    .filter(
-      (seminar) =>
-        seminar.isAdvancedSurvey && !seminar.pointPaid && !seminar.isPointExcluded && getSeminarIdFromUrl(seminar.url),
-    );
-  if (!targets.length) return new Map();
-  const ids = [
-    ...new Set(targets.map((seminar) => getSeminarIdFromUrl(seminar.url)).filter((id): id is string => !!id)),
-  ];
-  const results = await searchSeminarPoints(context, ids, 60);
-  const statuses = new Map<string, SeminarPointStatus>();
-  const checkedAt = new Date().toISOString();
-  for (const seminar of targets) {
-    const id = getSeminarIdFromUrl(seminar.url);
-    if (!id) continue;
-    const result = results.get(id);
-    if (!result?.found) continue;
-    statuses.set(seminar.url, {
-      pointPaid: result.type === '적립',
-      point: result.point,
-      pointText: result.pointText,
-      pointDate: result.date,
-      pointContent: result.content,
-      pointCheckedAt: checkedAt,
-    });
-  }
-  return statuses;
-}
-
-function updateStoredPointStatuses(statuses: Map<string, SeminarPointStatus>): void {
-  if (!statuses.size) return;
-  const history = storage.get<NewSeminarHistoryEntry[]>(NEW_SEMINAR_HISTORY_KEY, []) || [];
-  storage.set(
-    NEW_SEMINAR_HISTORY_KEY,
-    history.map((entry) => ({ ...entry, seminar: { ...entry.seminar, ...(statuses.get(entry.seminar.url) || {}) } })),
-  );
+  currentSeminars: SeminarListItem[],
+): Promise<SeminarListItem[]> {
   const storedSeminars = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
-  storage.set(
-    SEMINAR_LIST_KEY,
-    storedSeminars.map((item) => ({ ...item, ...(statuses.get(item.url) || {}) })),
-  );
-  const storedNew = storage.get<StoredNewSeminars>(NEW_SEMINAR_KEY);
-  if (storedNew)
-    storage.set(NEW_SEMINAR_KEY, {
-      ...storedNew,
-      seminars: storedNew.seminars.map((item) => ({ ...item, ...(statuses.get(item.url) || {}) })),
+  const storedByKey = new Map(storedSeminars.map((s) => [seminarKey(s), s]));
+  const currentByKey = new Map(currentSeminars.map((s) => [seminarKey(s), s]));
+
+  // 포인트 조회 대상 결정: pointPaid !== true인 세미나들
+  // (실제 파싱은 전체 테이블을 한 번 조회하므로 별도 필터 불필요 — 보존 로직에서 처리)
+
+  // 포인트 테이블에서 파싱된 모든 적립 내역 조회
+  const page = await context.newPage();
+  let allParsed = new Map<string, SeminarPointResult>();
+
+  try {
+    await safeGoto(
+      page,
+      'https://www.doctorville.co.kr/my/point/pointUseHistoryList',
+      { waitUntil: 'domcontentloaded', timeout: 30000 },
+      1,
+    );
+    await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - 90);
+    const formatDate = (d: Date) => d.toISOString().split('T')[0];
+
+    await page.fill('input[name="startDt"], input#startDt', formatDate(startDate)).catch(() => {});
+    await page.fill('input[name="endDt"], input#endDt', formatDate(endDate)).catch(() => {});
+    await page.fill('input[name="keyword"], input#keyword', '').catch(() => {});
+    await page.click('button[type="submit"], input[type="submit"], button:has-text("검색")').catch(async () => {
+      await page.keyboard.press('Enter').catch(() => {});
     });
+    await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+    await page.waitForTimeout(500);
+
+    const rows = await page.evaluate(() => {
+      const selectors = ['#useList table tbody tr', 'table tbody tr'];
+      for (const selector of selectors) {
+        const found = Array.from(document.querySelectorAll(selector));
+        if (found.length > 0) {
+          return found.map((row) =>
+            Array.from(row.querySelectorAll('td')).map((cell) => (cell.textContent || '').replace(/\s+/g, ' ').trim()),
+          );
+        }
+      }
+      return [] as string[][];
+    });
+
+    allParsed = new Map();
+    for (const cells of rows) {
+      if (cells.length < 5) continue;
+      const date = cells[0] || '';
+      const service = cells[1] || '';
+      const content = cells[2] || '';
+      const type = cells[3] || '';
+      const pointText = cells[4] || '';
+      const expiry = cells[5] || '';
+      if (type !== '적립') continue;
+
+      const idMatch = content.match(/설문\s*포인트\s*(\d+)/);
+      if (!idMatch) continue;
+      const seminarId = idMatch[1];
+      const pointMatch = pointText.match(/[+]?\s*([\d,]+)\s*P/i);
+      const point = pointMatch ? parseInt(pointMatch[1].replace(/,/g, ''), 10) : undefined;
+
+      if (!allParsed.has(seminarId)) {
+        allParsed.set(seminarId, { found: true, point, pointText, date, service, content, type: '적립', expiry });
+      }
+    }
+    console.log(`[refreshPointStatus] parsed point table rows: ${allParsed.size}`);
+  } catch (error) {
+    console.error('refreshPointStatusFromTable: point table parse error', error);
+  } finally {
+    await page.close().catch(() => {});
+  }
+
+  const checkedAt = new Date().toISOString();
+  const updatedSeminars = new Map<string, SeminarListItem>();
+
+  // 1) 기존 저장된 세미나들 중 pointPaid === true인 것들은 그대로 보존
+  for (const [key, seminar] of storedByKey) {
+    if (seminar.pointPaid === true) {
+      updatedSeminars.set(key, seminar);
+      continue;
+    }
+    updatedSeminars.set(key, { ...seminar });
+  }
+
+  // 2) 현재 세미나 목록과 포인트 테이블 대조하여 업데이트
+  for (const [key, current] of currentByKey) {
+    const existing = updatedSeminars.get(key);
+    const pointInfo = allParsed.get(current.seminarId || '');
+
+    let merged: SeminarListItem;
+    if (pointInfo) {
+      if (existing?.pointPaid === true) {
+        const base = updatedSeminars.get(key)!;
+        const patched = {
+          ...base,
+          name: current.name || base.name,
+          date: current.date || base.date,
+          time: current.time || base.time,
+          currentCount: current.currentCount || base.currentCount,
+          totalCount: current.totalCount || base.totalCount,
+          nightTime: current.nightTime,
+          isAdvancedSurvey: current.isAdvancedSurvey || base.isAdvancedSurvey,
+        };
+        updatedSeminars.set(key, patched);
+        continue;
+      }
+      merged = {
+        ...(existing || {}),
+        ...current,
+        pointPaid: true,
+        point: pointInfo.point,
+        pointText: pointInfo.pointText,
+        pointDate: pointInfo.date,
+        pointContent: pointInfo.content,
+        pointCheckedAt: checkedAt,
+        detectedDate: existing?.detectedDate ?? current.detectedDate,
+        detectedAt: existing?.detectedAt ?? current.detectedAt,
+      };
+    } else if (existing) {
+      if (existing.pointPaid === true) {
+        const base = updatedSeminars.get(key)!;
+        const patched = {
+          ...base,
+          name: current.name || base.name,
+          date: current.date || base.date,
+          time: current.time || base.time,
+          currentCount: current.currentCount || base.currentCount,
+          totalCount: current.totalCount || base.totalCount,
+          nightTime: current.nightTime,
+          isAdvancedSurvey: current.isAdvancedSurvey || base.isAdvancedSurvey,
+        };
+        updatedSeminars.set(key, patched);
+        continue;
+      }
+      merged = {
+        ...(existing || {}),
+        ...current,
+        pointPaid: false,
+        pointCheckedAt: checkedAt,
+        detectedDate: existing.detectedDate ?? current.detectedDate,
+        detectedAt: existing.detectedAt ?? current.detectedAt,
+      };
+    } else {
+      merged = {
+        ...current,
+        pointPaid: false,
+        pointCheckedAt: checkedAt,
+      };
+    }
+    updatedSeminars.set(key, merged);
+  }
+
+  // 3) 포인트 테이블에만 있고 seminar_list에 없는 세미나들 -> 새 항목 생성
+  for (const [seminarId, pointInfo] of allParsed) {
+    let foundKey: string | null = null;
+    for (const [key, s] of currentByKey) {
+      if (s.seminarId === seminarId) {
+        foundKey = key;
+        break;
+      }
+    }
+    if (!foundKey) {
+      for (const [key, s] of storedByKey) {
+        if (s.seminarId === seminarId) {
+          foundKey = key;
+          break;
+        }
+      }
+    }
+
+    if (!foundKey) {
+      const url = `${SEMINAR_DETAIL_PAGE}${seminarId}`;
+      const newItem: SeminarListItem = {
+        seminarId,
+        name: pointInfo.content || `세미나 ${seminarId}`,
+        url,
+        date: undefined,
+        time: '',
+        currentCount: '',
+        totalCount: '',
+        nightTime: false,
+        isPointExcluded: false,
+        isAdvancedSurvey: false,
+        detectedDate: new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' }),
+        detectedAt: new Date().toISOString(),
+        pointPaid: true,
+        point: pointInfo.point,
+        pointText: pointInfo.pointText,
+        pointDate: pointInfo.date,
+        pointContent: pointInfo.content,
+        pointCheckedAt: checkedAt,
+      };
+      const key = seminarKey(newItem);
+      updatedSeminars.set(key, newItem);
+      console.log(`[refreshPointStatus] added point-only seminar: ${seminarId}`);
+    }
+  }
+
+  // 4) Retention 적용 (60일 지난 세미나 제거)
+  const todayMs = Date.parse(`${new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' })}T00:00:00+09:00`);
+  const retentionMs = SEMINAR_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+
+  const finalSeminars = [...updatedSeminars.values()].filter((seminar) => {
+    const reference = normalizeSeminarDate(seminar.date, seminar.detectedDate || '') || seminar.detectedDate;
+    if (!reference) return true;
+    const dateMs = Date.parse(`${reference}T00:00:00+09:00`);
+    return Number.isNaN(dateMs) || Number.isNaN(todayMs) || todayMs - dateMs <= retentionMs;
+  });
+
+  storage.set(SEMINAR_LIST_KEY, finalSeminars);
+  return finalSeminars;
 }
 
 type ApplySeminarOptions = {
@@ -193,6 +333,7 @@ type ApplySeminarOptions = {
   silentIfNoNew?: boolean;
   checkAdvancedPointStatus?: boolean;
 };
+
 async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOptions = {}): Promise<TaskResult> {
   let screenshotPath: string | null = null;
   const {
@@ -200,10 +341,11 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
     notifyNewSeminarsToTelegram = true,
     checkAdvancedPointStatus = false,
   } = options;
+
   try {
     await ensureLoggedIn({ page, context: context ?? page.context() });
-
     await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'domcontentloaded', timeout: 30000 }, 1);
+
     const totalSeminarLinks = page.locator('a.list_detail');
     const totalSeminarsAvailable = await totalSeminarLinks.count();
     const closedCount = await page.locator('.ico_finish').count();
@@ -212,6 +354,7 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
       nodes.map((n) => ({ href: n.getAttribute('href'), text: (n.textContent || '').trim() })),
     );
     const attemptedApplyCount = items.length;
+
     for (const item of items) {
       await safeGoto(page, item.href, { waitUntil: 'load', timeout: 30000 }, 1);
       await page.click('a#applyLiveSeminarMemberBtn', { timeout: 5000 }).catch(() => {});
@@ -231,9 +374,9 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
       } catch {}
       await page.waitForTimeout(500);
     }
+
     await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'domcontentloaded', timeout: 30000 }, 1);
 
-    // --- Parse ALL seminars from the main page (only fields actually consumed downstream) ---
     const currentSeminars: RawSeminarData[] = await page.locator('.list_cont').evaluateAll((nodes) => {
       const results: RawSeminarData[] = [];
       nodes.forEach((node) => {
@@ -301,72 +444,47 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
         const noticeMessage = `🆕 새로 추가된 세미나 ${newlyAdded.length}건 발견\n\n${newSeminarMessage}`;
         if (notifyNewSeminarsToTelegram) await sendTelegram(noticeMessage);
         if (notifyNewSeminarsToChannel) await sendNotificationToChannel(noticeMessage);
-        const storedNew = storage.get<StoredNewSeminars>(NEW_SEMINAR_KEY);
-        const baseSeminars = storedNew?.date === referenceDate ? storedNew.seminars : [];
-        const merged = [...baseSeminars];
-        const existingUrls = new Set(baseSeminars.map((item) => item.url));
-        for (const item of newlyAddedWithFlags)
-          if (!existingUrls.has(item.url)) {
-            merged.push(item);
-            existingUrls.add(item.url);
+
+        const flaggedByUrl = new Map(newlyAddedWithFlags.map((item) => [item.url, item]));
+        for (const item of normalizedCurrentSeminars) {
+          if (flaggedByUrl.has(item.url)) {
+            Object.assign(item, flaggedByUrl.get(item.url));
           }
-        storage.set(NEW_SEMINAR_KEY, { date: referenceDate, seminars: merged });
-        appendNewSeminarsToHistory(newlyAddedWithFlags, referenceDate);
+        }
       }
     }
 
-    // Update history with all current seminars (preserving point fields from stored)
-    const historyItems: Array<SeminarListItem & { seminarId: string | null }> = normalizedCurrentSeminars.map(
-      (item) => {
-        const existing = storedByUrl.get(item.url);
-        const newlyAdded = newlyAddedWithFlags.find((n) => n.url === item.url);
-        return {
-          ...item,
-          seminarId: item.seminarId,
-          isPointExcluded: existing?.isPointExcluded ?? newlyAdded?.isPointExcluded,
-          pointPaid: existing?.pointPaid,
-          point: existing?.point,
-          pointText: existing?.pointText,
-          pointDate: existing?.pointDate,
-          pointContent: existing?.pointContent,
-          pointCheckedAt: existing?.pointCheckedAt,
-        };
-      },
-    );
-    appendNewSeminarsToHistory(historyItems, referenceDate);
+    // 포인트 지급 테이블 조회 및 병합 (핵심 로직)
+    const finalSeminars = await refreshPointStatusFromTable(context ?? page.context(), normalizedCurrentSeminars);
 
-    // Merge: current page data is primary, preserve point fields from existing stored data
-    const finalSeminarsToStore: SeminarListItem[] = normalizedCurrentSeminars.map((item) => {
-      const existing = storedByUrl.get(item.url);
-      if (!existing) return item;
-      return {
-        ...item,
-        isPointExcluded: existing.isPointExcluded,
-        pointPaid: existing.pointPaid,
-        point: existing.point,
-        pointText: existing.pointText,
-        pointDate: existing.pointDate,
-        pointContent: existing.pointContent,
-        pointCheckedAt: existing.pointCheckedAt,
-      };
-    });
-    storage.set(SEMINAR_LIST_KEY, finalSeminarsToStore);
+    if (newlyAddedWithFlags.length > 0) {
+      const flaggedByUrl = new Map(newlyAddedWithFlags.map((item) => [item.url, item]));
+      for (const seminar of finalSeminars) {
+        const flagged = flaggedByUrl.get(seminar.url);
+        if (flagged) {
+          seminar.isPointExcluded = flagged.isPointExcluded;
+          seminar.seminarId = flagged.seminarId;
+        }
+      }
+      storage.set(SEMINAR_LIST_KEY, finalSeminars);
+    }
 
     if (checkAdvancedPointStatus) {
-      const statuses = await refreshAdvancedPointStatus(context);
-      updateStoredPointStatuses(statuses);
-      if (statuses.size > 0) console.log(`advanced seminar point status updated from history: ${statuses.size}`);
+      console.log('point status already refreshed in main flow');
     }
+
     const appliedCount = await page.locator('a:has(.ico_completion)').count();
     let message = `✅ ${appliedCount}개 세미나 신청 완료! (${appliedCount}/${totalSeminarsAvailable})`;
     const failedToApplyCount = attemptedApplyCount - appliedCount;
     if (failedToApplyCount > 0) message += `\n (${failedToApplyCount}개는 마감 등의 사유로 신청 실패)`;
     if (closedCount > 0) message += `\n ${closedCount}개는 신청 마감되어 신청하지 못했습니다.`;
+
     const baseScreenshotDir = path.join(process.cwd(), 'screenshot');
     await fs.mkdir(baseScreenshotDir, { recursive: true });
     screenshotPath = path.join(baseScreenshotDir, 'apply_seminar_result.png');
     await page.screenshot({ path: screenshotPath, fullPage: false });
     message += `\n${SEMINAR_DETAIL_PAGE}`;
+
     const result: TaskResult = { success: true, message, imagePath: screenshotPath };
     if (options.silentIfNoNew && newlyAddedCount === 0) result.silent = true;
     return result;
@@ -393,7 +511,7 @@ export const applySeminarTask = { name: 'apply_seminar', description: '세미나
 export const applySeminarTaskStandalone = { name: 'apply_seminar', description: '세미나 신청 및 목록 저장', run };
 export const applySeminarExtraTask = {
   name: 'apply_seminar_extra',
-  description: '세미나 목록 갱신 및 심화 세미나 포인트 확인',
+  description: '세미나 목록 갱신 및 포인트 지급 확인',
   schedule: '*/10 6-23 * * *',
   options: { notifyNewSeminarsToTelegram: false, silentIfNoNew: true, checkAdvancedPointStatus: true },
   run,

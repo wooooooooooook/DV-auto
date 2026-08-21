@@ -13,7 +13,6 @@ import path from 'path';
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
 const SEMINAR_LIST_KEY = 'apply_seminar:seminar_list';
-const NEW_SEMINAR_KEY = 'apply_seminar:new_seminars';
 
 type SeminarListItem = {
   name: string;
@@ -24,11 +23,6 @@ type SeminarListItem = {
   totalCount?: string;
   isPointExcluded?: boolean;
   isAdvancedSurvey?: boolean;
-};
-
-type StoredNewSeminars = {
-  date: string;
-  seminars: Array<SeminarListItem & { seminarId?: string | null }>;
 };
 
 async function getPointExclusionStatusFromDetail(
@@ -112,32 +106,16 @@ async function run({ page }: PlaywrightRunArgs): Promise<TaskResult> {
       });
     }
 
-    storage.set(SEMINAR_LIST_KEY, refreshed);
-
-    const storedNew = storage.get<StoredNewSeminars>(NEW_SEMINAR_KEY);
-    if (storedNew?.seminars?.length) {
-      const refreshedNewSeminars = storedNew.seminars.map((seminar) => {
-        const seminarId = seminar.seminarId || getSeminarIdFromUrl(seminar.url);
-        const matched = refreshed.find((item) => {
-          const itemId = getSeminarIdFromUrl(item.url);
-          if (seminarId && itemId) return seminarId === itemId;
-          return item.url === seminar.url;
-        });
-
-        if (!matched) return seminar;
-
-        return {
-          ...seminar,
-          isPointExcluded: matched.isPointExcluded,
-          isAdvancedSurvey: matched.isAdvancedSurvey,
-        };
-      });
-
-      storage.set(NEW_SEMINAR_KEY, {
-        ...storedNew,
-        seminars: refreshedNewSeminars,
-      });
-    }
+    // 기존 seminar_list의 포인트 필드 보존하면서 isPointExcluded 갱신
+    const storedSeminars = storage.get<any[]>(SEMINAR_LIST_KEY, []) || [];
+    const refreshedMap = new Map(refreshed.map((item) => [getSeminarIdFromUrl(item.url) || item.url, item]));
+    const finalToStore = storedSeminars.map((s) => {
+      const key = getSeminarIdFromUrl(s.url) || s.url;
+      const matched = refreshedMap.get(key);
+      if (!matched) return s;
+      return { ...s, isPointExcluded: matched.isPointExcluded, isAdvancedSurvey: matched.isAdvancedSurvey };
+    });
+    storage.set(SEMINAR_LIST_KEY, finalToStore);
 
     const excludedCount = refreshed.filter((item) => item.isPointExcluded).length;
     return {

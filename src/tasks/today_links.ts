@@ -55,7 +55,6 @@ type TempQuizAnswers = {
   answers: Array<string | number>;
 };
 const TODAY_SEMINAR_KEY = 'today_seminars';
-const NEW_SEMINAR_KEY = 'apply_seminar:new_seminars';
 const SEMINAR_LIST_KEY = 'apply_seminar:seminar_list';
 
 function escapeHtml(text: string): string {
@@ -334,15 +333,31 @@ function getTodayDateStrings(customDateInput?: string) {
   };
 }
 
-function getStoredNewSeminars(isoDate: string, yesterdayIso: string): StoredNewSeminars['seminars'] {
-  const stored = storage.get<StoredNewSeminars>(NEW_SEMINAR_KEY);
-  if (!stored) return [];
-
-  // Return if the stored date matches today or yesterday
-  if (stored.date === isoDate || stored.date === yesterdayIso) {
-    return stored.seminars || [];
-  }
-  return [];
+function getYesterdayAddedSeminars(yesterdayIso: string): StoredNewSeminars['seminars'] {
+  const storedSeminars =
+    storage.get<
+      Array<{
+        name: string;
+        url: string;
+        seminarId: string | null;
+        isPointExcluded?: boolean;
+        isAdvancedSurvey?: boolean;
+        date?: string;
+        time?: string;
+        detectedDate?: string;
+      }>
+    >(SEMINAR_LIST_KEY, []) || [];
+  return storedSeminars
+    .filter((s) => s.detectedDate === yesterdayIso)
+    .map((s) => ({
+      name: s.name,
+      url: s.url,
+      seminarId: s.seminarId,
+      isPointExcluded: s.isPointExcluded,
+      isAdvancedSurvey: s.isAdvancedSurvey,
+      date: s.date,
+      time: s.time,
+    }));
 }
 
 function getTempQuizAnswers(isoDate: string, productTitle: string): Array<string | number> | null {
@@ -814,9 +829,8 @@ async function run({ page, args }: PlaywrightRunArgs, taskOptions?: Record<strin
     const seminarMessage = await collectTodaySeminarMessage(page, inputDate);
     const pointConversionInfo = await collectPointConversionInfo(page);
 
-    let storedNewSeminars = getStoredNewSeminars(isoDate, yesterdayIso);
+    let storedNewSeminars = getYesterdayAddedSeminars(yesterdayIso);
     if (storedNewSeminars.length > 0) {
-      let updatedMissingPointFlag = false;
       const pointExcludedCache = new Map<string, boolean>();
 
       const storedSeminars =
@@ -846,6 +860,7 @@ async function run({ page, args }: PlaywrightRunArgs, taskOptions?: Record<strin
         await batchCheckPointExcluded(page.context(), uncachedItems, pointExcludedCache);
       }
 
+      let updatedMissingPointFlag = false;
       storedNewSeminars = storedNewSeminars.map((item) => {
         const cacheKey = item.seminarId || item.url;
         const isPointExcluded = pointExcludedCache.get(cacheKey);
@@ -857,10 +872,17 @@ async function run({ page, args }: PlaywrightRunArgs, taskOptions?: Record<strin
       });
 
       if (updatedMissingPointFlag) {
-        storage.set(NEW_SEMINAR_KEY, {
-          date: isoDate,
-          seminars: storedNewSeminars,
+        const currentSeminarsInList = storage.get<any[]>(SEMINAR_LIST_KEY, []) || [];
+        const updatedNewSeminarsMap = new Map(storedNewSeminars.map((s) => [s.seminarId || s.url, s]));
+        const updatedList = currentSeminarsInList.map((s) => {
+          const key = s.seminarId || s.url;
+          const updatedNew = updatedNewSeminarsMap.get(key);
+          if (updatedNew && typeof updatedNew.isPointExcluded === 'boolean') {
+            return { ...s, isPointExcluded: updatedNew.isPointExcluded };
+          }
+          return s;
         });
+        storage.set(SEMINAR_LIST_KEY, updatedList);
       }
     }
 
@@ -919,5 +941,6 @@ export {
   isDateMatching,
   parseSeminarsFromNodes,
   collectTodaySeminarMessage,
+  getYesterdayAddedSeminars,
 };
 export type { SeminarData, SeminarTaskData, DateTarget, ParsedSeminarItem };

@@ -10,7 +10,6 @@ import * as runner from '../core/runner';
 import * as taskRegistry from '../core/taskRegistry';
 import { inspect } from '../modules/inspect';
 import { sendNotificationToChannel } from '../modules/utils';
-import { searchSeminarPoints } from '../tasks/check_seminar_point';
 
 const ADMIN_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const NOTICE_BOT_TOKEN = process.env.NOTICE_BOT_TOKEN;
