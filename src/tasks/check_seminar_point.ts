@@ -57,11 +57,17 @@ export async function parseRecentSeminarPointRows(page: Page): Promise<Map<strin
 }
 
 /** 포인트 지급내역 테이블을 한 번만 파싱하여 요청된 세미나 ID와 매칭한다. */
+export interface SearchSeminarPointsResult {
+  success: boolean;
+  points: Map<string, SeminarPointResult>;
+  error?: string;
+}
+
 export async function searchSeminarPoints(
   context: BrowserContext,
   seminarIds: string[] = [],
   daysBack = 30,
-): Promise<Map<string, SeminarPointResult>> {
+): Promise<SearchSeminarPointsResult> {
   const page = await context.newPage();
   const results = new Map<string, SeminarPointResult>();
 
@@ -91,10 +97,11 @@ export async function searchSeminarPoints(
       if (!results.has(seminarId)) results.set(seminarId, { found: false });
     }
     logger.info(`parsed recent seminar point rows: ${parsed.size}, total returned: ${results.size}`);
-    return results;
+    return { success: true, points: results };
   } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
     logger.error('searchSeminarPoints error', error);
-    return results;
+    return { success: false, points: results, error: errorMsg };
   } finally {
     await page.close().catch(() => {});
   }
@@ -106,8 +113,11 @@ export async function run(
 ): Promise<{ success: boolean; message: string; pointResult?: SeminarPointResult }> {
   if (!seminarId) return { success: false, message: '세미나 번호가 필요합니다.' };
   try {
-    const results = await searchSeminarPoints(context, [seminarId], 60);
-    const result = results.get(seminarId);
+    const searchRes = await searchSeminarPoints(context, [seminarId], 60);
+    if (!searchRes.success) {
+      return { success: false, message: `세미나 포인트 조회 중 오류: ${searchRes.error || '조회 실패'}` };
+    }
+    const result = searchRes.points.get(seminarId);
     if (result?.found) {
       return {
         success: true,

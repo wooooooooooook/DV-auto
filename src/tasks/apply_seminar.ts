@@ -229,7 +229,15 @@ export async function refreshSeminarPointStatus(
 ): Promise<SeminarListItem[]> {
   if (!context) return seminars;
 
-  const parsedPoints = await searchSeminarPoints(context, [], 60);
+  const searchRes = await searchSeminarPoints(context, [], 60);
+  if (!searchRes.success) {
+    console.warn(
+      'refreshSeminarPointStatus: point history query failed, keeping seminar_list status intact:',
+      searchRes.error,
+    );
+    return seminars;
+  }
+  const parsedPoints = searchRes.points;
   const checkedAt = new Date().toISOString();
 
   const updatedSeminars = seminars.map((seminar) => {
@@ -269,7 +277,7 @@ export async function refreshSeminarPointStatus(
         seminarId: id,
         name: '',
         url: `https://m.doctorville.co.kr/cme/seminar/${id}`,
-        date: pointResult.date || '',
+        date: '',
         time: '',
         currentCount: '',
         totalCount: '',

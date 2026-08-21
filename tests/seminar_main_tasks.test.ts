@@ -595,8 +595,7 @@ async function testPointSyncRequirements() {
   ]);
 
   const originalSearchSeminarPoints = checkSeminarPointModule.searchSeminarPoints;
-  (checkSeminarPointModule as unknown as { searchSeminarPoints: unknown }).searchSeminarPoints = async () =>
-    mockParsedPoints;
+  (checkSeminarPointModule as unknown as { searchSeminarPoints: unknown }).searchSeminarPoints = async () => ({ success: true, points: mockParsedPoints });
 
   try {
     const mockContext = {} as unknown as PlaywrightRunArgs['context'];
