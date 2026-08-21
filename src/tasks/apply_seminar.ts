@@ -19,8 +19,6 @@ const NEW_SEMINAR_KEY = 'apply_seminar:new_seminars';
 export const NEW_SEMINAR_HISTORY_KEY = 'apply_seminar:new_seminars_history';
 const NEW_SEMINAR_HISTORY_RETENTION_DAYS = 60;
 
-type SeminarStatus = 'completed' | 'open' | 'closed';
-
 type SeminarPointStatus = {
   pointPaid?: boolean;
   point?: number;
@@ -35,11 +33,8 @@ type SeminarListItem = {
   url: string;
   date?: string;
   time: string;
-  tail: string;
-  category: string;
   currentCount: string;
   totalCount: string;
-  status: SeminarStatus;
   nightTime: boolean;
   isPointExcluded?: boolean;
   isAdvancedSurvey: boolean;
@@ -60,11 +55,8 @@ type RawSeminarData = {
   name: string;
   date: string;
   time: string;
-  tail: string;
-  category: string;
   currentCount: string;
   totalCount: string;
-  status: SeminarStatus;
   nightTime: boolean;
   isAdvancedSurvey: boolean;
 };
@@ -109,11 +101,8 @@ export function normalizeParsedSeminars(raw: RawSeminarData[], referenceDate: st
       name: item.name,
       date: normalizeSeminarDate(item.date, referenceDate) ?? item.date,
       time: item.time,
-      tail: item.tail,
-      category: item.category,
       currentCount: item.currentCount,
       totalCount: item.totalCount,
-      status: item.status,
       nightTime: item.nightTime,
       isAdvancedSurvey: item.isAdvancedSurvey,
     };
@@ -244,7 +233,7 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
     }
     await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'domcontentloaded', timeout: 30000 }, 1);
 
-    // --- Parse ALL seminars from the main page ---
+    // --- Parse ALL seminars from the main page (only fields actually consumed downstream) ---
     const currentSeminars: RawSeminarData[] = await page.locator('.list_cont').evaluateAll((nodes) => {
       const results: RawSeminarData[] = [];
       nodes.forEach((node) => {
@@ -254,30 +243,19 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
           if (!href) return;
           const name =
             link.querySelector('.list_tit .tit')?.textContent?.trim() || link.textContent?.trim() || '세미나';
-          const tail = link.querySelector('.tail')?.textContent?.trim() || '';
-          const category = link.querySelector('.category')?.textContent?.trim() || '';
           const timeNode = link.querySelector('.txt_num.time');
           const time = timeNode?.textContent?.replace(/\n/g, '').trim() || '';
           const nightTime = timeNode ? timeNode.classList.contains('night_time') : false;
-
-          let status: 'completed' | 'open' | 'closed' = 'open';
-          if (link.querySelector('.ico_completion')) status = 'completed';
-          else if (link.querySelector('.ico_finish')) status = 'closed';
-
           const personNode = link.querySelector('.person');
           const currentCount = personNode?.querySelector('.txt_num')?.textContent?.trim() || '';
           const totalCount = personNode?.querySelector('.total .txt_num')?.textContent?.replace(/\//g, '').trim() || '';
-
           results.push({
             url: href,
             name,
             date,
             time,
-            tail,
-            category,
             currentCount,
             totalCount,
-            status,
             nightTime,
             isAdvancedSurvey: !!link.querySelector('.ic_survey'),
           });

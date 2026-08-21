@@ -28,6 +28,7 @@ function decodeHtmlEntities(text: string): string {
 
 /**
  * HTML fixture로부터 .list_cont 노드들을 파싱하는 가벼운 DOM 구조 모델
+ * (production parser와 동일하게 실제로 사용되는 필드만 보관)
  */
 type MockNode = {
   date: string;
@@ -39,11 +40,6 @@ type MockNode = {
     isAdvancedSurvey: boolean;
     currentCount: string;
     totalCount: string;
-    isCompletion: boolean;
-    isApply: boolean;
-    category: string;
-    tail: string;
-    status: 'completed' | 'open' | 'closed';
     nightTime: boolean;
   }>;
 };
@@ -60,7 +56,7 @@ function parseFixtureHtml(html: string): MockNode[] {
     const dateMatch = block.match(/<em class="txt_num date">([^<]+)<\/em>/);
     const date = dateMatch ? dateMatch[1].trim() : '';
 
-    // 세미나 링크 항목 추출 (<a href="..." class="list_detail"> ... </a>)
+    // 세미나 링크 항목 추출 (<a href="..." class="list_detail"> ...</a>)
     const linkRegex = /<a href="([^"]+)" class="list_detail">([\s\S]*?)<\/a>/g;
     const links: MockNode['links'] = [];
 
@@ -69,24 +65,16 @@ function parseFixtureHtml(html: string): MockNode[] {
       const href = linkMatch[1];
       const content = linkMatch[2];
 
-      // 시간 추출 (<span class="txt_num time ...">...</span>)
+      // 시간 추출 (<span class="txt_num time ..."></span>)
       const timeMatch = content.match(/<span class="txt_num time ([^"]*)">([\s\S]*?)<\/span>/);
       const timeClass = timeMatch ? timeMatch[1].trim() : '';
       const rawTime = timeMatch ? timeMatch[2].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim() : '';
       const time = rawTime.replace(/\s*~\s*/, '~');
       const nightTime = timeClass.includes('night_time');
 
-      // 제목 추출 (<p class="tit"> ... </p>)
+      // 제목 추출 (<p class="tit"> ...</p>)
       const titMatch = content.match(/<p class="tit">([\s\S]*?)<\/p>/);
       const title = titMatch ? decodeHtmlEntities(titMatch[1].replace(/\s+/g, ' ').trim()) : '';
-
-      // 카테고리 추출 (<span class="category"> ... </span>)
-      const categoryMatch = content.match(/<span class="category">([^<]+)<\/span>/);
-      const category = categoryMatch ? categoryMatch[1].trim() : '';
-
-      // 연자/꼬리말 추출 (<span class="tail"> ... </span>)
-      const tailMatch = content.match(/<span class="tail">([\s\S]*?)<\/span>/);
-      const tail = tailMatch ? tailMatch[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim() : '';
 
       // 심화설문 여부
       const isAdvancedSurvey =
@@ -97,11 +85,6 @@ function parseFixtureHtml(html: string): MockNode[] {
       const currentCount = personMatch ? personMatch[1] : '';
       const totalCount = personMatch ? personMatch[2] : '';
 
-      // 상태 확인
-      let status: 'completed' | 'open' | 'closed' = 'open';
-      if (content.includes('ico_completion') || content.includes('신청완료')) status = 'completed';
-      else if (content.includes('ico_finish') || content.includes('신청마감')) status = 'closed';
-
       links.push({
         href,
         title,
@@ -110,11 +93,6 @@ function parseFixtureHtml(html: string): MockNode[] {
         isAdvancedSurvey,
         currentCount,
         totalCount,
-        isCompletion: status === 'completed',
-        isApply: status === 'open',
-        category,
-        tail,
-        status,
         nightTime,
       });
     }
@@ -375,13 +353,11 @@ function testApplySeminarParsing(nodes: MockNode[]) {
   console.log('--- [Test 4] apply_seminar / refresh: 전체 25개 세미나 목록 및 메타 파싱 검증 시작 ---');
 
   let totalSeminars = 0;
-  let completedCount = 0;
   const allSeminarIds: string[] = [];
 
   nodes.forEach((node) => {
     node.links.forEach((link) => {
       totalSeminars++;
-      if (link.isCompletion) completedCount++;
       const match = link.href.match(/seminarId=(\d+)/);
       if (match) allSeminarIds.push(match[1]);
     });
@@ -389,7 +365,6 @@ function testApplySeminarParsing(nodes: MockNode[]) {
 
   // 전체 세미나 개수 검증 (8/18: 8건 + 8/19: 8건 + 8/20: 5건 + 8/21: 3건 + 8/28: 1건 + 9/1: 1건 + 9/2: 1건 = 27건)
   assert.strictEqual(totalSeminars, 27, 'HTML 내 총 세미나 개수는 27개여야 함');
-  assert.strictEqual(completedCount, 27, '27개 세미나 모두 신청완료 상태여야 함');
   assert.strictEqual(allSeminarIds.length, 27, '27개의 seminarId가 정상 추출되어야 함');
 
   // 첫 번째 세미나 검증 (8/18 실리스칸 5552)
@@ -399,9 +374,6 @@ function testApplySeminarParsing(nodes: MockNode[]) {
   assert.strictEqual(first.currentCount, '6067');
   assert.strictEqual(first.totalCount, '7000');
   assert(first.title.includes('실리스칸'));
-  assert(first.category === '소화기질환');
-  assert(first.tail.includes('이동현 교수'));
-  assert(first.status === 'completed');
   assert(first.nightTime === false);
   assert(first.isAdvancedSurvey === false);
 
@@ -413,15 +385,13 @@ function testApplySeminarParsing(nodes: MockNode[]) {
   assert.strictEqual(last.currentCount, '4701');
   assert.strictEqual(last.totalCount, '6500');
   assert(last.title.includes('리브레2'));
-  assert(last.category === '심혈관질환');
-  assert(last.status === 'completed');
   assert(last.nightTime === true);
 
   // 모든 evening 세미나 nightTime 검증
   const eveningSeminars = nodes[0].links.filter((l) => l.nightTime);
   assert(eveningSeminars.length > 0, '밤 시간대 세미나가 존재해야 함');
 
-  console.log('  ✓ 전체 27개 세미나 (신청완료 27/27), 정원, 시간, seminarId, category, tail, status, nightTime 파싱 검증 완료\n');
+  console.log('  ✓ 전체 27개 세미나, 정원, 시간, seminarId, nightTime 파싱 검증 완료\n');
 }
 
 /**
@@ -464,18 +434,15 @@ function testMonitorSeminarsTimeWindow(nodes: MockNode[]) {
 function testNormalizeParsedSeminars(nodes: MockNode[]) {
   console.log('--- [Test 6] apply_seminar: normalizeParsedSeminars 정규화 검증 시작 ---');
 
-  // MockNode[]를 RawSeminarData[] 형태로 변환
+  // MockNode[]를 RawSeminarData[] 형태로 변환 (production parser와 동일 필드만)
   const rawData = nodes.flatMap((node) =>
     node.links.map((link) => ({
       url: link.href,
       name: link.title,
       date: node.date,
       time: link.time,
-      tail: link.tail,
-      category: link.category,
       currentCount: link.currentCount,
       totalCount: link.totalCount,
-      status: link.status,
       nightTime: link.nightTime,
       isAdvancedSurvey: link.isAdvancedSurvey,
     })),
@@ -496,9 +463,6 @@ function testNormalizeParsedSeminars(nodes: MockNode[]) {
   assert.strictEqual(first.time, '12:00~13:00');
   assert.strictEqual(first.currentCount, '6067');
   assert.strictEqual(first.totalCount, '7000');
-  assert(first.tail.includes('이동현 교수'));
-  assert(first.category === '소화기질환');
-  assert(first.status === 'completed');
   assert(first.nightTime === false);
   assert(first.isAdvancedSurvey === false);
 
@@ -531,17 +495,21 @@ function testPointFieldsPreservation() {
   console.log('--- [Test 7] SEMINAR_LIST_KEY 포인트 필드 보존 검증 시작 ---');
 
   // Mock stored data with point fields
-  const existing: (ReturnType<typeof normalizeParsedSeminars>)[number] & { pointPaid?: boolean; point?: number; pointText?: string; pointDate?: string; pointContent?: string; pointCheckedAt?: string } = {
+  const existing: (ReturnType<typeof normalizeParsedSeminars>)[number] & {
+    pointPaid?: boolean;
+    point?: number;
+    pointText?: string;
+    pointDate?: string;
+    pointContent?: string;
+    pointCheckedAt?: string;
+  } = {
     seminarId: '5552',
     name: '[실리스칸] 간장용제의 작용기전과 실리마린의 효능 및 효과',
     url: 'https://www.doctorville.co.kr/seminar/seminarDetail?seminarId=5552',
     date: '2026-08-18',
     time: '12:00~13:00',
-    tail: '이동현 교수(서울보라매병원)',
-    category: '소화기질환',
     currentCount: '6067',
     totalCount: '7000',
-    status: 'completed',
     nightTime: false,
     isAdvancedSurvey: false,
     pointPaid: true,
@@ -560,11 +528,8 @@ function testPointFieldsPreservation() {
         name: '[실리스칸] 간장용제의 작용기전과 실리마린의 효능 및 효과',
         date: '8/18',
         time: '12:00~13:00',
-        tail: '이동현 교수(서울보라매병원)',
-        category: '소화기질환',
         currentCount: '6068', // 인원 수 변경됨
         totalCount: '7000',
-        status: 'completed',
         nightTime: false,
         isAdvancedSurvey: false,
       },
