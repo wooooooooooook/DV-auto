@@ -171,3 +171,96 @@ function testDateParsingAndCustomDateFormat() {
 testTodayLinksFormatWithUserExample();
 testDateParsingAndCustomDateFormat();
 
+/**
+ * 신규 세미나 필터링 로직 테스트 (seminar_list의 detectedDate 기준)
+ * - 전날 detectedDate만 포함
+ * - 오늘 detectedDate 제외
+ * - 이틀 전 detectedDate 제외
+ * - legacy new_seminars 키 없이도 정상 동작
+ */
+function testYesterdayAddedSeminarsFilter() {
+  console.log('--- [Test] 신규 세미나 필터링: detectedDate 기준 전날만 포함 ---\\n');
+
+  const { getYesterdayAddedSeminars } = require('../src/tasks/today_links');
+  const storage = require('../src/services/storage');
+
+  // 테스트용 목 데이터 저장
+  const todayIso = '2026-08-18';
+  const yesterdayIso = '2026-08-17';
+  const twoDaysAgoIso = '2026-08-16';
+
+  // storage를 깨끗이 비우고 테스트 데이터 주입
+  const SEMINAR_LIST_KEY = 'apply_seminar:seminar_list';
+  const testSeminars = [
+    {
+      name: '전날 세미나 (포함됨)',
+      url: 'https://m.doctorville.co.kr/cme/seminar/111',
+      seminarId: '111',
+      isPointExcluded: false,
+      isAdvancedSurvey: false,
+      date: '2026-08-18',
+      time: '13:00~14:00',
+      detectedDate: yesterdayIso,
+      detectedAt: '2026-08-17T10:00:00.000Z',
+    },
+    {
+      name: '오늘 세미나 (제외됨)',
+      url: 'https://m.doctorville.co.kr/cme/seminar/222',
+      seminarId: '222',
+      isPointExcluded: false,
+      isAdvancedSurvey: false,
+      date: '2026-08-18',
+      time: '13:00~14:00',
+      detectedDate: todayIso,
+      detectedAt: '2026-08-18T10:00:00.000Z',
+    },
+    {
+      name: '이틀 전 세미나 (제외됨)',
+      url: 'https://m.doctorville.co.kr/cme/seminar/333',
+      seminarId: '333',
+      isPointExcluded: false,
+      isAdvancedSurvey: false,
+      date: '2026-08-16',
+      time: '13:00~14:00',
+      detectedDate: twoDaysAgoIso,
+      detectedAt: '2026-08-16T10:00:00.000Z',
+    },
+    {
+      name: 'detectedDate 없는 세미나 (제외됨)',
+      url: 'https://m.doctorville.co.kr/cme/seminar/444',
+      seminarId: '444',
+      isPointExcluded: false,
+      isAdvancedSurvey: false,
+      date: '2026-08-18',
+      time: '13:00~14:00',
+    },
+  ];
+
+  storage.set(SEMINAR_LIST_KEY, testSeminars);
+
+  // 실행
+  const result = getYesterdayAddedSeminars(yesterdayIso);
+
+  // 검증: 전날(detectedDate === yesterdayIso)인 것만 1건 포함
+  assert.strictEqual(result.length, 1, '전날 detectedDate 세미나만 1개 포함되어야 함');
+  assert.strictEqual(result[0].name, '전날 세미나 (포함됨)');
+  assert.strictEqual(result[0].seminarId, '111');
+
+  // legacy key가 없어도 에러 없이 동작하는지 확인 (new_seminars 키 사용 안 함)
+  const NEW_SEMINAR_KEY = 'apply_seminar:new_seminars';
+  const legacy = storage.get(NEW_SEMINAR_KEY);
+  assert(legacy === undefined || legacy === null, '레거시 new_seminars 키는 존재하지 않아야 함 (또는 null)');
+
+  console.log('  ✓ 전날 detectedDate 세미나 포함');
+  console.log('  ✓ 오늘 detectedDate 세미나 제외');
+  console.log('  ✓ 이틀 전 detectedDate 세미나 제외');
+  console.log('  ✓ detectedDate 없는 세미나 제외');
+  console.log('  ✓ 레거시 new_seminars 키 없이 정상 동작');
+  console.log('\\n✅ [Pass] 신규 세미나 필터링 로직 검증 통과!\\n');
+
+  // 정리
+  storage.deleteKey(SEMINAR_LIST_KEY);
+}
+
+testYesterdayAddedSeminarsFilter();
+

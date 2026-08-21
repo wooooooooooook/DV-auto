@@ -14,10 +14,10 @@ import * as storage from '../services/storage';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
-const SEMINAR_LIST_KEY = 'apply_seminar:seminar_list';
-const NEW_SEMINAR_KEY = 'apply_seminar:new_seminars';
-export const NEW_SEMINAR_HISTORY_KEY = 'apply_seminar:new_seminars_history';
-const NEW_SEMINAR_HISTORY_RETENTION_DAYS = 60;
+export const SEMINAR_LIST_KEY = 'apply_seminar:seminar_list';
+const LEGACY_NEW_SEMINAR_KEY = 'apply_seminar:new_seminars';
+const LEGACY_HISTORY_KEY = 'apply_seminar:new_seminars_history';
+const SEMINAR_RETENTION_DAYS = 60;
 
 type SeminarPointStatus = {
   pointPaid?: boolean;
@@ -27,6 +27,7 @@ type SeminarPointStatus = {
   pointContent?: string;
   pointCheckedAt?: string;
 };
+
 type SeminarListItem = {
   seminarId: string | null;
   name: string;
@@ -38,18 +39,21 @@ type SeminarListItem = {
   nightTime: boolean;
   isPointExcluded?: boolean;
   isAdvancedSurvey: boolean;
+  detectedDate?: string;
+  detectedAt?: string;
 } & SeminarPointStatus;
-type StoredNewSeminars = { date: string; seminars: Array<SeminarListItem & { seminarId: string | null }> };
-type NewSeminarHistoryEntry = {
-  detectedDate: string;
-  detectedAt: string;
-  seminar: SeminarListItem & { seminarId: string | null };
+
+type LegacyHistoryEntry = {
+  detectedDate?: string;
+  detectedAt?: string;
+  seminar?: SeminarListItem;
 };
 
-/**
- * Raw data extracted from the seminar/main page DOM.
- * Produced by evaluateAll() inside the browser context.
- */
+type LegacyNewSeminars = {
+  date?: string;
+  seminars?: SeminarListItem[];
+};
+
 type RawSeminarData = {
   url: string;
   name: string;
@@ -82,16 +86,14 @@ function normalizeSeminarDate(value: string | undefined, referenceDate: string):
     year = refYear;
     if (month - refMonth > 6) year--;
     else if (refMonth - month > 6) year++;
-  } else return null;
+  } else {
+    return null;
+  }
   const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
   if (month < 1 || month > 12 || day < 1 || day > daysInMonth) return null;
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
-/**
- * Convert raw DOM-parsed seminar data into SeminarListItem[] with canonical dates.
- * Exported for testability — pure function, no side effects.
- */
 export function normalizeParsedSeminars(raw: RawSeminarData[], referenceDate: string): SeminarListItem[] {
   return raw.map((item) => {
     const url = new URL(item.url, SEMINAR_PAGE).toString();
@@ -109,58 +111,132 @@ export function normalizeParsedSeminars(raw: RawSeminarData[], referenceDate: st
   });
 }
 
-function appendNewSeminarsToHistory(
-  items: Array<SeminarListItem & { seminarId: string | null }>,
-  detectedDate: string,
-): void {
-  if (!items.length) return;
-  const history = storage.get<NewSeminarHistoryEntry[]>(NEW_SEMINAR_HISTORY_KEY, []) || [];
-  const existingUrls = new Set(history.map((entry) => entry.seminar.url));
-  const detectedAt = new Date().toISOString();
-  for (const seminar of items) {
-    if (existingUrls.has(seminar.url)) continue;
-    history.push({ detectedDate, detectedAt, seminar });
-    existingUrls.add(seminar.url);
+function seminarKey(seminar: Pick<SeminarListItem, 'url' | 'seminarId'>): string {
+  return seminar.seminarId || seminar.url;
+}
+
+function mergeSeminar(existing: SeminarListItem | undefined, incoming: SeminarListItem): SeminarListItem {
+  return {
+    ...existing,
+    ...incoming,
+    isPointExcluded: incoming.isPointExcluded ?? existing?.isPointExcluded,
+    pointPaid: incoming.pointPaid ?? existing?.pointPaid,
+    point: incoming.point ?? existing?.point,
+    pointText: incoming.pointText ?? existing?.pointText,
+    pointDate: incoming.pointDate ?? existing?.pointDate,
+    pointContent: incoming.pointContent ?? existing?.pointContent,
+    pointCheckedAt: incoming.pointCheckedAt ?? existing?.pointCheckedAt,
+    detectedDate: incoming.detectedDate ?? existing?.detectedDate,
+    detectedAt: incoming.detectedAt ?? existing?.detectedAt,
+  };
+}
+
+function migrateLegacySeminarStorage(referenceDate: string): SeminarListItem[] {
+  const current = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
+  const merged = new Map<string, SeminarListItem>();
+  for (const seminar of current) merged.set(seminarKey(seminar), seminar);
+
+  const legacyHistory = storage.get<LegacyHistoryEntry[]>(LEGACY_HISTORY_KEY, []) || [];
+  for (const entry of legacyHistory) {
+    if (!entry.seminar) continue;
+    const seminar = {
+      ...entry.seminar,
+      detectedDate: entry.seminar.detectedDate ?? entry.detectedDate,
+      detectedAt: entry.seminar.detectedAt ?? entry.detectedAt,
+    };
+    const key = seminarKey(seminar);
+    merged.set(key, mergeSeminar(merged.get(key), seminar));
   }
-  const todayMs = Date.parse(`${detectedDate}T00:00:00+09:00`);
-  const retentionMs = NEW_SEMINAR_HISTORY_RETENTION_DAYS * 24 * 60 * 60 * 1000;
-  const retained = history.filter((entry) => {
-    const normalizedDate = normalizeSeminarDate(entry.seminar.date, entry.detectedDate || detectedDate);
-    const referenceDate = normalizedDate || entry.detectedDate;
-    const entryMs = referenceDate ? Date.parse(`${referenceDate}T00:00:00+09:00`) : NaN;
-    return Number.isNaN(entryMs) || Number.isNaN(todayMs) || todayMs - entryMs <= retentionMs;
+
+  const legacyNew = storage.get<LegacyNewSeminars>(LEGACY_NEW_SEMINAR_KEY);
+  for (const seminar of legacyNew?.seminars || []) {
+    const key = seminarKey(seminar);
+    merged.set(
+      key,
+      mergeSeminar(merged.get(key), {
+        ...seminar,
+        detectedDate: seminar.detectedDate ?? legacyNew?.date,
+      }),
+    );
+  }
+
+  const todayMs = Date.parse(`${referenceDate}T00:00:00+09:00`);
+  const retentionMs = SEMINAR_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  const retained = [...merged.values()].filter((seminar) => {
+    const reference = normalizeSeminarDate(seminar.date, seminar.detectedDate || referenceDate) || seminar.detectedDate;
+    if (!reference) return true;
+    const dateMs = Date.parse(`${reference}T00:00:00+09:00`);
+    return Number.isNaN(dateMs) || Number.isNaN(todayMs) || todayMs - dateMs <= retentionMs;
   });
-  storage.set(NEW_SEMINAR_HISTORY_KEY, retained);
+
+  storage.set(SEMINAR_LIST_KEY, retained);
+  storage.deleteKey(LEGACY_NEW_SEMINAR_KEY);
+  storage.deleteKey(LEGACY_HISTORY_KEY);
+  return retained;
+}
+
+function refreshStoredSeminarList(
+  current: SeminarListItem[],
+  stored: SeminarListItem[],
+  referenceDate: string,
+): { seminars: SeminarListItem[]; newlyAdded: SeminarListItem[] } {
+  const storedByKey = new Map(stored.map((seminar) => [seminarKey(seminar), seminar]));
+  const newlyAdded = current.filter((seminar) => !storedByKey.has(seminarKey(seminar)));
+  const now = new Date().toISOString();
+
+  for (const seminar of current) {
+    const key = seminarKey(seminar);
+    const existing = storedByKey.get(key);
+    storedByKey.set(
+      key,
+      mergeSeminar(existing, {
+        ...seminar,
+        detectedDate: existing?.detectedDate ?? referenceDate,
+        detectedAt: existing?.detectedAt ?? now,
+      }),
+    );
+  }
+
+  const todayMs = Date.parse(`${referenceDate}T00:00:00+09:00`);
+  const retentionMs = SEMINAR_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  const seminars = [...storedByKey.values()].filter((seminar) => {
+    const reference = normalizeSeminarDate(seminar.date, seminar.detectedDate || referenceDate) || seminar.detectedDate;
+    if (!reference) return true;
+    const dateMs = Date.parse(`${reference}T00:00:00+09:00`);
+    return Number.isNaN(dateMs) || Number.isNaN(todayMs) || todayMs - dateMs <= retentionMs;
+  });
+
+  storage.set(SEMINAR_LIST_KEY, seminars);
+  return { seminars, newlyAdded };
 }
 
 async function refreshAdvancedPointStatus(
   context: PlaywrightRunArgs['context'],
+  seminars: SeminarListItem[],
 ): Promise<Map<string, SeminarPointStatus>> {
-  const history = storage.get<NewSeminarHistoryEntry[]>(NEW_SEMINAR_HISTORY_KEY, []) || [];
-  const targets = history
-    .map((entry) => entry.seminar)
-    .filter(
-      (seminar) =>
-        seminar.isAdvancedSurvey && !seminar.pointPaid && !seminar.isPointExcluded && getSeminarIdFromUrl(seminar.url),
-    );
+  const targets = seminars.filter(
+    (seminar) =>
+      seminar.isAdvancedSurvey && !seminar.pointPaid && !seminar.isPointExcluded && getSeminarIdFromUrl(seminar.url),
+  );
   if (!targets.length) return new Map();
+
   const ids = [
     ...new Set(targets.map((seminar) => getSeminarIdFromUrl(seminar.url)).filter((id): id is string => !!id)),
   ];
   const results = await searchSeminarPoints(context, ids, 60);
   const statuses = new Map<string, SeminarPointStatus>();
   const checkedAt = new Date().toISOString();
+
   for (const seminar of targets) {
     const id = getSeminarIdFromUrl(seminar.url);
     if (!id) continue;
     const result = results.get(id);
-    if (!result?.found) continue;
-    statuses.set(seminar.url, {
-      pointPaid: result.type === '적립',
-      point: result.point,
-      pointText: result.pointText,
-      pointDate: result.date,
-      pointContent: result.content,
+    statuses.set(seminarKey(seminar), {
+      pointPaid: result?.found === true && result.type === '적립',
+      point: result?.point,
+      pointText: result?.pointText,
+      pointDate: result?.date,
+      pointContent: result?.content,
       pointCheckedAt: checkedAt,
     });
   }
@@ -169,22 +245,14 @@ async function refreshAdvancedPointStatus(
 
 function updateStoredPointStatuses(statuses: Map<string, SeminarPointStatus>): void {
   if (!statuses.size) return;
-  const history = storage.get<NewSeminarHistoryEntry[]>(NEW_SEMINAR_HISTORY_KEY, []) || [];
-  storage.set(
-    NEW_SEMINAR_HISTORY_KEY,
-    history.map((entry) => ({ ...entry, seminar: { ...entry.seminar, ...(statuses.get(entry.seminar.url) || {}) } })),
-  );
-  const storedSeminars = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
+  const seminars = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
   storage.set(
     SEMINAR_LIST_KEY,
-    storedSeminars.map((item) => ({ ...item, ...(statuses.get(item.url) || {}) })),
+    seminars.map((seminar) => ({
+      ...seminar,
+      ...(statuses.get(seminarKey(seminar)) || {}),
+    })),
   );
-  const storedNew = storage.get<StoredNewSeminars>(NEW_SEMINAR_KEY);
-  if (storedNew)
-    storage.set(NEW_SEMINAR_KEY, {
-      ...storedNew,
-      seminars: storedNew.seminars.map((item) => ({ ...item, ...(statuses.get(item.url) || {}) })),
-    });
 }
 
 type ApplySeminarOptions = {
@@ -193,6 +261,7 @@ type ApplySeminarOptions = {
   silentIfNoNew?: boolean;
   checkAdvancedPointStatus?: boolean;
 };
+
 async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOptions = {}): Promise<TaskResult> {
   let screenshotPath: string | null = null;
   const {
@@ -200,6 +269,7 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
     notifyNewSeminarsToTelegram = true,
     checkAdvancedPointStatus = false,
   } = options;
+
   try {
     await ensureLoggedIn({ page, context: context ?? page.context() });
 
@@ -212,6 +282,7 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
       nodes.map((n) => ({ href: n.getAttribute('href'), text: (n.textContent || '').trim() })),
     );
     const attemptedApplyCount = items.length;
+
     for (const item of items) {
       await safeGoto(page, item.href, { waitUntil: 'load', timeout: 30000 }, 1);
       await page.click('a#applyLiveSeminarMemberBtn', { timeout: 5000 }).catch(() => {});
@@ -231,9 +302,9 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
       } catch {}
       await page.waitForTimeout(500);
     }
+
     await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'domcontentloaded', timeout: 30000 }, 1);
 
-    // --- Parse ALL seminars from the main page (only fields actually consumed downstream) ---
     const currentSeminars: RawSeminarData[] = await page.locator('.list_cont').evaluateAll((nodes) => {
       const results: RawSeminarData[] = [];
       nodes.forEach((node) => {
@@ -266,109 +337,62 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
 
     const referenceDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
     const normalizedCurrentSeminars = normalizeParsedSeminars(currentSeminars, referenceDate);
+    const storedSeminars = migrateLegacySeminarStorage(referenceDate);
+    const { seminars, newlyAdded } = refreshStoredSeminarList(normalizedCurrentSeminars, storedSeminars, referenceDate);
 
-    const storedSeminars = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
-    const storedByUrl = new Map(storedSeminars.map((s) => [s.url, s]));
-
-    let newlyAddedCount = 0;
-    let newlyAddedWithFlags: Array<SeminarListItem & { seminarId: string | null }> = [];
-    if (storedSeminars.length > 0) {
-      const storedUrls = new Set(storedSeminars.map((item) => item.url));
-      const newlyAdded = normalizedCurrentSeminars.filter((item) => !storedUrls.has(item.url));
-      newlyAddedCount = newlyAdded.length;
-      if (newlyAdded.length > 0) {
-        for (const item of newlyAdded) {
-          const seminarId = getSeminarIdFromUrl(item.url);
-          const link = seminarId ? `${SEMINAR_DETAIL_PAGE}${seminarId}` : item.url;
-          let isPointExcluded = await isSurveyPointExcludedSeminar(page.context(), link);
-          if (!isPointExcluded) {
-            await page.waitForTimeout(800);
-            isPointExcluded = await isSurveyPointExcludedSeminar(page.context(), link);
-          }
-          newlyAddedWithFlags.push({ ...item, seminarId, isPointExcluded });
+    if (newlyAdded.length > 0) {
+      const newlyAddedWithFlags: SeminarListItem[] = [];
+      for (const item of newlyAdded) {
+        const seminarId = getSeminarIdFromUrl(item.url);
+        const link = seminarId ? `${SEMINAR_DETAIL_PAGE}${seminarId}` : item.url;
+        let isPointExcluded = await isSurveyPointExcludedSeminar(page.context(), link);
+        if (!isPointExcluded) {
+          await page.waitForTimeout(800);
+          isPointExcluded = await isSurveyPointExcludedSeminar(page.context(), link);
         }
-        const newSeminarMessage = newlyAdded
-          .map((item) => {
-            const matched = newlyAddedWithFlags.find((flagged) => flagged.url === item.url);
-            const pointExcludedSuffix = matched?.isPointExcluded ? ' [포인트미지급]' : '';
-            const advancedSurveySuffix = item.isAdvancedSurvey ? ' [심화설문]' : '';
-            const dateTimePrefix = item.date || item.time ? `[${item.date}${item.time ? ' ' + item.time : ''}] ` : '';
-            const capacityInfo =
-              item.currentCount && item.totalCount ? `(${item.currentCount}/${item.totalCount}) ` : '';
-            return `${dateTimePrefix}${pointExcludedSuffix}${advancedSurveySuffix}${item.name}${capacityInfo}\n${item.url}`;
-          })
-          .join('\n\n');
-        const noticeMessage = `🆕 새로 추가된 세미나 ${newlyAdded.length}건 발견\n\n${newSeminarMessage}`;
-        if (notifyNewSeminarsToTelegram) await sendTelegram(noticeMessage);
-        if (notifyNewSeminarsToChannel) await sendNotificationToChannel(noticeMessage);
-        const storedNew = storage.get<StoredNewSeminars>(NEW_SEMINAR_KEY);
-        const baseSeminars = storedNew?.date === referenceDate ? storedNew.seminars : [];
-        const merged = [...baseSeminars];
-        const existingUrls = new Set(baseSeminars.map((item) => item.url));
-        for (const item of newlyAddedWithFlags)
-          if (!existingUrls.has(item.url)) {
-            merged.push(item);
-            existingUrls.add(item.url);
-          }
-        storage.set(NEW_SEMINAR_KEY, { date: referenceDate, seminars: merged });
-        appendNewSeminarsToHistory(newlyAddedWithFlags, referenceDate);
+        newlyAddedWithFlags.push({ ...item, seminarId, isPointExcluded });
       }
+
+      const flaggedByKey = new Map(newlyAddedWithFlags.map((item) => [seminarKey(item), item]));
+      const updatedSeminars = seminars.map((seminar) =>
+        flaggedByKey.has(seminarKey(seminar)) ? mergeSeminar(seminar, flaggedByKey.get(seminarKey(seminar))!) : seminar,
+      );
+      storage.set(SEMINAR_LIST_KEY, updatedSeminars);
+
+      const newSeminarMessage = newlyAddedWithFlags
+        .map((item) => {
+          const pointExcludedSuffix = item.isPointExcluded ? ' [포인트미지급]' : '';
+          const advancedSurveySuffix = item.isAdvancedSurvey ? ' [심화설문]' : '';
+          const dateTimePrefix = item.date || item.time ? `[${item.date}${item.time ? ' ' + item.time : ''}] ` : '';
+          const capacityInfo = item.currentCount && item.totalCount ? `(${item.currentCount}/${item.totalCount}) ` : '';
+          return `${dateTimePrefix}${pointExcludedSuffix}${advancedSurveySuffix}${item.name}${capacityInfo}\n${item.url}`;
+        })
+        .join('\n\n');
+      const noticeMessage = `🆕 새로 추가된 세미나 ${newlyAddedWithFlags.length}건 발견\n\n${newSeminarMessage}`;
+      if (notifyNewSeminarsToTelegram) await sendTelegram(noticeMessage);
+      if (notifyNewSeminarsToChannel) await sendNotificationToChannel(noticeMessage);
     }
 
-    // Update history with all current seminars (preserving point fields from stored)
-    const historyItems: Array<SeminarListItem & { seminarId: string | null }> = normalizedCurrentSeminars.map(
-      (item) => {
-        const existing = storedByUrl.get(item.url);
-        const newlyAdded = newlyAddedWithFlags.find((n) => n.url === item.url);
-        return {
-          ...item,
-          seminarId: item.seminarId,
-          isPointExcluded: existing?.isPointExcluded ?? newlyAdded?.isPointExcluded,
-          pointPaid: existing?.pointPaid,
-          point: existing?.point,
-          pointText: existing?.pointText,
-          pointDate: existing?.pointDate,
-          pointContent: existing?.pointContent,
-          pointCheckedAt: existing?.pointCheckedAt,
-        };
-      },
-    );
-    appendNewSeminarsToHistory(historyItems, referenceDate);
-
-    // Merge: current page data is primary, preserve point fields from existing stored data
-    const finalSeminarsToStore: SeminarListItem[] = normalizedCurrentSeminars.map((item) => {
-      const existing = storedByUrl.get(item.url);
-      if (!existing) return item;
-      return {
-        ...item,
-        isPointExcluded: existing.isPointExcluded,
-        pointPaid: existing.pointPaid,
-        point: existing.point,
-        pointText: existing.pointText,
-        pointDate: existing.pointDate,
-        pointContent: existing.pointContent,
-        pointCheckedAt: existing.pointCheckedAt,
-      };
-    });
-    storage.set(SEMINAR_LIST_KEY, finalSeminarsToStore);
-
+    const finalSeminars = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
     if (checkAdvancedPointStatus) {
-      const statuses = await refreshAdvancedPointStatus(context);
+      const statuses = await refreshAdvancedPointStatus(context, finalSeminars);
       updateStoredPointStatuses(statuses);
-      if (statuses.size > 0) console.log(`advanced seminar point status updated from history: ${statuses.size}`);
+      if (statuses.size > 0) console.log(`advanced seminar point status updated: ${statuses.size}`);
     }
+
     const appliedCount = await page.locator('a:has(.ico_completion)').count();
     let message = `✅ ${appliedCount}개 세미나 신청 완료! (${appliedCount}/${totalSeminarsAvailable})`;
     const failedToApplyCount = attemptedApplyCount - appliedCount;
     if (failedToApplyCount > 0) message += `\n (${failedToApplyCount}개는 마감 등의 사유로 신청 실패)`;
     if (closedCount > 0) message += `\n ${closedCount}개는 신청 마감되어 신청하지 못했습니다.`;
+
     const baseScreenshotDir = path.join(process.cwd(), 'screenshot');
     await fs.mkdir(baseScreenshotDir, { recursive: true });
     screenshotPath = path.join(baseScreenshotDir, 'apply_seminar_result.png');
     await page.screenshot({ path: screenshotPath, fullPage: false });
     message += `\n${SEMINAR_DETAIL_PAGE}`;
     const result: TaskResult = { success: true, message, imagePath: screenshotPath };
-    if (options.silentIfNoNew && newlyAddedCount === 0) result.silent = true;
+    if (options.silentIfNoNew && newlyAdded.length === 0) result.silent = true;
     return result;
   } catch (error) {
     console.error(
@@ -379,7 +403,6 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
       const baseScreenshotDir = path.join(process.cwd(), 'screenshot');
       await fs.mkdir(baseScreenshotDir, { recursive: true });
       screenshotPath = path.join(baseScreenshotDir, 'apply_seminar_error.png');
-      await fs.mkdir(baseScreenshotDir, { recursive: true }).catch(() => {});
       await page.screenshot({ path: screenshotPath, fullPage: false }).catch(() => {});
     }
     const message = error instanceof Error ? error.message : String(error);

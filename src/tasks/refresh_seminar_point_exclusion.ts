@@ -13,7 +13,6 @@ import path from 'path';
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
 const SEMINAR_LIST_KEY = 'apply_seminar:seminar_list';
-const NEW_SEMINAR_KEY = 'apply_seminar:new_seminars';
 
 type SeminarListItem = {
   name: string;
@@ -112,32 +111,21 @@ async function run({ page }: PlaywrightRunArgs): Promise<TaskResult> {
       });
     }
 
-    storage.set(SEMINAR_LIST_KEY, refreshed);
+    // Merge: update isPointExcluded and keep other fields (like pointPaid, etc.) in storage
+    const storedSeminars = storage.get<any[]>(SEMINAR_LIST_KEY, []) || [];
+    const refreshedMap = new Map(refreshed.map((item) => [getSeminarIdFromUrl(item.url) || item.url, item]));
+    const finalToStore = storedSeminars.map((seminar) => {
+      const key = getSeminarIdFromUrl(seminar.url) || seminar.url;
+      const matched = refreshedMap.get(key);
+      if (!matched) return seminar;
+      return {
+        ...seminar,
+        isPointExcluded: matched.isPointExcluded,
+        isAdvancedSurvey: matched.isAdvancedSurvey,
+      };
+    });
 
-    const storedNew = storage.get<StoredNewSeminars>(NEW_SEMINAR_KEY);
-    if (storedNew?.seminars?.length) {
-      const refreshedNewSeminars = storedNew.seminars.map((seminar) => {
-        const seminarId = seminar.seminarId || getSeminarIdFromUrl(seminar.url);
-        const matched = refreshed.find((item) => {
-          const itemId = getSeminarIdFromUrl(item.url);
-          if (seminarId && itemId) return seminarId === itemId;
-          return item.url === seminar.url;
-        });
-
-        if (!matched) return seminar;
-
-        return {
-          ...seminar,
-          isPointExcluded: matched.isPointExcluded,
-          isAdvancedSurvey: matched.isAdvancedSurvey,
-        };
-      });
-
-      storage.set(NEW_SEMINAR_KEY, {
-        ...storedNew,
-        seminars: refreshedNewSeminars,
-      });
-    }
+    storage.set(SEMINAR_LIST_KEY, finalToStore);
 
     const excludedCount = refreshed.filter((item) => item.isPointExcluded).length;
     return {
