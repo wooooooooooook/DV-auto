@@ -311,7 +311,9 @@ const checkSeminarPointTask: Task = {
       } else if (ctx.args?.seminarId) seminarIds = [ctx.args.seminarId];
       if (seminarIds.length === 0)
         return { success: false, message: '세미나 번호가 필요합니다. 예: /check_seminar_point 12345' };
-      const results = await checkSeminarPointTaskModule.searchSeminarPoints(context, seminarIds, 60);
+      const searchRes = await checkSeminarPointTaskModule.searchSeminarPoints(context, seminarIds, 60);
+      if (!searchRes.success) return { success: false, message: `포인트 조회 실패: ${searchRes.error || '조회 실패'}` };
+      const results = searchRes.points;
       const messages: string[] = [];
       for (const seminarId of seminarIds) {
         const r = results.get(seminarId);

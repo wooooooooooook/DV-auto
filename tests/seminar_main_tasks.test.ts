@@ -1,9 +1,12 @@
+import type { PlaywrightRunArgs } from "../src/types";
+import { refreshSeminarPointStatus, mergeSeminar, type SeminarListItem } from '../src/tasks/apply_seminar';
+import * as checkSeminarPointModule from '../src/tasks/check_seminar_point';
+import * as storage from '../src/services/storage';
 import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
   getTodayDateStrings,
-  parseTargetDate,
   isDateMatching,
   formatTodayLinksBroadcast,
   type DateTarget,
@@ -68,7 +71,12 @@ function parseFixtureHtml(html: string): MockNode[] {
       // 시간 추출 (<span class="txt_num time ..."></span>)
       const timeMatch = content.match(/<span class="txt_num time ([^"]*)">([\s\S]*?)<\/span>/);
       const timeClass = timeMatch ? timeMatch[1].trim() : '';
-      const rawTime = timeMatch ? timeMatch[2].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim() : '';
+      const rawTime = timeMatch
+        ? timeMatch[2]
+            .replace(/<[^>]+>/g, '')
+            .replace(/\s+/g, ' ')
+            .trim()
+        : '';
       const time = rawTime.replace(/\s*~\s*/, '~');
       const nightTime = timeClass.includes('night_time');
 
@@ -337,9 +345,7 @@ function testPointExcludedFormatting() {
     '일반 세미나 정상 표시 검증',
   );
   assert(
-    message.includes(
-      '<s>ChatGPT 실용 입문 — AI로 알아보고, 읽고, 만들고, 검증하기</s> 🚫[포인트미지급]',
-    ),
+    message.includes('<s>ChatGPT 실용 입문 — AI로 알아보고, 읽고, 만들고, 검증하기</s> 🚫[포인트미지급]'),
     '신규 세미나 포인트미지급 취소선 태그 검증',
   );
 
@@ -495,7 +501,7 @@ function testPointFieldsPreservation() {
   console.log('--- [Test 7] SEMINAR_LIST_KEY 포인트 필드 보존 검증 시작 ---');
 
   // Mock stored data with point fields
-  const existing: (ReturnType<typeof normalizeParsedSeminars>)[number] & {
+  const existing: ReturnType<typeof normalizeParsedSeminars>[number] & {
     pointPaid?: boolean;
     point?: number;
     pointText?: string;
@@ -560,7 +566,153 @@ function testPointFieldsPreservation() {
   console.log('  ✓ 포인트 필드 보존 로직 검증 완료\n');
 }
 
-function runAllFixtureTests() {
+async function testPointSyncRequirements() {
+  console.log('--- [Test 8] 포인트 sync 및 seminar_list merge 단일 저장소 요구사항 검증 시작 ---');
+
+  const mockParsedPoints = new Map<string, checkSeminarPointModule.SeminarPointResult>([
+    [
+      '5570',
+      {
+        found: true,
+        point: 500,
+        pointText: '+ 500 P',
+        date: '2026-08-18',
+        content: '8/18 설문 포인트 5570',
+        type: '적립',
+      },
+    ],
+    [
+      '5580',
+      {
+        found: true,
+        point: 300,
+        pointText: '+ 300 P',
+        date: '2026-08-19',
+        content: '8/19 설문 포인트 5580',
+        type: '적립',
+      },
+    ],
+  ]);
+
+  const originalSearchSeminarPoints = checkSeminarPointModule.searchSeminarPoints;
+  (checkSeminarPointModule as unknown as { searchSeminarPoints: unknown }).searchSeminarPoints = async () => ({ success: true, points: mockParsedPoints });
+
+  try {
+    const mockContext = {} as unknown as PlaywrightRunArgs['context'];
+
+    const initialSeminars: SeminarListItem[] = [
+      {
+        seminarId: '5570',
+        name: '5570 세미나',
+        url: 'https://m.doctorville.co.kr/cme/seminar/5570',
+        time: '13:00~14:00',
+        currentCount: '10',
+        totalCount: '100',
+        nightTime: false,
+        isAdvancedSurvey: true,
+      },
+      {
+        seminarId: '5571',
+        name: '5571 세미나',
+        url: 'https://m.doctorville.co.kr/cme/seminar/5571',
+        time: '13:00~14:00',
+        currentCount: '10',
+        totalCount: '100',
+        nightTime: false,
+        isAdvancedSurvey: true,
+      },
+      {
+        seminarId: '5572',
+        name: '5572 이미 지급된 세미나',
+        url: 'https://m.doctorville.co.kr/cme/seminar/5572',
+        time: '18:00~19:00',
+        currentCount: '50',
+        totalCount: '100',
+        nightTime: true,
+        isAdvancedSurvey: true,
+        pointPaid: true,
+        point: 1000,
+        pointText: '+ 1,000 P',
+        pointDate: '2026-08-10',
+        pointCheckedAt: '2026-08-10T10:00:00.000Z',
+      },
+    ];
+
+    const synced = await refreshSeminarPointStatus(mockContext, initialSeminars);
+
+    const sem5572 = synced.find((s) => s.seminarId === '5572');
+    assert(sem5572?.pointPaid === true);
+    assert.strictEqual(sem5572?.point, 1000);
+    assert.strictEqual(sem5572?.pointCheckedAt, '2026-08-10T10:00:00.000Z');
+    console.log('  ✓ [Req 1 & 5] pointPaid=true 세미나는 조회 대상 제외 및 정보 보존 (5572)');
+
+    const sem5570 = synced.find((s) => s.seminarId === '5570');
+    assert(sem5570?.pointPaid === true);
+    assert.strictEqual(sem5570?.point, 500);
+    assert.strictEqual(sem5570?.pointText, '+ 500 P');
+    assert.strictEqual(sem5570?.pointDate, '2026-08-18');
+    assert(sem5570?.pointCheckedAt !== undefined);
+    console.log('  ✓ [Req 2] pointPaid 없는 세미나가 포인트 테이블에 있으면 pointPaid=true 및 정보/시각 기록 (5570)');
+
+    const sem5571 = synced.find((s) => s.seminarId === '5571');
+    assert(sem5571?.pointPaid === false);
+    assert(sem5571?.pointCheckedAt !== undefined);
+    console.log(
+      '  ✓ [Req 3] pointPaid 없는 세미나가 포인트 테이블에 없으면 pointPaid=false 및 pointCheckedAt 기록 (5571)',
+    );
+
+    mockParsedPoints.set('5571', {
+      found: true,
+      point: 700,
+      pointText: '+ 700 P',
+      date: '2026-08-20',
+      content: '8/20 설문 포인트 5571',
+      type: '적립',
+    });
+
+    const synced2 = await refreshSeminarPointStatus(mockContext, synced);
+    const sem5571After = synced2.find((s) => s.seminarId === '5571');
+    assert(sem5571After?.pointPaid === true);
+    assert.strictEqual(sem5571After?.point, 700);
+    console.log('  ✓ [Req 4] pointPaid=false 세미나는 다음 실행에서 다시 조회되어 업데이트됨 (5571)');
+
+    const sem5580 = synced.find((s) => s.seminarId === '5580');
+    assert(sem5580 !== undefined, '포인트 테이블 전용 세미나 5580이 신규 추가되어야 함');
+    assert.strictEqual(sem5580?.pointPaid, true);
+    assert.strictEqual(sem5580?.point, 300);
+    assert.strictEqual(sem5580?.name, '', '알 수 없는 세미나 메타데이터는 기본값');
+    assert.strictEqual(sem5580?.isAdvancedSurvey, false);
+    console.log('  ✓ [Req 6 & 7] 포인트 테이블에만 존재하는 세미나(5580) 새 항목 생성 및 기본값 유지');
+
+    const fresh5580: SeminarListItem = {
+      seminarId: '5580',
+      name: '5580 나중에 수집된 세미나',
+      url: 'https://m.doctorville.co.kr/cme/seminar/5580',
+      date: '2026-08-19',
+      time: '12:00~13:00',
+      currentCount: '30',
+      totalCount: '50',
+      nightTime: false,
+      isAdvancedSurvey: true,
+    };
+
+    const merged5580 = mergeSeminar(sem5580, fresh5580);
+    assert.strictEqual(merged5580.name, '5580 나중에 수집된 세미나');
+    assert.strictEqual(merged5580.isAdvancedSurvey, true);
+    assert.strictEqual(merged5580.pointPaid, true, '기존 포인트 정보 유지');
+    assert.strictEqual(merged5580.point, 300, '기존 포인트 액수 유지');
+    console.log('  ✓ [Req 8] 나중에 같은 ID의 세미나가 수집되면 포인트 정보 보존하며 메타데이터 보완 (5580)');
+
+    assert.strictEqual(storage.get('apply_seminar:new_seminars'), null);
+    assert.strictEqual(storage.get('apply_seminar:new_seminars_history'), null);
+    console.log('  ✓ [Req 10] 레거시 new_seminars, new_seminars_history 키 사용 안 함');
+  } finally {
+    (checkSeminarPointModule as unknown as { searchSeminarPoints: unknown }).searchSeminarPoints =
+      originalSearchSeminarPoints;
+  }
+}
+
+async function runAllFixtureTests() {
   console.log('===========================================================');
   console.log('  닥터빌 세미나 메인 페이지 (/seminar/main) 기능 통합 테스트');
   console.log('===========================================================\n');
@@ -575,8 +727,12 @@ function runAllFixtureTests() {
   testMonitorSeminarsTimeWindow(nodes);
   testNormalizeParsedSeminars(nodes);
   testPointFieldsPreservation();
+  await testPointSyncRequirements();
 
   console.log('🎉 모든 세미나 메인 페이지 (/seminar/main) 기능 테스트를 100% 성공적으로 통과했습니다!\n');
 }
 
-runAllFixtureTests();
+runAllFixtureTests().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
