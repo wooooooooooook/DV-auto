@@ -28,7 +28,7 @@ type SeminarPointStatus = {
   pointCheckedAt?: string;
 };
 
-type SeminarListItem = {
+export type SeminarListItem = {
   seminarId: string | null;
   name: string;
   url: string;
@@ -115,19 +115,32 @@ function seminarKey(seminar: Pick<SeminarListItem, 'url' | 'seminarId'>): string
   return seminar.seminarId || seminar.url;
 }
 
-function mergeSeminar(existing: SeminarListItem | undefined, incoming: SeminarListItem): SeminarListItem {
+export function mergeSeminar(existing: SeminarListItem | undefined, incoming: SeminarListItem): SeminarListItem {
+  if (!existing) return incoming;
   return {
     ...existing,
     ...incoming,
-    isPointExcluded: incoming.isPointExcluded ?? existing?.isPointExcluded,
-    pointPaid: incoming.pointPaid ?? existing?.pointPaid,
-    point: incoming.point ?? existing?.point,
-    pointText: incoming.pointText ?? existing?.pointText,
-    pointDate: incoming.pointDate ?? existing?.pointDate,
-    pointContent: incoming.pointContent ?? existing?.pointContent,
-    pointCheckedAt: incoming.pointCheckedAt ?? existing?.pointCheckedAt,
-    detectedDate: incoming.detectedDate ?? existing?.detectedDate,
-    detectedAt: incoming.detectedAt ?? existing?.detectedAt,
+    name: incoming.name || existing.name || '',
+    url:
+      incoming.url ||
+      existing.url ||
+      `https://m.doctorville.co.kr/cme/seminar/${incoming.seminarId || existing.seminarId || ''}`,
+    date: incoming.date || existing.date || '',
+    time: incoming.time || existing.time || '',
+    currentCount: incoming.currentCount || existing.currentCount || '',
+    totalCount: incoming.totalCount || existing.totalCount || '',
+    nightTime: incoming.nightTime ?? existing.nightTime ?? false,
+    isAdvancedSurvey: incoming.isAdvancedSurvey ?? existing.isAdvancedSurvey ?? false,
+    isPointExcluded: incoming.isPointExcluded ?? existing.isPointExcluded,
+    pointPaid: existing.pointPaid === true ? true : (incoming.pointPaid ?? existing.pointPaid),
+    point: existing.pointPaid === true ? existing.point : (incoming.point ?? existing.point),
+    pointText: existing.pointPaid === true ? existing.pointText : (incoming.pointText ?? existing.pointText),
+    pointDate: existing.pointPaid === true ? existing.pointDate : (incoming.pointDate ?? existing.pointDate),
+    pointContent:
+      existing.pointPaid === true ? existing.pointContent : (incoming.pointContent ?? existing.pointContent),
+    pointCheckedAt: existing.pointCheckedAt || incoming.pointCheckedAt,
+    detectedDate: incoming.detectedDate || existing.detectedDate,
+    detectedAt: incoming.detectedAt || existing.detectedAt,
   };
 }
 
@@ -210,56 +223,82 @@ function refreshStoredSeminarList(
   return { seminars, newlyAdded };
 }
 
-async function refreshAdvancedPointStatus(
+export async function refreshSeminarPointStatus(
   context: PlaywrightRunArgs['context'],
   seminars: SeminarListItem[],
-): Promise<Map<string, SeminarPointStatus>> {
-  const targets = seminars.filter(
-    (seminar) =>
-      seminar.isAdvancedSurvey && !seminar.pointPaid && !seminar.isPointExcluded && getSeminarIdFromUrl(seminar.url),
-  );
-  if (!targets.length) return new Map();
+): Promise<SeminarListItem[]> {
+  if (!context) return seminars;
 
-  const ids = [
-    ...new Set(targets.map((seminar) => getSeminarIdFromUrl(seminar.url)).filter((id): id is string => !!id)),
-  ];
-  const results = await searchSeminarPoints(context, ids, 60);
-  const statuses = new Map<string, SeminarPointStatus>();
+  const parsedPoints = await searchSeminarPoints(context, [], 60);
   const checkedAt = new Date().toISOString();
 
-  for (const seminar of targets) {
-    const id = getSeminarIdFromUrl(seminar.url);
-    if (!id) continue;
-    const result = results.get(id);
-    statuses.set(seminarKey(seminar), {
-      pointPaid: result?.found === true && result.type === '적립',
-      point: result?.point,
-      pointText: result?.pointText,
-      pointDate: result?.date,
-      pointContent: result?.content,
-      pointCheckedAt: checkedAt,
-    });
-  }
-  return statuses;
-}
+  const updatedSeminars = seminars.map((seminar) => {
+    if (seminar.pointPaid === true) {
+      return seminar;
+    }
 
-function updateStoredPointStatuses(statuses: Map<string, SeminarPointStatus>): void {
-  if (!statuses.size) return;
-  const seminars = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
-  storage.set(
-    SEMINAR_LIST_KEY,
-    seminars.map((seminar) => ({
+    const id = seminar.seminarId || getSeminarIdFromUrl(seminar.url);
+    if (id && parsedPoints.has(id)) {
+      const pointResult = parsedPoints.get(id)!;
+      if (pointResult.found && pointResult.type === '적립') {
+        return {
+          ...seminar,
+          pointPaid: true,
+          point: pointResult.point,
+          pointDate: pointResult.date,
+          pointText: pointResult.pointText,
+          pointContent: pointResult.content,
+          pointCheckedAt: checkedAt,
+        };
+      }
+    }
+
+    return {
       ...seminar,
-      ...(statuses.get(seminarKey(seminar)) || {}),
-    })),
-  );
+      pointPaid: false,
+      pointCheckedAt: checkedAt,
+    };
+  });
+
+  for (const [id, pointResult] of parsedPoints) {
+    if (!pointResult.found || pointResult.type !== '적립') continue;
+
+    const exists = updatedSeminars.some((item) => (item.seminarId || getSeminarIdFromUrl(item.url)) === id);
+    if (!exists) {
+      const newItem: SeminarListItem = {
+        seminarId: id,
+        name: '',
+        url: `https://m.doctorville.co.kr/cme/seminar/${id}`,
+        date: pointResult.date || '',
+        time: '',
+        currentCount: '',
+        totalCount: '',
+        nightTime: false,
+        isAdvancedSurvey: false,
+        isPointExcluded: false,
+        pointPaid: true,
+        point: pointResult.point,
+        pointDate: pointResult.date,
+        pointText: pointResult.pointText,
+        pointContent: pointResult.content,
+        pointCheckedAt: checkedAt,
+        detectedDate: '',
+        detectedAt: '',
+      };
+      updatedSeminars.push(newItem);
+    }
+  }
+
+  storage.set(SEMINAR_LIST_KEY, updatedSeminars);
+  return updatedSeminars;
 }
 
-type ApplySeminarOptions = {
+export type ApplySeminarOptions = {
+  checkAdvancedPointStatus?: boolean;
   notifyNewSeminarsToChannel?: boolean;
   notifyNewSeminarsToTelegram?: boolean;
   silentIfNoNew?: boolean;
-  checkAdvancedPointStatus?: boolean;
+  _checkAdvancedPointStatus?: boolean;
 };
 
 async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOptions = {}): Promise<TaskResult> {
@@ -267,7 +306,7 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
   const {
     notifyNewSeminarsToChannel = false,
     notifyNewSeminarsToTelegram = true,
-    checkAdvancedPointStatus = false,
+    _checkAdvancedPointStatus = false,
   } = options;
 
   try {
@@ -374,10 +413,9 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
     }
 
     const finalSeminars = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
-    if (checkAdvancedPointStatus) {
-      const statuses = await refreshAdvancedPointStatus(context, finalSeminars);
-      updateStoredPointStatuses(statuses);
-      if (statuses.size > 0) console.log(`advanced seminar point status updated: ${statuses.size}`);
+    const activeContext = context ?? page.context();
+    if (activeContext) {
+      await refreshSeminarPointStatus(activeContext, finalSeminars);
     }
 
     const appliedCount = await page.locator('a:has(.ico_completion)').count();

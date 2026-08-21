@@ -25,7 +25,9 @@ test.describe('today_links E2E: collectTodaySeminarMessage with real browser con
 
       const result = await collectTodaySeminarMessage(page, tc.dateInput);
 
-      console.log(`[${tc.dateInput}] lunch: ${result.lunchSeminarIds.length}, dinner: ${result.dinnerSeminarIds.length}`);
+      console.log(
+        `[${tc.dateInput}] lunch: ${result.lunchSeminarIds.length}, dinner: ${result.dinnerSeminarIds.length}`,
+      );
 
       expect(result.lunchSeminarIds.length).toBe(tc.expectedLunch);
       expect(result.dinnerSeminarIds.length).toBe(tc.expectedDinner);

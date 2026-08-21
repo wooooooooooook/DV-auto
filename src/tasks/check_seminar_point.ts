@@ -16,7 +16,7 @@ export interface SeminarPointResult {
   expiry?: string;
 }
 
-async function parseRecentSeminarPointRows(page: Page): Promise<Map<string, SeminarPointResult>> {
+export async function parseRecentSeminarPointRows(page: Page): Promise<Map<string, SeminarPointResult>> {
   const results = new Map<string, SeminarPointResult>();
   const rows = await page.evaluate(() => {
     const selectors = ['#useList table tbody tr', 'table tbody tr'];
@@ -59,7 +59,7 @@ async function parseRecentSeminarPointRows(page: Page): Promise<Map<string, Semi
 /** 포인트 지급내역 테이블을 한 번만 파싱하여 요청된 세미나 ID와 매칭한다. */
 export async function searchSeminarPoints(
   context: BrowserContext,
-  seminarIds: string[],
+  seminarIds: string[] = [],
   daysBack = 30,
 ): Promise<Map<string, SeminarPointResult>> {
   const page = await context.newPage();
@@ -84,14 +84,13 @@ export async function searchSeminarPoints(
     await page.waitForTimeout(500);
 
     const parsed = await parseRecentSeminarPointRows(page);
-    const requested = new Set(seminarIds);
     for (const [seminarId, result] of parsed) {
-      if (requested.has(seminarId)) results.set(seminarId, result);
+      results.set(seminarId, result);
     }
     for (const seminarId of seminarIds) {
       if (!results.has(seminarId)) results.set(seminarId, { found: false });
     }
-    logger.info(`parsed recent seminar point rows: ${parsed.size}, matched: ${results.size}`);
+    logger.info(`parsed recent seminar point rows: ${parsed.size}, total returned: ${results.size}`);
     return results;
   } catch (error) {
     logger.error('searchSeminarPoints error', error);
