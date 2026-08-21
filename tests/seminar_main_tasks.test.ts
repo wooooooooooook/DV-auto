@@ -616,10 +616,30 @@ function testPointStatusMergeLogic() {
     storedSeminars: TestSeminar[],
     currentSeminars: TestSeminar[],
     pointTable: Map<string, SeminarPointStatus & { found: boolean; pointText?: string; date?: string; content?: string }>,
+    opts: { success?: boolean } = {},
   ): Map<string, TestSeminar> {
+    const success = opts.success ?? true;
     const checkedAt = '2026-08-22T10:00:00.000Z';
     const storedByKey = new Map(storedSeminars.map((s) => [seminarKey(s), s]));
     const currentByKey = new Map(currentSeminars.map((s) => [seminarKey(s), s]));
+    if (!success) {
+      // 실패 시 포인트 상태 갱신 없이 기존 storage 유지 — pointCheckedAt도 갱신하지 않음
+      const fallback = new Map<string, TestSeminar>();
+      for (const [key, s] of storedByKey) fallback.set(key, s);
+      for (const [key, current] of currentByKey) {
+        if (!fallback.has(key)) fallback.set(key, current);
+        else {
+          const base = fallback.get(key)!;
+          if (base.pointPaid === true) {
+            const patched = { ...base, name: current.name || base.name, date: current.date || base.date, time: current.time || base.time, currentCount: current.currentCount || base.currentCount, totalCount: current.totalCount || base.totalCount, nightTime: current.nightTime, isAdvancedSurvey: current.isAdvancedSurvey || base.isAdvancedSurvey };
+            fallback.set(key, patched);
+          } else {
+            fallback.set(key, { ...base, ...current, pointPaid: base.pointPaid, point: base.point, pointText: base.pointText, pointDate: base.pointDate, pointContent: base.pointContent, pointCheckedAt: base.pointCheckedAt });
+          }
+        }
+      }
+      return fallback;
+    }
     const allParsed = pointTable;
     const updatedSeminars = new Map<string, TestSeminar>();
     for (const [key, seminar] of storedByKey) {
@@ -672,7 +692,7 @@ function testPointStatusMergeLogic() {
         const url = `https://m.doctorville.co.kr/cme/seminar/${seminarId}`;
         const newItem: TestSeminar = {
           seminarId, name: pointInfo.content || `세미나 ${seminarId}`, url, date: undefined, time: '', currentCount: '', totalCount: '', nightTime: false, isAdvancedSurvey: false,
-          detectedDate: '2026-08-22', pointPaid: true, point: (pointInfo as any).point, pointText: pointInfo.pointText, pointDate: pointInfo.date, pointContent: pointInfo.content, pointCheckedAt: checkedAt,
+          pointPaid: true, point: (pointInfo as any).point, pointText: pointInfo.pointText, pointDate: pointInfo.date, pointContent: pointInfo.content, pointCheckedAt: checkedAt,
         };
         updatedSeminars.set(seminarKey(newItem), newItem);
       }
@@ -726,7 +746,7 @@ function testPointStatusMergeLogic() {
     assert.strictEqual(item.point, 800);
   }
 
-  // 5) 포인트 테이블에만 있는 세미나는 새 항목으로 추가
+  // 5) 포인트 테이블에만 있는 세미나는 새 항목으로 추가 — detectedDate 없음
   {
     const stored: TestSeminar[] = [];
     const current: TestSeminar[] = [];
@@ -737,6 +757,7 @@ function testPointStatusMergeLogic() {
     assert.strictEqual(item.pointPaid, true);
     assert.strictEqual(item.point, 300);
     assert.strictEqual(item.time, '', '메타데이터는 빈 값');
+    assert.strictEqual(item.detectedDate, undefined, '포인트-only 항목은 detectedDate가 없어야 함');
   }
 
   // 6) 포인트-only 항목 이후 같은 ID가 세미나 목록에 나타나면 메타데이터 보완 + 포인트 유지
@@ -766,6 +787,30 @@ function testPointStatusMergeLogic() {
     // pointPaid가 없는 경우에도 보존됨
     assert(merged.has('1001'), '과거 세미나가 새 목록에 없어도 저장소에서 보존되어야 함');
     assert(merged.has('1002'), '현재 세미나 유지');
+  }
+
+  // 8) 포인트 테이블 조회 실패 시 기존 포인트 상태 유지 — pointPaid/pointCheckedAt 갱신 없음
+  {
+    const stored: TestSeminar[] = [{ seminarId: '5555', name: 'existing', url: 'https://m.doctorville.co.kr/cme/seminar/5555', time: '13:00', currentCount: '10', totalCount: '100', nightTime: false, isAdvancedSurvey: true, pointPaid: false, pointCheckedAt: '2026-08-21T10:00:00.000Z', point: undefined }];
+    const current: TestSeminar[] = [{ seminarId: '5555', name: 'existing', url: 'https://m.doctorville.co.kr/cme/seminar/5555', time: '13:00', currentCount: '10', totalCount: '100', nightTime: false, isAdvancedSurvey: true }];
+    const table = new Map<string, any>();
+    const merged = simulateMerge(stored, current, table, { success: false });
+    const item = merged.get('5555')!;
+    assert.strictEqual(item.pointPaid, false, '실패 시 pointPaid 변경 없음');
+    assert.strictEqual(item.pointCheckedAt, '2026-08-21T10:00:00.000Z', '실패 시 pointCheckedAt 갱신하지 않음 — 성공한 조회와 구분');
+  }
+
+  // 9) 아직 조회하지 않은 세미나(pointCheckedAt 없음)가 테이블 조회 성공했지만 없음 → false + checkedAt 기록
+  {
+    const stored: TestSeminar[] = [{ seminarId: '6666', name: 'never-checked', url: 'https://m.doctorville.co.kr/cme/seminar/6666', time: '13:00', currentCount: '10', totalCount: '100', nightTime: false, isAdvancedSurvey: true }];
+    const current: TestSeminar[] = [{ seminarId: '6666', name: 'never-checked', url: 'https://m.doctorville.co.kr/cme/seminar/6666', time: '13:00', currentCount: '10', totalCount: '100', nightTime: false, isAdvancedSurvey: true }];
+    // stored의 pointCheckedAt이 undefined = 아직 조회 안 함
+    assert.strictEqual(stored[0].pointCheckedAt, undefined);
+    const table = new Map<string, any>(); // 성공적으로 조회했지만 없음
+    const merged = simulateMerge(stored, current, table, { success: true });
+    const item = merged.get('6666')!;
+    assert.strictEqual(item.pointPaid, false, '성공 조회 후 없음 → 미지급');
+    assert(item.pointCheckedAt, '성공 조회 후 없음이어도 pointCheckedAt 기록 — 실패와 구분');
   }
 
   console.log('  ✓ 포인트 상태 3단계 구분(미조회/미지급/지급됨), 재조회, 포인트-only 추가, 보존 검증 완료\n');

@@ -16,10 +16,11 @@ export interface SeminarPointResult {
   expiry?: string;
 }
 
-/** 전체 테이블 파싱 결과도 함께 반환하기 위한 타입 */
 export interface ParsedPointTable {
   results: Map<string, SeminarPointResult>;
   allParsed: Map<string, SeminarPointResult>;
+  success: boolean;
+  error?: string;
 }
 
 async function parseRecentSeminarPointRows(page: Page): Promise<Map<string, SeminarPointResult>> {
@@ -60,11 +61,6 @@ async function parseRecentSeminarPointRows(page: Page): Promise<Map<string, Semi
   return results;
 }
 
-/**
- * 포인트 지급내역 테이블을 파싱한다.
- * - requestedIds가 주어지면 해당 ID만 필터링한 results 반환
- * - allParsed에는 테이블에서 파싱된 모든 적립 내역이 들어옴
- */
 export async function searchSeminarPoints(
   context: BrowserContext,
   seminarIds: string[],
@@ -101,10 +97,11 @@ export async function searchSeminarPoints(
       if (!results.has(seminarId)) results.set(seminarId, { found: false });
     }
     logger.info(`parsed recent seminar point rows: ${allParsed.size}, matched: ${results.size}`);
-    return { results, allParsed };
+    return { results, allParsed, success: true };
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
     logger.error('searchSeminarPoints error', error);
-    return { results, allParsed: new Map() };
+    return { results, allParsed: new Map(), success: false, error: msg };
   } finally {
     await page.close().catch(() => {});
   }
