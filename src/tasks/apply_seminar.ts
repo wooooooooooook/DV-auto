@@ -19,6 +19,8 @@ const NEW_SEMINAR_KEY = 'apply_seminar:new_seminars';
 export const NEW_SEMINAR_HISTORY_KEY = 'apply_seminar:new_seminars_history';
 const NEW_SEMINAR_HISTORY_RETENTION_DAYS = 60;
 
+type SeminarStatus = 'completed' | 'open' | 'closed';
+
 type SeminarPointStatus = {
   pointPaid?: boolean;
   point?: number;
@@ -28,20 +30,43 @@ type SeminarPointStatus = {
   pointCheckedAt?: string;
 };
 type SeminarListItem = {
+  seminarId: string | null;
   name: string;
   url: string;
   date?: string;
-  time?: string;
-  currentCount?: string;
-  totalCount?: string;
+  time: string;
+  tail: string;
+  category: string;
+  currentCount: string;
+  totalCount: string;
+  status: SeminarStatus;
+  nightTime: boolean;
   isPointExcluded?: boolean;
-  isAdvancedSurvey?: boolean;
+  isAdvancedSurvey: boolean;
 } & SeminarPointStatus;
 type StoredNewSeminars = { date: string; seminars: Array<SeminarListItem & { seminarId: string | null }> };
 type NewSeminarHistoryEntry = {
   detectedDate: string;
   detectedAt: string;
   seminar: SeminarListItem & { seminarId: string | null };
+};
+
+/**
+ * Raw data extracted from the seminar/main page DOM.
+ * Produced by evaluateAll() inside the browser context.
+ */
+type RawSeminarData = {
+  url: string;
+  name: string;
+  date: string;
+  time: string;
+  tail: string;
+  category: string;
+  currentCount: string;
+  totalCount: string;
+  status: SeminarStatus;
+  nightTime: boolean;
+  isAdvancedSurvey: boolean;
 };
 
 function normalizeSeminarDate(value: string | undefined, referenceDate: string): string | null {
@@ -69,6 +94,30 @@ function normalizeSeminarDate(value: string | undefined, referenceDate: string):
   const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
   if (month < 1 || month > 12 || day < 1 || day > daysInMonth) return null;
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+/**
+ * Convert raw DOM-parsed seminar data into SeminarListItem[] with canonical dates.
+ * Exported for testability — pure function, no side effects.
+ */
+export function normalizeParsedSeminars(raw: RawSeminarData[], referenceDate: string): SeminarListItem[] {
+  return raw.map((item) => {
+    const url = new URL(item.url, SEMINAR_PAGE).toString();
+    return {
+      seminarId: getSeminarIdFromUrl(url),
+      url,
+      name: item.name,
+      date: normalizeSeminarDate(item.date, referenceDate) ?? item.date,
+      time: item.time,
+      tail: item.tail,
+      category: item.category,
+      currentCount: item.currentCount,
+      totalCount: item.totalCount,
+      status: item.status,
+      nightTime: item.nightTime,
+      isAdvancedSurvey: item.isAdvancedSurvey,
+    };
+  });
 }
 
 function appendNewSeminarsToHistory(
@@ -194,50 +243,55 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
       await page.waitForTimeout(500);
     }
     await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'domcontentloaded', timeout: 30000 }, 1);
-    const currentSeminars = await page.locator('.list_cont').evaluateAll((nodes) => {
-      const results: Array<{
-        url: string;
-        name: string;
-        date: string;
-        time: string;
-        currentCount: string;
-        totalCount: string;
-        isAdvancedSurvey: boolean;
-      }> = [];
+
+    // --- Parse ALL seminars from the main page ---
+    const currentSeminars: RawSeminarData[] = await page.locator('.list_cont').evaluateAll((nodes) => {
+      const results: RawSeminarData[] = [];
       nodes.forEach((node) => {
         const date = node.querySelector('.seminar_day .date')?.textContent?.trim() || '';
         node.querySelectorAll('a.list_detail').forEach((link) => {
           const href = link.getAttribute('href') || '';
           if (!href) return;
-          const title =
+          const name =
             link.querySelector('.list_tit .tit')?.textContent?.trim() || link.textContent?.trim() || '세미나';
-          const time = link.querySelector('.txt_num.time')?.textContent?.replace(/\n/g, '').trim() || '';
+          const tail = link.querySelector('.tail')?.textContent?.trim() || '';
+          const category = link.querySelector('.category')?.textContent?.trim() || '';
+          const timeNode = link.querySelector('.txt_num.time');
+          const time = timeNode?.textContent?.replace(/\n/g, '').trim() || '';
+          const nightTime = timeNode ? timeNode.classList.contains('night_time') : false;
+
+          let status: 'completed' | 'open' | 'closed' = 'open';
+          if (link.querySelector('.ico_completion')) status = 'completed';
+          else if (link.querySelector('.ico_finish')) status = 'closed';
+
           const personNode = link.querySelector('.person');
           const currentCount = personNode?.querySelector('.txt_num')?.textContent?.trim() || '';
           const totalCount = personNode?.querySelector('.total .txt_num')?.textContent?.replace(/\//g, '').trim() || '';
+
           results.push({
             url: href,
-            name: title,
+            name,
             date,
             time,
+            tail,
+            category,
             currentCount,
             totalCount,
+            status,
+            nightTime,
             isAdvancedSurvey: !!link.querySelector('.ic_survey'),
           });
         });
       });
       return results;
     });
-    const normalizedCurrentSeminars: SeminarListItem[] = currentSeminars.map((item) => ({
-      name: item.name,
-      url: new URL(item.url, SEMINAR_PAGE).toString(),
-      date: item.date,
-      time: item.time,
-      currentCount: item.currentCount,
-      totalCount: item.totalCount,
-      isAdvancedSurvey: item.isAdvancedSurvey,
-    }));
+
+    const referenceDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+    const normalizedCurrentSeminars = normalizeParsedSeminars(currentSeminars, referenceDate);
+
     const storedSeminars = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
+    const storedByUrl = new Map(storedSeminars.map((s) => [s.url, s]));
+
     let newlyAddedCount = 0;
     let newlyAddedWithFlags: Array<SeminarListItem & { seminarId: string | null }> = [];
     if (storedSeminars.length > 0) {
@@ -269,9 +323,8 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
         const noticeMessage = `🆕 새로 추가된 세미나 ${newlyAdded.length}건 발견\n\n${newSeminarMessage}`;
         if (notifyNewSeminarsToTelegram) await sendTelegram(noticeMessage);
         if (notifyNewSeminarsToChannel) await sendNotificationToChannel(noticeMessage);
-        const todayIso = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
         const storedNew = storage.get<StoredNewSeminars>(NEW_SEMINAR_KEY);
-        const baseSeminars = storedNew?.date === todayIso ? storedNew.seminars : [];
+        const baseSeminars = storedNew?.date === referenceDate ? storedNew.seminars : [];
         const merged = [...baseSeminars];
         const existingUrls = new Set(baseSeminars.map((item) => item.url));
         for (const item of newlyAddedWithFlags)
@@ -279,45 +332,48 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
             merged.push(item);
             existingUrls.add(item.url);
           }
-        storage.set(NEW_SEMINAR_KEY, { date: todayIso, seminars: merged });
-        appendNewSeminarsToHistory(newlyAddedWithFlags, todayIso);
+        storage.set(NEW_SEMINAR_KEY, { date: referenceDate, seminars: merged });
+        appendNewSeminarsToHistory(newlyAddedWithFlags, referenceDate);
       }
     }
-    const todayIso = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+
+    // Update history with all current seminars (preserving point fields from stored)
     const historyItems: Array<SeminarListItem & { seminarId: string | null }> = normalizedCurrentSeminars.map(
       (item) => {
-        const stored = storedSeminars.find((s) => s.url === item.url);
+        const existing = storedByUrl.get(item.url);
         const newlyAdded = newlyAddedWithFlags.find((n) => n.url === item.url);
         return {
           ...item,
-          seminarId: getSeminarIdFromUrl(item.url),
-          isPointExcluded: stored?.isPointExcluded ?? newlyAdded?.isPointExcluded,
-          pointPaid: stored?.pointPaid,
-          point: stored?.point,
-          pointText: stored?.pointText,
-          pointDate: stored?.pointDate,
-          pointContent: stored?.pointContent,
-          pointCheckedAt: stored?.pointCheckedAt,
+          seminarId: item.seminarId,
+          isPointExcluded: existing?.isPointExcluded ?? newlyAdded?.isPointExcluded,
+          pointPaid: existing?.pointPaid,
+          point: existing?.point,
+          pointText: existing?.pointText,
+          pointDate: existing?.pointDate,
+          pointContent: existing?.pointContent,
+          pointCheckedAt: existing?.pointCheckedAt,
         };
       },
     );
-    appendNewSeminarsToHistory(historyItems, todayIso);
+    appendNewSeminarsToHistory(historyItems, referenceDate);
+
+    // Merge: current page data is primary, preserve point fields from existing stored data
     const finalSeminarsToStore: SeminarListItem[] = normalizedCurrentSeminars.map((item) => {
-      const stored = storedSeminars.find((s) => s.url === item.url);
-      const newlyAdded = newlyAddedWithFlags.find((n) => n.url === item.url);
+      const existing = storedByUrl.get(item.url);
+      if (!existing) return item;
       return {
         ...item,
-        isPointExcluded: stored?.isPointExcluded ?? newlyAdded?.isPointExcluded,
-        isAdvancedSurvey: item.isAdvancedSurvey,
-        pointPaid: stored?.pointPaid,
-        point: stored?.point,
-        pointText: stored?.pointText,
-        pointDate: stored?.pointDate,
-        pointContent: stored?.pointContent,
-        pointCheckedAt: stored?.pointCheckedAt,
+        isPointExcluded: existing.isPointExcluded,
+        pointPaid: existing.pointPaid,
+        point: existing.point,
+        pointText: existing.pointText,
+        pointDate: existing.pointDate,
+        pointContent: existing.pointContent,
+        pointCheckedAt: existing.pointCheckedAt,
       };
     });
     storage.set(SEMINAR_LIST_KEY, finalSeminarsToStore);
+
     if (checkAdvancedPointStatus) {
       const statuses = await refreshAdvancedPointStatus(context);
       updateStoredPointStatuses(statuses);
