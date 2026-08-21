@@ -338,11 +338,7 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
     const referenceDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
     const normalizedCurrentSeminars = normalizeParsedSeminars(currentSeminars, referenceDate);
     const storedSeminars = migrateLegacySeminarStorage(referenceDate);
-    const { seminars, newlyAdded } = refreshStoredSeminarList(
-      normalizedCurrentSeminars,
-      storedSeminars,
-      referenceDate,
-    );
+    const { seminars, newlyAdded } = refreshStoredSeminarList(normalizedCurrentSeminars, storedSeminars, referenceDate);
 
     if (newlyAdded.length > 0) {
       const newlyAddedWithFlags: SeminarListItem[] = [];
@@ -359,9 +355,7 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
 
       const flaggedByKey = new Map(newlyAddedWithFlags.map((item) => [seminarKey(item), item]));
       const updatedSeminars = seminars.map((seminar) =>
-        flaggedByKey.has(seminarKey(seminar))
-          ? mergeSeminar(seminar, flaggedByKey.get(seminarKey(seminar))!)
-          : seminar,
+        flaggedByKey.has(seminarKey(seminar)) ? mergeSeminar(seminar, flaggedByKey.get(seminarKey(seminar))!) : seminar,
       );
       storage.set(SEMINAR_LIST_KEY, updatedSeminars);
 
@@ -370,8 +364,7 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
           const pointExcludedSuffix = item.isPointExcluded ? ' [포인트미지급]' : '';
           const advancedSurveySuffix = item.isAdvancedSurvey ? ' [심화설문]' : '';
           const dateTimePrefix = item.date || item.time ? `[${item.date}${item.time ? ' ' + item.time : ''}] ` : '';
-          const capacityInfo =
-            item.currentCount && item.totalCount ? `(${item.currentCount}/${item.totalCount}) ` : '';
+          const capacityInfo = item.currentCount && item.totalCount ? `(${item.currentCount}/${item.totalCount}) ` : '';
           return `${dateTimePrefix}${pointExcludedSuffix}${advancedSurveySuffix}${item.name}${capacityInfo}\n${item.url}`;
         })
         .join('\n\n');

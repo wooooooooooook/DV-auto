@@ -116,7 +116,11 @@ export async function run(
         pointResult: result,
       };
     }
-    return { success: true, message: `세미나 ${seminarId} 포인트 내역을 찾을 수 없습니다 (최근 60일간).`, pointResult: result };
+    return {
+      success: true,
+      message: `세미나 ${seminarId} 포인트 내역을 찾을 수 없습니다 (최근 60일간).`,
+      pointResult: result,
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     logger.error('check_seminar_point task error', error);
