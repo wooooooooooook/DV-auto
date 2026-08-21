@@ -103,7 +103,10 @@ function testTodayLinksFormatWithUserExample() {
   assert.strictEqual(options.reply_markup.inline_keyboard[0][0].text, '✨ 출석체크 바로가기');
   assert.strictEqual(options.reply_markup.inline_keyboard[0][0].url, 'https://m.doctorville.co.kr/mypage/attendance');
   assert.strictEqual(options.reply_markup.inline_keyboard[0][1].text, '✏️ 오늘의 퀴즈 풀기');
-  assert.strictEqual(options.reply_markup.inline_keyboard[0][1].url, 'https://www.doctorville.co.kr/product/productView?pId=161');
+  assert.strictEqual(
+    options.reply_markup.inline_keyboard[0][1].url,
+    'https://www.doctorville.co.kr/product/productView?pId=161',
+  );
   assert.strictEqual(options.reply_markup.inline_keyboard[1][0].text, '💳 포인트 전환하러 가기');
   assert.strictEqual(
     options.reply_markup.inline_keyboard[1][0].url,
@@ -144,7 +147,8 @@ function testDateParsingAndCustomDateFormat() {
       date: '2026-08-20',
       lunchSeminarIds: ['5573'],
       dinnerSeminarIds: [],
-      message: '<b>[8/20] 세미나 리스트:</b>\n🍴 <b>[점심 세미나]</b>\n- 13:00~14:00. AI 실용 입문 https://m.doctorville.co.kr/cme/seminar/5573',
+      message:
+        '<b>[8/20] 세미나 리스트:</b>\n🍴 <b>[점심 세미나]</b>\n- 13:00~14:00. AI 실용 입문 https://m.doctorville.co.kr/cme/seminar/5573',
     },
     storedNewSeminars: [],
     pointConversionInfo: null,
@@ -193,9 +197,20 @@ function testYesterdayAddedSeminarsFilter() {
   const SEMINAR_LIST_KEY = 'apply_seminar:seminar_list';
   const testSeminars = [
     {
-      name: '전날 세미나 (포함됨)',
-      url: 'https://m.doctorville.co.kr/cme/seminar/111',
-      seminarId: '111',
+      name: '전날 세미나 큰 ID',
+      url: 'https://m.doctorville.co.kr/cme/seminar/5580',
+      seminarId: '5580',
+      isPointExcluded: false,
+      isAdvancedSurvey: false,
+      date: '2026-08-18',
+      time: '13:00~14:00',
+      detectedDate: yesterdayIso,
+      detectedAt: '2026-08-17T10:00:00.000Z',
+    },
+    {
+      name: '전날 세미나 작은 ID',
+      url: 'https://m.doctorville.co.kr/cme/seminar/5570',
+      seminarId: '5570',
       isPointExcluded: false,
       isAdvancedSurvey: false,
       date: '2026-08-18',
@@ -242,9 +257,9 @@ function testYesterdayAddedSeminarsFilter() {
   const result = getYesterdayAddedSeminars(yesterdayIso);
 
   // 검증: 전날(detectedDate === yesterdayIso)인 것만 1건 포함
-  assert.strictEqual(result.length, 1, '전날 detectedDate 세미나만 1개 포함되어야 함');
-  assert.strictEqual(result[0].name, '전날 세미나 (포함됨)');
-  assert.strictEqual(result[0].seminarId, '111');
+  assert.strictEqual(result.length, 2, '전날 detectedDate 세미나 2개 포함되어야 함');
+  assert.strictEqual(result[0].seminarId, '5570', 'seminarId 순으로 오름차순 정렬되어야 함');
+  assert.strictEqual(result[1].seminarId, '5580', 'seminarId 순으로 오름차순 정렬되어야 함');
 
   // legacy key가 없어도 에러 없이 동작하는지 확인 (new_seminars 키 사용 안 함)
   const NEW_SEMINAR_KEY = 'apply_seminar:new_seminars';
@@ -263,4 +278,3 @@ function testYesterdayAddedSeminarsFilter() {
 }
 
 testYesterdayAddedSeminarsFilter();
-
