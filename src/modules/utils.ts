@@ -300,6 +300,13 @@ async function safeGoto(page: Page, url: string, options: Parameters<Page['goto'
   }
 }
 
+const verifiedLoggedInContexts = new WeakSet<BrowserContext>();
+
+function invalidateLoginStatus(context: BrowserContext): void {
+  if (context) {
+    verifiedLoggedInContexts.delete(context);
+  }
+}
 const MYPAGE_INFO_URL = 'https://m.doctorville.co.kr/mypage/info';
 
 type LoginStatus = 'LOGGED_IN' | 'NOT_LOGGED_IN' | 'UNKNOWN';
@@ -334,6 +341,11 @@ async function checkLoginStatus(page: Page): Promise<LoginStatus> {
 }
 
 async function ensureLoggedIn({ page, context }: { page: Page; context: BrowserContext }): Promise<void> {
+  if (context && verifiedLoggedInContexts.has(context)) {
+    console.log('Login check: already verified for this browser context.');
+    return;
+  }
+
   const isBlank = page.url() === 'about:blank' || !page.url();
   if (isBlank) {
     console.log('Current page is blank or empty. Checking login status via /mypage/info.');
@@ -354,6 +366,9 @@ async function ensureLoggedIn({ page, context }: { page: Page; context: BrowserC
       console.log('Navigated to /mypage/info.');
     }
     console.log('Login check: already logged in ("회원정보수정" button found).');
+    if (context) {
+      verifiedLoggedInContexts.add(context);
+    }
     return;
   }
 
@@ -373,11 +388,20 @@ async function ensureLoggedIn({ page, context }: { page: Page; context: BrowserC
 
   if (status === 'LOGGED_IN') {
     console.log('Login verification successful ("회원정보수정" button found).');
+    if (context) {
+      verifiedLoggedInContexts.add(context);
+    }
   } else if (status === 'NOT_LOGGED_IN') {
+    if (context) {
+      invalidateLoginStatus(context);
+    }
     console.log('Login task completed, but /mypage/info still redirects to /member/login.');
     console.log('Login verification failed.');
     throw new Error('Login verification failed.');
   } else {
+    if (context) {
+      invalidateLoginStatus(context);
+    }
     console.log('/mypage/info did not redirect to login, but "회원정보수정" button was not found.');
     console.log('Login status could not be verified.');
     throw new Error('Login status could not be verified.');
@@ -462,6 +486,7 @@ function getSeminarIdFromUrl(url: string): string | null {
 }
 
 export {
+  invalidateLoginStatus,
   sendTelegram,
   sendNotificationToChannel,
   saveCookies,
