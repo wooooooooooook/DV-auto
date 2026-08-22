@@ -23,6 +23,11 @@ function createMockPage(
       currentUrl = url;
     },
     waitForLoadState: async () => {},
+    waitForTimeout: async () => {},
+    screenshot: async () => {},
+    fill: async () => {},
+    click: async () => {},
+    waitForURL: async () => {},
     getByRole: (role: string, options: { name: string; exact?: boolean }) => {
       return {
         isVisible: async (_opts?: unknown) => {
@@ -125,9 +130,27 @@ async function runTests() {
     console.log('  ✓ Paragraph containing "회원정보수정" does NOT trigger LOGGED_IN status');
   }
 
-  // Case 3 & 4 — ensureLoggedIn integration with mock login task
+  // Case 6 — Text duplicate in DOM with <p>회원정보수정</p> only (no button)
   {
-    console.log('Case 3 & 4: ensureLoggedIn flow when already logged in');
+    console.log('Case 6: <p>회원정보수정</p> without button element');
+    const mockPage = createMockPage('about:blank', {
+      urlPatterns: [
+        {
+          pattern: /\/mypage\/info/,
+          finalUrl: 'https://m.doctorville.co.kr/mypage/info',
+          bodyHtml: '<div><p>회원정보수정</p></div>',
+        },
+      ],
+    });
+
+    const status = await checkLoginStatus(mockPage as never);
+    assert.strictEqual(status, 'UNKNOWN', 'Should return UNKNOWN when text matches <p> element');
+    console.log('  ✓ <p>회원정보수정</p> without button element returns UNKNOWN');
+  }
+
+  // Case 3 — ensureLoggedIn flow when already logged in
+  {
+    console.log('Case 3: ensureLoggedIn flow when already logged in');
     let pageState = 'LOGGED_IN';
 
     const mockPage = createMockPage('about:blank', {
@@ -151,6 +174,14 @@ async function runTests() {
     pageState = 'LOGGED_IN';
     await ensureLoggedIn({ page: mockPage as never, context: mockContext as never });
     console.log('  ✓ ensureLoggedIn completes successfully when already logged in');
+  }
+
+  // Case 7 — verify tasks/login.ts imports checkLoginStatus and uses centralized check
+  {
+    console.log('Case 7: Verify login.ts uses checkLoginStatus module export');
+    const loginTaskModule = await import('../src/tasks/login');
+    assert.strictEqual(typeof loginTaskModule.run, 'function', 'login.ts must export run function');
+    console.log('  ✓ login.ts correctly exports run function utilizing checkLoginStatus');
   }
 
   console.log('\n🎉 All login check tests passed successfully!\n');

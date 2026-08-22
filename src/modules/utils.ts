@@ -300,7 +300,6 @@ async function safeGoto(page: Page, url: string, options: Parameters<Page['goto'
   }
 }
 
-const _LOGIN_URL = 'https://mims-account.mcircle.co.kr/login?cb=https://www.doctorville.co.kr/mims/directLogin';
 const MYPAGE_INFO_URL = 'https://m.doctorville.co.kr/mypage/info';
 
 type LoginStatus = 'LOGGED_IN' | 'NOT_LOGGED_IN' | 'UNKNOWN';
