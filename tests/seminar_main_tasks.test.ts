@@ -1,4 +1,4 @@
-import type { PlaywrightRunArgs } from "../src/types";
+import type { PlaywrightRunArgs } from '../src/types';
 import { refreshSeminarPointStatus, mergeSeminar, type SeminarListItem } from '../src/tasks/apply_seminar';
 import * as checkSeminarPointModule from '../src/tasks/check_seminar_point';
 import * as storage from '../src/services/storage';
@@ -595,7 +595,10 @@ async function testPointSyncRequirements() {
   ]);
 
   const originalSearchSeminarPoints = checkSeminarPointModule.searchSeminarPoints;
-  (checkSeminarPointModule as unknown as { searchSeminarPoints: unknown }).searchSeminarPoints = async () => ({ success: true, points: mockParsedPoints });
+  (checkSeminarPointModule as unknown as { searchSeminarPoints: unknown }).searchSeminarPoints = async () => ({
+    success: true,
+    points: mockParsedPoints,
+  });
 
   try {
     const mockContext = {} as unknown as PlaywrightRunArgs['context'];
