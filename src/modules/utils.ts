@@ -300,32 +300,87 @@ async function safeGoto(page: Page, url: string, options: Parameters<Page['goto'
   }
 }
 
-const LOGIN_URL = 'https://mims-account.mcircle.co.kr/login?cb=https://www.doctorville.co.kr/mims/directLogin';
-async function ensureLoggedIn({ page, context }: { page: Page; context: BrowserContext }): Promise<void> {
-  if (page.url() === 'about:blank' || !page.url()) {
-    console.log('Current page is blank or empty, navigating to LOGIN_URL for login check.');
-    await safeGoto(page, LOGIN_URL);
+const MYPAGE_INFO_URL = 'https://m.doctorville.co.kr/mypage/info';
+
+type LoginStatus = 'LOGGED_IN' | 'NOT_LOGGED_IN' | 'UNKNOWN';
+
+async function checkLoginStatus(page: Page): Promise<LoginStatus> {
+  await safeGoto(page, MYPAGE_INFO_URL, { waitUntil: 'domcontentloaded', timeout: 30000 }, 1);
+  await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+
+  try {
+    const currentUrl = new URL(page.url());
+    if (currentUrl.pathname === '/member/login') {
+      const redirectParam = currentUrl.searchParams.get('redirect');
+      if (redirectParam) {
+        const decodedParam = decodeURIComponent(redirectParam);
+        if (decodedParam === '/mypage/info' || redirectParam === '/mypage/info') {
+          return 'NOT_LOGGED_IN';
+        }
+      }
+      return 'NOT_LOGGED_IN';
+    }
+  } catch (_e) {
+    /* ignore url parse error */
   }
 
-  // 쿠키/로컬스토리지를 네비게이션 이후에 로드하고, 쿠키 적용을 위해 페이지 리로드
-  let cookiesLoaded = false;
+  const infoButton = page.getByRole('button', { name: '회원정보수정', exact: true });
+  const isButtonVisible = await infoButton.isVisible({ timeout: 3000 }).catch(() => false);
+  if (isButtonVisible) {
+    return 'LOGGED_IN';
+  }
+
+  return 'UNKNOWN';
+}
+
+async function ensureLoggedIn({ page, context }: { page: Page; context: BrowserContext }): Promise<void> {
+  const isBlank = page.url() === 'about:blank' || !page.url();
+  if (isBlank) {
+    console.log('Current page is blank or empty. Checking login status via /mypage/info.');
+  }
+
+  // 쿠키/로컬스토리지를 먼저 로드
   try {
     await loadCookies(context).catch(() => {});
-    await loadLocalStorage(page, LOGIN_URL).catch(() => {});
-    cookiesLoaded = true;
+    await loadLocalStorage(page, MYPAGE_INFO_URL).catch(() => {});
   } catch (_e) {
     /* ignore */
   }
-  if (cookiesLoaded) {
-    // 쿠키를 새로 넣었으면 페이지에 반영하기 위해 리로드
-    await page.reload({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+
+  let status = await checkLoginStatus(page);
+
+  if (status === 'LOGGED_IN') {
+    if (isBlank) {
+      console.log('Navigated to /mypage/info.');
+    }
+    console.log('Login check: already logged in ("회원정보수정" button found).');
+    return;
   }
 
-  const loginButtonCount = await page.locator(':text("로그인")').count();
-  if (loginButtonCount > 0) {
-    console.log('로그인이 필요합니다. login 태스크를 실행합니다.');
-    const loginTask = await import('../tasks/login');
-    await loginTask.run({ page, context });
+  if (status === 'NOT_LOGGED_IN') {
+    console.log('Redirected to /member/login?redirect=/mypage/info.');
+    console.log('Login required. Running login task.');
+  } else {
+    console.log('/mypage/info did not redirect to login, but "회원정보수정" button was not found.');
+    console.log('Login status could not be verified. Running login task.');
+  }
+
+  const loginTask = await import('../tasks/login');
+  await loginTask.run({ page, context });
+
+  console.log('Login task completed. Verifying login status via /mypage/info.');
+  status = await checkLoginStatus(page);
+
+  if (status === 'LOGGED_IN') {
+    console.log('Login verification successful ("회원정보수정" button found).');
+  } else if (status === 'NOT_LOGGED_IN') {
+    console.log('Login task completed, but /mypage/info still redirects to /member/login.');
+    console.log('Login verification failed.');
+    throw new Error('Login verification failed.');
+  } else {
+    console.log('/mypage/info did not redirect to login, but "회원정보수정" button was not found.');
+    console.log('Login status could not be verified.');
+    throw new Error('Login status could not be verified.');
   }
 }
 
@@ -417,6 +472,7 @@ export {
   sleep,
   maskToken,
   ensureLoggedIn,
+  checkLoginStatus,
   escapeMarkdownV2,
   getSeminarIdFromUrl,
   hasSurveyPointExcludedNotice,
