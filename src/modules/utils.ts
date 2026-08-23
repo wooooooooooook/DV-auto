@@ -3,6 +3,8 @@ import path from 'path';
 import type { Telegraf } from 'telegraf';
 import type { BrowserContext, Page } from 'playwright';
 import { getBot } from '../services/bot_instance';
+import { httpGet, httpGetJson } from './http_client';
+import { parseLoginStatusHtml, hasSurveyPointExcludedNoticeHtml } from './html_parser';
 
 const COOKIE_FILE = path.join(process.cwd(), 'cookies.json');
 const LOCALSTORAGE_FILE = path.join(process.cwd(), 'localstorage.json');
@@ -302,7 +304,7 @@ async function safeGoto(page: Page, url: string, options: Parameters<Page['goto'
 
 const verifiedLoggedInContexts = new WeakSet<BrowserContext>();
 
-function invalidateLoginStatus(context: BrowserContext): void {
+function invalidateLoginStatus(context?: BrowserContext): void {
   if (context) {
     verifiedLoggedInContexts.delete(context);
   }
@@ -311,6 +313,22 @@ const MYPAGE_INFO_URL = 'https://m.doctorville.co.kr/mypage/info';
 
 type LoginStatus = 'LOGGED_IN' | 'NOT_LOGGED_IN' | 'UNKNOWN';
 
+/**
+ * HTTP 기반 로그인 상태 검사
+ */
+async function checkLoginStatusHttp(): Promise<LoginStatus> {
+  try {
+    const res = await httpGet(MYPAGE_INFO_URL);
+    return parseLoginStatusHtml(res.body, res.url);
+  } catch (err) {
+    console.warn('checkLoginStatusHttp error:', err);
+    return 'UNKNOWN';
+  }
+}
+
+/**
+ * Playwright Page 기반 로그인 상태 검사 (Fallback)
+ */
 async function checkLoginStatus(page: Page): Promise<LoginStatus> {
   await safeGoto(page, MYPAGE_INFO_URL, { waitUntil: 'domcontentloaded', timeout: 30000 }, 1);
   await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
@@ -340,16 +358,34 @@ async function checkLoginStatus(page: Page): Promise<LoginStatus> {
   return 'UNKNOWN';
 }
 
-async function ensureLoggedIn({ page, context }: { page: Page; context: BrowserContext }): Promise<void> {
+async function ensureLoggedIn(args?: { page?: Page; context?: BrowserContext }): Promise<void> {
+  const context = args?.context ?? args?.page?.context();
   if (context && verifiedLoggedInContexts.has(context)) {
     console.log('Login check: already verified for this browser context.');
     return;
   }
 
-  const isBlank = page.url() === 'about:blank' || !page.url();
-  if (isBlank) {
-    console.log('Current page is blank or empty. Checking login status via /mypage/info.');
+  // 1. HTTP 기반 로그인 검사 우선 시도
+  let status = await checkLoginStatusHttp();
+  if (status === 'LOGGED_IN') {
+    console.log('Login check (HTTP): logged in ("회원정보수정" text found).');
+    if (context) {
+      verifiedLoggedInContexts.add(context);
+    }
+    // Playwright page 및 context에 저장된 쿠키 동적 주입 (필요 시)
+    if (context) {
+      await loadCookies(context).catch(() => {});
+    }
+    return;
   }
+
+  console.log(`Login check (HTTP) returned status: ${status}. Proceeding to Playwright login check/flow.`);
+
+  if (!args?.page || !context) {
+    throw new Error('Playwright page or context is required for login fallback, but was not provided.');
+  }
+
+  const page = args.page;
 
   // 쿠키/로컬스토리지를 먼저 로드
   try {
@@ -359,13 +395,10 @@ async function ensureLoggedIn({ page, context }: { page: Page; context: BrowserC
     /* ignore */
   }
 
-  let status = await checkLoginStatus(page);
+  status = await checkLoginStatus(page);
 
   if (status === 'LOGGED_IN') {
-    if (isBlank) {
-      console.log('Navigated to /mypage/info.');
-    }
-    console.log('Login check: already logged in ("회원정보수정" button found).');
+    console.log('Login check (Playwright): already logged in.');
     if (context) {
       verifiedLoggedInContexts.add(context);
     }
@@ -383,11 +416,14 @@ async function ensureLoggedIn({ page, context }: { page: Page; context: BrowserC
   const loginTask = await import('../tasks/login');
   await loginTask.run({ page, context });
 
-  console.log('Login task completed. Verifying login status via /mypage/info.');
-  status = await checkLoginStatus(page);
+  console.log('Login task completed. Verifying login status via HTTP & Playwright.');
+  status = await checkLoginStatusHttp();
+  if (status !== 'LOGGED_IN') {
+    status = await checkLoginStatus(page);
+  }
 
   if (status === 'LOGGED_IN') {
-    console.log('Login verification successful ("회원정보수정" button found).');
+    console.log('Login verification successful.');
     if (context) {
       verifiedLoggedInContexts.add(context);
     }
@@ -395,14 +431,12 @@ async function ensureLoggedIn({ page, context }: { page: Page; context: BrowserC
     if (context) {
       invalidateLoginStatus(context);
     }
-    console.log('Login task completed, but /mypage/info still redirects to /member/login.');
-    console.log('Login verification failed.');
+    console.log('Login task completed, but login verification still failed.');
     throw new Error('Login verification failed.');
   } else {
     if (context) {
       invalidateLoginStatus(context);
     }
-    console.log('/mypage/info did not redirect to login, but "회원정보수정" button was not found.');
     console.log('Login status could not be verified.');
     throw new Error('Login status could not be verified.');
   }
@@ -460,7 +494,27 @@ async function ensureSeminarDetailReady(page: Page, url: string): Promise<void> 
   throw new Error(`세미나 상세 페이지 로딩 확인 실패("공유" 텍스트 미검출): ${url}`);
 }
 
+/**
+ * HTTP GET 기반 세미나 상세 페이지의 포인트 미지급 여부 검사
+ */
+async function isSurveyPointExcludedSeminarHttp(url: string): Promise<boolean> {
+  try {
+    const res = await httpGet(url);
+    if (res.status === 200 && res.body) {
+      return hasSurveyPointExcludedNoticeHtml(res.body);
+    }
+    return false;
+  } catch (_e) {
+    return false;
+  }
+}
+
 async function isSurveyPointExcludedSeminar(context: BrowserContext, url: string): Promise<boolean> {
+  // 1. HTTP GET으로 먼저 검사
+  const httpResult = await isSurveyPointExcludedSeminarHttp(url);
+  if (httpResult) return true;
+
+  // 2. HTTP로 확인되지 않으면 Playwright fallback
   const page = await context.newPage();
   try {
     await ensureLoggedIn({ page, context });
@@ -485,6 +539,26 @@ function getSeminarIdFromUrl(url: string): string | null {
   }
 }
 
+/**
+ * 포인트 전환 가능 여부 API HTTP GET 조회
+ */
+export async function getPointConversionAvailabilityHttp(): Promise<{
+  available?: boolean;
+  availablePlannedAt?: string;
+  meridiem?: string;
+} | null> {
+  try {
+    const API_URL = 'https://api.doctorville.co.kr/api/point/conversion/availability';
+    const json = await httpGetJson<{ data?: { available?: boolean; availablePlannedAt?: string; meridiem?: string } }>(
+      API_URL,
+    );
+    return json?.data ?? null;
+  } catch (err) {
+    console.error('getPointConversionAvailabilityHttp error:', err);
+    return null;
+  }
+}
+
 export {
   invalidateLoginStatus,
   sendTelegram,
@@ -498,11 +572,13 @@ export {
   maskToken,
   ensureLoggedIn,
   checkLoginStatus,
+  checkLoginStatusHttp,
   escapeMarkdownV2,
   getSeminarIdFromUrl,
   hasSurveyPointExcludedNotice,
   ensureSeminarDetailReady,
   isSurveyPointExcludedSeminar,
+  isSurveyPointExcludedSeminarHttp,
 };
 
 const analyticsBlockedPages = new WeakSet<Page>();

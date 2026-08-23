@@ -1,44 +1,43 @@
 import path from 'path';
 import fs from 'fs/promises';
-import type { BrowserContext, Page } from 'playwright';
+import type { BrowserContext } from 'playwright';
 import type { PlaywrightRunArgs } from '../types';
-import { safeGoto } from '../modules/utils';
+import { httpGet } from '../modules/http_client';
+import { parseCurrentPointHtml } from '../modules/html_parser';
 import * as logger from '../services/logger';
 
 const POINT_PAGE_URL = 'https://www.doctorville.co.kr/my/point/pointUseHistoryList';
+const MAIN_PAGE = 'https://www.doctorville.co.kr/main';
 
-async function getPoint(context: BrowserContext): Promise<string> {
-  const page = await context.newPage();
+async function getPoint(_context?: BrowserContext): Promise<string> {
   try {
-    const MAIN_PAGE = 'https://www.doctorville.co.kr/main';
-    await safeGoto(page, MAIN_PAGE, { waitUntil: 'load', timeout: 30000 }, 1);
-    await page.waitForSelector('.member_point', { timeout: 10000 });
-    const pointElement = page.locator('.member_point');
-    return (await pointElement.innerText()).trim();
+    const res = await httpGet(MAIN_PAGE);
+    if (res.status === 200 && res.body) {
+      return parseCurrentPointHtml(res.body);
+    }
+    return '조회 실패';
   } catch (error) {
     logger.error(
       'getPoint error',
       error && typeof error === 'object' && 'stack' in error ? (error as Error).stack : error,
     );
     return '조회 실패';
-  } finally {
-    await page.close().catch(() => {});
   }
 }
 
 async function run({ page, context }: PlaywrightRunArgs) {
   let screenshotPath: string | null = null;
-  const ctx = context || page.context();
+  const ctx = context || page?.context();
   try {
     const pointText = await getPoint(ctx);
 
     if (pointText === '조회 실패') {
-      const MAIN_PAGE = 'https://www.doctorville.co.kr/main';
-      await safeGoto(page, MAIN_PAGE, { waitUntil: 'load', timeout: 30000 }, 1);
-      const baseScreenshotDir = path.join(process.cwd(), 'screenshot');
-      await fs.mkdir(baseScreenshotDir, { recursive: true });
-      screenshotPath = path.join(baseScreenshotDir, `check_point_failed.png`);
-      await page.screenshot({ path: screenshotPath, fullPage: false });
+      if (page) {
+        const baseScreenshotDir = path.join(process.cwd(), 'screenshot');
+        await fs.mkdir(baseScreenshotDir, { recursive: true });
+        screenshotPath = path.join(baseScreenshotDir, `check_point_failed.png`);
+        await page.screenshot({ path: screenshotPath, fullPage: false }).catch(() => {});
+      }
       return {
         success: false,
         message: '포인트를 조회할 수 없습니다. 로그인 상태를 확인해주세요.',
@@ -55,7 +54,7 @@ async function run({ page, context }: PlaywrightRunArgs) {
       'check_point task error',
       error && typeof error === 'object' && 'stack' in error ? (error as Error).stack : error,
     );
-    if (!screenshotPath) {
+    if (!screenshotPath && page) {
       const baseScreenshotDir = path.join(process.cwd(), 'screenshot');
       await fs.mkdir(baseScreenshotDir, { recursive: true });
       screenshotPath = path.join(baseScreenshotDir, `check_point_error.png`);

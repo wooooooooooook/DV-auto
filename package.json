@@ -4,14 +4,14 @@
   "description": "",
   "main": "dist/core/main.js",
   "scripts": {
-    "test": "ts-node tests/today_links_format.test.ts && ts-node tests/seminar_main_tasks.test.ts && ts-node tests/login_check.test.ts && ts-node tests/apply_seminar_changes.test.ts",
+    "test": "ts-node tests/today_links_format.test.ts && ts-node tests/seminar_main_tasks.test.ts && ts-node tests/login_check.test.ts && ts-node tests/apply_seminar_changes.test.ts && ts-node tests/html_parser.test.ts && ts-node tests/apply_seminar_no_browser.test.ts",
     "build": "tsc",
     "start": "node dist/core/main.js",
     "dev": "ts-node src/core/main.ts",
     "restart:app": "pnpm run build && systemctl restart doctorville-auto.service",
     "update:app": "git pull && pnpm install --frozen-lockfile && pnpm run build && cp deploy/doctorville-auto.service /etc/systemd/system/ && systemctl daemon-reload && systemctl restart doctorville-auto.service",
-    "format": "prettier --write \"src/**/*.ts\"",
-    "format:check": "prettier --check \"src/**/*.ts\"",
+    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\"",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "log": "journalctl --no-pager -u doctorville-auto.service -n 20"
@@ -21,6 +21,7 @@
   "license": "ISC",
   "packageManager": "pnpm@10.24.0",
   "dependencies": {
+    "cheerio": "^1.2.0",
     "dotenv": "^17.2.3",
     "node-cron": "^3.0.3",
     "playwright": "^1.57.0",

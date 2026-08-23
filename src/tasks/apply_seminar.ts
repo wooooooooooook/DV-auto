@@ -6,9 +6,11 @@ import {
   sendNotificationToChannel,
   sendTelegram,
   getSeminarIdFromUrl,
-  isSurveyPointExcludedSeminar,
+  isSurveyPointExcludedSeminarHttp,
   ensureLoggedIn,
 } from '../modules/utils';
+import { httpGet } from '../modules/http_client';
+import { parseSeminarListHtml, parseCompletionCountHtml } from '../modules/html_parser';
 import { searchSeminarPoints } from './check_seminar_point';
 import * as storage from '../services/storage';
 
@@ -76,7 +78,7 @@ type LegacyNewSeminars = {
   seminars?: SeminarListItem[];
 };
 
-type RawSeminarData = {
+export type RawSeminarData = {
   url: string;
   name: string;
   date: string;
@@ -470,7 +472,9 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
         await page.click('.agg_confirm').catch(() => {});
         await page.waitForSelector('#seminarAgree', { timeout: 2000 });
         await page.click('#seminarAgree').catch(() => {});
-      } catch {}
+      } catch (_e) {
+        /* ignore */
+      }
       try {
         const nextTerms = page.locator('.agg_next_terms');
         if (await nextTerms.isVisible({ timeout: 1000 })) {
@@ -478,7 +482,9 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
           await page.waitForSelector('#terms_confirm', { timeout: 2000 });
           await page.click('#terms_confirm');
         }
-      } catch {}
+      } catch (_e) {
+        /* ignore */
+      }
       await page.waitForTimeout(500);
     }
 
@@ -528,10 +534,10 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
       for (const item of newlyAdded) {
         const seminarId = getSeminarIdFromUrl(item.url);
         const link = seminarId ? `${SEMINAR_DETAIL_PAGE}${seminarId}` : item.url;
-        let isPointExcluded = await isSurveyPointExcludedSeminar(page.context(), link);
+        let isPointExcluded = await isSurveyPointExcludedSeminarHttp(link);
         if (!isPointExcluded) {
           await page.waitForTimeout(800);
-          isPointExcluded = await isSurveyPointExcludedSeminar(page.context(), link);
+          isPointExcluded = await isSurveyPointExcludedSeminarHttp(link);
         }
         newlyAddedWithFlags.push({ ...item, seminarId, isPointExcluded });
       }
@@ -609,5 +615,81 @@ export const applySeminarExtraTask = {
   description: '세미나 목록 갱신 및 심화 세미나 포인트 확인',
   schedule: '*/10 6-23 * * *',
   options: { notifyNewSeminarsToTelegram: false, silentIfNoNew: true, checkAdvancedPointStatus: true },
-  run,
+  run: (_args: unknown, options?: ApplySeminarOptions) =>
+    runHttpOnly(options || { notifyNewSeminarsToTelegram: false, silentIfNoNew: true, checkAdvancedPointStatus: true }),
 };
+
+export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<TaskResult> {
+  const { notifyNewSeminarsToChannel = false, notifyNewSeminarsToTelegram = true } = options;
+
+  try {
+    await ensureLoggedIn();
+
+    const mainRes = await httpGet(SEMINAR_PAGE);
+    if (mainRes.status !== 200 || !mainRes.body) {
+      throw new Error(`HTTP GET ${SEMINAR_PAGE} failed with status ${mainRes.status}`);
+    }
+
+    const currentSeminars = parseSeminarListHtml(mainRes.body);
+    const referenceDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+    const normalizedCurrentSeminars = normalizeParsedSeminars(currentSeminars, referenceDate);
+    const storedSeminars = migrateLegacySeminarStorage(referenceDate);
+
+    const { seminars, newlyAdded, infoChanges } = refreshStoredSeminarList(
+      normalizedCurrentSeminars,
+      storedSeminars,
+      referenceDate,
+    );
+
+    if (newlyAdded.length > 0) {
+      const newlyAddedWithFlags: SeminarListItem[] = [];
+      for (const item of newlyAdded) {
+        const seminarId = getSeminarIdFromUrl(item.url);
+        const link = seminarId ? `${SEMINAR_DETAIL_PAGE}${seminarId}` : item.url;
+        const isPointExcluded = await isSurveyPointExcludedSeminarHttp(link);
+        newlyAddedWithFlags.push({ ...item, seminarId, isPointExcluded });
+      }
+
+      const flaggedByKey = new Map(newlyAddedWithFlags.map((item) => [seminarKey(item), item]));
+      const updatedSeminars = seminars.map((seminar) =>
+        flaggedByKey.has(seminarKey(seminar)) ? mergeSeminar(seminar, flaggedByKey.get(seminarKey(seminar))!) : seminar,
+      );
+      storage.set(SEMINAR_LIST_KEY, updatedSeminars);
+
+      const newSeminarMessage = newlyAddedWithFlags
+        .map((item) => {
+          const pointExcludedSuffix = item.isPointExcluded ? ' [포인트미지급]' : '';
+          const advancedSurveySuffix = item.isAdvancedSurvey ? ' [심화설문]' : '';
+          const dateTimePrefix = item.date || item.time ? `[${item.date}${item.time ? ' ' + item.time : ''}] ` : '';
+          const capacityInfo = item.currentCount && item.totalCount ? `(${item.currentCount}/${item.totalCount}) ` : '';
+          return `${dateTimePrefix}${pointExcludedSuffix}${advancedSurveySuffix}${item.name}${capacityInfo}\n${item.url}`;
+        })
+        .join('\n\n');
+      const noticeMessage = `🆕 새로 추가된 세미나 ${newlyAddedWithFlags.length}건 발견\n\n${newSeminarMessage}`;
+      if (notifyNewSeminarsToTelegram) await sendTelegram(noticeMessage);
+      if (notifyNewSeminarsToChannel) await sendNotificationToChannel(noticeMessage);
+    }
+
+    const finalSeminars = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
+    const pointStatusResult = await refreshSeminarPointStatus(undefined, finalSeminars);
+    const pointChanges = pointStatusResult.pointChanges;
+
+    const changeNotificationText = formatSeminarChangeNotification(infoChanges, pointChanges);
+    if (changeNotificationText) {
+      await sendTelegram(changeNotificationText).catch(() => {});
+    }
+
+    const completionCount = parseCompletionCountHtml(mainRes.body);
+    const totalSeminarsAvailable = currentSeminars.length;
+    const message = `✅ ${completionCount}개 세미나 신청 완료! (${completionCount}/${totalSeminarsAvailable})`;
+
+    const result: TaskResult = { success: true, message };
+    if (options.silentIfNoNew && newlyAdded.length === 0) result.silent = true;
+    return result;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('apply_seminar_extra HTTP error:', message);
+    await sendTelegram(`❗ 세미나 목록 갱신 작업 오류: ${message}`).catch(() => {});
+    return { success: false, message: `세미나 목록 갱신 작업 오류: ${message}` };
+  }
+}
