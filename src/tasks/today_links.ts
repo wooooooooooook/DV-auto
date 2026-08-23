@@ -836,6 +836,9 @@ https://t.me/+J1UGmvLA9jU4NjQ1</blockquote>`;
     inlineKeyboard.push([{ text: '💳 포인트 전환하러 가기', url: POINT_CONVERSION_URL }]);
   }
 
+  // 세미나 목록 바로가기 버튼 추가
+  inlineKeyboard.push([{ text: '📋 세미나 목록 바로가기', url: SEMINAR_PAGE }]);
+
   const options = {
     parse_mode: 'HTML' as const,
     link_preview_options: {
