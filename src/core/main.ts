@@ -167,7 +167,9 @@ const scheduledTask: Task = {
       await utils.sendTelegram('🕗 데일리 루틴 작업을 시작합니다.(출석체크, 세미나등록, 브랜드퀴즈)').catch(() => {});
       for (const { name, task } of tasks) {
         try {
-          await utils.ensureLoggedIn({ page, context });
+          if (name !== 'apply_seminar') {
+            await utils.ensureLoggedIn({ page, context });
+          }
           const taskResultRaw = await task.run({ page, context });
           const taskResult: TaskResult =
             typeof taskResultRaw === 'object' && taskResultRaw !== null
