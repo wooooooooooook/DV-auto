@@ -89,6 +89,39 @@ function testTodayLinksFormatWithUserExample() {
   // 5. 포인트 전환 안내
   assert(message.includes('💳 <b>오늘 네이버페이포인트 전환 가능 예정입니다. 전환 가능 알림을 기다려주세요!</b>'));
 
+  // 5-1. 포인트 전환 예정일 (D-Day 표시) 검증
+  const ddayInput: TodayLinksFormatInput = {
+    ...mockInput,
+    pointConversionInfo: {
+      available: false,
+      availablePlannedAt: '08월 25일',
+      meridiem: '오후',
+    },
+    targetDate: '2026-08-23 (8/23)',
+    isCustomDate: true,
+  };
+  const { message: ddayMessage } = formatTodayLinksBroadcast(ddayInput);
+  assert(
+    ddayMessage.includes('💳 <b>다음 네이버페이포인트 전환가능일:</b> 08월 25일 오후 (D-2)'),
+    `D-day 표시 검증 실패: ${ddayMessage}`,
+  );
+
+  const dday0Input: TodayLinksFormatInput = {
+    ...mockInput,
+    pointConversionInfo: {
+      available: false,
+      availablePlannedAt: '08월 23일',
+      meridiem: '오전',
+    },
+    targetDate: '2026-08-23 (8/23)',
+    isCustomDate: true,
+  };
+  const { message: dday0Message } = formatTodayLinksBroadcast(dday0Input);
+  assert(
+    dday0Message.includes('💳 <b>다음 네이버페이포인트 전환가능일:</b> 08월 23일 오전 (D-Day)'),
+    `D-Day(당일) 검증 실패: ${dday0Message}`,
+  );
+
   // 6. 하단 봇 안내 인용구
   assert(
     message.includes(
