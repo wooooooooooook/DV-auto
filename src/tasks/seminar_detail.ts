@@ -211,13 +211,11 @@ function formatStatus(processState: number, seminarCompleted: number, useSurvey:
 function stripHtml(html: string): string {
   return html
     .replace(/<[^>]*>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/</g, '<')
-    .replace(/>/g, '>')
-    .replace(/&/g, '&')
-    .replace(/"/g, '"')
-    .replace(/'/g, "'")
-    .replace(/&apos;/g, "'")
+    .replace(
+      /&(amp|lt|gt|quot|#39|apos|nbsp);/g,
+      (m) =>
+        ({ '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&apos;': "'", '&nbsp;': ' ' })[m] ?? m,
+    )
     .replace(/\s+/g, ' ')
     .trim();
 }
