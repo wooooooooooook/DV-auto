@@ -16,7 +16,7 @@ import * as storage from '../services/storage';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
-const _SEMINAR_DETAIL_HTTP_PAGE = 'https://www.doctorville.co.kr/seminar/seminarDetail?seminarId=';
+const SEMINAR_DETAIL_SSR_PAGE = 'https://www.doctorville.co.kr/seminar/seminarDetail?seminarId=';
 export const SEMINAR_LIST_KEY = 'apply_seminar:seminar_list';
 const LEGACY_NEW_SEMINAR_KEY = 'apply_seminar:new_seminars';
 const LEGACY_HISTORY_KEY = 'apply_seminar:new_seminars_history';
@@ -534,7 +534,7 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
       const newlyAddedWithFlags: SeminarListItem[] = [];
       for (const item of newlyAdded) {
         const seminarId = getSeminarIdFromUrl(item.url);
-        const link = seminarId ? `${SEMINAR_DETAIL_PAGE}${seminarId}` : item.url;
+        const link = seminarId ? `${SEMINAR_DETAIL_SSR_PAGE}${seminarId}` : item.url;
         const pointExRes = await isSurveyPointExcludedSeminarHttp(link);
         const isPointExcluded = pointExRes.status === 'success' ? pointExRes.excluded : item.isPointExcluded;
         newlyAddedWithFlags.push({ ...item, seminarId, isPointExcluded });
@@ -643,7 +643,7 @@ export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<Ta
       const newlyAddedWithFlags: SeminarListItem[] = [];
       for (const item of newlyAdded) {
         const seminarId = getSeminarIdFromUrl(item.url);
-        const link = seminarId ? `${SEMINAR_DETAIL_PAGE}${seminarId}` : item.url;
+        const link = seminarId ? `${SEMINAR_DETAIL_SSR_PAGE}${seminarId}` : item.url;
         const pointExRes = await isSurveyPointExcludedSeminarHttp(link);
         const isPointExcluded = pointExRes.status === 'success' ? pointExRes.excluded : item.isPointExcluded;
         newlyAddedWithFlags.push({ ...item, seminarId, isPointExcluded });
