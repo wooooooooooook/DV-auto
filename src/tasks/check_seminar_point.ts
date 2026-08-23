@@ -1,3 +1,4 @@
+import { sendTelegram } from '../modules/utils';
 import type { BrowserContext, Page } from 'playwright';
 import type { PlaywrightRunArgs } from '../types';
 import { httpPostForm } from '../modules/http_client';
@@ -60,6 +61,10 @@ export async function searchSeminarPoints(
     };
 
     const res = await httpPostForm(POINT_HISTORY_URL, formData);
+    if (res.resultType === 'AUTH_EXPIRED') {
+      await sendTelegram('🔒 세션이 만료되었습니다. 로그인이 필요합니다.').catch(() => {});
+      return { success: false, points: results, error: 'AUTH_EXPIRED' };
+    }
     if (res.status !== 200 || !res.body) {
       return { success: false, points: results, error: `HTTP Status ${res.status}` };
     }

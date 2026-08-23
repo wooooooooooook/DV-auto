@@ -1,3 +1,10 @@
+/**
+ * 세션 만료 여부 확인 HTML 파싱
+ */
+export function isAuthExpiredHtml(html: string): boolean {
+  return html.includes('로그인이 되어 있지 않습니다');
+}
+
 import * as cheerio from 'cheerio';
 import type { RawSeminarData } from '../tasks/apply_seminar';
 import type { SeminarPointResult } from '../tasks/check_seminar_point';
@@ -16,6 +23,10 @@ export function parseLoginStatusHtml(html: string, finalUrl?: string): 'LOGGED_I
     } catch (_e) {
       /* ignore */
     }
+  }
+
+  if (isAuthExpiredHtml(html)) {
+    return 'NOT_LOGGED_IN';
   }
 
   const $ = cheerio.load(html);
