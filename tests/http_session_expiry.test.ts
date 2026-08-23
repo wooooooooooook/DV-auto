@@ -193,6 +193,57 @@ async function runTests() {
     (httpClientModule as unknown as { httpGet: unknown }).httpGet = originalHttpGet;
     (utilsModule as unknown as { ensureLoggedIn: unknown }).ensureLoggedIn = originalEnsureLoggedIn;
 
+    // 7. 신규 세미나 정상 추가 및 상세 조회/포인트 제외 판정 성공 시 seminar_list 정상 업데이트 검증
+    storage.set('apply_seminar:seminar_list', initialStorageData);
+    let successHttpGetCount = 0;
+
+    const mockDetailSuccessHtml = '<html><body><div>세미나 상세 내용 (포인트 지급 세미나)</div></body></html>';
+
+    (httpClientModule as unknown as { httpGet: unknown }).httpGet = async (
+      url: string,
+      _headers?: Record<string, string>,
+    ) => {
+      successHttpGetCount++;
+      if (successHttpGetCount === 1) {
+        return {
+          status: 200,
+          statusText: '200',
+          headers: {},
+          body: mockListHtml,
+          url,
+          redirected: false,
+          resultType: 'SUCCESS' as const,
+        };
+      } else {
+        return {
+          status: 200,
+          statusText: '200',
+          headers: {},
+          body: mockDetailSuccessHtml,
+          url,
+          redirected: false,
+          resultType: 'SUCCESS' as const,
+        };
+      }
+    };
+
+    (utilsModule as unknown as { ensureLoggedIn: unknown }).ensureLoggedIn = async () => {};
+    const successTaskResult = await applySeminarExtraTask.run({}, { notifyNewSeminarsToTelegram: false });
+    assert.strictEqual(successTaskResult.success, true);
+
+    const storedAfterSuccess = storage.get<unknown[]>('apply_seminar:seminar_list') as Array<Record<string, unknown>>;
+    assert.ok(Array.isArray(storedAfterSuccess));
+    assert.strictEqual(storedAfterSuccess.length, 3, '기존 1건 + 신규 2건 = 총 3건이 storage에 저장되어야 함');
+    const newSeminar101 = storedAfterSuccess.find((item) => item.url.includes('/101'));
+    assert.ok(newSeminar101, '신규 세미나 101이 storage에 포함되어야 함');
+    assert.strictEqual(
+      newSeminar101.isPointExcluded,
+      false,
+      '포인트 지급 세미나이므로 isPointExcluded가 false로 설정되어야 함',
+    );
+
+    console.log('  ✓ 신규 세미나 정상 추가 및 상세 조회/포인트 제외 판정 성공 시 seminar_list 정상 업데이트 검증 완료');
+
     console.log('🎉 모든 HTTP 세션 만료 및 오류 구분 테스트 통과!');
   } finally {
     server.close();
