@@ -254,26 +254,21 @@ export function formatSeminarDetail(data: SeminarDetail): string {
   ].join('\n');
 }
 
-export function formatRawResponse(raw: SeminarDetailResponse): string {
+export function formatRawResponse(raw: SeminarDetailResponse): string[] {
   const rawJson = JSON.stringify(raw, null, 2);
-  if (rawJson.length <= 3800) {
-    return `*Raw API Response:*\n\`\`\`json\n${rawJson}\n\`\`\``;
-  }
-  // 너무 길면 청크로 분할
+  // 각 메시지가 텔레그램 4096자 제한 이내여야 하므로 배열로 분할해 별도 전송
   const chunks: string[] = [];
-  for (let i = 0; i < rawJson.length; i += 3800) {
-    chunks.push(rawJson.slice(i, i + 3800));
+  for (let i = 0; i < rawJson.length; i += 3500) {
+    chunks.push(rawJson.slice(i, i + 3500));
   }
-  return chunks
-    .map((chunk, idx) => `*Raw API Response (${idx + 1}/${chunks.length}):*\n\`\`\`json\n${chunk}\n\`\`\``)
-    .join('\n\n');
+  return chunks.map((chunk, idx) => `*Raw API Response (${idx + 1}/${chunks.length}):*\n\`\`\`json\n${chunk}\n\`\`\``);
 }
 
 export async function run({
   args,
 }: {
   args: { seminarId: string };
-}): Promise<{ success: boolean; message: string; rawMessage?: string }> {
+}): Promise<{ success: boolean; message: string; rawMessages?: string[] }> {
   const seminarId = args?.seminarId;
   if (!seminarId) {
     return { success: false, message: '세미나 ID가 필요합니다. 예: /seminar_detail 5566' };
@@ -285,6 +280,6 @@ export async function run({
   }
 
   const formatted = formatSeminarDetail(result.data);
-  const rawMessage = result.raw ? formatRawResponse(result.raw) : undefined;
-  return { success: true, message: formatted, rawMessage };
+  const rawMessages = result.raw ? formatRawResponse(result.raw) : undefined;
+  return { success: true, message: formatted, rawMessages };
 }
