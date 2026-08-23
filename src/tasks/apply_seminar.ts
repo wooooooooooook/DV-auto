@@ -335,7 +335,6 @@ function refreshStoredSeminarList(
     return Number.isNaN(dateMs) || Number.isNaN(todayMs) || todayMs - dateMs <= retentionMs;
   });
 
-  storage.set(SEMINAR_LIST_KEY, seminars);
   return { seminars, newlyAdded, infoChanges };
 }
 
@@ -530,7 +529,9 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
       referenceDate,
     );
 
-    if (newlyAdded.length > 0) {
+    if (newlyAdded.length === 0) {
+      storage.set(SEMINAR_LIST_KEY, seminars);
+    } else {
       const newlyAddedWithFlags: SeminarListItem[] = [];
       for (const item of newlyAdded) {
         const seminarId = getSeminarIdFromUrl(item.url);
@@ -649,7 +650,9 @@ export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<Ta
       referenceDate,
     );
 
-    if (newlyAdded.length > 0) {
+    if (newlyAdded.length === 0) {
+      storage.set(SEMINAR_LIST_KEY, seminars);
+    } else {
       const newlyAddedWithFlags: SeminarListItem[] = [];
       for (const item of newlyAdded) {
         const seminarId = getSeminarIdFromUrl(item.url);

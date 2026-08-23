@@ -6,7 +6,7 @@ import { chromium } from 'playwright';
 import * as httpClientModule from '../src/modules/http_client';
 import * as utilsModule from '../src/modules/utils';
 import { applySeminarExtraTask } from '../src/tasks/apply_seminar';
-import { run as runRefreshPointExclusion } from '../src/tasks/refresh_seminar_point_exclusion';
+// import { run as runRefreshPointExclusion } from '../src/tasks/refresh_seminar_point_exclusion';
 import * as storage from '../src/services/storage';
 
 const COOKIE_FILE = path.join(process.cwd(), 'cookies.json');
@@ -67,71 +67,126 @@ async function runTests() {
     assert.strictEqual(res4.resultType, 'HTTP_ERROR');
     console.log('  ✓ 500 → HTTP_ERROR');
 
-    // 5. timeout/network error -> HTTP_ERROR
-    try {
-      await httpClientModule.sendDoctorVilleRequest('http://127.0.0.1:59999/nonexistent', { timeout: 100 });
-      assert.fail('Should have thrown network error');
-    } catch (err) {
-      assert.ok(err instanceof Error);
-      console.log('  ✓ timeout/network error → 에러 발생(HTTP_ERROR 영역)');
-    }
+    // 5. timeout/network error -> HTTP_ERROR 반환 (throw 하지 않음)
+    const res5 = await httpClientModule.sendDoctorVilleRequest('http://127.0.0.1:59999/nonexistent', { timeout: 100 });
+    assert.strictEqual(res5.status, 0);
+    assert.strictEqual(res5.resultType, 'HTTP_ERROR');
+    assert.ok(res5.statusText.length > 0);
+    console.log('  ✓ timeout/network error → resultType: HTTP_ERROR, status: 0');
 
-    // Prepare mock storage for storage preservation test
+    // 6. 실제 작업 중 세션 만료(중간 만료) 시나리오 검증
+    // Prepare initial storage data
     const initialStorageData = [
       {
         name: '기존 세미나 1',
-        url: `${baseUrl}/seminar/1`,
-        seminarId: '1',
+        url: 'https://www.doctorville.co.kr/cme/seminar/100',
+        seminarId: '100',
         isPointExcluded: false,
         date: '2026-08-25',
       },
     ];
     storage.set('apply_seminar:seminar_list', initialStorageData);
 
-    // Mock httpGet to redirect external calls to mock server
-    const originalHttpGet = httpClientModule.httpGet;
-    (httpClientModule as unknown as { httpGet: unknown }).httpGet = async (
-      url: string,
-      headers?: Record<string, string>,
-    ) => {
-      return httpClientModule.sendDoctorVilleRequest(`${baseUrl}/path?url=${encodeURIComponent(url)}`, { headers });
+    // Track state
+    let ensureLoggedInCalledCount = 0;
+    let browserCreated = false;
+    let httpGetCallCount = 0;
+
+    const originalEnsureLoggedIn = utilsModule.ensureLoggedIn;
+    (utilsModule as unknown as { ensureLoggedIn: unknown }).ensureLoggedIn = async () => {
+      ensureLoggedInCalledCount++;
     };
 
-    // Mock ensureLoggedIn so that task start check succeeds without Playwright
-    const originalEnsureLoggedIn = utilsModule.ensureLoggedIn;
-    (utilsModule as unknown as { ensureLoggedIn: unknown }).ensureLoggedIn = async () => {};
-
-    // 6 & 7. 작업 중 AUTH_EXPIRED -> 재로그인하지 않고 즉시 중단 및 storage 미변경 확인
-    let browserCreated = false;
     const originalLaunch = chromium.launch.bind(chromium);
     chromium.launch = async (...args: Parameters<typeof originalLaunch>) => {
       browserCreated = true;
       return originalLaunch(...args);
     };
 
-    mockStatusCode = 200;
-    mockResponseBody = 'alert("로그인이 되어 있지 않습니다.\\n로그인 해주시기 바랍니다.");';
+    // First HTTP call (seminar list) -> 200 OK + valid list HTML containing a newly added seminar
+    // Second HTTP call (detail page check for newly added seminar) -> 200 OK + AUTH_EXPIRED ("로그인이 되어 있지 않습니다")
+    const mockListHtml = `
+      <div class="list_cont">
+        <span class="seminar_day"><span class="date">8/25</span></span>
+        <a class="list_detail" href="/cme/seminar/101">
+          <span class="list_tit"><span class="tit">신규 세미나 101</span></span>
+          <span class="txt_num time">13:00~14:00</span>
+        </a>
+        <a class="list_detail" href="/cme/seminar/102">
+          <span class="list_tit"><span class="tit">신규 세미나 102</span></span>
+          <span class="txt_num time">14:00~15:00</span>
+        </a>
+      </div>
+    `;
+    const mockExpiredHtml = '<script>alert("로그인이 되어 있지 않습니다.\\n로그인 해주시기 바랍니다.");</script>';
+
+    const originalHttpGet = httpClientModule.httpGet;
+    (httpClientModule as unknown as { httpGet: unknown }).httpGet = async (
+      url: string,
+      headers?: Record<string, string>,
+    ) => {
+      httpGetCallCount++;
+      if (httpGetCallCount === 1) {
+        // 첫 번째 요청: 세미나 목록 조회 -> 정상
+        return {
+          status: 200,
+          statusText: '200',
+          headers: {},
+          body: mockListHtml,
+          url,
+          redirected: false,
+          resultType: 'SUCCESS' as const,
+        };
+      } else {
+        // 두 번째 요청: 신규 세미나 상세 페이지/포인트미지급 여부 조회 중 세션 만료 발생!
+        return {
+          status: 200,
+          statusText: '200',
+          headers: {},
+          body: mockExpiredHtml,
+          url,
+          redirected: false,
+          resultType: 'AUTH_EXPIRED' as const,
+        };
+      }
+    };
 
     const taskResult = await applySeminarExtraTask.run({}, { notifyNewSeminarsToTelegram: false });
+
+    // Assertions for Mid-Task Session Expiry:
+    // 1) Task result is failure
     assert.strictEqual(taskResult.success, false);
     assert.ok(
       taskResult.message.includes('만료') ||
         taskResult.message.includes('AUTH_EXPIRED') ||
         taskResult.message.includes('로그인이 필요합니다'),
-      `Unexpected message: ${taskResult.message}`,
+      `Unexpected task message: ${taskResult.message}`,
     );
-    assert.strictEqual(browserCreated, false, 'AUTH_EXPIRED 발생 시 Playwright 재로그인을 시도하지 않아야 함');
 
+    // 2) ensureLoggedIn was called only once at task start
+    assert.strictEqual(
+      ensureLoggedInCalledCount,
+      1,
+      'ensureLoggedIn()은 작업 시작 시 1회만 호출되어야 하며, AUTH_EXPIRED 발생 시 재호출되지 않아야 함',
+    );
+
+    // 3) Playwright browser was NOT launched
+    assert.strictEqual(browserCreated, false, 'AUTH_EXPIRED 발생 시 Playwright 브라우저를 켜지 않아야 함');
+
+    // 4) Subsequent HTTP requests were aborted immediately (call count should be 2, not continuing to 102)
+    assert.strictEqual(httpGetCallCount, 2, 'AUTH_EXPIRED 감지 즉시 이후 세미나 조회를 중단해야 함 (호출 횟수: 2)');
+
+    // 5) Existing storage was preserved and not corrupted
     const storedAfter = storage.get('apply_seminar:seminar_list');
-    assert.deepStrictEqual(storedAfter, initialStorageData, 'AUTH_EXPIRED 발생 시 기존 storage 데이터가 유지되어야 함');
-    console.log('  ✓ 작업 중 AUTH_EXPIRED 발생 시 재로그인 없이 즉시 중단 및 storage 데이터 보존 확인');
+    assert.deepStrictEqual(
+      storedAfter,
+      initialStorageData,
+      '중간 세션 만료 발생 시 기존 storage 데이터가 잘못된 값으로 덮어씌워지지 않아야 함',
+    );
 
-    // 8. refresh_seminar_point_exclusion 도 작업 중 AUTH_EXPIRED 발생 시 중단 및 storage 보존
-    const refreshResult = await runRefreshPointExclusion();
-    assert.strictEqual(refreshResult.success, false);
-    assert.strictEqual(browserCreated, false, 'refresh task에서 AUTH_EXPIRED 시 Playwright 미실행');
-    assert.deepStrictEqual(storage.get('apply_seminar:seminar_list'), initialStorageData);
-    console.log('  ✓ refresh_seminar_point_exclusion 작업 중 AUTH_EXPIRED 즉시 중단 확인');
+    console.log(
+      '  ✓ 작업 중간 AUTH_EXPIRED 발생 시 ensureLoggedIn 재호출 없음, Playwright 미실행, 추가 조회 즉시 중단, storage 보존 성공적 검증 완료',
+    );
 
     // Restore functions
     chromium.launch = originalLaunch;

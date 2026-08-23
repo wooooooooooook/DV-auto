@@ -1,3 +1,4 @@
+import { isAuthExpiredHtml } from './html_parser';
 import fs from 'fs';
 import path from 'path';
 import { request } from 'undici';
@@ -170,7 +171,7 @@ export async function sendDoctorVilleRequest(url: string, options: HttpRequestOp
       let resultType: HttpResultType = 'SUCCESS';
       if (status !== 200) {
         resultType = 'HTTP_ERROR';
-      } else if (responseText.includes('로그인이 되어 있지 않습니다')) {
+      } else if (isAuthExpiredHtml(responseText)) {
         resultType = 'AUTH_EXPIRED';
       }
 
@@ -185,10 +186,22 @@ export async function sendDoctorVilleRequest(url: string, options: HttpRequestOp
       };
     } catch (err: unknown) {
       clearTimeout(timer);
-      if (err && typeof err === 'object' && 'name' in err && (err as Error).name === 'AbortError') {
-        throw new Error(`HTTP request timed out after ${timeoutMs}ms: ${url}`);
-      }
-      throw err;
+      const errMessage =
+        err && typeof err === 'object' && 'name' in err && (err as Error).name === 'AbortError'
+          ? `HTTP request timed out after ${timeoutMs}ms: ${url}`
+          : err instanceof Error
+            ? err.message
+            : String(err);
+
+      return {
+        status: 0,
+        statusText: errMessage,
+        headers: {},
+        body: '',
+        url: currentUrl,
+        redirected: isRedirected,
+        resultType: 'HTTP_ERROR',
+      };
     }
   }
 }
