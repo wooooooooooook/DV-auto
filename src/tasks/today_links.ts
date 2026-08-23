@@ -710,14 +710,38 @@ async function collectPointConversionInfo(page: PlaywrightRunArgs['page']): Prom
   }
 }
 
-function formatPointConversionMessage(info: PointConversionInfo | null): string {
+function getPointConversionDdayLabel(plannedAt: string | undefined, todayIsoOverride?: string): string {
+  if (!plannedAt) return '';
+  const m = plannedAt.match(/(\d{1,2})\s*월\s*(\d{1,2})\s*일/);
+  if (!m) return '';
+  const plannedMonth = parseInt(m[1], 10);
+  const plannedDay = parseInt(m[2], 10);
+  if (!plannedMonth || !plannedDay) return '';
+  const todayIso = todayIsoOverride ?? new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+  const [y, mo, d] = todayIso.split('-').map(Number);
+  if (!y || !mo || !d) return '';
+  const todayMs = Date.UTC(y, mo - 1, d);
+  let targetYear = y;
+  let targetMs = Date.UTC(targetYear, plannedMonth - 1, plannedDay);
+  if (targetMs < todayMs) {
+    targetYear += 1;
+    targetMs = Date.UTC(targetYear, plannedMonth - 1, plannedDay);
+  }
+  const diffDays = Math.round((targetMs - todayMs) / 86400000);
+  if (diffDays === 0) return ' (D-Day)';
+  if (diffDays > 0) return ` (D-${diffDays})`;
+  return '';
+}
+
+function formatPointConversionMessage(info: PointConversionInfo | null, todayIsoOverride?: string): string {
   if (!info) return '';
   if (info.available) {
     return `💳 <b>오늘 네이버페이포인트 전환 가능 예정입니다. 전환 가능 알림을 기다려주세요!</b>\n${POINT_CONVERSION_URL}`;
   }
   const plannedParts = [info.availablePlannedAt, info.meridiem].map((s) => s?.trim()).filter(Boolean);
   if (plannedParts.length > 0) {
-    return `💳 <b>다음 네이버페이포인트 전환가능일:</b> ${escapeHtml(plannedParts.join(' '))}`;
+    const dday = getPointConversionDdayLabel(info.availablePlannedAt, todayIsoOverride);
+    return `💳 <b>다음 네이버페이포인트 전환가능일:</b> ${escapeHtml(plannedParts.join(' '))}${dday}`;
   }
   return '';
 }
@@ -785,7 +809,10 @@ function formatTodayLinksBroadcast(input: TodayLinksFormatInput): TodayLinksForm
     message += `\n🆕 <b>어제 추가된 신규 세미나</b>\n${newSeminarList}\n`;
   }
 
-  const pointConversionMessage = formatPointConversionMessage(pointConversionInfo);
+  const pointConversionMessage = formatPointConversionMessage(
+    pointConversionInfo,
+    isCustomDate && targetDate ? targetDate.split(' ')[0] : undefined,
+  );
   if (pointConversionMessage) {
     message += `\n${pointConversionMessage}\n`;
   }
