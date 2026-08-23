@@ -123,7 +123,7 @@ async function runTests() {
     const originalHttpGet = httpClientModule.httpGet;
     (httpClientModule as unknown as { httpGet: unknown }).httpGet = async (
       url: string,
-      headers?: Record<string, string>,
+      _headers?: Record<string, string>,
     ) => {
       httpGetCallCount++;
       if (httpGetCallCount === 1) {
@@ -234,7 +234,7 @@ async function runTests() {
     const storedAfterSuccess = storage.get<unknown[]>('apply_seminar:seminar_list') as Array<Record<string, unknown>>;
     assert.ok(Array.isArray(storedAfterSuccess));
     assert.strictEqual(storedAfterSuccess.length, 3, '기존 1건 + 신규 2건 = 총 3건이 storage에 저장되어야 함');
-    const newSeminar101 = storedAfterSuccess.find((item) => item.url.includes('/101'));
+    const newSeminar101 = storedAfterSuccess.find((item) => (item.url as string).includes('/101'));
     assert.ok(newSeminar101, '신규 세미나 101이 storage에 포함되어야 함');
     assert.strictEqual(
       newSeminar101.isPointExcluded,

@@ -84,6 +84,8 @@ export function parseSeminarListHtml(
 
       const isAdvancedSurvey = $link.find('.ic_survey').length > 0;
 
+      const hasIcoApply = $link.find('.ico_apply').length > 0;
+
       const absoluteUrl = new URL(href, baseUrl).toString();
 
       results.push({
@@ -95,6 +97,7 @@ export function parseSeminarListHtml(
         totalCount,
         nightTime,
         isAdvancedSurvey,
+        hasIcoApply,
       });
     });
   });
