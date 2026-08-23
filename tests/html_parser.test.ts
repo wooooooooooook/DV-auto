@@ -94,3 +94,55 @@ testHtmlParser().catch((err) => {
   console.error('❌ HTML Parser tests failed:', err);
   process.exit(1);
 });
+
+async function testSsrDetailHtmlParsing() {
+  console.log('Testing SSR Seminar Detail HTML Parsing...');
+
+  const ssrExcludedHtml = `
+    <!DOCTYPE html>
+    <html>
+      <head><title>세미나 상세</title></head>
+      <body>
+        <div class="seminar_detail">
+          <h2>[학회] 심혈관 위험 평가 웹 심포지엄</h2>
+          <div class="notice_box">
+            <p class="txt">본 세미나는 설문 포인트가 지급되지 않는 세미나입니다.</p>
+          </div>
+        </div>
+      </body>
+    </html>
+  `;
+
+  const ssrNormalHtml = `
+    <!DOCTYPE html>
+    <html>
+      <head><title>세미나 상세</title></head>
+      <body>
+        <div class="seminar_detail">
+          <h2>[학회] 심혈관 위험 평가 웹 심포지엄</h2>
+          <div class="notice_box">
+            <p class="txt">세미나 참석 후 설문 완료 시 포인트가 적립됩니다.</p>
+          </div>
+        </div>
+      </body>
+    </html>
+  `;
+
+  assert.strictEqual(
+    hasSurveyPointExcludedNoticeHtml(ssrExcludedHtml),
+    true,
+    'SSR Excluded notice should be detected as true',
+  );
+  assert.strictEqual(
+    hasSurveyPointExcludedNoticeHtml(ssrNormalHtml),
+    false,
+    'SSR Normal notice should be detected as false',
+  );
+
+  console.log('✅ SSR Seminar Detail HTML Parsing test passed!');
+}
+
+testSsrDetailHtmlParsing().catch((err) => {
+  console.error('❌ SSR Seminar Detail HTML Parsing test failed:', err);
+  process.exit(1);
+});

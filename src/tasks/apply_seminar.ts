@@ -16,6 +16,7 @@ import * as storage from '../services/storage';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
+const _SEMINAR_DETAIL_HTTP_PAGE = 'https://www.doctorville.co.kr/seminar/seminarDetail?seminarId=';
 export const SEMINAR_LIST_KEY = 'apply_seminar:seminar_list';
 const LEGACY_NEW_SEMINAR_KEY = 'apply_seminar:new_seminars';
 const LEGACY_HISTORY_KEY = 'apply_seminar:new_seminars_history';

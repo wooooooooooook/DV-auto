@@ -620,7 +620,10 @@ async function collectTodaySeminarMessage(
       if (typeof storedPointExcluded === 'boolean') {
         pointExcludedCache.set(pointExcludedKey, storedPointExcluded);
       } else {
-        uncachedSeminarItems.push({ link: item.seminarLink, cacheKey: pointExcludedKey });
+        const httpLink = item.seminarId
+          ? 'https://www.doctorville.co.kr/seminar/seminarDetail?seminarId=' + item.seminarId
+          : item.seminarLink;
+        uncachedSeminarItems.push({ link: httpLink, cacheKey: pointExcludedKey });
       }
     }
 
@@ -890,7 +893,10 @@ async function run({ page, args }: PlaywrightRunArgs, taskOptions?: Record<strin
         if (typeof storedPointExcluded === 'boolean') {
           pointExcludedCache.set(cacheKey, storedPointExcluded);
         } else {
-          uncachedItems.push({ link, cacheKey });
+          const httpLink = item.seminarId
+            ? 'https://www.doctorville.co.kr/seminar/seminarDetail?seminarId=' + item.seminarId
+            : link;
+          uncachedItems.push({ link: httpLink, cacheKey });
         }
       }
 

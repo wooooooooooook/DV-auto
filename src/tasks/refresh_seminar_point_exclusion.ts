@@ -6,6 +6,7 @@ import * as storage from '../services/storage';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
+const _SEMINAR_DETAIL_HTTP_PAGE = 'https://www.doctorville.co.kr/seminar/seminarDetail?seminarId=';
 const SEMINAR_LIST_KEY = 'apply_seminar:seminar_list';
 
 type SeminarListItem = {
