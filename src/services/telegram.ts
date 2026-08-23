@@ -985,6 +985,38 @@ if (adminBot) {
     }
   });
 
+  // 세미나 상세 정보 조회
+  adminBot.command('seminar_detail', async (ctx) => {
+    logger.info('User requested seminar detail', { from: ctx.from?.username });
+    const task = taskRegistry.getByName('seminar_detail');
+    if (!task) {
+      logger.error('seminar_detail task not found, cannot run');
+      return ctx.reply('seminar_detail task not found!');
+    }
+
+    try {
+      const text = ctx.message?.text || '';
+      const seminarIds = (text.match(/\b\d{4,5}\b/g) || []) as string[];
+      const seminarId = seminarIds[0];
+      if (!seminarId) {
+        return ctx.reply('사용법: /seminar_detail <세미나번호>\n예: /seminar_detail 5566');
+      }
+
+      await ctx.reply(`세미나 ${seminarId} 상세 정보 조회 중...`);
+
+      const result = await runner.runTask(task, { args: { seminarId } });
+
+      if (result && typeof result === 'object') {
+        const r = result as { message?: string; success?: boolean };
+        if (r.success !== false && r.message) await ctx.reply(r.message, { parse_mode: 'Markdown' });
+        else if (!r.success && r.message) await ctx.reply(r.message);
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      ctx.reply(`Failed to start seminar_detail: ${message}`);
+    }
+  });
+
   // 최근 2주 심화 세미나 포인트 지급 일괄 확인
   adminBot.command('check_advanced_seminars', async (ctx) => {
     logger.info('User requested to check advanced seminars point', { from: ctx.from?.username });
@@ -1457,6 +1489,7 @@ const adminCommands = [
   { command: 'list_quiz', description: 'quiz.json 등록 제품 목록' },
   { command: 'delete_quiz', description: 'quiz.json 항목 삭제' },
   { command: 'refresh_seminar_point_exclusion', description: '세미나 포인트미지급 캐시 재확인' },
+  { command: 'seminar_detail', description: '세미나 번호로 상세 정보 조회' },
   // 3. 포인트 & 교환
   { command: 'check_point', description: '현재 포인트 확인' },
   { command: 'check_seminar_point', description: '세미나 번호로 포인트 지급 확인' },
