@@ -8,7 +8,7 @@ import type { Telegraf } from 'telegraf';
 import type { BrowserContext, Page } from 'playwright';
 import { getBot } from '../services/bot_instance';
 import { httpGet, httpGetJson } from './http_client';
-import { parseLoginStatusHtml, hasSurveyPointExcludedNoticeHtml } from './html_parser';
+import { parseLoginStatusHtml, parseSeminarDetailHtml, type SeminarDetailMetadata } from './html_parser';
 
 const COOKIE_FILE = path.join(process.cwd(), 'cookies.json');
 const LOCALSTORAGE_FILE = path.join(process.cwd(), 'localstorage.json');
@@ -514,20 +514,10 @@ async function ensureSeminarDetailReady(page: Page, url: string): Promise<void> 
  * 실패(오류/timeout/비정상 응답) 시 { status: 'error', error: string } 반환
  */
 async function isSurveyPointExcludedSeminarHttp(url: string): Promise<SurveyPointExcludedResult> {
-  try {
-    const res = await httpGet(url);
-    if (res.resultType === 'AUTH_EXPIRED') {
-      return { status: 'auth_expired' };
-    }
-    if (res.status === 200 && res.body) {
-      const excluded = hasSurveyPointExcludedNoticeHtml(res.body);
-      return { status: 'success', excluded };
-    }
-    return { status: 'error', error: `HTTP status ${res.status}` };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return { status: 'error', error: message };
-  }
+  const res = await fetchSeminarDetail(url);
+  if (res.status === 'auth_expired') return { status: 'auth_expired' };
+  if (res.status === 'success') return { status: 'success', excluded: res.metadata.isPointExcluded };
+  return { status: 'error', error: res.error };
 }
 
 async function isSurveyPointExcludedSeminar(context: BrowserContext, url: string): Promise<boolean> {
@@ -612,5 +602,36 @@ function setupAnalyticsBlock(page: Page): void {
     analyticsBlockedPages.add(page);
   } catch (_e) {
     console.error('setupAnalyticsBlock failed', _e);
+  }
+}
+
+export type FetchSeminarDetailResult =
+  | { status: 'success'; metadata: SeminarDetailMetadata }
+  | { status: 'auth_expired' }
+  | { status: 'error'; error: string };
+
+/**
+ * HTTP GET 기반 세미나 상세 페이지 (SSR) 메타데이터 조회
+ */
+export async function fetchSeminarDetail(seminarIdOrUrl: string): Promise<FetchSeminarDetailResult> {
+  try {
+    let url = seminarIdOrUrl;
+    const seminarId = /^[0-9]+$/.test(seminarIdOrUrl) ? seminarIdOrUrl : getSeminarIdFromUrl(seminarIdOrUrl);
+    if (seminarId) {
+      url = 'https://www.doctorville.co.kr/seminar/seminarDetail?seminarId=' + seminarId;
+    }
+
+    const res = await httpGet(url);
+    if (res.resultType === 'AUTH_EXPIRED') {
+      return { status: 'auth_expired' };
+    }
+    if (res.status === 200 && res.body) {
+      const metadata = parseSeminarDetailHtml(res.body);
+      return { status: 'success', metadata };
+    }
+    return { status: 'error', error: 'HTTP status ' + res.status };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { status: 'error', error: message };
   }
 }

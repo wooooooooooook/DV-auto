@@ -84,6 +84,9 @@ export function parseSeminarListHtml(
 
       const isAdvancedSurvey = $link.find('.ic_survey').length > 0;
 
+      const statusBox = $link.find('.progress .ico_box');
+      const status = statusBox.length > 0 ? statusBox.text().trim() : '상태없음';
+
       const absoluteUrl = new URL(href, baseUrl).toString();
 
       results.push({
@@ -95,6 +98,7 @@ export function parseSeminarListHtml(
         totalCount,
         nightTime,
         isAdvancedSurvey,
+        status,
       });
     });
   });
@@ -187,4 +191,45 @@ export function parseCurrentPointHtml(html: string): string {
     return pointText;
   }
   return '조회 실패';
+}
+
+export interface SeminarDetailMetadata {
+  hasSurvey: boolean;
+  isPointExcluded: boolean;
+  isEnded: boolean;
+}
+
+/**
+ * 세미나 상세 SSR HTML 파싱
+ * URL: https://www.doctorville.co.kr/seminar/seminarDetail?seminarId={seminarId}
+ */
+export function parseSeminarDetailHtml(html: string): SeminarDetailMetadata {
+  const $ = cheerio.load(html);
+  const bodyText = $('body').text().replace(/s+/g, ' ');
+
+  // 1. 포인트 미지급 여부
+  const isPointExcluded = hasSurveyPointExcludedNoticeHtml(html);
+
+  // 2. 설문 여부
+  // '설문참여' 버튼 또는 '.seminar-badge' 내 '설문' 텍스트
+  const hasSurveyBtn = $(':contains("설문참여")').length > 0;
+  let hasSurveyBadge = false;
+  $('.seminar-badge').each((_, el) => {
+    if ($(el).text().trim().includes('설문')) {
+      hasSurveyBadge = true;
+    }
+  });
+  const hasSurvey = hasSurveyBtn || hasSurveyBadge;
+
+  // 3. 종료 여부
+  // '세미나 종료' 문구 또는 '신청 취소' 버튼 부재 (기존 Playwright isSeminarEnded 조건 및 text check)
+  const isEndedText = /세미나s*종료/.test(bodyText);
+  const canCancel = $(':contains("신청 취소")').length > 0;
+  const isEnded = isEndedText || (!canCancel && /종료/.test(bodyText));
+
+  return {
+    hasSurvey,
+    isPointExcluded,
+    isEnded,
+  };
 }

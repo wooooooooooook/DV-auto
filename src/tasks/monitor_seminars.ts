@@ -7,9 +7,10 @@ import {
   sendTelegram,
   getSeminarIdFromUrl,
   ensureLoggedIn,
-  ensureSeminarDetailReady,
-  hasSurveyPointExcludedNotice,
+  fetchSeminarDetail,
 } from '../modules/utils';
+import { httpGet } from '../modules/http_client';
+import { parseSeminarListHtml } from '../modules/html_parser';
 import { processSeminarQuiz } from './seminar_quiz';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
@@ -26,7 +27,7 @@ const randomDelay = (): Promise<void> => {
 };
 
 // Helper function to get today's seminars within a specific time range
-type SeminarInfo = {
+export type SeminarInfo = {
   status: string;
   name: string;
   seminarId: string | null;
@@ -39,77 +40,43 @@ type SeminarInfo = {
 
 const seoulDateString = (): string => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
 
-type SeminarSurveyMeta = {
+export type SeminarSurveyMeta = {
   hasSurvey: boolean;
   isSurveyPointExcluded: boolean;
 };
 
 const getSeminarTrackingKey = (url: string, seminarId: string | null | undefined): string => seminarId || url;
 
-async function checkSurveyMeta(context: BrowserContext, url: string): Promise<SeminarSurveyMeta> {
-  const page = await context.newPage();
-  try {
-    await safeGoto(page, url, { waitUntil: 'domcontentloaded', timeout: 15000 });
-    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
-    await ensureSeminarDetailReady(page, url);
-
-    const isSurveyPointExcluded = await hasSurveyPointExcludedNotice(page);
-
-    // Check for "설문참여" button
-    const surveyBtn = page.locator('text="설문참여"').first();
-    const isSurveyButtonVisible = await surveyBtn.isVisible({ timeout: 5000 }).catch(() => false);
-
-    // Check for badge with inner text "설문" and class "seminar-badge"
-    const surveyBadge = page.locator('.seminar-badge', { hasText: '설문' }).first();
-    const isSurveyBadgeVisible = await surveyBadge.isVisible({ timeout: 5000 }).catch(() => false);
-
+export async function checkSurveyMeta(url: string): Promise<SeminarSurveyMeta> {
+  const res = await fetchSeminarDetail(url);
+  if (res.status === 'success') {
     return {
-      hasSurvey: isSurveyButtonVisible || isSurveyBadgeVisible,
-      isSurveyPointExcluded,
+      hasSurvey: res.metadata.hasSurvey,
+      isSurveyPointExcluded: res.metadata.isPointExcluded,
     };
-  } catch (e) {
-    console.warn(`[checkSurveyMeta] Failed to check survey for ${url}`, e);
-    // If check fails, assume it exists to be safe (or false? User wants to suppress if *missing*. Safe default is true.)
-    // But if we error out, maybe we shouldn't suppress the end notification.
-    return { hasSurvey: true, isSurveyPointExcluded: false };
-  } finally {
-    await page.close().catch(() => {});
   }
+  console.warn(
+    '[checkSurveyMeta] Failed to check survey via HTTP for ' + url,
+    res.status === 'error' ? res.error : res.status,
+  );
+  return { hasSurvey: true, isSurveyPointExcluded: false };
 }
 
-async function isSeminarEnded(
-  context: BrowserContext,
+export async function isSeminarEnded(
   seminar: { name: string; seminarId: string | null },
   fallbackUrl: string,
 ): Promise<boolean> {
-  const targetUrl = seminar.seminarId ? `${SEMINAR_DETAIL_PAGE}${seminar.seminarId}` : fallbackUrl;
-  const detailPage = await context.newPage();
-  const screenshotPath = path.join(process.cwd(), `screenshot_end_check_${seminar.seminarId || Date.now()}.png`);
-
-  try {
-    await safeGoto(detailPage, targetUrl, { waitUntil: 'commit', timeout: 15000 }, 2);
-    await detailPage.reload({ waitUntil: 'networkidle', timeout: 15000 });
-    const surveyEnded = await detailPage.locator('text="세미나 종료"').first().isVisible({ timeout: 2000 });
-    const canCancel = await detailPage.locator('text="신청 취소"').first().isVisible({ timeout: 2000 });
-    console.log(`[monitor_seminars] Seminar end check (${seminar.seminarId}): ${surveyEnded}, ${canCancel}`);
-
-    await detailPage.screenshot({ path: screenshotPath, fullPage: false });
-    if (!canCancel) {
-      console.log(`[monitor_seminars] End check pending for ${seminar.seminarId}. surveyEnded=${surveyEnded}`);
-    }
-    await fs
-      .unlink(screenshotPath)
-      .catch((err) => console.error(`Failed to delete screenshot: ${screenshotPath}`, err));
-    return surveyEnded;
-  } catch (e) {
-    console.error(
-      `[monitor_seminars] 종료 여부 확인 실패 (${seminar.seminarId})`,
-      e && typeof e === 'object' && 'stack' in e ? (e as Error).stack : e,
-    );
-    return false;
-  } finally {
-    await detailPage.close().catch(() => {});
+  const targetUrl = seminar.seminarId ? SEMINAR_DETAIL_PAGE + seminar.seminarId : fallbackUrl;
+  const res = await fetchSeminarDetail(targetUrl);
+  if (res.status === 'success') {
+    console.log('[monitor_seminars] Seminar end check (' + seminar.seminarId + '): isEnded=' + res.metadata.isEnded);
+    return res.metadata.isEnded;
   }
+  console.error(
+    '[monitor_seminars] 종료 여부 확인 실패 (' + seminar.seminarId + ')',
+    res.status === 'error' ? res.error : res.status,
+  );
+  return false;
 }
 
 /**
@@ -157,7 +124,6 @@ async function handleSeminarEndAndQuiz(
       }
 
       // 개인정보 동의 모달이 있을 경우 상태만 확인
-      // NOTE: 일부 페이지는 기본값이 이미 체크된 상태라 추가 클릭 시 오히려 해제될 수 있음.
       const consentModal = quizPage
         .locator('text="개인정보 활용에 대한 동의", text="개인정보 제3자 제공 동의서"')
         .first();
@@ -251,49 +217,56 @@ async function handleSeminarEndAndQuiz(
   return { message: quizResultMessage, foundSurveyButton };
 }
 
-async function getTodaysSeminars(page: Page, startHour: number, endHour: number): Promise<Record<string, SeminarInfo>> {
+export type GetTodaysSeminarsResult =
+  | { success: true; seminars: Record<string, SeminarInfo> }
+  | { success: false; errorType: 'AUTH_EXPIRED' | 'HTTP_ERROR'; error: string };
+
+export async function getTodaysSeminarsHttp(startHour: number, endHour: number): Promise<GetTodaysSeminarsResult> {
   const seminars: Record<string, SeminarInfo> = {};
 
-  const container = await page.locator('.list_cont').first();
-  const seminarDay = await container
-    .locator('.seminar_day .date')
-    .innerText()
-    .catch(() => '');
+  const mainRes = await httpGet(SEMINAR_PAGE);
+  if (mainRes.resultType === 'AUTH_EXPIRED') {
+    return { success: false, errorType: 'AUTH_EXPIRED', error: 'AUTH_EXPIRED' };
+  }
+  if (mainRes.status !== 200 || !mainRes.body) {
+    return { success: false, errorType: 'HTTP_ERROR', error: `HTTP GET failed with status ${mainRes.status}` };
+  }
+
+  const rawList = parseSeminarListHtml(mainRes.body);
+  if (rawList.length === 0) {
+    return { success: true, seminars };
+  }
 
   const now = new Date();
   const month = now.toLocaleDateString('en-US', { month: 'numeric', timeZone: 'Asia/Seoul' });
   const day = now.toLocaleDateString('en-US', { day: 'numeric', timeZone: 'Asia/Seoul' });
   const todayString = `${month}/${day}`;
 
+  const firstDate = rawList[0]?.date || '';
   console.log(
-    `[monitor_seminars] Getting Today seminar lists... Today's date string: ${todayString}, Seminar day string: ${seminarDay}`,
+    `[monitor_seminars] Getting Today seminar lists (HTTP)... Today's date string: ${todayString}, Seminar day string: ${firstDate}`,
   );
 
-  if (seminarDay === todayString) {
-    const seminarDetails = await container.locator('.list_detail');
-    const detailCount = await seminarDetails.count();
-
-    for (let j = 0; j < detailCount; j++) {
-      const detail = seminarDetails.nth(j);
-      const timeStr = await detail.locator('.txt_num.time').first().innerText();
-      const hour = parseInt(timeStr.split(':')[0], 10);
-
+  if (firstDate === todayString) {
+    for (const item of rawList) {
+      if (item.date !== todayString) continue;
+      const hour = parseInt(item.time.split(':')[0], 10);
       if (hour >= startHour && hour < endHour) {
-        const href = await detail.getAttribute('href');
-        const fullUrl = `${BASE_URL}${href}`;
+        const fullUrl = new URL(item.url, BASE_URL).toString();
         const seminarId = getSeminarIdFromUrl(fullUrl);
-        const statusElement = detail.locator('.progress .ico_box');
-        const statusText = (await statusElement.count()) > 0 ? await statusElement.innerText() : '상태없음';
-        const seminarName = await detail.locator('.list_tit .tit').first().innerText();
-        const isAdvancedSurvey = (await detail.locator('.ic_survey').count()) > 0;
-        seminars[fullUrl] = { status: statusText, name: seminarName, seminarId: seminarId, isAdvancedSurvey };
+        seminars[fullUrl] = {
+          status: item.status || '상태없음',
+          name: item.name,
+          seminarId,
+          isAdvancedSurvey: item.isAdvancedSurvey,
+        };
       }
     }
   } else {
     console.log('[monitor_seminars] No seminars on today...');
   }
 
-  return seminars;
+  return { success: true, seminars };
 }
 
 async function performAutoEnter(
@@ -315,7 +288,6 @@ async function performAutoEnter(
     const enterBtn = page.locator('text="입장하기"').first();
     if (!(await enterBtn.isVisible({ timeout: 5000 }))) {
       console.log(`[monitor_seminars] '입장하기' button not found for ${seminarId}. retry needed.`);
-      // 버튼 못 찾아도 현재 페이지 스크린샷 전송
       const notFoundScreenshotPath = path.join(process.cwd(), `seminar_entry_notfound_${screenshotKey}.png`);
       try {
         await page.screenshot({ path: notFoundScreenshotPath, fullPage: false });
@@ -343,7 +315,6 @@ async function performAutoEnter(
       await activePage.waitForLoadState('domcontentloaded');
     }
 
-    // "채널 선택" 다이얼로그 감지 후 "확인" 버튼 클릭
     console.log(`[monitor_seminars] Checking for '채널 선택' dialog after clicking '입장하기' (${seminarId})`);
     await activePage.waitForTimeout(2000);
     const channelSelectText = activePage.locator('text="채널 선택"').first();
@@ -363,14 +334,12 @@ async function performAutoEnter(
     console.log(`[monitor_seminars] Waiting for chat iframe to confirm seminar entry (${seminarId})`);
     await activePage.waitForTimeout(5000);
 
-    // Q&A 섹션 존재 여부로 입장 완료 판정: video.ibm.com/socialstream iframe만 확인
     const chatFrame = page.frames().find((f) => f.url().includes('socialstream') || f.url().includes('video.ibm.com'));
     let isQnaVisible = !!chatFrame;
 
     if (isQnaVisible) {
       console.log(`[monitor_seminars] Chat iframe (socialstream) found for ${seminarId}. Entry confirmed.`);
     } else {
-      // Fallback: URL 패턴 확인 (https://m.doctorville.co.kr/cme/seminar/attend?seminarId=...)
       const currentUrl = activePage.url();
       const urlPattern = /https:\/\/m\.doctorville\.co\.kr\/cme\/seminar\/attend\?seminarId=\d+/;
       const on24Pattern = /https:\/\/event\.on24\.com\/eventRegistration\/console\/apollox\/mainEvent/;
@@ -387,7 +356,6 @@ async function performAutoEnter(
         `[monitor_seminars] Q&A section not found after entry attempt for ${seminarId}. Entry may have failed.`,
       );
 
-      // 불확실 시 → PC 도메인 상세 페이지로 fallback 후 '입장하기' 클릭
       if (seminarId) {
         const pcFallbackUrl = `${SEMINAR_DETAIL_PC_PAGE}?seminarId=${seminarId}`;
         console.log(`[monitor_seminars] PC fallback for ${seminarId} -> ${pcFallbackUrl}`);
@@ -428,7 +396,6 @@ async function performAutoEnter(
       console.log(`[monitor_seminars] Q&A section confirmed. Seminar entry successful for ${seminarId}.`);
     }
 
-    // Take a screenshot and return success status (notification moved to checkAndPerformAutoEnter)
     const screenshotPath = path.join(process.cwd(), `seminar_entry_${screenshotKey}.png`);
     try {
       await activePage.screenshot({ path: screenshotPath, fullPage: false });
@@ -436,7 +403,6 @@ async function performAutoEnter(
     } catch (screenshotError) {
       console.error(`[monitor_seminars] Failed to take screenshot for ${seminarId}`, screenshotError);
     } finally {
-      // Clean up the screenshot file
       await fs.unlink(screenshotPath).catch(() => {});
     }
 
@@ -468,12 +434,10 @@ async function checkAndPerformAutoEnter(
   const screenshotKey = seminarId || `url_${Date.now()}`;
   const didEnter = await performAutoEnter(context, seminarId, name, targetUrl, screenshotKey);
 
-  // 첫 성공 시에만 관리자 알림 전송 (중복 방지)
   if (didEnter) {
     const entryMessage = `🟢세미나 입장 완료\n**${name}**\n${targetUrl}`;
     const screenshotPath = path.join(process.cwd(), `seminar_entry_${screenshotKey}.png`);
     try {
-      // 알림용 스크린샷 별도 캡처
       const page = await context.newPage();
       await safeGoto(page, targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
       await page.screenshot({ path: screenshotPath, fullPage: false });
@@ -502,21 +466,27 @@ async function monitorSeminars(
   const todayIsoDate = seoulDateString();
 
   try {
-    // Initial population of the monitoring list
-    await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'load', timeout: 30000 }, 1);
-
-    const initialSeminars = await getTodaysSeminars(page, startHour, endHour);
+    const initialResult = await getTodaysSeminarsHttp(startHour, endHour);
+    let initialSeminars: Record<string, SeminarInfo> = {};
+    if (initialResult.success === false) {
+      if (initialResult.errorType === 'AUTH_EXPIRED') {
+        const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
+        await sendTelegram(msg).catch(() => {});
+        return false;
+      }
+      console.warn(`[${periodName}] Initial HTTP seminar list fetch failed: ${initialResult.error}`);
+    } else {
+      initialSeminars = initialResult.seminars;
+    }
     monitoringList = { ...initialSeminars };
 
     for (const [url, { status, name, seminarId }] of Object.entries(initialSeminars)) {
-      // If a seminar is already open, start its key message monitor immediately
       if (status === '입장하기') {
         console.log(`[${periodName}] Seminar already available: ${name}`);
         await sendTelegram(`[${periodName}] Seminar already available: ${name}`);
         const targetUrl = seminarId ? `${SEMINAR_DETAIL_PAGE}${seminarId}` : url;
 
-        // Check for survey existence
-        const { hasSurvey, isSurveyPointExcluded } = await checkSurveyMeta(context, targetUrl);
+        const { hasSurvey, isSurveyPointExcluded } = await checkSurveyMeta(targetUrl);
         if (isSurveyPointExcluded) {
           console.log(
             `[monitor_seminars] ${name} is point-excluded. Entry only, no channel notice, no end monitoring. (During Initialization)`,
@@ -537,7 +507,6 @@ async function monitorSeminars(
           monitoringList[url].isEntryStarted = true;
         }
 
-        // 포인트미지급 세미나: 공지봇 알림 없이 입장 후 모니터링 목록에서 제거
         if (isSurveyPointExcluded) {
           excludedSeminarKeys.add(getSeminarTrackingKey(url, seminarId));
           delete monitoringList[url];
@@ -549,7 +518,6 @@ async function monitorSeminars(
         if (!hasSurvey) {
           message += `\n(설문이 없는 세미나인 것 같습니다)`;
         }
-        // auto-resume 시(재부팅/재시작)에는 이미 시작된 세미나의 채널 공지를 건너뜁니다
         if (!isAutoResume) {
           await sendNotificationToChannel(message);
         } else {
@@ -589,27 +557,24 @@ async function monitorSeminars(
 
       await randomDelay();
 
-      try {
-        await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });
-        await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
-      } catch (reloadError) {
-        console.error(`[${periodName}] page.reload failed. trying safeGoto fallback.`, reloadError);
-
-        try {
-          await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'domcontentloaded', timeout: 30000 }, 1);
-          await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
-        } catch (fallbackError) {
-          const reloadMessage = reloadError instanceof Error ? reloadError.message : String(reloadError);
-          const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
-          await sendTelegram(
-            `⚠️ [${periodName}] 세미나 목록 새로고침 실패. 다음 주기에 재시도합니다.\nreload: ${reloadMessage}\nfallback: ${fallbackMessage}`,
-          ).catch(() => {});
-          await randomDelay();
-          continue;
+      const pollRes = await getTodaysSeminarsHttp(startHour, endHour);
+      if (pollRes.success === false) {
+        if (pollRes.errorType === 'AUTH_EXPIRED') {
+          const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
+          await sendTelegram(msg).catch(() => {});
+          return false;
         }
+        const errDetail = pollRes.error;
+        console.warn(
+          `[${periodName}] 세미나 목록 HTTP polling 실패 (${errDetail}). 기존 monitoringList 유지 후 다음 주기에 재시도.`,
+        );
+        await sendTelegram(
+          `⚠️ [${periodName}] 세미나 목록 HTTP polling 실패: ${errDetail}. 다음 주기에 재시도합니다.`,
+        ).catch(() => {});
+        continue;
       }
 
-      const currentSeminarsOnPage = await getTodaysSeminars(page, startHour, endHour);
+      const currentSeminarsOnPage = pollRes.seminars;
 
       for (const [url, info] of Object.entries(currentSeminarsOnPage)) {
         const trackingKey = getSeminarTrackingKey(url, info.seminarId);
@@ -622,6 +587,25 @@ async function monitorSeminars(
         }
       }
 
+      // Per-cycle detail cache to prevent redundant HTTP GET requests for the same seminar
+      const detailCache = new Map<string, { hasSurvey: boolean; isSurveyPointExcluded: boolean; isEnded: boolean }>();
+      const getDetailMeta = async (targetUrl: string, seminarId: string | null) => {
+        const key = seminarId || targetUrl;
+        if (detailCache.has(key)) return detailCache.get(key)!;
+
+        const res = await fetchSeminarDetail(targetUrl);
+        let meta = { hasSurvey: true, isSurveyPointExcluded: false, isEnded: false };
+        if (res.status === 'success') {
+          meta = {
+            hasSurvey: res.metadata.hasSurvey,
+            isSurveyPointExcluded: res.metadata.isPointExcluded,
+            isEnded: res.metadata.isEnded,
+          };
+        }
+        detailCache.set(key, meta);
+        return meta;
+      };
+
       const monitoredUrls = [...Object.keys(monitoringList)];
       for (const url of monitoredUrls) {
         const monitoredInfo = monitoringList[url];
@@ -631,44 +615,41 @@ async function monitorSeminars(
           name: currentInfo?.name || monitoredInfo.name,
           status: currentInfo?.status || monitoredInfo.status,
           seminarId: currentInfo?.seminarId || monitoredInfo.seminarId,
-          hasSurvey: monitoredInfo.hasSurvey, // Preserve hasSurvey state
-          isSurveyPointExcluded: monitoredInfo.isSurveyPointExcluded, // Preserve point-excluded state
-          isEntryStarted: monitoredInfo.isEntryStarted, // Preserve isEntryStarted state
-          autoEnterDone: monitoredInfo.autoEnterDone, // Preserve autoEnterDone state
-          isAdvancedSurvey: monitoredInfo.isAdvancedSurvey, // Preserve isAdvancedSurvey state
+          hasSurvey: monitoredInfo.hasSurvey,
+          isSurveyPointExcluded: monitoredInfo.isSurveyPointExcluded,
+          isEntryStarted: monitoredInfo.isEntryStarted,
+          autoEnterDone: monitoredInfo.autoEnterDone,
+          isAdvancedSurvey: monitoredInfo.isAdvancedSurvey,
         };
 
         const effectiveStatus = currentInfo ? currentInfo.status : monitoredInfo.status;
         let ended = false;
 
-        // Only check for end if the seminar entry has started (notice sent).
         if (mergedSeminarInfo.isEntryStarted) {
           if (mergedSeminarInfo.hasSurvey === false) {
             if (!currentInfo) {
-              // If survey is not required and seminar disappeared from the list, consider it ended/removed
               ended = true;
             }
           } else {
-            ended = await isSeminarEnded(context, mergedSeminarInfo, url);
+            const targetUrl = mergedSeminarInfo.seminarId
+              ? `${SEMINAR_DETAIL_PAGE}${mergedSeminarInfo.seminarId}`
+              : url;
+            const detail = await getDetailMeta(targetUrl, mergedSeminarInfo.seminarId);
+            ended = detail.isEnded;
           }
         }
 
-        // 1. Check seminar end by visiting detail page
         if (ended) {
-          // Always try to handle the end/quiz, regardless of initial survey status
           const { message: quizResultMessage, foundSurveyButton } = await handleSeminarEndAndQuiz(
             context,
             mergedSeminarInfo,
             url,
           );
 
-          // If we knew it had a survey, OR if we just found one (even if we thought it didn't have one)
           if (mergedSeminarInfo.hasSurvey !== false || foundSurveyButton) {
             const targetUrl = mergedSeminarInfo.seminarId
               ? `${SEMINAR_DETAIL_PAGE}${mergedSeminarInfo.seminarId}`
               : url;
-            // quizResultMessage는 processSeminarQuiz()가 [퀴즈] 문항만으로 만든 결과만 담습니다.
-            // 일반 설문(객관식 서베이 등)은 절대 채널로 가지 않습니다.
             const quizSuffix = quizResultMessage ? `\n\n${quizResultMessage}` : '';
             const advancedSurveySuffix = mergedSeminarInfo.isAdvancedSurvey ? ' [심화설문]' : '';
             const message = `🔴세미나종료\n**${mergedSeminarInfo.name}**${advancedSurveySuffix}\n${targetUrl}${quizSuffix}`;
@@ -678,22 +659,20 @@ async function monitorSeminars(
               `[monitor_seminars] Skipping end notification for ${mergedSeminarInfo.name} because it has no survey.`,
             );
           }
-          delete monitoringList[url]; // Remove from monitoring
-          continue; // Move to the next seminar
+          delete monitoringList[url];
+          continue;
         }
 
-        // 2. If it still exists, get its new state
         const { status: newStatus, name: newName } = currentInfo || monitoredInfo;
-        const _oldStatus = monitoredInfo.status;
 
-        // 3. Check for transition to '입장하기' (New entry detection)
-        // Check if now ready for entry (either newly transitioned from Apply status, or newly discovered as entry-ready)
         if (currentInfo && newStatus === '입장하기' && !monitoredInfo.isEntryStarted) {
           console.log(`[${periodName}] Seminar ready for entry: ${newName}.`);
           const targetUrl = mergedSeminarInfo.seminarId ? `${SEMINAR_DETAIL_PAGE}${mergedSeminarInfo.seminarId}` : url;
 
-          // Check for survey existence
-          const { hasSurvey, isSurveyPointExcluded } = await checkSurveyMeta(context, targetUrl);
+          const detail = await getDetailMeta(targetUrl, mergedSeminarInfo.seminarId);
+          const hasSurvey = detail.hasSurvey;
+          const isSurveyPointExcluded = detail.isSurveyPointExcluded;
+
           if (isSurveyPointExcluded) {
             console.log(
               `[monitor_seminars] ${newName} is point-excluded. Entry only, no channel notice, no end monitoring. (During Loop)`,
@@ -705,7 +684,6 @@ async function monitorSeminars(
             monitoringList[url].isSurveyPointExcluded = isSurveyPointExcluded;
           }
 
-          // 포인트미지급 세미나: 입장 시도(관리자봇 스크린샷) 후 모니터링 제거, 공지봇 알림 X
           if (isSurveyPointExcluded) {
             const trackingKey = getSeminarTrackingKey(url, mergedSeminarInfo.seminarId);
             excludedSeminarKeys.add(trackingKey);
@@ -730,7 +708,6 @@ async function monitorSeminars(
           }
           await sendNotificationToChannel(message);
 
-          // Update state in both merged and original list
           mergedSeminarInfo.hasSurvey = hasSurvey;
           mergedSeminarInfo.isEntryStarted = true;
           mergedSeminarInfo.autoEnterDone = await checkAndPerformAutoEnter(
@@ -741,7 +718,6 @@ async function monitorSeminars(
             newStatus,
             mergedSeminarInfo.autoEnterDone,
           );
-          // Note: monitoringList[url] will be updated below at step 4
         } else {
           mergedSeminarInfo.autoEnterDone = await checkAndPerformAutoEnter(
             context,
@@ -753,7 +729,6 @@ async function monitorSeminars(
           );
         }
 
-        // 4. Always update the seminar's status and name in the monitoring list
         monitoringList[url] = {
           ...mergedSeminarInfo,
           status: newStatus,

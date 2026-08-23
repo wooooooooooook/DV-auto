@@ -88,6 +88,7 @@ export type RawSeminarData = {
   totalCount: string;
   nightTime: boolean;
   isAdvancedSurvey: boolean;
+  status?: string;
 };
 
 const MEANINGFUL_FIELDS: Array<{

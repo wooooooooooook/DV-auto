@@ -13,6 +13,10 @@ import {
   type TodayLinksFormatInput,
 } from '../src/tasks/today_links';
 import { normalizeParsedSeminars } from '../src/tasks/apply_seminar';
+import { parseSeminarListHtml, parseSeminarDetailHtml } from '../src/modules/html_parser';
+import { fetchSeminarDetail } from '../src/modules/utils';
+// use fetchSeminarDetail in assertion
+assert(typeof fetchSeminarDetail === 'function');
 
 const FIXTURE_PATH = path.join(__dirname, 'fixtures', 'seminar_main.html');
 const BASE_URL = 'https://www.doctorville.co.kr';
@@ -731,6 +735,7 @@ async function runAllFixtureTests() {
   testNormalizeParsedSeminars(nodes);
   testPointFieldsPreservation();
   await testPointSyncRequirements();
+  testHttpAndDetailParsers();
 
   console.log('🎉 모든 세미나 메인 페이지 (/seminar/main) 기능 테스트를 100% 성공적으로 통과했습니다!\n');
 }
@@ -739,3 +744,65 @@ runAllFixtureTests().catch((err) => {
   console.error(err);
   process.exit(1);
 });
+
+/**
+ * 9. HTTP 목록 파서 및 상세 SSR 메타데이터 파서 테스트
+ */
+function testHttpAndDetailParsers() {
+  console.log('--- [Test 9] HTTP 목록 파서 (.progress .ico_box 상태) 및 상세 SSR 메타데이터 파서 테스트 시작 ---');
+
+  // 9-1. 목록 HTML 파싱 (상태값 추출)
+  const sampleListHtml = `
+    <div class="list_cont">
+      <div class="seminar_day"><em class="txt_num date">8/18</em></div>
+      <a href="/seminar/seminarDetail?seminarId=9001" class="list_detail">
+        <span class="txt_num time">12:00~13:00</span>
+        <div class="list_tit"><p class="tit">테스트 세미나 1</p></div>
+        <div class="progress"><span class="ico_box">신청하기</span></div>
+        <div class="person"><em class="txt_num">10</em><span class="total"><em class="txt_num">/100</em></span></div>
+      </a>
+      <a href="/seminar/seminarDetail?seminarId=9002" class="list_detail">
+        <span class="txt_num time">18:00~19:00</span>
+        <div class="list_tit"><p class="tit">테스트 세미나 2</p></div>
+        <div class="progress"><span class="ico_box">입장하기</span></div>
+        <div class="person"><em class="txt_num">50</em><span class="total"><em class="txt_num">/100</em></span></div>
+      </a>
+    </div>
+  `;
+
+  const parsedList = parseSeminarListHtml(sampleListHtml);
+  assert.strictEqual(parsedList.length, 2);
+  assert.strictEqual(parsedList[0].status, '신청하기');
+  assert.strictEqual(parsedList[1].status, '입장하기');
+  console.log('  ✓ [List Parser] .progress .ico_box 상태값 정상 추출 (신청하기, 입장하기)');
+
+  // 9-2. 상세 SSR HTML 파싱 (hasSurvey, isPointExcluded, isEnded)
+  const sampleDetailHtmlActive = `
+    <html>
+      <body>
+        <div>세미나 상세 설명</div>
+        <button class="btn">설문참여</button>
+        <button class="btn">신청 취소</button>
+      </body>
+    </html>
+  `;
+  const metaActive = parseSeminarDetailHtml(sampleDetailHtmlActive);
+  assert.strictEqual(metaActive.hasSurvey, true);
+  assert.strictEqual(metaActive.isPointExcluded, false);
+  assert.strictEqual(metaActive.isEnded, false);
+
+  const sampleDetailHtmlEndedAndPointExcluded = `
+    <html>
+      <body>
+        <div>포인트가 지급되지 않는 세미나입니다.</div>
+        <div>세미나 종료</div>
+      </body>
+    </html>
+  `;
+  const metaEnded = parseSeminarDetailHtml(sampleDetailHtmlEndedAndPointExcluded);
+  assert.strictEqual(metaEnded.hasSurvey, false);
+  assert.strictEqual(metaEnded.isPointExcluded, true);
+  assert.strictEqual(metaEnded.isEnded, true);
+
+  console.log('  ✓ [Detail SSR Parser] hasSurvey, isPointExcluded, isEnded 추출 정상 작동\n');
+}
