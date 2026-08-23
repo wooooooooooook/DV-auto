@@ -1007,9 +1007,10 @@ if (adminBot) {
       const result = await runner.runTask(task, { args: { seminarId } });
 
       if (result && typeof result === 'object') {
-        const r = result as { message?: string; success?: boolean };
+        const r = result as { message?: string; success?: boolean; rawMessage?: string };
         if (r.success !== false && r.message) await ctx.reply(r.message, { parse_mode: 'Markdown' });
         else if (!r.success && r.message) await ctx.reply(r.message);
+        if (r.rawMessage) await ctx.reply(r.rawMessage, { parse_mode: 'Markdown' });
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);

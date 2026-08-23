@@ -222,17 +222,22 @@ function stripHtml(html: string): string {
     .trim();
 }
 
-export function formatSeminarDetail(data: SeminarDetail, raw?: SeminarDetailResponse): string {
+function buildSeminarUrl(seminarId: number): string {
+  return `https://m.doctorville.co.kr/cme/seminar/${seminarId}`;
+}
+
+export function formatSeminarDetail(data: SeminarDetail): string {
   const dateTime = formatDateTime(data.startDt, data.endDt, data.startTime, data.endTime, data.startMonthAndDay);
   const status = formatStatus(data.processState, data.seminarCompleted, data.useSurvey);
   const participantInfo = `${data.applyCnt} / ${data.maxPeopleCnt}`;
+  const seminarUrl = buildSeminarUrl(data.seminarId);
 
   let introText = stripHtml(data.intro || '');
   if (introText.length > 200) {
     introText = introText.slice(0, 200) + '...';
   }
 
-  const lines = [
+  return [
     `*세미나 상세* (ID: ${data.seminarId})`,
     '',
     `*제목:* ${data.seminarNm}`,
@@ -244,25 +249,33 @@ export function formatSeminarDetail(data: SeminarDetail, raw?: SeminarDetailResp
     `*VOD:* ${data.useVod === 'Y' ? '제공' : '미제공'}`,
     `*설문:* ${data.useSurvey === 'Y' ? '있음' : '없음'} (심화: ${data.useDepthSurvey === 'Y' ? '있음' : '없음'})`,
     `*설문ID:* ${data.surveyId ?? '없음'}`,
+    `*URL:* ${seminarUrl}`,
     '',
     `*소개:*`,
     introText || '(소개 없음)',
-  ];
-
-  // Raw JSON 첨부 (텔레그램 4096자 제한 고려: 별도 메시지로)
-  if (raw) {
-    const rawJson = JSON.stringify(raw, null, 2);
-    if (rawJson.length <= 3500) {
-      lines.push('', '---', '*Raw API Response:*', `\`\`\`json\n${rawJson}\n\`\`\``);
-    } else {
-      lines.push('', '---', '*Raw API Response:* (길이 초과로 생략, 별도 확인 필요)');
-    }
-  }
-
-  return lines.join('\n');
+  ].join('\n');
 }
 
-export async function run({ args }: { args: { seminarId: string } }): Promise<{ success: boolean; message: string }> {
+export function formatRawResponse(raw: SeminarDetailResponse): string {
+  const rawJson = JSON.stringify(raw, null, 2);
+  if (rawJson.length <= 3800) {
+    return `*Raw API Response:*\n\`\`\`json\n${rawJson}\n\`\`\``;
+  }
+  // 너무 길면 청크로 분할
+  const chunks: string[] = [];
+  for (let i = 0; i < rawJson.length; i += 3800) {
+    chunks.push(rawJson.slice(i, i + 3800));
+  }
+  return chunks
+    .map((chunk, idx) => `*Raw API Response (${idx + 1}/${chunks.length}):*\n\`\`\`json\n${chunk}\n\`\`\``)
+    .join('\n\n');
+}
+
+export async function run({
+  args,
+}: {
+  args: { seminarId: string };
+}): Promise<{ success: boolean; message: string; rawMessage?: string }> {
   const seminarId = args?.seminarId;
   if (!seminarId) {
     return { success: false, message: '세미나 ID가 필요합니다. 예: /seminar_detail 5566' };
@@ -273,6 +286,7 @@ export async function run({ args }: { args: { seminarId: string } }): Promise<{ 
     return { success: false, message: result.error || '세미나 정보를 가져올 수 없습니다.' };
   }
 
-  const formatted = formatSeminarDetail(result.data, result.raw);
-  return { success: true, message: formatted };
+  const formatted = formatSeminarDetail(result.data);
+  const rawMessage = result.raw ? formatRawResponse(result.raw) : undefined;
+  return { success: true, message: formatted, rawMessage };
 }
