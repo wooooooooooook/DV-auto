@@ -20,6 +20,7 @@ async function testApplySeminarChanges() {
   console.log('===========================================================\n');
 
   // 백업
+  const originalHttpGet = (await import('../src/modules/http_client')).httpGet;
   const originalSendTelegram = utilsModule.sendTelegram;
   const originalSendNotificationToChannel = utilsModule.sendNotificationToChannel;
   const originalEnsureLoggedIn = utilsModule.ensureLoggedIn;
@@ -193,6 +194,25 @@ async function testApplySeminarChanges() {
     (utilsModule as unknown as { ensureLoggedIn: unknown }).ensureLoggedIn = async () => {};
     (utilsModule as unknown as { safeGoto: unknown }).safeGoto = async () => {};
 
+    (await import('../src/modules/http_client')).httpGet = async () => ({
+      status: 200,
+      body: `
+        <div class="list_cont">
+          <div class="seminar_day"><span class="date">2026-08-24</span></div>
+          <a class="list_detail" href="/seminar/seminarDetail?seminarId=100">
+            <div class="list_tit"><span class="tit">테스트 세미나</span></div>
+            <span class="txt_num time night_time">21:00</span>
+            <div class="person"><span class="txt_num">15</span><span class="total"><span class="txt_num">/100</span></span></div>
+          </a>
+        </div>
+      `,
+      statusText: '200',
+      headers: {},
+      url: 'https://www.doctorville.co.kr/seminar/main',
+      redirected: false,
+      resultType: 'SUCCESS',
+    });
+
     // Mock page with minimal locator implementations
     const createMockPage = () => {
       return {
@@ -274,6 +294,7 @@ async function testApplySeminarChanges() {
 
     console.log('🎉 모든 apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스트 통과!\n');
   } finally {
+    (await import('../src/modules/http_client')).httpGet = originalHttpGet;
     (utilsModule as unknown as { sendTelegram: unknown }).sendTelegram = originalSendTelegram;
     (utilsModule as unknown as { sendNotificationToChannel: unknown }).sendNotificationToChannel =
       originalSendNotificationToChannel;

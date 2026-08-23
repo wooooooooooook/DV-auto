@@ -1,6 +1,6 @@
 import path from 'path';
 import fs from 'fs/promises';
-import type { PlaywrightRunArgs, TaskResult } from '../types';
+import type { TaskContext, TaskResult } from '../types';
 import {
   safeGoto,
   sendNotificationToChannel,
@@ -88,6 +88,7 @@ export type RawSeminarData = {
   totalCount: string;
   nightTime: boolean;
   isAdvancedSurvey: boolean;
+  hasIcoApply?: boolean;
 };
 
 const MEANINGFUL_FIELDS: Array<{
@@ -109,8 +110,6 @@ export function getSeminarInfoChanges(existing: SeminarListItem, incoming: Semin
     const oldVal = existing[key];
     const newVal = incoming[key];
 
-    // If incoming value is undefined and existing had a value, only treat as change if explicitly defined
-    // For boolean flags like isPointExcluded, undefined in incoming might mean not fetched yet
     if (newVal === undefined && oldVal !== undefined) continue;
 
     if (oldVal !== newVal) {
@@ -339,7 +338,7 @@ function refreshStoredSeminarList(
 }
 
 export async function refreshSeminarPointStatus(
-  context: PlaywrightRunArgs['context'],
+  context: TaskContext['context'],
   seminars: SeminarListItem[],
 ): Promise<{ seminars: SeminarListItem[]; pointChanges: SeminarPointChange[] }> {
   if (!context) return { seminars, pointChanges: [] };
@@ -443,20 +442,116 @@ export type ApplySeminarOptions = {
   _checkAdvancedPointStatus?: boolean;
 };
 
-async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOptions = {}): Promise<TaskResult> {
+async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Promise<TaskResult> {
+  const { notifyNewSeminarsToChannel = false, notifyNewSeminarsToTelegram = true } = options;
+
+  let mainRes;
+  try {
+    mainRes = await httpGet(SEMINAR_PAGE);
+    if (mainRes.resultType === 'AUTH_EXPIRED') {
+      const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
+      await sendTelegram(msg).catch(() => {});
+      return { success: false, message: msg };
+    }
+    if (mainRes.status !== 200 || !mainRes.body) {
+      throw new Error(`HTTP GET ${SEMINAR_PAGE} failed with status ${mainRes.status}`);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('apply_seminar HTTP pre-check error:', message);
+    await sendTelegram(`❗ 세미나 신청 작업 오류: ${message}`).catch(() => {});
+    return { success: false, message: `세미나 신청 작업 오류: ${message}` };
+  }
+
+  const currentSeminars = parseSeminarListHtml(mainRes.body);
+  const referenceDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+  const normalizedCurrentSeminars = normalizeParsedSeminars(currentSeminars, referenceDate);
+  const storedSeminars = migrateLegacySeminarStorage(referenceDate);
+
+  const { seminars, newlyAdded, infoChanges } = refreshStoredSeminarList(
+    normalizedCurrentSeminars,
+    storedSeminars,
+    referenceDate,
+  );
+
+  if (newlyAdded.length === 0) {
+    storage.set(SEMINAR_LIST_KEY, seminars);
+  } else {
+    const newlyAddedWithFlags: SeminarListItem[] = [];
+    for (const item of newlyAdded) {
+      const seminarId = getSeminarIdFromUrl(item.url);
+      const link = seminarId ? `${SEMINAR_DETAIL_SSR_PAGE}${seminarId}` : item.url;
+      const pointExRes = await isSurveyPointExcludedSeminarHttp(link);
+      if (pointExRes.status === 'auth_expired') {
+        const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
+        await sendTelegram(msg).catch(() => {});
+        return { success: false, message: msg };
+      }
+      const isPointExcluded = pointExRes.status === 'success' ? pointExRes.excluded : item.isPointExcluded;
+      newlyAddedWithFlags.push({ ...item, seminarId, isPointExcluded });
+    }
+
+    const flaggedByKey = new Map(newlyAddedWithFlags.map((item) => [seminarKey(item), item]));
+    const updatedSeminars = seminars.map((seminar) =>
+      flaggedByKey.has(seminarKey(seminar)) ? mergeSeminar(seminar, flaggedByKey.get(seminarKey(seminar))!) : seminar,
+    );
+    storage.set(SEMINAR_LIST_KEY, updatedSeminars);
+
+    const newSeminarMessage = newlyAddedWithFlags
+      .map((item) => {
+        const pointExcludedSuffix = item.isPointExcluded ? ' [포인트미지급]' : '';
+        const advancedSurveySuffix = item.isAdvancedSurvey ? ' [심화설문]' : '';
+        const dateTimePrefix = item.date || item.time ? `[${item.date}${item.time ? ' ' + item.time : ''}] ` : '';
+        const capacityInfo = item.currentCount && item.totalCount ? `(${item.currentCount}/${item.totalCount}) ` : '';
+        return `${dateTimePrefix}${pointExcludedSuffix}${advancedSurveySuffix}${item.name}${capacityInfo}\n${item.url}`;
+      })
+      .join('\n\n');
+    const noticeMessage = `🆕 새로 추가된 세미나 ${newlyAddedWithFlags.length}건 발견\n\n${newSeminarMessage}`;
+    if (notifyNewSeminarsToTelegram) await sendTelegram(noticeMessage);
+    if (notifyNewSeminarsToChannel) await sendNotificationToChannel(noticeMessage);
+  }
+
+  const finalSeminars = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
+  const pointStatusResult = await refreshSeminarPointStatus(ctx.context, finalSeminars);
+  const pointChanges = pointStatusResult.pointChanges;
+
+  const changeNotificationText = formatSeminarChangeNotification(infoChanges, pointChanges);
+  if (changeNotificationText) {
+    await sendTelegram(changeNotificationText).catch(() => {});
+  }
+
+  const hasApplyTarget = currentSeminars.some((s) => s.hasIcoApply);
+
+  let totalSeminarsAvailable = currentSeminars.length;
+
+  if (!hasApplyTarget) {
+    const completionCount = parseCompletionCountHtml(mainRes.body);
+    const message = `✅ ${completionCount}개 세미나 신청 완료! (${completionCount}/${totalSeminarsAvailable})`;
+
+    const result: TaskResult = { success: true, message };
+    if (options.silentIfNoNew && newlyAdded.length === 0) result.silent = true;
+    return result;
+  }
+
+  let page = ctx.page;
+  let context = ctx.context;
+  let createdBrowser: import('playwright').Browser | null = null;
   let screenshotPath: string | null = null;
-  const {
-    notifyNewSeminarsToChannel = false,
-    notifyNewSeminarsToTelegram = true,
-    _checkAdvancedPointStatus = false,
-  } = options;
 
   try {
+    if (!page) {
+      const { chromium } = await import('playwright');
+      const HEADLESS = (process.env.HEADLESS || 'true').toLowerCase() === 'true';
+      createdBrowser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
+      context = await createdBrowser.newContext();
+      page = await context.newPage();
+    }
+
     await ensureLoggedIn({ page, context: context ?? page.context() });
 
     await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'domcontentloaded', timeout: 30000 }, 1);
     const totalSeminarLinks = page.locator('a.list_detail');
-    const totalSeminarsAvailable = await totalSeminarLinks.count();
+    totalSeminarsAvailable = await totalSeminarLinks.count();
     const closedCount = await page.locator('.ico_finish').count();
     const applyLocator = page.locator('a:has(.ico_apply)');
     const items = await applyLocator.evaluateAll((nodes) =>
@@ -465,6 +560,7 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
     const attemptedApplyCount = items.length;
 
     for (const item of items) {
+      if (!item.href) continue;
       await safeGoto(page, item.href, { waitUntil: 'load', timeout: 30000 }, 1);
       await page.click('a#applyLiveSeminarMemberBtn', { timeout: 5000 }).catch(() => {});
       try {
@@ -490,96 +586,6 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
 
     await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'domcontentloaded', timeout: 30000 }, 1);
 
-    const currentSeminars: RawSeminarData[] = await page.locator('.list_cont').evaluateAll((nodes) => {
-      const results: RawSeminarData[] = [];
-      nodes.forEach((node) => {
-        const date = node.querySelector('.seminar_day .date')?.textContent?.trim() || '';
-        node.querySelectorAll('a.list_detail').forEach((link) => {
-          const href = link.getAttribute('href') || '';
-          if (!href) return;
-          const name =
-            link.querySelector('.list_tit .tit')?.textContent?.trim() || link.textContent?.trim() || '세미나';
-          const timeNode = link.querySelector('.txt_num.time');
-          const time = timeNode?.textContent?.replace(/\n/g, '').trim() || '';
-          const nightTime = timeNode ? timeNode.classList.contains('night_time') : false;
-          const personNode = link.querySelector('.person');
-          const currentCount = personNode?.querySelector('.txt_num')?.textContent?.trim() || '';
-          const totalCount = personNode?.querySelector('.total .txt_num')?.textContent?.replace(/\//g, '').trim() || '';
-          results.push({
-            url: href,
-            name,
-            date,
-            time,
-            currentCount,
-            totalCount,
-            nightTime,
-            isAdvancedSurvey: !!link.querySelector('.ic_survey'),
-          });
-        });
-      });
-      return results;
-    });
-
-    const referenceDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
-    const normalizedCurrentSeminars = normalizeParsedSeminars(currentSeminars, referenceDate);
-    const storedSeminars = migrateLegacySeminarStorage(referenceDate);
-    const { seminars, newlyAdded, infoChanges } = refreshStoredSeminarList(
-      normalizedCurrentSeminars,
-      storedSeminars,
-      referenceDate,
-    );
-
-    if (newlyAdded.length === 0) {
-      storage.set(SEMINAR_LIST_KEY, seminars);
-    } else {
-      const newlyAddedWithFlags: SeminarListItem[] = [];
-      for (const item of newlyAdded) {
-        const seminarId = getSeminarIdFromUrl(item.url);
-        const link = seminarId ? `${SEMINAR_DETAIL_SSR_PAGE}${seminarId}` : item.url;
-        const pointExRes = await isSurveyPointExcludedSeminarHttp(link);
-        if (pointExRes.status === 'auth_expired') {
-          const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
-          await sendTelegram(msg).catch(() => {});
-          return { success: false, message: msg };
-        }
-        const isPointExcluded = pointExRes.status === 'success' ? pointExRes.excluded : item.isPointExcluded;
-        newlyAddedWithFlags.push({ ...item, seminarId, isPointExcluded });
-      }
-
-      const flaggedByKey = new Map(newlyAddedWithFlags.map((item) => [seminarKey(item), item]));
-      const updatedSeminars = seminars.map((seminar) =>
-        flaggedByKey.has(seminarKey(seminar)) ? mergeSeminar(seminar, flaggedByKey.get(seminarKey(seminar))!) : seminar,
-      );
-      storage.set(SEMINAR_LIST_KEY, updatedSeminars);
-
-      const newSeminarMessage = newlyAddedWithFlags
-        .map((item) => {
-          const pointExcludedSuffix = item.isPointExcluded ? ' [포인트미지급]' : '';
-          const advancedSurveySuffix = item.isAdvancedSurvey ? ' [심화설문]' : '';
-          const dateTimePrefix = item.date || item.time ? `[${item.date}${item.time ? ' ' + item.time : ''}] ` : '';
-          const capacityInfo = item.currentCount && item.totalCount ? `(${item.currentCount}/${item.totalCount}) ` : '';
-          return `${dateTimePrefix}${pointExcludedSuffix}${advancedSurveySuffix}${item.name}${capacityInfo}\n${item.url}`;
-        })
-        .join('\n\n');
-      const noticeMessage = `🆕 새로 추가된 세미나 ${newlyAddedWithFlags.length}건 발견\n\n${newSeminarMessage}`;
-      if (notifyNewSeminarsToTelegram) await sendTelegram(noticeMessage);
-      if (notifyNewSeminarsToChannel) await sendNotificationToChannel(noticeMessage);
-    }
-
-    const finalSeminars = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
-    const activeContext = context ?? page.context();
-    let pointChanges: SeminarPointChange[] = [];
-    if (activeContext) {
-      const pointStatusResult = await refreshSeminarPointStatus(activeContext, finalSeminars);
-      pointChanges = pointStatusResult.pointChanges;
-    }
-
-    // Send adminbot notification if there are meaningful seminar info changes or new point payments
-    const changeNotificationText = formatSeminarChangeNotification(infoChanges, pointChanges);
-    if (changeNotificationText) {
-      await sendTelegram(changeNotificationText).catch(() => {});
-    }
-
     const appliedCount = await page.locator('a:has(.ico_completion)').count();
     let message = `✅ ${appliedCount}개 세미나 신청 완료! (${appliedCount}/${totalSeminarsAvailable})`;
     const failedToApplyCount = attemptedApplyCount - appliedCount;
@@ -599,7 +605,7 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
       'seminar task error',
       error && typeof error === 'object' && 'stack' in error ? (error as Error).stack : error,
     );
-    if (!screenshotPath) {
+    if (page && !screenshotPath) {
       const baseScreenshotDir = path.join(process.cwd(), 'screenshot');
       await fs.mkdir(baseScreenshotDir, { recursive: true });
       screenshotPath = path.join(baseScreenshotDir, 'apply_seminar_error.png');
@@ -608,11 +614,15 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
     const message = error instanceof Error ? error.message : String(error);
     await sendTelegram(`❗ 세미나 신청 작업 오류: ${message}`, screenshotPath).catch(() => {});
     return { success: false, message: `세미나 신청 작업 오류: ${message}`, imagePath: screenshotPath };
+  } finally {
+    if (createdBrowser) {
+      await createdBrowser.close().catch(() => {});
+    }
   }
 }
 
 export { run };
-export const applySeminarTask = { name: 'apply_seminar', description: '세미나 신청 및 목록 저장', run };
+export const applySeminarTask = { name: 'apply_seminar', description: '세미나 신청 및 목록 저장', run, runHttpOnly };
 export const applySeminarTaskStandalone = { name: 'apply_seminar', description: '세미나 신청 및 목록 저장', run };
 export const applySeminarExtraTask = {
   name: 'apply_seminar_extra',
@@ -627,8 +637,6 @@ export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<Ta
   const { notifyNewSeminarsToChannel = false, notifyNewSeminarsToTelegram = true } = options;
 
   try {
-    await ensureLoggedIn();
-
     const mainRes = await httpGet(SEMINAR_PAGE);
     if (mainRes.resultType === 'AUTH_EXPIRED') {
       const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';

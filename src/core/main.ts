@@ -91,7 +91,9 @@ async function checkAndNotifyPointConversion(): Promise<void> {
           return null;
         }
       }, POINT_CONVERSION_API_URL)) as PointConversionResponse | null;
-    } catch {}
+    } catch (_err) {
+      /* ignore */
+    }
     if (!response || response.data === undefined) return;
     const available = response.data.available === true;
     const plannedAt = response.data.availablePlannedAt ?? '';
@@ -165,7 +167,9 @@ const scheduledTask: Task = {
       await utils.sendTelegram('🕗 데일리 루틴 작업을 시작합니다.(출석체크, 세미나등록, 브랜드퀴즈)').catch(() => {});
       for (const { name, task } of tasks) {
         try {
-          await utils.ensureLoggedIn({ page, context });
+          if (name !== 'apply_seminar') {
+            await utils.ensureLoggedIn({ page, context });
+          }
           const taskResultRaw = await task.run({ page, context });
           const taskResult: TaskResult =
             typeof taskResultRaw === 'object' && taskResultRaw !== null
@@ -196,24 +200,15 @@ const applySeminarExtraTask: Task = {
   name: 'apply_seminar_extra',
   schedule: APPLY_SEMINAR_EXTRA_CRON,
   timezone: TIMEZONE,
-  run: async () => {
-    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    try {
-      await utils.ensureLoggedIn({ page, context });
-      return await applySeminarTask.run(
-        { page, context },
-        {
-          notifyNewSeminarsToChannel: true,
-          notifyNewSeminarsToTelegram: true,
-          silentIfNoNew: true,
-          checkAdvancedPointStatus: true,
-        },
-      );
-    } finally {
-      await browser.close();
-    }
+  run: async (_ctx, options) => {
+    return await applySeminarTask.runHttpOnly(
+      options || {
+        notifyNewSeminarsToChannel: true,
+        notifyNewSeminarsToTelegram: true,
+        silentIfNoNew: true,
+        checkAdvancedPointStatus: true,
+      },
+    );
   },
 };
 taskRegistry.registerTask(applySeminarExtraTask);
@@ -231,19 +226,11 @@ taskRegistry.registerTask(pointConversionCheckTask);
 scheduler.scheduleTaskCron(pointConversionCheckTask);
 const applySeminarTaskStandalone: Task = {
   name: 'apply_seminar',
-  run: async () => {
-    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    try {
-      await utils.ensureLoggedIn({ page, context });
-      return await applySeminarTask.run(
-        { page, context },
-        { notifyNewSeminarsToChannel: false, notifyNewSeminarsToTelegram: true },
-      );
-    } finally {
-      await browser.close();
-    }
+  run: async (ctx, options) => {
+    return await applySeminarTask.run(
+      ctx,
+      options || { notifyNewSeminarsToChannel: false, notifyNewSeminarsToTelegram: true },
+    );
   },
 };
 taskRegistry.registerTask(applySeminarTaskStandalone);
