@@ -146,10 +146,7 @@ function testTodayLinksFormatWithUserExample() {
     'https://www.doctorville.co.kr/my/point/pointUseHistoryList',
   );
   assert.strictEqual(options.reply_markup.inline_keyboard[2][0].text, '📋 세미나 목록 바로가기');
-  assert.strictEqual(
-    options.reply_markup.inline_keyboard[2][0].url,
-    'https://www.doctorville.co.kr/seminar/main',
-  );
+  assert.strictEqual(options.reply_markup.inline_keyboard[2][0].url, 'https://www.doctorville.co.kr/seminar/main');
 
   console.log('\n✅ [Pass] 예시 문구 포맷팅 검증을 성공적으로 통과했습니다!\n');
 }

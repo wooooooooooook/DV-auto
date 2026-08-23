@@ -184,13 +184,12 @@ async function runTests() {
     console.log('  ✓ login.ts correctly exports run function utilizing checkLoginStatus');
   }
 
-
   // Case 8 — BrowserContext cache and deduplication test
   {
-    console.log("Case 8: Same BrowserContext caching & deduplication test");
+    console.log('Case 8: Same BrowserContext caching & deduplication test');
     let gotoCount = 0;
     const mockPage = {
-      url: () => "about:blank",
+      url: () => 'about:blank',
       goto: async () => {
         gotoCount++;
       },
@@ -205,23 +204,23 @@ async function runTests() {
 
     // Initial call on contextA -> should navigate to /mypage/info (gotoCount = 1)
     await ensureLoggedIn({ page: mockPage as never, context: contextA as never });
-    assert.strictEqual(gotoCount, 1, "First ensureLoggedIn on contextA should check login status via goto");
+    assert.strictEqual(gotoCount, 1, 'First ensureLoggedIn on contextA should check login status via goto');
 
     // Subsequent calls on same contextA -> should skip goto (gotoCount stays 1)
     await ensureLoggedIn({ page: mockPage as never, context: contextA as never });
     await ensureLoggedIn({ page: mockPage as never, context: contextA as never });
-    assert.strictEqual(gotoCount, 1, "Subsequent ensureLoggedIn on contextA should not trigger extra goto");
+    assert.strictEqual(gotoCount, 1, 'Subsequent ensureLoggedIn on contextA should not trigger extra goto');
 
     // Call on contextB -> should navigate (gotoCount = 2)
     await ensureLoggedIn({ page: mockPage as never, context: contextB as never });
-    assert.strictEqual(gotoCount, 2, "ensureLoggedIn on contextB should trigger goto");
+    assert.strictEqual(gotoCount, 2, 'ensureLoggedIn on contextB should trigger goto');
 
     // Invalidate contextA -> next call on contextA should navigate (gotoCount = 3)
     invalidateLoginStatus(contextA as never);
     await ensureLoggedIn({ page: mockPage as never, context: contextA as never });
-    assert.strictEqual(gotoCount, 3, "After invalidateLoginStatus, ensureLoggedIn should re-check login status");
+    assert.strictEqual(gotoCount, 3, 'After invalidateLoginStatus, ensureLoggedIn should re-check login status');
 
-    console.log("  ✓ BrowserContext login state cache, context separation, and invalidation verified");
+    console.log('  ✓ BrowserContext login state cache, context separation, and invalidation verified');
   }
 
   console.log('\n🎉 All login check tests passed successfully!\n');

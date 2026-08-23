@@ -641,7 +641,7 @@ async function testPointSyncRequirements() {
       },
     ];
 
-    const synced = await refreshSeminarPointStatus(mockContext, initialSeminars);
+    const { seminars: synced } = await refreshSeminarPointStatus(mockContext, initialSeminars);
 
     const sem5572 = synced.find((s) => s.seminarId === '5572');
     assert(sem5572?.pointPaid === true);
@@ -673,7 +673,7 @@ async function testPointSyncRequirements() {
       type: '적립',
     });
 
-    const synced2 = await refreshSeminarPointStatus(mockContext, synced);
+    const { seminars: synced2 } = await refreshSeminarPointStatus(mockContext, synced);
     const sem5571After = synced2.find((s) => s.seminarId === '5571');
     assert(sem5571After?.pointPaid === true);
     assert.strictEqual(sem5571After?.point, 700);
