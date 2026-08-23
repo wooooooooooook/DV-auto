@@ -713,22 +713,43 @@ async function collectPointConversionInfo(page: PlaywrightRunArgs['page']): Prom
   }
 }
 
-function getPointConversionDdayLabel(plannedAt: string | undefined, todayIsoOverride?: string): string {
-  if (!plannedAt) return '';
+function parsePointConversionPlannedDate(plannedAt: string | undefined): { month: number; day: number } | null {
+  if (!plannedAt) return null;
   const m = plannedAt.match(/(\d{1,2})\s*월\s*(\d{1,2})\s*일/);
-  if (!m) return '';
-  const plannedMonth = parseInt(m[1], 10);
-  const plannedDay = parseInt(m[2], 10);
-  if (!plannedMonth || !plannedDay) return '';
+  if (!m) return null;
+  const month = parseInt(m[1], 10);
+  const day = parseInt(m[2], 10);
+  if (!month || !day) return null;
+  return { month, day };
+}
+
+export function isPointConversionDay(info: PointConversionInfo | null | undefined, todayIsoOverride?: string): boolean {
+  if (!info || info.available) return false;
+  const planned = parsePointConversionPlannedDate(info.availablePlannedAt);
+  if (!planned) return false;
+  const todayIso = todayIsoOverride ?? new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+  const [y, mo, d] = todayIso.split('-').map(Number);
+  if (!y || !mo || !d) return false;
+  const todayMs = Date.UTC(y, mo - 1, d);
+  let targetMs = Date.UTC(y, planned.month - 1, planned.day);
+  if (targetMs < todayMs) {
+    targetMs = Date.UTC(y + 1, planned.month - 1, planned.day);
+  }
+  return targetMs === todayMs;
+}
+
+function getPointConversionDdayLabel(plannedAt: string | undefined, todayIsoOverride?: string): string {
+  const planned = parsePointConversionPlannedDate(plannedAt);
+  if (!planned) return '';
   const todayIso = todayIsoOverride ?? new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
   const [y, mo, d] = todayIso.split('-').map(Number);
   if (!y || !mo || !d) return '';
   const todayMs = Date.UTC(y, mo - 1, d);
   let targetYear = y;
-  let targetMs = Date.UTC(targetYear, plannedMonth - 1, plannedDay);
+  let targetMs = Date.UTC(targetYear, planned.month - 1, planned.day);
   if (targetMs < todayMs) {
     targetYear += 1;
-    targetMs = Date.UTC(targetYear, plannedMonth - 1, plannedDay);
+    targetMs = Date.UTC(targetYear, planned.month - 1, planned.day);
   }
   const diffDays = Math.round((targetMs - todayMs) / 86400000);
   if (diffDays === 0) return ' (D-Day)';
@@ -835,7 +856,10 @@ https://t.me/+J1UGmvLA9jU4NjQ1</blockquote>`;
   inlineKeyboard.push(actionRow);
 
   // 포인트 전환 가능일(당일 전환 가능)인 경우 포인트 전환 바로가기 버튼 추가
-  if (pointConversionInfo?.available) {
+  const pointConversionDay = pointConversionInfo?.available
+    ? true
+    : isPointConversionDay(pointConversionInfo, isCustomDate && targetDate ? targetDate.split(' ')[0] : undefined);
+  if (pointConversionDay) {
     inlineKeyboard.push([{ text: '💳 포인트 전환하러 가기', url: POINT_CONVERSION_URL }]);
   }
 
