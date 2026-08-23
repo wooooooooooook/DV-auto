@@ -5,8 +5,7 @@ import { parseSeminarListHtml } from '../modules/html_parser';
 import * as storage from '../services/storage';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
-const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
-const _SEMINAR_DETAIL_HTTP_PAGE = 'https://www.doctorville.co.kr/seminar/seminarDetail?seminarId=';
+const SEMINAR_DETAIL_SSR_PAGE = 'https://www.doctorville.co.kr/seminar/seminarDetail?seminarId=';
 const SEMINAR_LIST_KEY = 'apply_seminar:seminar_list';
 
 type SeminarListItem = {
@@ -37,7 +36,7 @@ async function run(): Promise<TaskResult> {
 
     for (const seminar of currentSeminars) {
       const seminarId = getSeminarIdFromUrl(seminar.url);
-      const detailLink = seminarId ? `${SEMINAR_DETAIL_PAGE}${seminarId}` : seminar.url;
+      const detailLink = seminarId ? `${SEMINAR_DETAIL_SSR_PAGE}${seminarId}` : seminar.url;
       const cacheKey = seminarId || seminar.url;
       const existingItem = storedMap.get(cacheKey);
 
