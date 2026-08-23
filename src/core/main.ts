@@ -353,15 +353,7 @@ taskRegistry.registerTask(runSeminarQuizTask);
 const refreshSeminarPointExclusionTask: Task = {
   name: 'refresh_seminar_point_exclusion',
   run: async () => {
-    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    try {
-      await utils.ensureLoggedIn({ page, context });
-      return await refreshSeminarPointExclusionTaskModule.run({ page, context });
-    } finally {
-      await browser.close();
-    }
+    return await refreshSeminarPointExclusionTaskModule.run();
   },
 };
 taskRegistry.registerTask(refreshSeminarPointExclusionTask);

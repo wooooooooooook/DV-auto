@@ -4,7 +4,7 @@
   "description": "",
   "main": "dist/core/main.js",
   "scripts": {
-    "test": "ts-node tests/today_links_format.test.ts && ts-node tests/seminar_main_tasks.test.ts && ts-node tests/login_check.test.ts && ts-node tests/apply_seminar_changes.test.ts && ts-node tests/html_parser.test.ts && ts-node tests/apply_seminar_no_browser.test.ts",
+    "test": "ts-node tests/today_links_format.test.ts && ts-node tests/seminar_main_tasks.test.ts && ts-node tests/login_check.test.ts && ts-node tests/apply_seminar_changes.test.ts && ts-node tests/html_parser.test.ts && ts-node tests/apply_seminar_no_browser.test.ts && ts-node tests/telegram_notification.test.ts",
     "build": "tsc",
     "start": "node dist/core/main.js",
     "dev": "ts-node src/core/main.ts",
