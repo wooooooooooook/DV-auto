@@ -1,4 +1,7 @@
-export type SurveyPointExcludedResult = { status: 'success'; excluded: boolean } | { status: 'error'; error: string };
+export type SurveyPointExcludedResult =
+  | { status: 'success'; excluded: boolean }
+  | { status: 'auth_expired' }
+  | { status: 'error'; error: string };
 import fs from 'fs';
 import path from 'path';
 import type { Telegraf } from 'telegraf';
@@ -323,6 +326,9 @@ type LoginStatus = 'LOGGED_IN' | 'NOT_LOGGED_IN' | 'UNKNOWN';
 async function checkLoginStatusHttp(): Promise<LoginStatus> {
   try {
     const res = await httpGet(MYPAGE_INFO_URL);
+    if (res.resultType === 'AUTH_EXPIRED') {
+      return 'NOT_LOGGED_IN';
+    }
     return parseLoginStatusHtml(res.body, res.url);
   } catch (err) {
     console.warn('checkLoginStatusHttp error:', err);
@@ -510,6 +516,9 @@ async function ensureSeminarDetailReady(page: Page, url: string): Promise<void> 
 async function isSurveyPointExcludedSeminarHttp(url: string): Promise<SurveyPointExcludedResult> {
   try {
     const res = await httpGet(url);
+    if (res.resultType === 'AUTH_EXPIRED') {
+      return { status: 'auth_expired' };
+    }
     if (res.status === 200 && res.body) {
       const excluded = hasSurveyPointExcludedNoticeHtml(res.body);
       return { status: 'success', excluded };

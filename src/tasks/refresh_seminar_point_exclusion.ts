@@ -1,5 +1,5 @@
 import type { TaskResult } from '../types';
-import { getSeminarIdFromUrl, isSurveyPointExcludedSeminarHttp } from '../modules/utils';
+import { getSeminarIdFromUrl, isSurveyPointExcludedSeminarHttp, sendTelegram } from '../modules/utils';
 import { httpGet } from '../modules/http_client';
 import { parseSeminarListHtml } from '../modules/html_parser';
 import * as storage from '../services/storage';
@@ -23,6 +23,11 @@ type SeminarListItem = {
 async function run(): Promise<TaskResult> {
   try {
     const mainRes = await httpGet(SEMINAR_PAGE);
+    if (mainRes.resultType === 'AUTH_EXPIRED') {
+      const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
+      await sendTelegram(msg).catch(() => {});
+      return { success: false, message: msg };
+    }
     if (mainRes.status !== 200 || !mainRes.body) {
       throw new Error(`HTTP status ${mainRes.status} on ${SEMINAR_PAGE}`);
     }
@@ -44,6 +49,11 @@ async function run(): Promise<TaskResult> {
 
       if (typeof isPointExcluded !== 'boolean') {
         const pointExRes = await isSurveyPointExcludedSeminarHttp(detailLink);
+        if (pointExRes.status === 'auth_expired') {
+          const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
+          await sendTelegram(msg).catch(() => {});
+          return { success: false, message: msg };
+        }
         if (pointExRes.status === 'success') {
           isPointExcluded = pointExRes.excluded;
           checked.set(cacheKey, isPointExcluded);

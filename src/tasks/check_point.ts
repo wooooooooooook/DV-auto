@@ -3,6 +3,7 @@ import fs from 'fs/promises';
 import type { BrowserContext } from 'playwright';
 import type { PlaywrightRunArgs } from '../types';
 import { httpGet } from '../modules/http_client';
+import { sendTelegram } from '../modules/utils';
 import { parseCurrentPointHtml } from '../modules/html_parser';
 import * as logger from '../services/logger';
 
@@ -12,6 +13,10 @@ const MAIN_PAGE = 'https://www.doctorville.co.kr/main';
 async function getPoint(_context?: BrowserContext): Promise<string> {
   try {
     const res = await httpGet(MAIN_PAGE);
+    if (res.resultType === 'AUTH_EXPIRED') {
+      await sendTelegram('🔒 세션이 만료되었습니다. 로그인이 필요합니다.').catch(() => {});
+      return 'AUTH_EXPIRED';
+    }
     if (res.status === 200 && res.body) {
       return parseCurrentPointHtml(res.body);
     }
@@ -30,6 +35,13 @@ async function run({ page, context }: PlaywrightRunArgs) {
   const ctx = context || page?.context();
   try {
     const pointText = await getPoint(ctx);
+
+    if (pointText === 'AUTH_EXPIRED') {
+      return {
+        success: false,
+        message: '🔒 세션이 만료되었습니다. 로그인이 필요합니다.',
+      };
+    }
 
     if (pointText === '조회 실패') {
       if (page) {

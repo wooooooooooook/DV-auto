@@ -536,6 +536,11 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
         const seminarId = getSeminarIdFromUrl(item.url);
         const link = seminarId ? `${SEMINAR_DETAIL_SSR_PAGE}${seminarId}` : item.url;
         const pointExRes = await isSurveyPointExcludedSeminarHttp(link);
+        if (pointExRes.status === 'auth_expired') {
+          const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
+          await sendTelegram(msg).catch(() => {});
+          return { success: false, message: msg };
+        }
         const isPointExcluded = pointExRes.status === 'success' ? pointExRes.excluded : item.isPointExcluded;
         newlyAddedWithFlags.push({ ...item, seminarId, isPointExcluded });
       }
@@ -624,6 +629,11 @@ export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<Ta
     await ensureLoggedIn();
 
     const mainRes = await httpGet(SEMINAR_PAGE);
+    if (mainRes.resultType === 'AUTH_EXPIRED') {
+      const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
+      await sendTelegram(msg).catch(() => {});
+      return { success: false, message: msg };
+    }
     if (mainRes.status !== 200 || !mainRes.body) {
       throw new Error(`HTTP GET ${SEMINAR_PAGE} failed with status ${mainRes.status}`);
     }
@@ -645,6 +655,11 @@ export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<Ta
         const seminarId = getSeminarIdFromUrl(item.url);
         const link = seminarId ? `${SEMINAR_DETAIL_SSR_PAGE}${seminarId}` : item.url;
         const pointExRes = await isSurveyPointExcludedSeminarHttp(link);
+        if (pointExRes.status === 'auth_expired') {
+          const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
+          await sendTelegram(msg).catch(() => {});
+          return { success: false, message: msg };
+        }
         const isPointExcluded = pointExRes.status === 'success' ? pointExRes.excluded : item.isPointExcluded;
         newlyAddedWithFlags.push({ ...item, seminarId, isPointExcluded });
       }

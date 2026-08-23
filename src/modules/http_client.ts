@@ -24,6 +24,8 @@ export interface HttpRequestOptions {
   maxRedirects?: number;
 }
 
+export type HttpResultType = 'SUCCESS' | 'AUTH_EXPIRED' | 'HTTP_ERROR';
+
 export interface HttpResponse {
   status: number;
   statusText: string;
@@ -31,6 +33,7 @@ export interface HttpResponse {
   body: string;
   url: string;
   redirected: boolean;
+  resultType: HttpResultType;
 }
 
 /**
@@ -164,6 +167,13 @@ export async function sendDoctorVilleRequest(url: string, options: HttpRequestOp
 
       const responseText = await res.body.text();
 
+      let resultType: HttpResultType = 'SUCCESS';
+      if (status !== 200) {
+        resultType = 'HTTP_ERROR';
+      } else if (responseText.includes('로그인이 되어 있지 않습니다')) {
+        resultType = 'AUTH_EXPIRED';
+      }
+
       return {
         status,
         statusText: String(status),
@@ -171,6 +181,7 @@ export async function sendDoctorVilleRequest(url: string, options: HttpRequestOp
         body: responseText,
         url: currentUrl,
         redirected: isRedirected,
+        resultType,
       };
     } catch (err: unknown) {
       clearTimeout(timer);
