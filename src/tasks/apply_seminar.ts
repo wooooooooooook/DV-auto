@@ -43,6 +43,28 @@ export type SeminarListItem = {
   detectedAt?: string;
 } & SeminarPointStatus;
 
+export type SeminarFieldChange = {
+  field: string;
+  label: string;
+  oldValue: string | number | boolean;
+  newValue: string | number | boolean;
+};
+
+export type SeminarInfoChange = {
+  seminarId: string;
+  name: string;
+  changes: SeminarFieldChange[];
+};
+
+export type SeminarPointChange = {
+  seminarId: string;
+  name: string;
+  point?: number;
+  pointText?: string;
+  pointDate?: string;
+  pointContent?: string;
+};
+
 type LegacyHistoryEntry = {
   detectedDate?: string;
   detectedAt?: string;
@@ -64,6 +86,84 @@ type RawSeminarData = {
   nightTime: boolean;
   isAdvancedSurvey: boolean;
 };
+
+const MEANINGFUL_FIELDS: Array<{
+  key: keyof SeminarListItem;
+  label: string;
+}> = [
+  { key: 'name', label: '세미나명' },
+  { key: 'date', label: '날짜' },
+  { key: 'time', label: '시간' },
+  { key: 'totalCount', label: '총원' },
+  { key: 'nightTime', label: '야간세미나' },
+  { key: 'isPointExcluded', label: '포인트미지급' },
+  { key: 'isAdvancedSurvey', label: '심화설문' },
+];
+
+export function getSeminarInfoChanges(existing: SeminarListItem, incoming: SeminarListItem): SeminarFieldChange[] {
+  const changes: SeminarFieldChange[] = [];
+  for (const { key, label } of MEANINGFUL_FIELDS) {
+    const oldVal = existing[key];
+    const newVal = incoming[key];
+
+    // If incoming value is undefined and existing had a value, only treat as change if explicitly defined
+    // For boolean flags like isPointExcluded, undefined in incoming might mean not fetched yet
+    if (newVal === undefined && oldVal !== undefined) continue;
+
+    if (oldVal !== newVal) {
+      changes.push({
+        field: key,
+        label,
+        oldValue: (oldVal ?? '') as string | number | boolean,
+        newValue: (newVal ?? '') as string | number | boolean,
+      });
+    }
+  }
+  return changes;
+}
+
+export function formatSeminarChangeNotification(
+  infoChanges: SeminarInfoChange[],
+  pointChanges: SeminarPointChange[],
+): string | null {
+  if (infoChanges.length === 0 && pointChanges.length === 0) {
+    return null;
+  }
+
+  const sections: string[] = ['🔔 세미나 정보 변경 감지'];
+
+  if (pointChanges.length > 0) {
+    sections.push('[포인트 지급]');
+    for (const p of pointChanges) {
+      const lines: string[] = [];
+      lines.push(p.name || '세미나');
+      lines.push(`seminarId: ${p.seminarId}`);
+      if (p.pointText || p.point !== undefined) {
+        lines.push(`포인트: ${p.pointText || `${p.point}P`}`);
+      }
+      if (p.pointDate) {
+        lines.push(`지급일: ${p.pointDate}`);
+      }
+      sections.push(lines.join('\n'));
+    }
+  }
+
+  if (infoChanges.length > 0) {
+    if (pointChanges.length > 0) sections.push('');
+    sections.push('[정보 변경]');
+    for (const info of infoChanges) {
+      const lines: string[] = [];
+      lines.push(info.name || '세미나');
+      lines.push(`seminarId: ${info.seminarId}`);
+      for (const ch of info.changes) {
+        lines.push(`${ch.label}: ${ch.oldValue} → ${ch.newValue}`);
+      }
+      sections.push(lines.join('\n'));
+    }
+  }
+
+  return sections.join('\n\n');
+}
 
 function normalizeSeminarDate(value: string | undefined, referenceDate: string): string | null {
   if (!value) return null;
@@ -192,14 +292,27 @@ function refreshStoredSeminarList(
   current: SeminarListItem[],
   stored: SeminarListItem[],
   referenceDate: string,
-): { seminars: SeminarListItem[]; newlyAdded: SeminarListItem[] } {
+): { seminars: SeminarListItem[]; newlyAdded: SeminarListItem[]; infoChanges: SeminarInfoChange[] } {
   const storedByKey = new Map(stored.map((seminar) => [seminarKey(seminar), seminar]));
   const newlyAdded = current.filter((seminar) => !storedByKey.has(seminarKey(seminar)));
+  const infoChanges: SeminarInfoChange[] = [];
   const now = new Date().toISOString();
 
   for (const seminar of current) {
     const key = seminarKey(seminar);
     const existing = storedByKey.get(key);
+
+    if (existing) {
+      const fieldChanges = getSeminarInfoChanges(existing, seminar);
+      if (fieldChanges.length > 0) {
+        infoChanges.push({
+          seminarId: existing.seminarId || seminar.seminarId || '',
+          name: seminar.name || existing.name || '',
+          changes: fieldChanges,
+        });
+      }
+    }
+
     storedByKey.set(
       key,
       mergeSeminar(existing, {
@@ -220,14 +333,14 @@ function refreshStoredSeminarList(
   });
 
   storage.set(SEMINAR_LIST_KEY, seminars);
-  return { seminars, newlyAdded };
+  return { seminars, newlyAdded, infoChanges };
 }
 
 export async function refreshSeminarPointStatus(
   context: PlaywrightRunArgs['context'],
   seminars: SeminarListItem[],
-): Promise<SeminarListItem[]> {
-  if (!context) return seminars;
+): Promise<{ seminars: SeminarListItem[]; pointChanges: SeminarPointChange[] }> {
+  if (!context) return { seminars, pointChanges: [] };
 
   const searchRes = await searchSeminarPoints(context, [], 60);
   if (!searchRes.success) {
@@ -235,10 +348,11 @@ export async function refreshSeminarPointStatus(
       'refreshSeminarPointStatus: point history query failed, keeping seminar_list status intact:',
       searchRes.error,
     );
-    return seminars;
+    return { seminars, pointChanges: [] };
   }
   const parsedPoints = searchRes.points;
   const checkedAt = new Date().toISOString();
+  const pointChanges: SeminarPointChange[] = [];
 
   const updatedSeminars = seminars.map((seminar) => {
     if (seminar.pointPaid === true) {
@@ -249,6 +363,15 @@ export async function refreshSeminarPointStatus(
     if (id && parsedPoints.has(id)) {
       const pointResult = parsedPoints.get(id)!;
       if (pointResult.found && pointResult.type === '적립') {
+        pointChanges.push({
+          seminarId: id,
+          name: seminar.name,
+          point: pointResult.point,
+          pointText: pointResult.pointText,
+          pointDate: pointResult.date,
+          pointContent: pointResult.content,
+        });
+
         return {
           ...seminar,
           pointPaid: true,
@@ -294,11 +417,20 @@ export async function refreshSeminarPointStatus(
         detectedAt: '',
       };
       updatedSeminars.push(newItem);
+
+      pointChanges.push({
+        seminarId: id,
+        name: newItem.name,
+        point: pointResult.point,
+        pointText: pointResult.pointText,
+        pointDate: pointResult.date,
+        pointContent: pointResult.content,
+      });
     }
   }
 
   storage.set(SEMINAR_LIST_KEY, updatedSeminars);
-  return updatedSeminars;
+  return { seminars: updatedSeminars, pointChanges };
 }
 
 export type ApplySeminarOptions = {
@@ -385,7 +517,11 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
     const referenceDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
     const normalizedCurrentSeminars = normalizeParsedSeminars(currentSeminars, referenceDate);
     const storedSeminars = migrateLegacySeminarStorage(referenceDate);
-    const { seminars, newlyAdded } = refreshStoredSeminarList(normalizedCurrentSeminars, storedSeminars, referenceDate);
+    const { seminars, newlyAdded, infoChanges } = refreshStoredSeminarList(
+      normalizedCurrentSeminars,
+      storedSeminars,
+      referenceDate,
+    );
 
     if (newlyAdded.length > 0) {
       const newlyAddedWithFlags: SeminarListItem[] = [];
@@ -422,8 +558,16 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
 
     const finalSeminars = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
     const activeContext = context ?? page.context();
+    let pointChanges: SeminarPointChange[] = [];
     if (activeContext) {
-      await refreshSeminarPointStatus(activeContext, finalSeminars);
+      const pointStatusResult = await refreshSeminarPointStatus(activeContext, finalSeminars);
+      pointChanges = pointStatusResult.pointChanges;
+    }
+
+    // Send adminbot notification if there are meaningful seminar info changes or new point payments
+    const changeNotificationText = formatSeminarChangeNotification(infoChanges, pointChanges);
+    if (changeNotificationText) {
+      await sendTelegram(changeNotificationText).catch(() => {});
     }
 
     const appliedCount = await page.locator('a:has(.ico_completion)').count();
