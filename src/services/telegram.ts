@@ -995,9 +995,9 @@ if (adminBot) {
     }
 
     try {
-      const text = ctx.message?.text || '';
-      const seminarIds = (text.match(/\b\d{4,5}\b/g) || []) as string[];
-      const seminarId = seminarIds[0];
+      const messageText = ctx.message?.text || '';
+      const args = messageText.split(' ').slice(1);
+      const seminarId = args[0]?.trim();
       if (!seminarId) {
         return ctx.reply('사용법: /seminar_detail <세미나번호>\n예: /seminar_detail 5566');
       }

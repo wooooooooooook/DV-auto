@@ -24,7 +24,6 @@ export interface SeminarDetail {
   intro: string;
   broadcastUrl: string;
   isScraped: boolean;
-  isSurveyPointExcluded?: boolean;
   surveyId?: number | null;
 }
 
@@ -47,15 +46,16 @@ export async function fetchSeminarDetail(
   }
 }
 
-function formatDateTime(startDt: string, endDt: string): string {
-  // "2026-08-21 13:00:00.0" -> "8/21 13:00~14:00"
-  const start = new Date(startDt.replace('.0', ''));
-  const end = new Date(endDt.replace('.0', ''));
-  const month = start.getMonth() + 1;
-  const day = start.getDate();
-  const startTime = start.toTimeString().slice(0, 5);
-  const endTime = end.toTimeString().slice(0, 5);
-  return `${month}/${day} ${startTime}~${endTime}`;
+function formatDateTime(
+  startDt: string,
+  endDt: string,
+  startTime: string,
+  endTime: string,
+  startMonthAndDay: string,
+): string {
+  // API가 이미 파싱된 시간 문자열 제공: startTime="13:00", endTime="14:00", startMonthAndDay="8/21"
+  // 서버 timezone 의존성 제거: Date 파싱 없이 그대로 사용
+  return `${startMonthAndDay} ${startTime}~${endTime}`;
 }
 
 function formatStatus(processState: number, seminarCompleted: number, useSurvey: string): string {
@@ -75,14 +75,15 @@ function stripHtml(html: string): string {
     .replace(/</g, '<')
     .replace(/>/g, '>')
     .replace(/&/g, '&')
+    .replace(/"/g, '"')
+    .replace(/'/g, "'")
     .replace(/\s+/g, ' ')
     .trim();
 }
 
 export function formatSeminarDetail(data: SeminarDetail): string {
-  const dateTime = formatDateTime(data.startDt, data.endDt);
+  const dateTime = formatDateTime(data.startDt, data.endDt, data.startTime, data.endTime, data.startMonthAndDay);
   const status = formatStatus(data.processState, data.seminarCompleted, data.useSurvey);
-  const pointExcluded = data.isSurveyPointExcluded === true ? ' 🚫[포인트미지급]' : '';
   const participantInfo = `${data.applyCnt} / ${data.maxPeopleCnt}`;
 
   let introText = stripHtml(data.intro || '');
@@ -93,7 +94,7 @@ export function formatSeminarDetail(data: SeminarDetail): string {
   return [
     `*세미나 상세* (ID: ${data.seminarId})`,
     '',
-    `*제목:* ${data.seminarNm}${pointExcluded}`,
+    `*제목:* ${data.seminarNm}`,
     `*일시:* ${dateTime} (${data.startDayOfWeek})`,
     `*진행자:* ${data.tutorNm}`,
     `*분야:* ${data.diseaseCategoryNm}`,
