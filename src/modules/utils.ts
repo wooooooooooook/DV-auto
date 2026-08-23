@@ -44,9 +44,10 @@ async function sendTelegram(
   }
 
   try {
-    if (imagePath) {
+    const validImagePath = imagePath && fs.existsSync(imagePath) ? imagePath : null;
+    if (validImagePath) {
       const photoOptions: SendPhotoOptions = { caption: text, ...(options as SendPhotoOptions) };
-      await bot.telegram.sendPhoto(CHAT_ID, { source: imagePath }, photoOptions);
+      await bot.telegram.sendPhoto(CHAT_ID, { source: validImagePath }, photoOptions);
     } else {
       await bot.telegram.sendMessage(CHAT_ID, text, options as SendMessageOptions);
     }
@@ -87,9 +88,10 @@ async function sendNotificationToChannel(
     : baseOptions;
 
   try {
-    if (imagePath) {
+    const validImagePath = imagePath && fs.existsSync(imagePath) ? imagePath : null;
+    if (validImagePath) {
       const photoOptions: SendPhotoOptions = { ...messageOptions, caption: text } as SendPhotoOptions;
-      const result = await bot.telegram.sendPhoto(CHANNEL_ID, { source: imagePath }, photoOptions);
+      const result = await bot.telegram.sendPhoto(CHANNEL_ID, { source: validImagePath }, photoOptions);
       return result.message_id;
     } else {
       const result = await bot.telegram.sendMessage(CHANNEL_ID, text, messageOptions as SendMessageOptions);
@@ -102,9 +104,10 @@ async function sendNotificationToChannel(
       const plainOptions: SendMessageOptions | SendPhotoOptions = { ...baseOptions };
       delete (plainOptions as Partial<SendMessageOptions | SendPhotoOptions>).parse_mode;
 
-      if (imagePath) {
+      const validImagePath = imagePath && fs.existsSync(imagePath) ? imagePath : null;
+      if (validImagePath) {
         const fallbackPhotoOptions: SendPhotoOptions = { ...plainOptions, caption: text } as SendPhotoOptions;
-        const result = await bot.telegram.sendPhoto(CHANNEL_ID, { source: imagePath }, fallbackPhotoOptions);
+        const result = await bot.telegram.sendPhoto(CHANNEL_ID, { source: validImagePath }, fallbackPhotoOptions);
         return result.message_id;
       } else {
         const result = await bot.telegram.sendMessage(CHANNEL_ID, text, plainOptions as SendMessageOptions);

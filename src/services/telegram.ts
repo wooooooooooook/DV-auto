@@ -1,6 +1,7 @@
 import { Telegraf, type Context } from 'telegraf';
 import { exec } from 'child_process';
 import fs from 'fs/promises';
+import fsSync from 'fs';
 import https from 'https';
 import path from 'path';
 import { setBot } from './bot_instance';
@@ -302,7 +303,10 @@ if (adminBot) {
               (result as { message: string }).message,
               (result as { options?: Record<string, unknown> }).options,
             );
-            if ((result as { imagePath?: string }).imagePath) {
+            if (
+              (result as { imagePath?: string }).imagePath &&
+              fsSync.existsSync((result as { imagePath: string }).imagePath)
+            ) {
               await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
               await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
             }
@@ -378,7 +382,10 @@ if (adminBot) {
               (result as { message: string }).message,
               (result as { options?: Record<string, unknown> }).options,
             );
-            if ((result as { imagePath?: string }).imagePath) {
+            if (
+              (result as { imagePath?: string }).imagePath &&
+              fsSync.existsSync((result as { imagePath: string }).imagePath)
+            ) {
               await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
               await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
             }
@@ -418,7 +425,10 @@ if (adminBot) {
               (result as { message: string }).message,
               (result as { options?: Record<string, unknown> }).options,
             );
-            if ((result as { imagePath?: string }).imagePath) {
+            if (
+              (result as { imagePath?: string }).imagePath &&
+              fsSync.existsSync((result as { imagePath: string }).imagePath)
+            ) {
               await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
               await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
             }
@@ -458,7 +468,10 @@ if (adminBot) {
               (result as { message: string }).message,
               (result as { options?: Record<string, unknown> }).options,
             );
-            if ((result as { imagePath?: string }).imagePath) {
+            if (
+              (result as { imagePath?: string }).imagePath &&
+              fsSync.existsSync((result as { imagePath: string }).imagePath)
+            ) {
               await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
               await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
             }
@@ -498,7 +511,10 @@ if (adminBot) {
               (result as { message: string }).message,
               (result as { options?: Record<string, unknown> }).options,
             );
-            if ((result as { imagePath?: string }).imagePath) {
+            if (
+              (result as { imagePath?: string }).imagePath &&
+              fsSync.existsSync((result as { imagePath: string }).imagePath)
+            ) {
               await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
               await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
             }
@@ -558,7 +574,10 @@ if (adminBot) {
               (result as { message: string }).message,
               (result as { options?: Record<string, unknown> }).options,
             );
-            if ((result as { imagePath?: string }).imagePath) {
+            if (
+              (result as { imagePath?: string }).imagePath &&
+              fsSync.existsSync((result as { imagePath: string }).imagePath)
+            ) {
               await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
               await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
             } else {
@@ -911,7 +930,7 @@ if (adminBot) {
           if (result && typeof result === 'object' && (result as { message?: string }).message) {
             const msg = (result as { message: string }).message;
             const imagePath = (result as { imagePath?: string }).imagePath;
-            if (imagePath) {
+            if (imagePath && fsSync.existsSync(imagePath)) {
               await ctx.replyWithPhoto({ source: imagePath }, { caption: msg });
               await fs.unlink(imagePath).catch(() => {});
             } else {
@@ -1023,7 +1042,10 @@ if (adminBot) {
               (result as { message: string }).message,
               (result as { options?: Record<string, unknown> }).options,
             );
-            if ((result as { imagePath?: string }).imagePath) {
+            if (
+              (result as { imagePath?: string }).imagePath &&
+              fsSync.existsSync((result as { imagePath: string }).imagePath)
+            ) {
               await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
               await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
             }
@@ -1073,7 +1095,10 @@ if (adminBot) {
               (result as { message: string }).message,
               (result as { options?: Record<string, unknown> }).options,
             );
-            if ((result as { imagePath?: string }).imagePath) {
+            if (
+              (result as { imagePath?: string }).imagePath &&
+              fsSync.existsSync((result as { imagePath: string }).imagePath)
+            ) {
               await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
               await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
             }
