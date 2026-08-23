@@ -19,17 +19,20 @@ export function parseLoginStatusHtml(html: string, finalUrl?: string): 'LOGGED_I
   }
 
   const $ = cheerio.load(html);
-  // '회원정보수정' 버튼/링크나 텍스트가 있는지 확인
-  const text = $.text();
-  if (text.includes('회원정보수정')) {
+
+  // 1. '회원정보수정' 버튼/링크 요소 검출
+  const hasButton =
+    $('button:contains("회원정보수정")').length > 0 ||
+    $('a:contains("회원정보수정")').length > 0 ||
+    $('.btn:contains("회원정보수정")').length > 0;
+
+  if (hasButton) {
     return 'LOGGED_IN';
   }
 
-  // /member/login 리다이렉트 스크립트나 메시지 검출
-  if (html.includes('/member/login') || html.includes('로그인')) {
-    if (!text.includes('회원정보수정')) {
-      return 'NOT_LOGGED_IN';
-    }
+  // 2. /member/login 리다이렉트 스크립트나 로그인 페이지 여부 확인
+  if (html.includes('/member/login') || html.includes('location.href')) {
+    return 'NOT_LOGGED_IN';
   }
 
   return 'UNKNOWN';

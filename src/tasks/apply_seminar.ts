@@ -534,11 +534,8 @@ async function run({ page, context }: PlaywrightRunArgs, options: ApplySeminarOp
       for (const item of newlyAdded) {
         const seminarId = getSeminarIdFromUrl(item.url);
         const link = seminarId ? `${SEMINAR_DETAIL_PAGE}${seminarId}` : item.url;
-        let isPointExcluded = await isSurveyPointExcludedSeminarHttp(link);
-        if (!isPointExcluded) {
-          await page.waitForTimeout(800);
-          isPointExcluded = await isSurveyPointExcludedSeminarHttp(link);
-        }
+        const pointExRes = await isSurveyPointExcludedSeminarHttp(link);
+        const isPointExcluded = pointExRes.status === 'success' ? pointExRes.excluded : item.isPointExcluded;
         newlyAddedWithFlags.push({ ...item, seminarId, isPointExcluded });
       }
 
@@ -646,7 +643,8 @@ export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<Ta
       for (const item of newlyAdded) {
         const seminarId = getSeminarIdFromUrl(item.url);
         const link = seminarId ? `${SEMINAR_DETAIL_PAGE}${seminarId}` : item.url;
-        const isPointExcluded = await isSurveyPointExcludedSeminarHttp(link);
+        const pointExRes = await isSurveyPointExcludedSeminarHttp(link);
+        const isPointExcluded = pointExRes.status === 'success' ? pointExRes.excluded : item.isPointExcluded;
         newlyAddedWithFlags.push({ ...item, seminarId, isPointExcluded });
       }
 

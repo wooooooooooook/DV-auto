@@ -1,3 +1,4 @@
+export type SurveyPointExcludedResult = { status: 'success'; excluded: boolean } | { status: 'error'; error: string };
 import fs from 'fs';
 import path from 'path';
 import type { Telegraf } from 'telegraf';
@@ -497,24 +498,34 @@ async function ensureSeminarDetailReady(page: Page, url: string): Promise<void> 
 /**
  * HTTP GET 기반 세미나 상세 페이지의 포인트 미지급 여부 검사
  */
-async function isSurveyPointExcludedSeminarHttp(url: string): Promise<boolean> {
+
+/**
+ * HTTP GET 기반 세미나 상세 페이지의 포인트 미지급 여부 검사
+ * 성공 시 { status: 'success', excluded: boolean }
+ * 실패(오류/timeout/비정상 응답) 시 { status: 'error', error: string } 반환
+ */
+async function isSurveyPointExcludedSeminarHttp(url: string): Promise<SurveyPointExcludedResult> {
   try {
     const res = await httpGet(url);
     if (res.status === 200 && res.body) {
-      return hasSurveyPointExcludedNoticeHtml(res.body);
+      const excluded = hasSurveyPointExcludedNoticeHtml(res.body);
+      return { status: 'success', excluded };
     }
-    return false;
-  } catch (_e) {
-    return false;
+    return { status: 'error', error: `HTTP status ${res.status}` };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { status: 'error', error: message };
   }
 }
 
 async function isSurveyPointExcludedSeminar(context: BrowserContext, url: string): Promise<boolean> {
   // 1. HTTP GET으로 먼저 검사
   const httpResult = await isSurveyPointExcludedSeminarHttp(url);
-  if (httpResult) return true;
+  if (httpResult.status === 'success') {
+    return httpResult.excluded;
+  }
 
-  // 2. HTTP로 확인되지 않으면 Playwright fallback
+  // 2. HTTP 오류 시 Playwright fallback
   const page = await context.newPage();
   try {
     await ensureLoggedIn({ page, context });

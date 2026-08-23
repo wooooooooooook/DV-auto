@@ -7,16 +7,20 @@ import {
   parseRecentSeminarPointRowsHtml,
   parseCurrentPointHtml,
 } from '../src/modules/html_parser';
+import { isSurveyPointExcludedSeminarHttp } from '../src/modules/utils';
 
 async function testHtmlParser() {
-  console.log('Testing HTML Parser...');
+  console.log('Testing HTML Parser and isSurveyPointExcludedStatus...');
 
   // 1. login status
-  const loggedInHtml = '<div><span>회원정보수정</span></div>';
+  const loggedInHtml = '<div><button>회원정보수정</button></div>';
   assert.strictEqual(parseLoginStatusHtml(loggedInHtml), 'LOGGED_IN');
 
   const loggedOutHtml = '<div><script>location.href="/member/login";</script></div>';
   assert.strictEqual(parseLoginStatusHtml(loggedOutHtml, 'https://m.doctorville.co.kr/member/login'), 'NOT_LOGGED_IN');
+
+  const plainTextHtml = '<p>회원정보수정 안내 문구입니다</p>';
+  assert.strictEqual(parseLoginStatusHtml(plainTextHtml), 'UNKNOWN');
 
   // 2. seminar main parsing
   const seminarMainHtml = `
@@ -50,7 +54,11 @@ async function testHtmlParser() {
   assert.strictEqual(hasSurveyPointExcludedNoticeHtml(excludedHtml), true);
   assert.strictEqual(hasSurveyPointExcludedNoticeHtml(normalDetailHtml), false);
 
-  // 5. point history parsing
+  // 5. isSurveyPointExcludedSeminarHttp error statuses (invalid URL / non-200)
+  const invalidUrlRes = await isSurveyPointExcludedSeminarHttp('http://localhost:99999/not_exist');
+  assert.strictEqual(invalidUrlRes.status, 'error');
+
+  // 6. point history parsing
   const pointHistoryHtml = `
     <div id="useList">
       <table>
@@ -75,11 +83,11 @@ async function testHtmlParser() {
   assert.strictEqual(p?.point, 1000);
   assert.strictEqual(p?.type, '적립');
 
-  // 6. current point parsing
+  // 7. current point parsing
   const mainPointHtml = '<div class="member_point">12,500P</div>';
   assert.strictEqual(parseCurrentPointHtml(mainPointHtml), '12,500P');
 
-  console.log('✅ HTML Parser tests passed!');
+  console.log('✅ HTML Parser & isSurveyPointExcludedStatus tests passed!');
 }
 
 testHtmlParser().catch((err) => {

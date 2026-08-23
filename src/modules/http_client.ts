@@ -34,9 +34,9 @@ export interface HttpResponse {
 }
 
 /**
- * cookies.json 파일에서 Playwright 쿠키 목록을 읽고, Cookie 헤더 문자열을 작성한다.
+ * targetUrl에 맞는 Domain/Path를 가진 쿠키만 선별하여 Cookie 헤더 문자열 생성
  */
-export function getCookieHeader(): string {
+export function getCookieHeader(targetUrl?: string): string {
   try {
     if (!fs.existsSync(COOKIE_FILE)) {
       return '';
@@ -46,10 +46,41 @@ export function getCookieHeader(): string {
     if (!Array.isArray(cookies)) return '';
 
     const nowSeconds = Date.now() / 1000;
+    let urlObj: URL | null = null;
+    if (targetUrl) {
+      try {
+        urlObj = new URL(targetUrl);
+      } catch (_e) {
+        /* ignore */
+      }
+    }
+
     const validCookies = cookies.filter((c) => {
+      // 1. 만료일 확인
       if (c.expires && c.expires > 0 && c.expires < nowSeconds) {
         return false;
       }
+
+      // 2. targetUrl 매칭 확인 (도메인 / 경로)
+      if (urlObj) {
+        const hostname = urlObj.hostname.toLowerCase();
+        let cookieDomain = (c.domain || '').toLowerCase();
+        if (cookieDomain.startsWith('.')) {
+          cookieDomain = cookieDomain.slice(1);
+        }
+
+        // 도메인 매칭 검사
+        const isDomainMatch =
+          hostname === cookieDomain || hostname.endsWith('.' + cookieDomain) || cookieDomain.endsWith('.' + hostname);
+
+        if (!isDomainMatch) return false;
+
+        // 경로 매칭 검사
+        if (c.path && !urlObj.pathname.startsWith(c.path)) {
+          return false;
+        }
+      }
+
       return true;
     });
 
@@ -64,7 +95,7 @@ export function getCookieHeader(): string {
  */
 export async function sendDoctorVilleRequest(url: string, options: HttpRequestOptions = {}): Promise<HttpResponse> {
   const method = options.method || 'GET';
-  const cookieHeader = getCookieHeader();
+  const cookieHeader = getCookieHeader(url);
   const headers: Record<string, string> = {
     'User-Agent':
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
