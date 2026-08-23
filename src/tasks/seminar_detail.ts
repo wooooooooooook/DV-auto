@@ -230,11 +230,6 @@ export function formatSeminarDetail(data: SeminarDetail): string {
   const participantInfo = `${data.applyCnt} / ${data.maxPeopleCnt}`;
   const seminarUrl = buildSeminarUrl(data.seminarId);
 
-  let introText = stripHtml(data.intro || '');
-  if (introText.length > 200) {
-    introText = introText.slice(0, 200) + '...';
-  }
-
   return [
     `*세미나 상세* (ID: ${data.seminarId})`,
     '',
@@ -248,14 +243,27 @@ export function formatSeminarDetail(data: SeminarDetail): string {
     `*설문:* ${data.useSurvey === 'Y' ? '있음' : '없음'} (심화: ${data.useDepthSurvey === 'Y' ? '있음' : '없음'})`,
     `*설문ID:* ${data.surveyId ?? '없음'}`,
     `*URL:* ${seminarUrl}`,
-    '',
-    `*소개:*`,
-    introText || '(소개 없음)',
   ].join('\n');
 }
 
+function cleanRawData(obj: unknown): unknown {
+  if (Array.isArray(obj)) {
+    return obj.map(cleanRawData);
+  }
+  if (obj !== null && typeof obj === 'object') {
+    const cleaned: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(obj)) {
+      if (key === 'intro' || value === null) continue;
+      cleaned[key] = cleanRawData(value);
+    }
+    return cleaned;
+  }
+  return obj;
+}
+
 export function formatRawResponse(raw: SeminarDetailResponse): string[] {
-  const rawJson = JSON.stringify(raw, null, 2);
+  const cleaned = cleanRawData(raw);
+  const rawJson = JSON.stringify(cleaned, null, 2);
   // 각 메시지가 텔레그램 4096자 제한 이내여야 하므로 배열로 분할해 별도 전송
   const chunks: string[] = [];
   for (let i = 0; i < rawJson.length; i += 3500) {
