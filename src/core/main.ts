@@ -22,6 +22,7 @@ import * as checkPointTaskModule from '../tasks/check_point';
 import * as checkSeminarPointTaskModule from '../tasks/check_seminar_point';
 import * as checkAdvancedSeminarsTaskModule from '../tasks/check_advanced_seminars';
 import * as runSeminarQuizTaskModule from '../tasks/run_seminar_quiz';
+import * as seminarDetailTaskModule from '../tasks/seminar_detail';
 import type { Task, TaskResult } from '../types';
 
 dns.setDefaultResultOrder('ipv4first');
@@ -330,6 +331,17 @@ const checkSeminarPointTask: Task = {
   },
 };
 taskRegistry.registerTask(checkSeminarPointTask);
+const seminarDetailTask: Task = {
+  name: 'seminar_detail',
+  run: async (ctx) => {
+    const seminarId = ctx.args?.seminarId;
+    if (!seminarId) {
+      return { success: false, message: '세미나 ID가 필요합니다. 예: /seminar_detail 5566' };
+    }
+    return await seminarDetailTaskModule.run({ args: { seminarId } });
+  },
+};
+taskRegistry.registerTask(seminarDetailTask);
 const checkAdvancedSeminarsTask: Task = {
   name: 'check_advanced_seminars',
   run: async () => checkAdvancedSeminarsTaskModule.run(),
