@@ -8,3 +8,4 @@ dist/
 .memo/
 storage/
 scratch/
+*.tsbuildinfo
