@@ -12,6 +12,7 @@ const testFiles = [
   'monitor_seminars_api.test.ts',
   'apply_seminar_changes.test.ts',
   'point_only_seminar_detail.test.ts',
+  'apply_seminar_api.test.ts',
   'apply_seminar_http_precheck.test.ts',
   'apply_seminar_result_count.test.ts',
   'apply_seminar_no_browser.test.ts',

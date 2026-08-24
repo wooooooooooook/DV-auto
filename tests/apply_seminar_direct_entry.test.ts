@@ -34,6 +34,7 @@ async function runAllTests() {
 
   const originalFetchMainFuture = seminarApiModule.fetchMainFutureSeminars;
   const originalFetchDetail = seminarApiModule.fetchSeminarDetail;
+  const originalApplyWithTerms = seminarApiModule.applySeminarWithTerms;
   const originalSearchSeminarPoints = checkSeminarPointModule.searchSeminarPoints;
   const originalSendTelegram = utilsModule.sendTelegram;
   const originalEnsureLoggedIn = utilsModule.ensureLoggedIn;
@@ -108,9 +109,9 @@ async function runAllTests() {
     console.log(`  ✓ [Pass] 신청 대상 없이 정상 완료: "${result1.message}"\n`);
 
     // ======================================================================
-    // ② 신청 대상 1개면 해당 seminarId의 상세 URL로 직접 진입함
+    // ② 신청 대상 1개면 API 실패 시 Playwright 폴백으로 해당 상세 URL로 직접 진입함
     // ======================================================================
-    console.log('--- [Test ②] 신청 대상 1개 → 해당 상세 URL로 직접 진입 ---');
+    console.log('--- [Test ②] 신청 대상 1개 → API 실패 시 Playwright 폴백으로 해당 상세 URL 진입 ---');
     storage.set(SEMINAR_LIST_KEY, []);
     browserLaunchCount = 0;
     safeGotoUrls.length = 0;
@@ -124,19 +125,26 @@ async function runAllTests() {
       rawResponse: { futureSeminarList: { items: [] } },
     });
 
-    // 신청 후 결과 확인용 mock: 5610이 PROCESS_CANCEL로 변경됨
-    (seminarApiModule as unknown as { fetchSeminarDetail: unknown }).fetchSeminarDetail = async (id: string) => ({
-      success: true,
-      seminarId: String(id),
-      isPointExcluded: false,
-      hasEntryHistory: false,
-      rawResponse: {
-        seminarDetail: {
-          seminarId: Number(id),
-          processState: ProcessState.PROCESS_CANCEL,
-        },
-      },
+    (seminarApiModule as unknown as { applySeminarWithTerms: unknown }).applySeminarWithTerms = async () => ({
+      success: false,
+      isAuthExpired: false,
+      errorMessage: 'API 신청 실패 시뮬레이션',
     });
+
+    (seminarApiModule as unknown as { fetchSeminarDetail: unknown }).fetchSeminarDetail = async (id: string) => {
+      return {
+        success: true,
+        seminarId: String(id),
+        isPointExcluded: false,
+        hasEntryHistory: false,
+        rawResponse: {
+          seminarDetail: {
+            seminarId: Number(id),
+            processState: safeGotoUrls.length > 0 ? ProcessState.PROCESS_CANCEL : ProcessState.PROCESS_APPLY,
+          },
+        },
+      };
+    };
 
     const mockPage2 = createMockPage();
     const result2 = await runApplySeminar({ page: mockPage2 as never }, { notifyNewSeminarsToTelegram: false });
@@ -159,7 +167,7 @@ async function runAllTests() {
     // ======================================================================
     // ③ 신청 대상 여러 개면 각 상세 URL로 직접 진입함
     // ======================================================================
-    console.log('--- [Test ③] 신청 대상 여러 개 → 각 상세 URL로 진입 ---');
+    console.log('--- [Test ③] 신청 대상 여러 개 → API 실패 시 각 상세 URL로 폴백 진입 ---');
     storage.set(SEMINAR_LIST_KEY, []);
     browserLaunchCount = 0;
     safeGotoUrls.length = 0;
@@ -175,18 +183,26 @@ async function runAllTests() {
       rawResponse: { futureSeminarList: { items: [] } },
     });
 
-    (seminarApiModule as unknown as { fetchSeminarDetail: unknown }).fetchSeminarDetail = async (id: string) => ({
-      success: true,
-      seminarId: String(id),
-      isPointExcluded: false,
-      hasEntryHistory: false,
-      rawResponse: {
-        seminarDetail: {
-          seminarId: Number(id),
-          processState: ProcessState.PROCESS_CANCEL,
-        },
-      },
+    (seminarApiModule as unknown as { applySeminarWithTerms: unknown }).applySeminarWithTerms = async () => ({
+      success: false,
+      isAuthExpired: false,
+      errorMessage: 'API 신청 실패 시뮬레이션',
     });
+
+    (seminarApiModule as unknown as { fetchSeminarDetail: unknown }).fetchSeminarDetail = async (id: string) => {
+      return {
+        success: true,
+        seminarId: String(id),
+        isPointExcluded: false,
+        hasEntryHistory: false,
+        rawResponse: {
+          seminarDetail: {
+            seminarId: Number(id),
+            processState: safeGotoUrls.length > 0 ? ProcessState.PROCESS_CANCEL : ProcessState.PROCESS_APPLY,
+          },
+        },
+      };
+    };
 
     const mockPage3 = createMockPage();
     const result3 = await runApplySeminar({ page: mockPage3 as never }, { notifyNewSeminarsToTelegram: false });
@@ -318,6 +334,7 @@ async function runAllTests() {
     (seminarApiModule as unknown as { fetchMainFutureSeminars: unknown }).fetchMainFutureSeminars =
       originalFetchMainFuture;
     (seminarApiModule as unknown as { fetchSeminarDetail: unknown }).fetchSeminarDetail = originalFetchDetail;
+    (seminarApiModule as unknown as { applySeminarWithTerms: unknown }).applySeminarWithTerms = originalApplyWithTerms;
     (checkSeminarPointModule as unknown as { searchSeminarPoints: unknown }).searchSeminarPoints =
       originalSearchSeminarPoints;
     (utilsModule as unknown as { sendTelegram: unknown }).sendTelegram = originalSendTelegram;

@@ -14,6 +14,7 @@ import { parseSeminarListHtml, parseCompletionCountHtml } from '../modules/html_
 import {
   fetchMainFutureSeminars,
   fetchSeminarDetail,
+  applySeminarWithTerms,
   convertApiItemToRawSeminar,
   convertApiItemToSeminarListItem,
   parseSeminarDateTime,
@@ -738,68 +739,139 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
     return { success: false, message: `세미나 신청 작업 오류: ${errorMessage}` };
   }
 
-  let page = ctx.page;
-  let context = ctx.context;
-  let createdBrowser: import('playwright').Browser | null = null;
-  let screenshotPath: string | null = null;
-
   try {
-    if (!page) {
-      const { chromium } = await import('playwright');
-      const HEADLESS = (process.env.HEADLESS || 'true').toLowerCase() === 'true';
-      createdBrowser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
-      context = await createdBrowser.newContext();
-      page = await context.newPage();
-    }
-
-    await ensureLoggedIn({ page, context: context ?? page.context() });
-
-    // 각 신청 대상 세미나의 상세페이지로 직접 진입하여 신청
+    // 1단계: HTTP API로 세미나 신청 시도 (약관 처리 포함)
+    const apiAppliedIds = new Set<string>();
     for (const seminarId of targetSeminarIds) {
-      const detailUrl = `${SEMINAR_DETAIL_PAGE}${seminarId}`;
-      await safeGoto(page, detailUrl, { waitUntil: 'load', timeout: 30000 }, 1);
-      await page.click('a#applyLiveSeminarMemberBtn', { timeout: 5000 }).catch(() => {});
       try {
-        await page.waitForSelector('.agg_confirm', { timeout: 2000 });
-        await page.click('.agg_confirm').catch(() => {});
-        await page.waitForSelector('#seminarAgree', { timeout: 2000 });
-        await page.click('#seminarAgree').catch(() => {});
-      } catch (_e) {
-        /* ignore */
-      }
-      try {
-        const nextTerms = page.locator('.agg_next_terms');
-        if (await nextTerms.isVisible({ timeout: 1000 })) {
-          await nextTerms.click();
-          await page.waitForSelector('#terms_confirm', { timeout: 2000 });
-          await page.click('#terms_confirm');
+        const applyRes = await applySeminarWithTerms(seminarId);
+        if (applyRes.isAuthExpired) {
+          const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
+          await sendTelegram(msg).catch(() => {});
+          return { success: false, message: msg };
         }
-      } catch (_e) {
-        /* ignore */
+        if (applyRes.success) {
+          apiAppliedIds.add(seminarId);
+        } else {
+          console.warn(
+            `[apply_seminar] seminarId ${seminarId} API 신청 실패, Playwright 폴백 예정:`,
+            applyRes.errorMessage,
+          );
+        }
+      } catch (err) {
+        console.warn(`[apply_seminar] seminarId ${seminarId} API 신청 중 예외 발생, Playwright 폴백 예정:`, err);
       }
-      await page.waitForTimeout(500);
     }
 
-    // 신청 결과 확인: 각 대상에 대해 detail API 재조회로 개별 확인
-    let successCount = 0;
-    let failCount = 0;
+    // 신청 결과 1차 검증 (상세 API 재조회)
+    const confirmedAppliedIds = new Set<string>();
     for (const seminarId of targetSeminarIds) {
       try {
         const detailRes = await fetchSeminarDetail(seminarId);
-        if (detailRes.success && detailRes.rawResponse?.seminarDetail) {
-          const ps = Number(detailRes.rawResponse.seminarDetail.processState);
+        if (detailRes.success && detailRes.rawResponse && typeof detailRes.rawResponse === 'object') {
+          const rawDetail = detailRes.rawResponse as { seminarDetail?: { processState?: number | string } };
+          const ps = Number(rawDetail.seminarDetail?.processState);
           if (isAppliedSeminar(ps)) {
-            successCount++;
-          } else {
-            failCount++;
+            confirmedAppliedIds.add(seminarId);
           }
-        } else {
-          failCount++;
+        } else if (apiAppliedIds.has(seminarId)) {
+          confirmedAppliedIds.add(seminarId);
         }
       } catch {
-        failCount++;
+        if (apiAppliedIds.has(seminarId)) {
+          confirmedAppliedIds.add(seminarId);
+        }
       }
     }
+
+    // 2단계: API로 신청되지 않은 세미나가 있는 경우에만 Playwright 브라우저 폴백 실행
+    const fallbackTargets = targetSeminarIds.filter((id) => !confirmedAppliedIds.has(id));
+
+    let page = ctx.page;
+    let context = ctx.context;
+    let createdBrowser: import('playwright').Browser | null = null;
+    let screenshotPath: string | null = null;
+
+    if (fallbackTargets.length > 0) {
+      console.log(
+        `[apply_seminar] ${fallbackTargets.length}개 세미나에 대해 Playwright 폴백 실행: ${fallbackTargets.join(', ')}`,
+      );
+      try {
+        if (!page) {
+          const { chromium } = await import('playwright');
+          const HEADLESS = (process.env.HEADLESS || 'true').toLowerCase() === 'true';
+          createdBrowser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
+          context = await createdBrowser.newContext();
+          page = await context.newPage();
+        }
+
+        await ensureLoggedIn({ page, context: context ?? page.context() });
+
+        for (const seminarId of fallbackTargets) {
+          const detailUrl = `${SEMINAR_DETAIL_PAGE}${seminarId}`;
+          await safeGoto(page, detailUrl, { waitUntil: 'load', timeout: 30000 }, 1);
+          await page.click('a#applyLiveSeminarMemberBtn', { timeout: 5000 }).catch(() => {});
+          try {
+            await page.waitForSelector('.agg_confirm', { timeout: 2000 });
+            await page.click('.agg_confirm').catch(() => {});
+            await page.waitForSelector('#seminarAgree', { timeout: 2000 });
+            await page.click('#seminarAgree').catch(() => {});
+          } catch (_e) {
+            /* ignore */
+          }
+          try {
+            const nextTerms = page.locator('.agg_next_terms');
+            if (await nextTerms.isVisible({ timeout: 1000 })) {
+              await nextTerms.click();
+              await page.waitForSelector('#terms_confirm', { timeout: 2000 });
+              await page.click('#terms_confirm');
+            }
+          } catch (_e) {
+            /* ignore */
+          }
+          await page.waitForTimeout(500);
+        }
+
+        // 폴백 실행 후 재확인
+        for (const seminarId of fallbackTargets) {
+          try {
+            const detailRes = await fetchSeminarDetail(seminarId);
+            if (detailRes.success && detailRes.rawResponse && typeof detailRes.rawResponse === 'object') {
+              const rawDetail = detailRes.rawResponse as { seminarDetail?: { processState?: number | string } };
+              const ps = Number(rawDetail.seminarDetail?.processState);
+              if (isAppliedSeminar(ps)) {
+                confirmedAppliedIds.add(seminarId);
+              }
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+
+        const baseScreenshotDir = path.join(process.cwd(), 'screenshot');
+        await fs.mkdir(baseScreenshotDir, { recursive: true });
+        screenshotPath = path.join(baseScreenshotDir, 'apply_seminar_result.png');
+        await page.screenshot({ path: screenshotPath, fullPage: false }).catch(() => {});
+      } catch (error) {
+        console.error(
+          'seminar task playwright fallback error',
+          error && typeof error === 'object' && 'stack' in error ? (error as Error).stack : error,
+        );
+        if (page && !screenshotPath) {
+          const baseScreenshotDir = path.join(process.cwd(), 'screenshot');
+          await fs.mkdir(baseScreenshotDir, { recursive: true });
+          screenshotPath = path.join(baseScreenshotDir, 'apply_seminar_error.png');
+          await page.screenshot({ path: screenshotPath, fullPage: false }).catch(() => {});
+        }
+      } finally {
+        if (createdBrowser) {
+          await createdBrowser.close().catch(() => {});
+        }
+      }
+    }
+
+    const successCount = confirmedAppliedIds.size;
+    const failCount = targetSeminarIds.length - successCount;
 
     // 기존 이미 신청된 세미나 수
     const previouslyApplied = currentSeminars.filter((s) => isAppliedSeminar(s.processState)).length;
@@ -814,12 +886,12 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
       message += `\n⚠️ ${excessCount}개 정원 초과로 신청 불가`;
     }
 
-    const baseScreenshotDir = path.join(process.cwd(), 'screenshot');
-    await fs.mkdir(baseScreenshotDir, { recursive: true });
-    screenshotPath = path.join(baseScreenshotDir, 'apply_seminar_result.png');
-    await page.screenshot({ path: screenshotPath, fullPage: false });
     message += `\n${SEMINAR_DETAIL_PAGE}`;
-    const result: TaskResult = { success: true, message, imagePath: screenshotPath };
+    const result: TaskResult = {
+      success: true,
+      message,
+      ...(screenshotPath ? { imagePath: screenshotPath } : {}),
+    };
     if (options.silentIfNoNew && newlyAdded.length === 0) result.silent = true;
     return result;
   } catch (error) {
@@ -827,19 +899,9 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
       'seminar task error',
       error && typeof error === 'object' && 'stack' in error ? (error as Error).stack : error,
     );
-    if (page && !screenshotPath) {
-      const baseScreenshotDir = path.join(process.cwd(), 'screenshot');
-      await fs.mkdir(baseScreenshotDir, { recursive: true });
-      screenshotPath = path.join(baseScreenshotDir, 'apply_seminar_error.png');
-      await page.screenshot({ path: screenshotPath, fullPage: false }).catch(() => {});
-    }
     const message = error instanceof Error ? error.message : String(error);
-    await sendTelegram(`❗ 세미나 신청 작업 오류: ${message}`, screenshotPath).catch(() => {});
-    return { success: false, message: `세미나 신청 작업 오류: ${message}`, imagePath: screenshotPath };
-  } finally {
-    if (createdBrowser) {
-      await createdBrowser.close().catch(() => {});
-    }
+    await sendTelegram(`❗ 세미나 신청 작업 오류: ${message}`).catch(() => {});
+    return { success: false, message: `세미나 신청 작업 오류: ${message}` };
   }
 }
 

@@ -1,9 +1,11 @@
-import { httpGet, type HttpResponse } from './http_client';
+import { httpGet, sendDoctorVilleRequest, type HttpResponse } from './http_client';
 import type { RawSeminarData, SeminarListItem } from '../tasks/apply_seminar';
 import { isAuthExpiredHtml } from './html_parser';
 
 export const MAIN_FUTURE_SEMINARS_API_URL = 'https://m-api.doctorville.co.kr/api/mw/seminars/mainFuture';
 export const SEMINAR_DETAIL_API_URL = 'https://m-api.doctorville.co.kr/api/mw/seminars';
+export const SEMINAR_APPLY_API_URL = 'https://api.doctorville.co.kr/api/seminars/apply';
+export const SEMINAR_TERMS_INFO_API_URL = 'https://m-api.doctorville.co.kr/api/mw/seminar/terms-info';
 
 export const ProcessState = {
   PROCESS_ENTER: 1, // 입장하기 (라이브 입장 가능)
@@ -88,6 +90,19 @@ export interface SeminarMemberInfo {
   [key: string]: unknown;
 }
 
+export interface TermsOptionModel {
+  termsOptionsId: number | string;
+  title: string;
+  [key: string]: unknown;
+}
+
+export interface TermsInfo {
+  dataReceiver?: string;
+  contents?: string;
+  termsOptionsModels?: TermsOptionModel[];
+  [key: string]: unknown;
+}
+
 export interface SeminarDetailApiResponse {
   seminarDetail?: {
     seminarId?: number | string;
@@ -105,6 +120,7 @@ export interface SeminarDetailApiResponse {
   seminarMember?: SeminarMemberInfo | null;
   survey?: SeminarSurveyInfo | null;
   surveyState?: number | string;
+  termsInfo?: TermsInfo | null;
   isExistVod?: boolean;
   code?: number | string;
   message?: string;
@@ -472,4 +488,239 @@ export async function fetchSeminarDetail(
       errorMessage: `fetchSeminarDetail(${sid}) 요청 중 예외 발생: ${errorMessage}`,
     };
   }
+}
+
+/**
+ * (선택)이 포함되지 않은 약관 옵션 ID 목록 추출
+ * 약관 title에 '(선택)' 또는 '[선택]'이 포함되지 않은 경우 필수/일반 약관으로 간주하여 동의 대상에 포함
+ */
+export function getRequiredTermsOptionIds(termsInfo?: TermsInfo | null): Array<number | string> {
+  if (!termsInfo || !Array.isArray(termsInfo.termsOptionsModels)) {
+    return [];
+  }
+  return termsInfo.termsOptionsModels
+    .filter((opt) => {
+      const title = (opt.title || '').trim();
+      const isOptional = title.includes('(선택)') || title.includes('[선택]');
+      return !isOptional;
+    })
+    .map((opt) => opt.termsOptionsId);
+}
+
+export interface ApiOperationResult {
+  success: boolean;
+  isAuthExpired: boolean;
+  errorMessage?: string;
+  rawResponse?: unknown;
+}
+
+/**
+ * 약관 동의 제출 API (POST /api/mw/seminar/terms-info) 호출
+ */
+export async function submitSeminarTermsAgree(
+  seminarId: number | string,
+  agreedTermsOptionsIdList: Array<number | string>,
+  customUrl: string = SEMINAR_TERMS_INFO_API_URL,
+): Promise<ApiOperationResult> {
+  const sid = String(seminarId).trim();
+  try {
+    const res = await sendDoctorVilleRequest(customUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json, text/plain, */*',
+        Referer: `https://m.doctorville.co.kr/cme/seminar/${sid}`,
+        Origin: 'https://m.doctorville.co.kr',
+      },
+      body: JSON.stringify({
+        seminarId: Number(sid),
+        agreedTermsOptionsIdList: agreedTermsOptionsIdList.map((id) => Number(id)),
+      }),
+    });
+
+    if (res.resultType === 'AUTH_EXPIRED' || isAuthExpiredHtml(res.body)) {
+      return {
+        success: false,
+        isAuthExpired: true,
+        errorMessage: '세션이 만료되었습니다. 로그인이 필요합니다.',
+      };
+    }
+
+    if (res.status !== 200 || !res.body) {
+      return {
+        success: false,
+        isAuthExpired: false,
+        errorMessage: `약관 동의 HTTP 요청 실패 (상태 코드: ${res.status}, ${res.statusText})`,
+      };
+    }
+
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(res.body);
+    } catch (parseErr) {
+      return {
+        success: false,
+        isAuthExpired: false,
+        errorMessage: `약관 동의 응답 JSON 파싱 실패: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`,
+        rawResponse: res.body,
+      };
+    }
+
+    if (
+      parsed.code === 401 ||
+      parsed.code === '401' ||
+      (typeof parsed.message === 'string' && parsed.message.includes('로그인'))
+    ) {
+      return {
+        success: false,
+        isAuthExpired: true,
+        errorMessage: (parsed.message as string) || '로그인이 필요합니다.',
+        rawResponse: parsed,
+      };
+    }
+
+    return {
+      success: true,
+      isAuthExpired: false,
+      rawResponse: parsed,
+    };
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    return {
+      success: false,
+      isAuthExpired: false,
+      errorMessage: `약관 동의 API(${sid}) 호출 중 예외 발생: ${errorMessage}`,
+    };
+  }
+}
+
+/**
+ * 세미나 신청 API (POST /api/seminars/apply) 호출
+ */
+export async function applySeminarApi(
+  seminarId: number | string,
+  customUrl: string = SEMINAR_APPLY_API_URL,
+): Promise<ApiOperationResult> {
+  const sid = String(seminarId).trim();
+  try {
+    const res = await sendDoctorVilleRequest(customUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json, text/plain, */*',
+        Referer: `https://m.doctorville.co.kr/cme/seminar/${sid}`,
+        Origin: 'https://m.doctorville.co.kr',
+      },
+      body: JSON.stringify({
+        seminarId: Number(sid),
+      }),
+    });
+
+    if (res.resultType === 'AUTH_EXPIRED' || isAuthExpiredHtml(res.body)) {
+      return {
+        success: false,
+        isAuthExpired: true,
+        errorMessage: '세션이 만료되었습니다. 로그인이 필요합니다.',
+      };
+    }
+
+    if (res.status !== 200 || !res.body) {
+      return {
+        success: false,
+        isAuthExpired: false,
+        errorMessage: `세미나 신청 HTTP 요청 실패 (상태 코드: ${res.status}, ${res.statusText})`,
+      };
+    }
+
+    let parsed: { data?: unknown; error?: { message?: string } | null; code?: number | string; message?: string };
+    try {
+      parsed = JSON.parse(res.body);
+    } catch (parseErr) {
+      return {
+        success: false,
+        isAuthExpired: false,
+        errorMessage: `세미나 신청 응답 JSON 파싱 실패: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`,
+        rawResponse: res.body,
+      };
+    }
+
+    if (
+      parsed.code === 401 ||
+      parsed.code === '401' ||
+      (typeof parsed.message === 'string' && parsed.message.includes('로그인'))
+    ) {
+      return {
+        success: false,
+        isAuthExpired: true,
+        errorMessage: parsed.message || '로그인이 필요합니다.',
+        rawResponse: parsed,
+      };
+    }
+
+    if (parsed.error) {
+      return {
+        success: false,
+        isAuthExpired: false,
+        errorMessage: parsed.error.message || '세미나 신청 API 처리 오류',
+        rawResponse: parsed,
+      };
+    }
+
+    return {
+      success: true,
+      isAuthExpired: false,
+      rawResponse: parsed,
+    };
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    return {
+      success: false,
+      isAuthExpired: false,
+      errorMessage: `세미나 신청 API(${sid}) 호출 중 예외 발생: ${errorMessage}`,
+    };
+  }
+}
+
+/**
+ * 약관 확인 및 (선택) 미포함 약관 동의 후 세미나 신청 진행
+ */
+export async function applySeminarWithTerms(
+  seminarId: number | string,
+  termsInfo?: TermsInfo | null,
+): Promise<ApiOperationResult> {
+  const sid = String(seminarId).trim();
+
+  let currentTermsInfo = termsInfo;
+  if (currentTermsInfo === undefined) {
+    const detail = await fetchSeminarDetail(sid);
+    if (detail.isAuthExpired) {
+      return { success: false, isAuthExpired: true, errorMessage: detail.errorMessage };
+    }
+    if (detail.success) {
+      currentTermsInfo = (detail.rawResponse as SeminarDetailApiResponse)?.termsInfo ?? null;
+    }
+  }
+
+  // (선택)이 포함되지 않은 필수/일반 약관 옵션 ID 목록 추출
+  const requiredTermsIds = getRequiredTermsOptionIds(currentTermsInfo);
+  if (requiredTermsIds.length > 0) {
+    const termsRes = await submitSeminarTermsAgree(sid, requiredTermsIds);
+    if (termsRes.isAuthExpired) {
+      return { success: false, isAuthExpired: true, errorMessage: termsRes.errorMessage };
+    }
+    if (!termsRes.success) {
+      console.warn(
+        `[applySeminarWithTerms] seminarId ${sid} 약관 동의 실패 (경고 후 신청 계속):`,
+        termsRes.errorMessage,
+      );
+    }
+  }
+
+  // 세미나 신청 API 호출
+  const applyRes = await applySeminarApi(sid);
+  if (applyRes.isAuthExpired) {
+    return { success: false, isAuthExpired: true, errorMessage: applyRes.errorMessage };
+  }
+
+  return applyRes;
 }

@@ -34,6 +34,7 @@ async function testApplySeminarHttpPrecheck() {
 
   const originalFetchMainFuture = seminarApiModule.fetchMainFutureSeminars;
   const originalFetchDetail = seminarApiModule.fetchSeminarDetail;
+  const originalApplyWithTerms = seminarApiModule.applySeminarWithTerms;
   const originalHttpGet = httpClientModule.httpGet;
   const originalEnsureLoggedIn = utilsModule.ensureLoggedIn;
   const originalSafeGoto = utilsModule.safeGoto;
@@ -105,16 +106,22 @@ async function testApplySeminarHttpPrecheck() {
     assert.strictEqual(browserLaunchCount, 0, 'Chromium should NOT be launched when all applied');
     console.log('  ✓ [Pass] safeGoto 및 브라우저 실행 없이 정상 완료\n');
 
-    // --- Case B: API에서 PROCESS_APPLY 세미나 1개 → Playwright 신청 단계 진입 ---
-    console.log('--- Case B: API에서 PROCESS_APPLY 세미나 1개 있음 ---');
+    // --- Case B1: API에서 PROCESS_APPLY 세미나 1개 → HTTP API로 신청 성공 시 Playwright 미실행 ---
+    console.log('--- Case B1: PROCESS_APPLY 세미나 1개 → HTTP API로 신청 성공 ---');
     safeGotoCallCount = 0;
     safeGotoUrls.length = 0;
+    browserLaunchCount = 0;
     storage.set(SEMINAR_LIST_KEY, []);
 
     (seminarApiModule as unknown as { fetchMainFutureSeminars: unknown }).fetchMainFutureSeminars = async () => ({
       success: true,
       items: [createFutureSeminarApiItem(100, ProcessState.PROCESS_APPLY, 10, 100)],
       rawResponse: { futureSeminarList: { items: [] } },
+    });
+
+    (seminarApiModule as unknown as { applySeminarWithTerms: unknown }).applySeminarWithTerms = async () => ({
+      success: true,
+      isAuthExpired: false,
     });
 
     (seminarApiModule as unknown as { fetchSeminarDetail: unknown }).fetchSeminarDetail = async (id: string) => ({
@@ -127,10 +134,50 @@ async function testApplySeminarHttpPrecheck() {
       },
     });
 
+    const resultB1 = await runApplySeminar({}, { notifyNewSeminarsToTelegram: false });
+    assert.strictEqual(resultB1.success, true);
+    assert.strictEqual(safeGotoCallCount, 0, 'safeGoto should NOT be called when API application succeeds');
+    assert.strictEqual(browserLaunchCount, 0, 'Chromium should NOT be launched when API application succeeds');
+    console.log('  ✓ [Pass] HTTP API 신청 성공 시 Playwright 브라우저 기동 없이 즉시 완료\n');
+
+    // --- Case B2: API에서 PROCESS_APPLY 세미나 1개 → HTTP API 신청 실패 시 Playwright 폴백 실행 ---
+    console.log('--- Case B2: PROCESS_APPLY 세미나 1개 → HTTP API 실패 시 Playwright 폴백 ---');
+    safeGotoCallCount = 0;
+    safeGotoUrls.length = 0;
+    storage.set(SEMINAR_LIST_KEY, []);
+
+    (seminarApiModule as unknown as { fetchMainFutureSeminars: unknown }).fetchMainFutureSeminars = async () => ({
+      success: true,
+      items: [createFutureSeminarApiItem(100, ProcessState.PROCESS_APPLY, 10, 100)],
+      rawResponse: { futureSeminarList: { items: [] } },
+    });
+
+    (seminarApiModule as unknown as { applySeminarWithTerms: unknown }).applySeminarWithTerms = async () => ({
+      success: false,
+      isAuthExpired: false,
+      errorMessage: 'API 신청 임의 실패',
+    });
+
+    // safeGoto(Playwright) 실행 전에는 PROCESS_APPLY, Playwright 실행 후에는 PROCESS_CANCEL
+    (seminarApiModule as unknown as { fetchSeminarDetail: unknown }).fetchSeminarDetail = async (id: string) => {
+      return {
+        success: true,
+        seminarId: String(id),
+        isPointExcluded: false,
+        hasEntryHistory: false,
+        rawResponse: {
+          seminarDetail: {
+            seminarId: Number(id),
+            processState: safeGotoUrls.length > 0 ? ProcessState.PROCESS_CANCEL : ProcessState.PROCESS_APPLY,
+          },
+        },
+      };
+    };
+
     const mockPageB = createMockPage();
-    const resultB = await runApplySeminar({ page: mockPageB as never }, { notifyNewSeminarsToTelegram: false });
-    assert.strictEqual(resultB.success, true);
-    assert.ok(safeGotoCallCount >= 1, 'safeGoto should be called for PROCESS_APPLY seminar');
+    const resultB2 = await runApplySeminar({ page: mockPageB as never }, { notifyNewSeminarsToTelegram: false });
+    assert.strictEqual(resultB2.success, true);
+    assert.ok(safeGotoCallCount >= 1, 'safeGoto should be called for PROCESS_APPLY seminar when API fails');
     // 상세 URL로 직접 진입 확인
     assert.ok(
       safeGotoUrls.some((u) => u.includes('/cme/seminar/100')),
@@ -141,9 +188,9 @@ async function testApplySeminarHttpPrecheck() {
       !safeGotoUrls.some((u) => u.includes('seminar/main')),
       `목록 페이지 미호출: ${JSON.stringify(safeGotoUrls)}`,
     );
-    console.log('  ✓ [Pass] Playwright 진입 후 상세페이지 직접 신청 로직 정상 수행\n');
+    console.log('  ✓ [Pass] API 신청 실패 시 Playwright 폴백 진입 후 상세페이지 직접 신청 로직 정상 수행\n');
 
-    // --- Case C: 기존 세미나 있지만 PROCESS_APPLY 세미나 추가됨 → Playwright 신청 실행 ---
+    // --- Case C: 기존 세미나 있지만 PROCESS_APPLY 세미나 추가됨 → API 실패 시 Playwright 신청 실행 ---
     console.log('--- Case C: 기존 세미나 있지만 PROCESS_APPLY 세미나 추가 ---');
     storage.set(SEMINAR_LIST_KEY, [
       {
@@ -170,10 +217,31 @@ async function testApplySeminarHttpPrecheck() {
       rawResponse: { futureSeminarList: { items: [] } },
     });
 
+    (seminarApiModule as unknown as { applySeminarWithTerms: unknown }).applySeminarWithTerms = async () => ({
+      success: false,
+      isAuthExpired: false,
+      errorMessage: 'API 신청 실패 시뮬레이션',
+    });
+
+    (seminarApiModule as unknown as { fetchSeminarDetail: unknown }).fetchSeminarDetail = async (id: string) => {
+      return {
+        success: true,
+        seminarId: String(id),
+        isPointExcluded: false,
+        hasEntryHistory: false,
+        rawResponse: {
+          seminarDetail: {
+            seminarId: Number(id),
+            processState: safeGotoUrls.length > 0 ? ProcessState.PROCESS_CANCEL : ProcessState.PROCESS_APPLY,
+          },
+        },
+      };
+    };
+
     const mockPageC = createMockPage();
     const resultC = await runApplySeminar({ page: mockPageC as never }, { notifyNewSeminarsToTelegram: false });
     assert.strictEqual(resultC.success, true);
-    assert.ok(safeGotoCallCount >= 1, 'safeGoto should be called for new PROCESS_APPLY seminar');
+    assert.ok(safeGotoCallCount >= 1, 'safeGoto should be called for new PROCESS_APPLY seminar when API fails');
     assert.ok(
       safeGotoUrls.some((u) => u.includes('/cme/seminar/200')),
       `200 상세 URL 포함: ${JSON.stringify(safeGotoUrls)}`,
@@ -253,6 +321,12 @@ async function testApplySeminarHttpPrecheck() {
       rawResponse: { futureSeminarList: { items: [] } },
     });
 
+    (seminarApiModule as unknown as { applySeminarWithTerms: unknown }).applySeminarWithTerms = async () => ({
+      success: false,
+      isAuthExpired: false,
+      errorMessage: 'API 실패',
+    });
+
     // 신청 후에도 여전히 PROCESS_APPLY → 실패로 판정
     (seminarApiModule as unknown as { fetchSeminarDetail: unknown }).fetchSeminarDetail = async (id: string) => ({
       success: true,
@@ -278,6 +352,7 @@ async function testApplySeminarHttpPrecheck() {
     (seminarApiModule as unknown as { fetchMainFutureSeminars: unknown }).fetchMainFutureSeminars =
       originalFetchMainFuture;
     (seminarApiModule as unknown as { fetchSeminarDetail: unknown }).fetchSeminarDetail = originalFetchDetail;
+    (seminarApiModule as unknown as { applySeminarWithTerms: unknown }).applySeminarWithTerms = originalApplyWithTerms;
     (checkSeminarPointModule as unknown as { searchSeminarPoints: unknown }).searchSeminarPoints =
       originalSearchSeminarPoints;
     (httpClientModule as unknown as { httpGet: unknown }).httpGet = originalHttpGet;
