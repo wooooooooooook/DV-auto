@@ -344,7 +344,142 @@ async function runTests() {
     '최종 모니터링 종료 공지가 전송되어야 함',
   );
 
-  console.log('  ✓ monitorSeminars API 모니터링 -> Playwright 온디맨드 입장 -> 설문/퀴즈 제출 전 플로우 통과!\n');
+  // ── Test 4: isAutoResume 시 입장이력(hasEntryHistory)에 따른 자동입장 생략 검증 ──
+  console.log('--- [Test 4] isAutoResume 시 입장이력(hasEntryHistory)에 따른 자동입장 생략 검증 ---');
+
+  const resumePageCalls: string[] = [];
+  const resumeChannelMessages: string[] = [];
+  const resumeTelegramMessages: string[] = [];
+
+  (utilsModule as unknown as { sendNotificationToChannel: unknown }).sendNotificationToChannel = async (
+    msg: string,
+  ) => {
+    resumeChannelMessages.push(msg);
+    return true;
+  };
+  (utilsModule as unknown as { sendTelegram: unknown }).sendTelegram = async (msg: string) => {
+    resumeTelegramMessages.push(msg);
+    return true;
+  };
+
+  const resumeMockPage = {
+    locator: (selector: string) => ({
+      first: () => ({
+        isVisible: async () => selector.includes('설문참여'),
+        click: async () => {},
+        isEnabled: async () => true,
+        count: async () => 1,
+        waitFor: async () => {},
+      }),
+      count: async () => 1,
+      waitFor: async () => {},
+    }),
+    getByRole: () => ({
+      first: () => ({
+        isVisible: async () => true,
+        click: async () => {},
+        waitFor: async () => {},
+      }),
+    }),
+    evaluate: async () => [],
+    on: () => {},
+    waitForEvent: async () => null,
+    waitForTimeout: async () => {},
+    waitForLoadState: async () => {},
+    screenshot: async () => {},
+    frames: () => [{ url: () => 'https://video.ibm.com/socialstream/123' }],
+    url: () => 'https://m.doctorville.co.kr/cme/seminar/attend?seminarId=9902',
+    close: async () => {},
+  } as unknown as Page;
+
+  const resumeMockContext = {
+    newPage: async () => {
+      resumePageCalls.push('newPage');
+      return resumeMockPage;
+    },
+    waitForEvent: async () => null,
+    close: async () => {},
+  } as unknown as BrowserContext;
+
+  let resumeStep = 0;
+  (seminarApiModule as unknown as { fetchMainFutureSeminars: unknown }).fetchMainFutureSeminars = async () => {
+    resumeStep++;
+    const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+    const currentH = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' })).getHours();
+
+    return {
+      success: true,
+      items: [
+        {
+          seminarId: 9902,
+          seminarNm: '재개 테스트 세미나',
+          startDt: `${todayStr} ${String(currentH).padStart(2, '0')}:00:00`,
+          endDt: `${todayStr} ${String(currentH + 1).padStart(2, '0')}:00:00`,
+          useSurvey: 'Y',
+          useDepthSurvey: 'N',
+          survey: { point: 1000 },
+          processState: 1, // 이미 입장 가능 상태
+        },
+      ],
+      rawResponse: {},
+    };
+  };
+
+  (seminarApiModule as unknown as { fetchSeminarDetail: unknown }).fetchSeminarDetail = async (id: number | string) => {
+    const sid = String(id);
+    if (sid === '9902') {
+      if (resumeStep < 2) {
+        return {
+          success: true,
+          seminarId: sid,
+          survey: { point: 1000 },
+          surveyState: 5,
+          isPointExcluded: false,
+          hasEntryHistory: true, // 입장이력 존재!
+          rawResponse: {
+            surveyState: 5,
+            seminarDetail: {
+              processState: 1,
+              seminarMember: {
+                joinDt: '2026-08-24 13:00:10.0',
+                applyTy: 1,
+              },
+            },
+          },
+        };
+      } else {
+        // 종료
+        return {
+          success: true,
+          seminarId: sid,
+          survey: { point: 1000 },
+          surveyState: 1,
+          isPointExcluded: false,
+          hasEntryHistory: true,
+          rawResponse: { surveyState: 1, seminarDetail: { processState: 7 } },
+        };
+      }
+    }
+    return { success: false, seminarId: sid, isAuthExpired: false, errorMessage: 'not found' };
+  };
+
+  // isAutoResume: true 로 실행
+  const resumeSuccess = await monitorSeminars('테스트재개', currentHour, currentHour + 2, {
+    pollIntervalMs: 10,
+    context: resumeMockContext,
+    isAutoResume: true,
+  });
+
+  assert.strictEqual(resumeSuccess, true);
+  // 종료 설문 처리(handleSeminarEndAndQuiz) 외에 초기 입장(performAutoEnter) 단계에서 newPage가 불리지 않았는지 확인:
+  // Step 1에서 입장 호출이 생략되므로 종료 시점(Step 2) 설문 처리용으로만 1회 newPage가 호출됨.
+  assert.strictEqual(
+    resumePageCalls.length,
+    1,
+    '초기 입장(performAutoEnter)은 생략되고 종료 설문 처리용 newPage 1회만 호출되어야 함',
+  );
+
+  console.log('  ✓ isAutoResume: true 및 입장이력 존재 시 자동입장 생략 검증 완료!\n');
 
   // Clean up mocks
   (seminarApiModule as unknown as { fetchMainFutureSeminars: unknown }).fetchMainFutureSeminars =

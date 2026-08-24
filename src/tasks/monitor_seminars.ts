@@ -157,17 +157,22 @@ export async function getTodaysSeminarsFromApi(
 }
 
 /**
- * 개별 세미나의 종료 상태 및 설문 상태를 API(fetchSeminarDetail)로 확인
+ * 개별 세미나의 종료 상태 및 설문 상태, 입장이력을 API(fetchSeminarDetail)로 확인
  */
-export async function checkSeminarEndStatusFromApi(
-  seminarId: string,
-): Promise<{ isEnded: boolean; isSurveyOpen: boolean; surveyState?: number; isPointExcluded: boolean }> {
+export async function checkSeminarEndStatusFromApi(seminarId: string): Promise<{
+  isEnded: boolean;
+  isSurveyOpen: boolean;
+  surveyState?: number;
+  isPointExcluded: boolean;
+  hasEntryHistory: boolean;
+}> {
   const detailRes = await fetchSeminarDetail(seminarId);
   if (!detailRes.success) {
     return {
       isEnded: false,
       isSurveyOpen: false,
       isPointExcluded: false,
+      hasEntryHistory: false,
     };
   }
 
@@ -196,6 +201,7 @@ export async function checkSeminarEndStatusFromApi(
     isSurveyOpen,
     surveyState,
     isPointExcluded: detailRes.isPointExcluded,
+    hasEntryHistory: detailRes.hasEntryHistory ?? false,
   };
 }
 
@@ -612,25 +618,35 @@ async function monitorSeminars(
         await sendTelegram(`[${periodName}] Seminar already available: ${info.name}`);
         const targetUrl = info.seminarId ? `${SEMINAR_DETAIL_PAGE}${info.seminarId}` : url;
 
-        // 포인트미지급 여부 재확인 (detail API 조회)
+        // 포인트미지급 여부 및 입장이력 확인 (detail API 조회)
         let isPointExcluded = false;
+        let hasEntryHistory = false;
         if (info.seminarId) {
           const detailCheck = await checkSeminarEndStatusFromApi(info.seminarId);
           isPointExcluded = detailCheck.isPointExcluded;
+          hasEntryHistory = detailCheck.hasEntryHistory;
           info.isSurveyPointExcluded = isPointExcluded;
         }
 
-        // Playwright 온디맨드 입장 시도
-        await withBrowserContext(providedContext, async (ctx) => {
-          info.autoEnterDone = await checkAndPerformAutoEnter(
-            ctx,
-            info.seminarId,
-            url,
-            info.name,
-            '입장하기',
-            info.autoEnterDone,
+        // isAutoResume 상태이고 이미 입장이력이 있으면 자동입장 생략
+        if (isAutoResume && hasEntryHistory) {
+          console.log(
+            `[${periodName}] [isAutoResume] 세미나(${info.seminarId}) 입장이력이 확인되어 자동입장을 생략합니다: ${info.name}`,
           );
-        });
+          info.autoEnterDone = true;
+        } else {
+          // Playwright 온디맨드 입장 시도
+          await withBrowserContext(providedContext, async (ctx) => {
+            info.autoEnterDone = await checkAndPerformAutoEnter(
+              ctx,
+              info.seminarId,
+              url,
+              info.name,
+              '입장하기',
+              info.autoEnterDone,
+            );
+          });
+        }
 
         info.isEntryStarted = true;
 
@@ -801,25 +817,35 @@ async function monitorSeminars(
           if (!monitoredInfo.isEntryStarted) {
             console.log(`[${periodName}] Seminar newly ready for entry: ${name} (${seminarId})`);
 
-            // 포인트미지급 여부 재확인 (detail API)
+            // 포인트미지급 여부 및 입장이력 확인 (detail API)
             let isPointExcluded = false;
+            let hasEntryHistory = false;
             if (seminarId) {
               const detailCheck = await checkSeminarEndStatusFromApi(seminarId);
               isPointExcluded = detailCheck.isPointExcluded;
+              hasEntryHistory = detailCheck.hasEntryHistory;
               mergedSeminarInfo.isSurveyPointExcluded = isPointExcluded;
             }
 
-            // Playwright 온디맨드 자동 입장
-            await withBrowserContext(providedContext, async (ctx) => {
-              mergedSeminarInfo.autoEnterDone = await checkAndPerformAutoEnter(
-                ctx,
-                seminarId,
-                url,
-                name,
-                '입장하기',
-                mergedSeminarInfo.autoEnterDone,
+            // isAutoResume 상태이고 이미 입장이력이 있으면 자동입장 생략
+            if (isAutoResume && hasEntryHistory) {
+              console.log(
+                `[${periodName}] [isAutoResume] 세미나(${seminarId}) 입장이력이 확인되어 자동입장을 생략합니다: ${name}`,
               );
-            });
+              mergedSeminarInfo.autoEnterDone = true;
+            } else {
+              // Playwright 온디맨드 자동 입장
+              await withBrowserContext(providedContext, async (ctx) => {
+                mergedSeminarInfo.autoEnterDone = await checkAndPerformAutoEnter(
+                  ctx,
+                  seminarId,
+                  url,
+                  name,
+                  '입장하기',
+                  mergedSeminarInfo.autoEnterDone,
+                );
+              });
+            }
 
             mergedSeminarInfo.isEntryStarted = true;
 

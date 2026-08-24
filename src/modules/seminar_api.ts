@@ -80,11 +80,20 @@ export type FetchFutureSeminarsResult =
       rawResponse?: unknown;
     };
 
+export interface SeminarMemberInfo {
+  applyTy?: number | string | null;
+  joinDt?: string | null;
+  createDt?: string | null;
+  surveyApplyTy?: number | string | null;
+  [key: string]: unknown;
+}
+
 export interface SeminarDetailApiResponse {
   seminarDetail?: {
     seminarId?: number | string;
     seminarNm?: string;
     survey?: SeminarSurveyInfo | null;
+    seminarMember?: SeminarMemberInfo | null;
     payPoint?: number | string | null;
     processState?: number | string;
     cancelProcessState?: number | string;
@@ -93,6 +102,7 @@ export interface SeminarDetailApiResponse {
     useDepthSurvey?: string | boolean;
     [key: string]: unknown;
   };
+  seminarMember?: SeminarMemberInfo | null;
   survey?: SeminarSurveyInfo | null;
   surveyState?: number | string;
   isExistVod?: boolean;
@@ -108,6 +118,7 @@ export type FetchSeminarDetailResult =
       survey?: SeminarSurveyInfo | null;
       surveyState?: number;
       isPointExcluded: boolean;
+      hasEntryHistory: boolean;
       isAuthExpired?: false;
       errorMessage?: undefined;
       rawResponse: SeminarDetailApiResponse;
@@ -116,6 +127,7 @@ export type FetchSeminarDetailResult =
       success: false;
       seminarId: string;
       isPointExcluded?: undefined;
+      hasEntryHistory?: undefined;
       isAuthExpired: boolean;
       errorMessage: string;
       rawResponse?: unknown;
@@ -155,6 +167,20 @@ export function checkIsPointExcluded(survey?: SeminarSurveyInfo | null): boolean
     return true;
   }
 
+  return false;
+}
+
+/**
+ * 세미나 상세 정보에서 회원 입장이력(joinDt 존재 또는 applyTy === 1) 여부 판별
+ */
+export function checkHasEntryHistory(
+  seminarDetail?: { seminarMember?: SeminarMemberInfo | null } | null,
+  seminarMember?: SeminarMemberInfo | null,
+): boolean {
+  const member = seminarDetail?.seminarMember ?? seminarMember;
+  if (!member) return false;
+  if (typeof member.joinDt === 'string' && member.joinDt.trim().length > 0) return true;
+  if (member.applyTy !== undefined && member.applyTy !== null && Number(member.applyTy) === 1) return true;
   return false;
 }
 
@@ -415,6 +441,7 @@ export async function fetchSeminarDetail(
     // seminarDetail?.survey 또는 survey 객체 추출
     const survey = parsed.seminarDetail?.survey ?? parsed.survey ?? null;
     const isPointExcluded = checkIsPointExcluded(survey);
+    const hasEntryHistory = checkHasEntryHistory(parsed.seminarDetail, parsed.seminarMember);
     const surveyState =
       parsed.surveyState !== undefined
         ? Number(parsed.surveyState)
@@ -428,6 +455,7 @@ export async function fetchSeminarDetail(
       survey,
       surveyState,
       isPointExcluded,
+      hasEntryHistory,
       rawResponse: parsed,
     };
   } catch (err) {

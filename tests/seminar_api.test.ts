@@ -3,6 +3,7 @@ import {
   parseSeminarDateTime,
   checkIsAdvancedSurvey,
   checkIsPointExcluded,
+  checkHasEntryHistory,
   convertApiItemToRawSeminar,
   convertApiItemToSeminarListItem,
   fetchMainFutureSeminars,
@@ -233,6 +234,54 @@ async function testSeminarApiConversion() {
   assert.strictEqual(detail5576.isPointExcluded, true);
   assert.strictEqual(detail5576.surveyState, 5);
   console.log('  ✓ [Pass] Case 8: fetchSeminarDetail - survey: null 및 surveyState=5 판정');
+
+  // Case 9: checkHasEntryHistory 및 fetchSeminarDetail 입장이력 판별 테스트
+  const memberWithJoinDt = { joinDt: '2026-08-24 13:05:00.0', applyTy: 0 };
+  const memberWithApplyTy = { joinDt: null, applyTy: 1 };
+  const memberNoEntry = { joinDt: null, applyTy: 0 };
+  assert.strictEqual(checkHasEntryHistory({ seminarMember: memberWithJoinDt }), true);
+  assert.strictEqual(checkHasEntryHistory({ seminarMember: memberWithApplyTy }), true);
+  assert.strictEqual(checkHasEntryHistory({ seminarMember: memberNoEntry }), false);
+  assert.strictEqual(checkHasEntryHistory(null, null), false);
+
+  (httpClientModule as unknown as { httpGet: unknown }).httpGet = async (url: string) => {
+    if (url.includes('/5599')) {
+      return {
+        status: 200,
+        statusText: '200',
+        headers: {},
+        body: JSON.stringify({
+          surveyState: 5,
+          seminarDetail: {
+            seminarId: 5599,
+            seminarNm: '입장이력 있는 세미나',
+            survey: { point: 1000 },
+            seminarMember: {
+              joinDt: '2026-08-24 13:01:23.0',
+              applyTy: 1,
+            },
+          },
+        }),
+        url,
+        redirected: false,
+        resultType: 'SUCCESS' as const,
+      };
+    }
+    return {
+      status: 404,
+      statusText: '404',
+      headers: {},
+      body: '',
+      url,
+      redirected: false,
+      resultType: 'HTTP_ERROR' as const,
+    };
+  };
+
+  const detail5599 = await fetchSeminarDetail(5599);
+  assert.strictEqual(detail5599.success, true);
+  assert.strictEqual(detail5599.hasEntryHistory, true);
+  console.log('  ✓ [Pass] Case 9: checkHasEntryHistory 및 fetchSeminarDetail 입장이력(hasEntryHistory) 판정');
 
   (httpClientModule as unknown as { httpGet: unknown }).httpGet = originalHttpGet;
 
