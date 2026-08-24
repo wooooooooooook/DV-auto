@@ -290,39 +290,31 @@ taskRegistry.registerTask(checkPointTask);
 const checkSeminarPointTask: Task = {
   name: 'check_seminar_point',
   run: async (ctx) => {
-    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    try {
-      await utils.ensureLoggedIn({ page, context });
-      const seminarIdsRaw = ctx.args?.seminarIds;
-      let seminarIds: string[] = [];
-      if (seminarIdsRaw) {
-        if (Array.isArray(seminarIdsRaw)) seminarIds = seminarIdsRaw;
-        else if (typeof seminarIdsRaw === 'string')
-          seminarIds = seminarIdsRaw
-            .split(',')
-            .map((s) => s.trim())
-            .filter(Boolean);
-      } else if (ctx.args?.seminarId) seminarIds = [ctx.args.seminarId];
-      if (seminarIds.length === 0)
-        return { success: false, message: '세미나 번호가 필요합니다. 예: /check_seminar_point 12345' };
-      const searchRes = await checkSeminarPointTaskModule.searchSeminarPoints(context, seminarIds, 60);
-      if (!searchRes.success) return { success: false, message: `포인트 조회 실패: ${searchRes.error || '조회 실패'}` };
-      const results = searchRes.points;
-      const messages: string[] = [];
-      for (const seminarId of seminarIds) {
-        const r = results.get(seminarId);
-        if (r?.found)
-          messages.push(
-            `[${seminarId}] 세미나 ${seminarId} 포인트 ${r.type === '적립' ? '지급됨' : '사용됨'}: ${r.pointText} (${r.date} / ${r.content})`,
-          );
-        else messages.push(`[${seminarId}] 세미나 ${seminarId} 포인트 내역을 찾을 수 없습니다 (최근 60일간).`);
-      }
-      return { success: true, message: messages.join('\n') };
-    } finally {
-      await browser.close();
+    const seminarIdsRaw = ctx.args?.seminarIds;
+    let seminarIds: string[] = [];
+    if (seminarIdsRaw) {
+      if (Array.isArray(seminarIdsRaw)) seminarIds = seminarIdsRaw;
+      else if (typeof seminarIdsRaw === 'string')
+        seminarIds = seminarIdsRaw
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
+    } else if (ctx.args?.seminarId) seminarIds = [ctx.args.seminarId];
+    if (seminarIds.length === 0)
+      return { success: false, message: '세미나 번호가 필요합니다. 예: /check_seminar_point 12345' };
+    const searchRes = await checkSeminarPointTaskModule.searchSeminarPoints(undefined, seminarIds, 60);
+    if (!searchRes.success) return { success: false, message: `포인트 조회 실패: ${searchRes.error || '조회 실패'}` };
+    const results = searchRes.points;
+    const messages: string[] = [];
+    for (const seminarId of seminarIds) {
+      const r = results.get(seminarId);
+      if (r?.found)
+        messages.push(
+          `[${seminarId}] 세미나 ${seminarId} 포인트 ${r.type === '적립' ? '지급됨' : '사용됨'}: ${r.pointText} (${r.date} / ${r.content})`,
+        );
+      else messages.push(`[${seminarId}] 세미나 ${seminarId} 포인트 내역을 찾을 수 없습니다 (최근 60일간).`);
     }
+    return { success: true, message: messages.join('\n') };
   },
 };
 taskRegistry.registerTask(checkSeminarPointTask);
