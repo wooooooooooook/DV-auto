@@ -1,6 +1,6 @@
 import type { BrowserContext, Page } from 'playwright';
 import type { PlaywrightRunArgs, TaskContext, TaskResult } from '../types';
-import { safeGoto } from '../modules/utils';
+import { ensureLoggedIn, safeGoto } from '../modules/utils';
 import { processSeminarQuiz } from './seminar_quiz';
 
 /**
@@ -33,6 +33,7 @@ async function run({ page }: PlaywrightRunArgs, options?: Record<string, unknown
   let quizPage: Page = surveyPage;
 
   try {
+    await ensureLoggedIn({ page: surveyPage, context: browserCtx });
     await safeGoto(surveyPage, targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
     await surveyPage.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
 

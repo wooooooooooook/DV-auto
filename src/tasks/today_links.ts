@@ -10,6 +10,13 @@ import {
   findOptionByAnswer,
   type QuizQuestion,
 } from './seminar_quiz';
+import {
+  fetchMainFutureSeminars,
+  fetchSeminarDetail,
+  parseSeminarDateTime,
+  checkIsAdvancedSurvey,
+  checkIsPointExcluded,
+} from '../modules/seminar_api';
 
 const QUIZ_LIST_URLS = [
   'https://www.doctorville.co.kr/product/medicineList',
@@ -21,6 +28,26 @@ const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
 const POINT_CONVERSION_API_URL = 'https://api.doctorville.co.kr/api/point/conversion/availability';
 const POINT_CONVERSION_URL = 'https://www.doctorville.co.kr/my/point/pointUseHistoryList';
 const TODAY_QUIZ_TEMP_KEY = 'today_quiz:temp_answers';
+export const TODAY_LINKS_CACHE_KEY = 'today_links_cache';
+
+export interface TodayLinksCache {
+  date: string;
+  message: string;
+  options?: Record<string, unknown>;
+  cachedAt: string;
+}
+
+function getTodayLinksCache(): TodayLinksCache | null {
+  return storage.get<TodayLinksCache>(TODAY_LINKS_CACHE_KEY, null);
+}
+
+function setTodayLinksCache(cache: TodayLinksCache): void {
+  storage.set(TODAY_LINKS_CACHE_KEY, cache);
+}
+
+function clearTodayLinksCache(): void {
+  storage.deleteKey(TODAY_LINKS_CACHE_KEY);
+}
 
 type PointConversionInfo = {
   available?: boolean;
@@ -476,6 +503,7 @@ type ParsedSeminarItem = {
   seminarId: string | null;
   classAttr: string;
   isAdvancedSurvey: boolean;
+  isPointExcluded?: boolean;
 };
 
 function isDateMatching(dateText: string, target: DateTarget): boolean {
@@ -579,14 +607,39 @@ async function collectTodaySeminarMessage(
   const seminarTitlePrefix = isCustomDate ? `[${todayString}]` : '오늘의';
 
   try {
-    await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'domcontentloaded', timeout: 30000 }, 1);
+    let parsedSeminars: ParsedSeminarItem[] = [];
+    const dateTarget: DateTarget = { todayString, isoDate, targetMonth, targetDay };
 
-    const parsedSeminars = await page.locator('.list_cont').evaluateAll(parseSeminarsFromNodes, {
-      todayString,
-      isoDate,
-      targetMonth,
-      targetDay,
-    });
+    const apiRes = await fetchMainFutureSeminars();
+    if (apiRes.success) {
+      for (const item of apiRes.items) {
+        const { date, time, nightTime } = parseSeminarDateTime(item.startDt, item.endDt);
+        if (!isDateMatching(date, dateTarget)) continue;
+
+        const seminarId = String(item.seminarId ?? '');
+        const seminarLink = `https://m.doctorville.co.kr/cme/seminar/${seminarId}`;
+        const isAdvancedSurvey = checkIsAdvancedSurvey(item.useDepthSurvey);
+        parsedSeminars.push({
+          title: item.seminarNm || '세미나',
+          time,
+          seminarLink,
+          fullUrl: seminarLink,
+          seminarId,
+          classAttr: nightTime ? 'night_time' : '',
+          isAdvancedSurvey,
+        });
+      }
+    } else {
+      console.warn('[today_links] fetchMainFutureSeminars 실패, DOM fallback 시도:', apiRes.errorMessage);
+      await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'domcontentloaded', timeout: 30000 }, 1);
+
+      parsedSeminars = await page.locator('.list_cont').evaluateAll(parseSeminarsFromNodes, {
+        todayString,
+        isoDate,
+        targetMonth,
+        targetDay,
+      });
+    }
 
     if (!parsedSeminars || parsedSeminars.length === 0) {
       return {
@@ -616,15 +669,30 @@ async function collectTodaySeminarMessage(
     const uncachedSeminarItems: Array<{ link: string; cacheKey: string }> = [];
     for (const item of parsedSeminars) {
       const pointExcludedKey = item.seminarId || item.fullUrl;
+      if (typeof item.isPointExcluded === 'boolean') {
+        pointExcludedCache.set(pointExcludedKey, item.isPointExcluded);
+        continue;
+      }
       const storedPointExcluded = findPointExcludedFromStoredSeminars(storedSeminars, item.seminarId, item.fullUrl);
       if (typeof storedPointExcluded === 'boolean') {
         pointExcludedCache.set(pointExcludedKey, storedPointExcluded);
+      } else if (item.seminarId) {
+        // detail API로 비동기 확인
+        try {
+          const detailRes = await fetchSeminarDetail(item.seminarId);
+          if (detailRes.success) {
+            pointExcludedCache.set(pointExcludedKey, detailRes.isPointExcluded);
+            continue;
+          }
+        } catch (_e) {}
+        const httpLink = 'https://www.doctorville.co.kr/seminar/seminarDetail?seminarId=' + item.seminarId;
+        uncachedSeminarItems.push({ link: httpLink, cacheKey: pointExcludedKey });
       } else {
         uncachedSeminarItems.push({ link: item.seminarLink, cacheKey: pointExcludedKey });
       }
     }
 
-    if (uncachedSeminarItems.length > 0) {
+    if (uncachedSeminarItems.length > 0 && page) {
       await batchCheckPointExcluded(page.context(), uncachedSeminarItems, pointExcludedCache);
     }
 
@@ -710,22 +778,43 @@ async function collectPointConversionInfo(page: PlaywrightRunArgs['page']): Prom
   }
 }
 
-function getPointConversionDdayLabel(plannedAt: string | undefined, todayIsoOverride?: string): string {
-  if (!plannedAt) return '';
+function parsePointConversionPlannedDate(plannedAt: string | undefined): { month: number; day: number } | null {
+  if (!plannedAt) return null;
   const m = plannedAt.match(/(\d{1,2})\s*월\s*(\d{1,2})\s*일/);
-  if (!m) return '';
-  const plannedMonth = parseInt(m[1], 10);
-  const plannedDay = parseInt(m[2], 10);
-  if (!plannedMonth || !plannedDay) return '';
+  if (!m) return null;
+  const month = parseInt(m[1], 10);
+  const day = parseInt(m[2], 10);
+  if (!month || !day) return null;
+  return { month, day };
+}
+
+export function isPointConversionDay(info: PointConversionInfo | null | undefined, todayIsoOverride?: string): boolean {
+  if (!info || info.available) return false;
+  const planned = parsePointConversionPlannedDate(info.availablePlannedAt);
+  if (!planned) return false;
+  const todayIso = todayIsoOverride ?? new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+  const [y, mo, d] = todayIso.split('-').map(Number);
+  if (!y || !mo || !d) return false;
+  const todayMs = Date.UTC(y, mo - 1, d);
+  let targetMs = Date.UTC(y, planned.month - 1, planned.day);
+  if (targetMs < todayMs) {
+    targetMs = Date.UTC(y + 1, planned.month - 1, planned.day);
+  }
+  return targetMs === todayMs;
+}
+
+function getPointConversionDdayLabel(plannedAt: string | undefined, todayIsoOverride?: string): string {
+  const planned = parsePointConversionPlannedDate(plannedAt);
+  if (!planned) return '';
   const todayIso = todayIsoOverride ?? new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
   const [y, mo, d] = todayIso.split('-').map(Number);
   if (!y || !mo || !d) return '';
   const todayMs = Date.UTC(y, mo - 1, d);
   let targetYear = y;
-  let targetMs = Date.UTC(targetYear, plannedMonth - 1, plannedDay);
+  let targetMs = Date.UTC(targetYear, planned.month - 1, planned.day);
   if (targetMs < todayMs) {
     targetYear += 1;
-    targetMs = Date.UTC(targetYear, plannedMonth - 1, plannedDay);
+    targetMs = Date.UTC(targetYear, planned.month - 1, planned.day);
   }
   const diffDays = Math.round((targetMs - todayMs) / 86400000);
   if (diffDays === 0) return ' (D-Day)';
@@ -819,7 +908,7 @@ function formatTodayLinksBroadcast(input: TodayLinksFormatInput): TodayLinksForm
 
   message += `\n<blockquote>🤖 <b>닥터빌 텔레그램방에 전송된 메시지입니다.</b>
 매일 오전 9시 링크모음 발송, 세미나 시작/종료, 퀴즈 정답 알림, 지금 가입하세요!
-https://t.me/+J1UGmvLA9jU4NjQ1</blockquote>`;
+https://t.me/+J1UGmvLA9jU4NjQ1</blockquote>\n<blockquote>✨세미나정보변경/포인트지급내역 알림 등 상세 알림을 받으려면 알림봇을 구독해주세요! https://t.me/DV_notice_bot </blockquote>`;
 
   const inlineKeyboard: Array<Array<{ text: string; url: string }>> = [];
 
@@ -832,7 +921,10 @@ https://t.me/+J1UGmvLA9jU4NjQ1</blockquote>`;
   inlineKeyboard.push(actionRow);
 
   // 포인트 전환 가능일(당일 전환 가능)인 경우 포인트 전환 바로가기 버튼 추가
-  if (pointConversionInfo?.available) {
+  const pointConversionDay = pointConversionInfo?.available
+    ? true
+    : isPointConversionDay(pointConversionInfo, isCustomDate && targetDate ? targetDate.split(' ')[0] : undefined);
+  if (pointConversionDay) {
     inlineKeyboard.push([{ text: '💳 포인트 전환하러 가기', url: POINT_CONVERSION_URL }]);
   }
 
@@ -890,7 +982,10 @@ async function run({ page, args }: PlaywrightRunArgs, taskOptions?: Record<strin
         if (typeof storedPointExcluded === 'boolean') {
           pointExcludedCache.set(cacheKey, storedPointExcluded);
         } else {
-          uncachedItems.push({ link, cacheKey });
+          const httpLink = item.seminarId
+            ? 'https://www.doctorville.co.kr/seminar/seminarDetail?seminarId=' + item.seminarId
+            : link;
+          uncachedItems.push({ link: httpLink, cacheKey });
         }
       }
 
@@ -946,12 +1041,18 @@ async function run({ page, args }: PlaywrightRunArgs, taskOptions?: Record<strin
         )
       : [...newSeminarIds];
 
-    // 당일 세미나인 경우에만 storage 갱신
+    // 당일 세미나인 경우에만 storage 갱신 및 캐시 저장
     if (!isCustomDate) {
       storage.set(TODAY_SEMINAR_KEY, {
         date: seminarMessage.date,
         lunchSeminarIds: seminarMessage.lunchSeminarIds,
         dinnerSeminarIds: seminarMessage.dinnerSeminarIds,
+      });
+      setTodayLinksCache({
+        date: seminarMessage.date,
+        message,
+        options,
+        cachedAt: new Date().toISOString(),
       });
     }
 
@@ -982,5 +1083,8 @@ export {
   parseSeminarsFromNodes,
   collectTodaySeminarMessage,
   getYesterdayAddedSeminars,
+  getTodayLinksCache,
+  setTodayLinksCache,
+  clearTodayLinksCache,
 };
 export type { SeminarData, SeminarTaskData, DateTarget, ParsedSeminarItem };

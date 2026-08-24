@@ -10,6 +10,8 @@
     "resolveJsonModule": true,
     "strict": false,
     "skipLibCheck": true,
+    "incremental": true,
+    "tsBuildInfoFile": "dist/.tsbuildinfo",
     "noEmitOnError": false,
     "types": [
       "node"

@@ -7,6 +7,7 @@ type SeminarRecord = {
   name?: string;
   url: string;
   date?: string;
+  detectedDate?: string;
   seminarId?: string | null;
   isAdvancedSurvey?: boolean;
   pointPaid?: boolean;
@@ -75,7 +76,7 @@ export function run(): { success: boolean; message: string } {
 
     for (const stored of seminarList) {
       const seminarId = getSeminarId(stored);
-      const normalizedDate = normalizeSeminarDate(stored.date, todayStr);
+      const normalizedDate = normalizeSeminarDate(stored.date || stored.detectedDate, todayStr);
       if (!seminarId || !normalizedDate || normalizedDate < pastStr || normalizedDate > todayStr) continue;
       if (stored.isAdvancedSurvey !== true) continue;
       unique.set(seminarId, { date: normalizedDate, seminar: { ...stored, seminarId } });
@@ -84,24 +85,42 @@ export function run(): { success: boolean; message: string } {
     if (!unique.size) {
       return {
         success: true,
-        message: `최근 2주(${pastStr} ~ ${todayStr}) 심화설문 세미나가 없습니다.`,
+        message: `최근 2주(${pastStr} ~ ${todayStr}) 심화설문 세미나가 없습니다.\n(※ 방장 계정 기준)`,
       };
     }
 
-    const entries = [...unique.values()].sort((a, b) => b.date.localeCompare(a.date));
-    const lines = entries.map(({ date, seminar }) => {
-      const pointStatus =
-        seminar.pointPaid === true
-          ? ` → ✅ ${seminar.pointText ?? `${seminar.point ?? 0}P`} 지급됨`
-          : seminar.pointCheckedAt
-            ? ' → ❌ 미지급'
-            : ' → ⏳ 조회 대기';
-      return `${date} | ${seminar.name || '세미나'} | ID: ${seminar.seminarId} | 판별: seminar_list${pointStatus}`;
+    const entries = [...unique.values()].sort((a, b) => {
+      const dateCmp = a.date.localeCompare(b.date);
+      if (dateCmp !== 0) return dateCmp;
+      return (a.seminar.seminarId || '').localeCompare(b.seminar.seminarId || '');
     });
+
+    const groupedByDate = new Map<string, Array<{ seminar: SeminarRecord }>>();
+    for (const entry of entries) {
+      const list = groupedByDate.get(entry.date) || [];
+      list.push(entry);
+      groupedByDate.set(entry.date, list);
+    }
+
+    const dateSections: string[] = [];
+    for (const [date, items] of groupedByDate.entries()) {
+      const itemLines = items.map(({ seminar }) => {
+        const rawName = seminar.name || '세미나';
+        const truncatedName = rawName.length > 10 ? `${rawName.slice(0, 10)}...` : rawName;
+        const pointStatus =
+          seminar.pointPaid === true
+            ? `✅ ${seminar.pointText ?? `${seminar.point ?? 0}P`} 지급됨`
+            : seminar.pointCheckedAt
+              ? '❌ 미지급'
+              : '⏳ 조회 대기';
+        return `${seminar.seminarId} | ${truncatedName} | ${pointStatus}`;
+      });
+      dateSections.push(`📅 ${date}\n${itemLines.join('\n')}`);
+    }
 
     return {
       success: true,
-      message: `⭐ 최근 2주 심화설문 ${entries.length}건 (${pastStr} ~ ${todayStr})\n\n${lines.join('\n')}`,
+      message: `⭐ 최근 2주 심화설문 ${entries.length}건 (${pastStr} ~ ${todayStr})\n(※ 방장 계정 기준)\n\n${dateSections.join('\n\n')}`,
     };
   } catch (e) {
     return {
@@ -111,6 +130,26 @@ export function run(): { success: boolean; message: string } {
   }
 }
 
+const CACHE_TTL_MS = 10 * 60 * 1000; // 10분
+
+let cachedResult: { timestamp: number; result: { success: boolean; message: string } } | null = null;
+
+export function clearCache(): void {
+  cachedResult = null;
+}
+
+export function runCached(ttlMs: number = CACHE_TTL_MS): { success: boolean; message: string } {
+  const now = Date.now();
+  if (cachedResult && now - cachedResult.timestamp < ttlMs) {
+    return cachedResult.result;
+  }
+  const result = run();
+  if (result.success) {
+    cachedResult = { timestamp: now, result };
+  }
+  return result;
+}
+
 export async function checkAdvancedSeminars(): Promise<{ success: boolean; message: string }> {
-  return run();
+  return runCached();
 }

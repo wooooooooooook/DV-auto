@@ -8,8 +8,9 @@ Type=simple
 WorkingDirectory=/root/doctorville-auto
 # Use /usr/bin/env to find node in PATH
 ExecStart=/usr/bin/env node dist/core/main.js
-Restart=on-failure
+Restart=always
 RestartSec=5
+TimeoutStopSec=15
 # Point to an EnvironmentFile that contains your secrets (one per line: VAR=val)
 EnvironmentFile=/root/doctorville-auto/.env
 

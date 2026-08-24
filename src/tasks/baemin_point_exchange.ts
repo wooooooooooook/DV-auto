@@ -50,7 +50,7 @@ async function run({ page, context, maxIterations }: PlaywrightRunArgs): Promise
   await ensureLoggedIn({ page: workPage, context }).catch(() => {});
 
   const startPoint = await getPoint(context);
-  await sendTelegram(`💳 배민포인트교환 시작 전 남은 포인트: ${startPoint}`).catch(() => {});
+  console.log(`[baemin_point_exchange] 시작 전 남은 포인트: ${startPoint}`);
 
   await fs.mkdir(path.join(process.cwd(), 'screenshot'), { recursive: true });
   let successCount = 0;

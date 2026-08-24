@@ -48,7 +48,7 @@ async function run({ page, context, maxIterations }: PlaywrightRunArgs): Promise
   await ensureLoggedIn({ page, context }).catch(() => {});
 
   const startPoint = await getPoint(context);
-  await sendTelegram(`💳 네이버페이포인트교환 시작 전 남은 포인트: ${startPoint}`).catch(() => {});
+  console.log(`[naverpay_point_exchange] 시작 전 남은 포인트: ${startPoint}`);
 
   await fs.mkdir(path.join(process.cwd(), 'screenshot'), { recursive: true });
   let successCount = 0;

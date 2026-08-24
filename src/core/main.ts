@@ -17,11 +17,11 @@ import * as monitorLunchSeminars from '../tasks/monitor_lunch_seminars';
 import * as monitorDinnerSeminars from '../tasks/monitor_dinner_seminars';
 import * as naverpayPointExchangeTask from '../tasks/naverpay_point_exchange';
 import * as baeminPointExchangeTask from '../tasks/baemin_point_exchange';
-import * as refreshSeminarPointExclusionTaskModule from '../tasks/refresh_seminar_point_exclusion';
 import * as checkPointTaskModule from '../tasks/check_point';
 import * as checkSeminarPointTaskModule from '../tasks/check_seminar_point';
 import * as checkAdvancedSeminarsTaskModule from '../tasks/check_advanced_seminars';
 import * as runSeminarQuizTaskModule from '../tasks/run_seminar_quiz';
+import * as seminarDetailTaskModule from '../tasks/seminar_detail';
 import type { Task, TaskResult } from '../types';
 
 dns.setDefaultResultOrder('ipv4first');
@@ -90,7 +90,9 @@ async function checkAndNotifyPointConversion(): Promise<void> {
           return null;
         }
       }, POINT_CONVERSION_API_URL)) as PointConversionResponse | null;
-    } catch {}
+    } catch (_err) {
+      /* ignore */
+    }
     if (!response || response.data === undefined) return;
     const available = response.data.available === true;
     const plannedAt = response.data.availablePlannedAt ?? '';
@@ -105,7 +107,17 @@ async function checkAndNotifyPointConversion(): Promise<void> {
     if (prev !== null) {
       if (available)
         await utils.sendNotificationToChannel(
-          '네이버페이포인트 전환이 가능해졌습니다\nhttps://www.doctorville.co.kr/my/point/pointUseHistoryList',
+          [
+            '네이버페이포인트 전환이 가능해졌습니다',
+            'https://www.doctorville.co.kr/my/point/pointUseHistoryList',
+            '',
+            '[Q&A]',
+            'Q. 연동된 네이버 계정 없음',
+            'A. 아닙니다 광클하세요',
+            '',
+            'Q. 포인트 월 한도 초과 안내 : 네이버페이포인트 전환에 실패했습니다.',
+            'A. 아닙니다 광클하세요',
+          ].join('\n'),
         );
       else
         await utils.sendNotificationToChannel(
@@ -161,10 +173,11 @@ const scheduledTask: Task = {
         { name: 'today_quiz', task: todayQuizTaskModule },
         { name: 'today_links', task: todayLinksTaskModule },
       ];
-      await utils.sendTelegram('🕗 데일리 루틴 작업을 시작합니다.(출석체크, 세미나등록, 브랜드퀴즈)').catch(() => {});
       for (const { name, task } of tasks) {
         try {
-          await utils.ensureLoggedIn({ page, context });
+          if (name !== 'apply_seminar') {
+            await utils.ensureLoggedIn({ page, context });
+          }
           const taskResultRaw = await task.run({ page, context });
           const taskResult: TaskResult =
             typeof taskResultRaw === 'object' && taskResultRaw !== null
@@ -195,24 +208,20 @@ const applySeminarExtraTask: Task = {
   name: 'apply_seminar_extra',
   schedule: APPLY_SEMINAR_EXTRA_CRON,
   timezone: TIMEZONE,
-  run: async () => {
-    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    try {
-      await utils.ensureLoggedIn({ page, context });
-      return await applySeminarTask.run(
-        { page, context },
-        {
-          notifyNewSeminarsToChannel: true,
-          notifyNewSeminarsToTelegram: true,
-          silentIfNoNew: true,
-          checkAdvancedPointStatus: true,
-        },
-      );
-    } finally {
-      await browser.close();
-    }
+  options: {
+    notifyNewSeminarsToChannel: true,
+    notifyNewSeminarsToTelegram: true,
+    silentIfNoNew: true,
+    checkAdvancedPointStatus: true,
+  },
+  run: async (_ctx, options) => {
+    return await applySeminarTask.runHttpOnly({
+      notifyNewSeminarsToChannel: true,
+      notifyNewSeminarsToTelegram: true,
+      silentIfNoNew: true,
+      checkAdvancedPointStatus: true,
+      ...options,
+    });
   },
 };
 taskRegistry.registerTask(applySeminarExtraTask);
@@ -230,19 +239,13 @@ taskRegistry.registerTask(pointConversionCheckTask);
 scheduler.scheduleTaskCron(pointConversionCheckTask);
 const applySeminarTaskStandalone: Task = {
   name: 'apply_seminar',
-  run: async () => {
-    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    try {
-      await utils.ensureLoggedIn({ page, context });
-      return await applySeminarTask.run(
-        { page, context },
-        { notifyNewSeminarsToChannel: false, notifyNewSeminarsToTelegram: true },
-      );
-    } finally {
-      await browser.close();
-    }
+  options: { notifyNewSeminarsToChannel: false, notifyNewSeminarsToTelegram: true },
+  run: async (ctx, options) => {
+    return await applySeminarTask.run(ctx, {
+      notifyNewSeminarsToChannel: false,
+      notifyNewSeminarsToTelegram: true,
+      ...options,
+    });
   },
 };
 taskRegistry.registerTask(applySeminarTaskStandalone);
@@ -279,57 +282,48 @@ taskRegistry.registerTask(todayLinksTask);
 const checkPointTask: Task = {
   name: 'check_point',
   run: async () => {
-    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    try {
-      await utils.ensureLoggedIn({ page, context });
-      return await checkPointTaskModule.run({ page, context });
-    } finally {
-      await browser.close();
-    }
+    return await checkPointTaskModule.run();
   },
 };
 taskRegistry.registerTask(checkPointTask);
 const checkSeminarPointTask: Task = {
   name: 'check_seminar_point',
   run: async (ctx) => {
-    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    try {
-      await utils.ensureLoggedIn({ page, context });
-      const seminarIdsRaw = ctx.args?.seminarIds;
-      let seminarIds: string[] = [];
-      if (seminarIdsRaw) {
-        if (Array.isArray(seminarIdsRaw)) seminarIds = seminarIdsRaw;
-        else if (typeof seminarIdsRaw === 'string')
-          seminarIds = seminarIdsRaw
-            .split(',')
-            .map((s) => s.trim())
-            .filter(Boolean);
-      } else if (ctx.args?.seminarId) seminarIds = [ctx.args.seminarId];
-      if (seminarIds.length === 0)
-        return { success: false, message: '세미나 번호가 필요합니다. 예: /check_seminar_point 12345' };
-      const searchRes = await checkSeminarPointTaskModule.searchSeminarPoints(context, seminarIds, 60);
-      if (!searchRes.success) return { success: false, message: `포인트 조회 실패: ${searchRes.error || '조회 실패'}` };
-      const results = searchRes.points;
-      const messages: string[] = [];
-      for (const seminarId of seminarIds) {
-        const r = results.get(seminarId);
-        if (r?.found)
-          messages.push(
-            `[${seminarId}] 세미나 ${seminarId} 포인트 ${r.type === '적립' ? '지급됨' : '사용됨'}: ${r.pointText} (${r.date} / ${r.content})`,
-          );
-        else messages.push(`[${seminarId}] 세미나 ${seminarId} 포인트 내역을 찾을 수 없습니다 (최근 60일간).`);
-      }
-      return { success: true, message: messages.join('\n') };
-    } finally {
-      await browser.close();
+    const seminarIdsRaw = ctx.args?.seminarIds;
+    let seminarIds: string[] = [];
+    if (seminarIdsRaw) {
+      if (Array.isArray(seminarIdsRaw)) seminarIds = seminarIdsRaw;
+      else if (typeof seminarIdsRaw === 'string')
+        seminarIds = seminarIdsRaw
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
+    } else if (ctx.args?.seminarId) seminarIds = [ctx.args.seminarId];
+    if (seminarIds.length === 0)
+      return { success: false, message: '세미나 번호가 필요합니다. 예: /check_seminar_point 12345' };
+    const searchRes = await checkSeminarPointTaskModule.searchSeminarPoints(undefined, seminarIds, 60);
+    if (!searchRes.success) return { success: false, message: `포인트 조회 실패: ${searchRes.error || '조회 실패'}` };
+    const results = searchRes.points;
+    const messages: string[] = [];
+    for (const seminarId of seminarIds) {
+      const r = results.get(seminarId);
+      if (r?.found)
+        messages.push(
+          `[${seminarId}] 세미나 ${seminarId} 포인트 ${r.type === '적립' ? '지급됨' : '사용됨'}: ${r.pointText} (${r.date} / ${r.content})`,
+        );
+      else messages.push(`[${seminarId}] 세미나 ${seminarId} 포인트 내역을 찾을 수 없습니다 (최근 60일간).`);
     }
+    return { success: true, message: messages.join('\n') };
   },
 };
 taskRegistry.registerTask(checkSeminarPointTask);
+const seminarDetailTask: Task = {
+  name: 'seminar_detail',
+  run: async (ctx) => {
+    return await seminarDetailTaskModule.run(ctx);
+  },
+};
+taskRegistry.registerTask(seminarDetailTask);
 const checkAdvancedSeminarsTask: Task = {
   name: 'check_advanced_seminars',
   run: async () => checkAdvancedSeminarsTaskModule.run(),
@@ -350,40 +344,17 @@ const runSeminarQuizTask: Task = {
   },
 };
 taskRegistry.registerTask(runSeminarQuizTask);
-const refreshSeminarPointExclusionTask: Task = {
-  name: 'refresh_seminar_point_exclusion',
-  run: async () => {
-    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    try {
-      await utils.ensureLoggedIn({ page, context });
-      return await refreshSeminarPointExclusionTaskModule.run({ page, context });
-    } finally {
-      await browser.close();
-    }
-  },
-};
-taskRegistry.registerTask(refreshSeminarPointExclusionTask);
 const monitorLunchSeminarsTask: Task = {
   name: 'monitor_lunch_seminars',
   schedule: LUNCH_MONITOR_CRON,
   timezone: TIMEZONE,
   run: async (ctx) => {
-    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    try {
-      await utils.ensureLoggedIn({ page, context });
-      await applySeminarTask
-        .run({ page, context })
-        .catch((err) =>
-          logger.warn('monitor_lunch_seminars: apply_seminar 선실행 실패, 모니터링은 계속 진행합니다', err),
-        );
-      return await monitorLunchSeminars.run({ page, context, isAutoResume: ctx.isAutoResume });
-    } finally {
-      await browser.close();
-    }
+    await applySeminarTask
+      .run()
+      .catch((err) =>
+        logger.warn('monitor_lunch_seminars: apply_seminar 선실행 실패, 모니터링은 계속 진행합니다', err),
+      );
+    return await monitorLunchSeminars.run({ isAutoResume: ctx.isAutoResume });
   },
 };
 taskRegistry.registerTask(monitorLunchSeminarsTask);
@@ -393,20 +364,12 @@ const monitorDinnerSeminarsTask: Task = {
   schedule: DINNER_MONITOR_CRON,
   timezone: TIMEZONE,
   run: async (ctx) => {
-    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    try {
-      await utils.ensureLoggedIn({ page, context });
-      await applySeminarTask
-        .run({ page, context })
-        .catch((err) =>
-          logger.warn('monitor_dinner_seminars: apply_seminar 선실행 실패, 모니터링은 계속 진행합니다', err),
-        );
-      return await monitorDinnerSeminars.run({ page, context, isAutoResume: ctx.isAutoResume });
-    } finally {
-      await browser.close();
-    }
+    await applySeminarTask
+      .run()
+      .catch((err) =>
+        logger.warn('monitor_dinner_seminars: apply_seminar 선실행 실패, 모니터링은 계속 진행합니다', err),
+      );
+    return await monitorDinnerSeminars.run({ isAutoResume: ctx.isAutoResume });
   },
 };
 taskRegistry.registerTask(monitorDinnerSeminarsTask);
@@ -495,6 +458,31 @@ function checkAndResumeTasks(): void {
 }
 checkAndNotifyPointConversion().catch((err) => logger.error('Startup point-conversion check failed:', err));
 checkAndResumeTasks();
+function setupGracefulShutdown(): void {
+  let isShuttingDown = false;
+  const handleShutdown = (signal: string) => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    logger.info(`Received ${signal}, starting graceful shutdown...`);
+    try {
+      stopFastPolling();
+      telegram.stop();
+    } catch (e) {
+      logger.error('Error during graceful shutdown:', e);
+    }
+    // 즉시 종료하여 systemd timeout 방지
+    setTimeout(() => {
+      logger.info('Graceful shutdown finished, exiting process.');
+      process.exit(0);
+    }, 500).unref();
+  };
+
+  process.on('SIGTERM', () => handleShutdown('SIGTERM'));
+  process.on('SIGINT', () => handleShutdown('SIGINT'));
+}
+
+setupGracefulShutdown();
+
 telegram.launch();
 const nowStr = new Date().toLocaleString('ko-KR', { timeZone: TIMEZONE });
 utils

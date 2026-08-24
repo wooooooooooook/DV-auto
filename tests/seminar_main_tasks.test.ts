@@ -1,6 +1,7 @@
 import type { PlaywrightRunArgs } from '../src/types';
 import { refreshSeminarPointStatus, mergeSeminar, type SeminarListItem } from '../src/tasks/apply_seminar';
 import * as checkSeminarPointModule from '../src/tasks/check_seminar_point';
+import * as seminarApiModule from '../src/modules/seminar_api';
 import * as storage from '../src/services/storage';
 import assert from 'node:assert';
 import fs from 'node:fs';
@@ -595,10 +596,32 @@ async function testPointSyncRequirements() {
   ]);
 
   const originalSearchSeminarPoints = checkSeminarPointModule.searchSeminarPoints;
+  const originalFetchSeminarDetail = seminarApiModule.fetchSeminarDetail;
   (checkSeminarPointModule as unknown as { searchSeminarPoints: unknown }).searchSeminarPoints = async () => ({
     success: true,
     points: mockParsedPoints,
   });
+  (seminarApiModule as unknown as { fetchSeminarDetail: unknown }).fetchSeminarDetail = async (
+    seminarId: string | number,
+  ) => {
+    if (String(seminarId) === '5580') {
+      return {
+        success: true,
+        seminarId: '5580',
+        isPointExcluded: false,
+        rawResponse: {
+          seminarDetail: {
+            seminarId: 5580,
+            seminarNm: '5580 상세 세미나',
+            startDt: '2026-08-19 12:00:00',
+            endDt: '2026-08-19 13:00:00',
+            useDepthSurvey: 'Y',
+          },
+        },
+      };
+    }
+    return { success: false, seminarId: String(seminarId), errorMessage: 'Not found' };
+  };
 
   try {
     const mockContext = {} as unknown as PlaywrightRunArgs['context'];
@@ -683,9 +706,9 @@ async function testPointSyncRequirements() {
     assert(sem5580 !== undefined, '포인트 테이블 전용 세미나 5580이 신규 추가되어야 함');
     assert.strictEqual(sem5580?.pointPaid, true);
     assert.strictEqual(sem5580?.point, 300);
-    assert.strictEqual(sem5580?.name, '', '알 수 없는 세미나 메타데이터는 기본값');
-    assert.strictEqual(sem5580?.isAdvancedSurvey, false);
-    console.log('  ✓ [Req 6 & 7] 포인트 테이블에만 존재하는 세미나(5580) 새 항목 생성 및 기본값 유지');
+    assert.strictEqual(sem5580?.name, '5580 상세 세미나', '세미나 상세 API로 메타데이터가 채워져야 함');
+    assert.strictEqual(sem5580?.isAdvancedSurvey, true);
+    console.log('  ✓ [Req 6 & 7] 포인트 테이블에만 존재하는 세미나(5580) 새 항목 생성 및 detail API로 메타데이터 채움');
 
     const fresh5580: SeminarListItem = {
       seminarId: '5580',
@@ -712,6 +735,7 @@ async function testPointSyncRequirements() {
   } finally {
     (checkSeminarPointModule as unknown as { searchSeminarPoints: unknown }).searchSeminarPoints =
       originalSearchSeminarPoints;
+    (seminarApiModule as unknown as { fetchSeminarDetail: unknown }).fetchSeminarDetail = originalFetchSeminarDetail;
   }
 }
 

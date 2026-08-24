@@ -4,11 +4,14 @@ import {
   formatSeminarChangeNotification,
   refreshSeminarPointStatus,
   run as runApplySeminar,
+  runHttpOnly,
+  applySeminarExtraTask,
   SEMINAR_LIST_KEY,
   type SeminarListItem,
   type SeminarInfoChange,
   type SeminarPointChange,
 } from '../src/tasks/apply_seminar';
+import * as runner from '../src/core/runner';
 import * as utilsModule from '../src/modules/utils';
 import * as checkSeminarPointModule from '../src/tasks/check_seminar_point';
 import * as storage from '../src/services/storage';
@@ -20,6 +23,7 @@ async function testApplySeminarChanges() {
   console.log('===========================================================\n');
 
   // 백업
+  const originalHttpGet = (await import('../src/modules/http_client')).httpGet;
   const originalSendTelegram = utilsModule.sendTelegram;
   const originalSendNotificationToChannel = utilsModule.sendNotificationToChannel;
   const originalEnsureLoggedIn = utilsModule.ensureLoggedIn;
@@ -193,6 +197,25 @@ async function testApplySeminarChanges() {
     (utilsModule as unknown as { ensureLoggedIn: unknown }).ensureLoggedIn = async () => {};
     (utilsModule as unknown as { safeGoto: unknown }).safeGoto = async () => {};
 
+    (await import('../src/modules/http_client')).httpGet = async () => ({
+      status: 200,
+      body: `
+        <div class="list_cont">
+          <div class="seminar_day"><span class="date">2026-08-24</span></div>
+          <a class="list_detail" href="/seminar/seminarDetail?seminarId=100">
+            <div class="list_tit"><span class="tit">테스트 세미나</span></div>
+            <span class="txt_num time night_time">21:00</span>
+            <div class="person"><span class="txt_num">15</span><span class="total"><span class="txt_num">/100</span></span></div>
+          </a>
+        </div>
+      `,
+      statusText: '200',
+      headers: {},
+      url: 'https://www.doctorville.co.kr/seminar/main',
+      redirected: false,
+      resultType: 'SUCCESS',
+    });
+
     // Mock page with minimal locator implementations
     const createMockPage = () => {
       return {
@@ -272,8 +295,52 @@ async function testApplySeminarChanges() {
       '  ✓ [Pass] apply_seminar_extra 실행 시 변경 알림은 adminbot으로만 전송되고 notice channel 전송 없음\n',
     );
 
+    // 12. apply_seminar_extra 실행 시 아무런 변경(신규/정보/포인트)이 없을 때 메시지를 보내지 않고 silent=true 검증
+    console.log('--- Case 12: apply_seminar_extra 아무 작업도 하지 않았을 때 메시지 미전송 검증 ---');
+    mockPointHistory.clear();
+    sentTelegramMessages.length = 0;
+    sentChannelMessages.length = 0;
+
+    // 현재 저장소와 Mock HTML의 내용이 일치하도록 설정 (ID 100: time='21:00', currentCount='15')
+    const currentStoredList: SeminarListItem[] = [
+      {
+        seminarId: '100',
+        name: '테스트 세미나',
+        url: 'https://m.doctorville.co.kr/cme/seminar/100',
+        date: '2026-08-24',
+        time: '21:00',
+        currentCount: '15',
+        totalCount: '100',
+        nightTime: true,
+        isAdvancedSurvey: false,
+        pointPaid: true,
+      },
+    ];
+    storage.set(SEMINAR_LIST_KEY, currentStoredList);
+
+    // 1) runHttpOnly() 직접 실행 (옵션 미지정/기본값)
+    const directResult = await runHttpOnly();
+    assert.strictEqual(directResult.success, true);
+    assert.strictEqual(directResult.silent, true, '신규 세미나가 없을 때 directResult.silent가 true여야 함');
+    assert.strictEqual(sentTelegramMessages.length, 0, '아무 변경이 없을 때 직접 전송된 텔레그램 메시지가 없어야 함');
+    assert.strictEqual(sentChannelMessages.length, 0, '아무 변경이 없을 때 채널 전송 메시지가 없어야 함');
+
+    // 2) runner.runTask(applySeminarExtraTask, { notifyAdminOnSuccess: true }) 스케줄러 환경 실행
+    sentTelegramMessages.length = 0;
+    const runnerResult = await runner.runTask(applySeminarExtraTask, { notifyAdminOnSuccess: true });
+    assert.ok(typeof runnerResult === 'object' && runnerResult !== null);
+    assert.strictEqual((runnerResult as { silent?: boolean }).silent, true);
+    assert.strictEqual(
+      sentTelegramMessages.length,
+      0,
+      'runner 실행 시 silent=true이므로 adminbot 완료 알림 메시지도 전송되지 않아야 함',
+    );
+
+    console.log('  ✓ [Pass] apply_seminar_extra 실행 시 아무런 변경이 없으면 텔레그램 메시지를 일체 전송하지 않음\n');
+
     console.log('🎉 모든 apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스트 통과!\n');
   } finally {
+    (await import('../src/modules/http_client')).httpGet = originalHttpGet;
     (utilsModule as unknown as { sendTelegram: unknown }).sendTelegram = originalSendTelegram;
     (utilsModule as unknown as { sendNotificationToChannel: unknown }).sendNotificationToChannel =
       originalSendNotificationToChannel;

@@ -1,8 +1,14 @@
+export type SurveyPointExcludedResult =
+  | { status: 'success'; excluded: boolean }
+  | { status: 'auth_expired' }
+  | { status: 'error'; error: string };
 import fs from 'fs';
 import path from 'path';
 import type { Telegraf } from 'telegraf';
 import type { BrowserContext, Page } from 'playwright';
 import { getBot } from '../services/bot_instance';
+import { httpGet, httpGetJson } from './http_client';
+import { parseLoginStatusHtml, hasSurveyPointExcludedNoticeHtml } from './html_parser';
 
 const COOKIE_FILE = path.join(process.cwd(), 'cookies.json');
 const LOCALSTORAGE_FILE = path.join(process.cwd(), 'localstorage.json');
@@ -41,9 +47,10 @@ async function sendTelegram(
   }
 
   try {
-    if (imagePath) {
+    const validImagePath = imagePath && fs.existsSync(imagePath) ? imagePath : null;
+    if (validImagePath) {
       const photoOptions: SendPhotoOptions = { caption: text, ...(options as SendPhotoOptions) };
-      await bot.telegram.sendPhoto(CHAT_ID, { source: imagePath }, photoOptions);
+      await bot.telegram.sendPhoto(CHAT_ID, { source: validImagePath }, photoOptions);
     } else {
       await bot.telegram.sendMessage(CHAT_ID, text, options as SendMessageOptions);
     }
@@ -84,9 +91,10 @@ async function sendNotificationToChannel(
     : baseOptions;
 
   try {
-    if (imagePath) {
+    const validImagePath = imagePath && fs.existsSync(imagePath) ? imagePath : null;
+    if (validImagePath) {
       const photoOptions: SendPhotoOptions = { ...messageOptions, caption: text } as SendPhotoOptions;
-      const result = await bot.telegram.sendPhoto(CHANNEL_ID, { source: imagePath }, photoOptions);
+      const result = await bot.telegram.sendPhoto(CHANNEL_ID, { source: validImagePath }, photoOptions);
       return result.message_id;
     } else {
       const result = await bot.telegram.sendMessage(CHANNEL_ID, text, messageOptions as SendMessageOptions);
@@ -99,9 +107,10 @@ async function sendNotificationToChannel(
       const plainOptions: SendMessageOptions | SendPhotoOptions = { ...baseOptions };
       delete (plainOptions as Partial<SendMessageOptions | SendPhotoOptions>).parse_mode;
 
-      if (imagePath) {
+      const validImagePath = imagePath && fs.existsSync(imagePath) ? imagePath : null;
+      if (validImagePath) {
         const fallbackPhotoOptions: SendPhotoOptions = { ...plainOptions, caption: text } as SendPhotoOptions;
-        const result = await bot.telegram.sendPhoto(CHANNEL_ID, { source: imagePath }, fallbackPhotoOptions);
+        const result = await bot.telegram.sendPhoto(CHANNEL_ID, { source: validImagePath }, fallbackPhotoOptions);
         return result.message_id;
       } else {
         const result = await bot.telegram.sendMessage(CHANNEL_ID, text, plainOptions as SendMessageOptions);
@@ -302,7 +311,7 @@ async function safeGoto(page: Page, url: string, options: Parameters<Page['goto'
 
 const verifiedLoggedInContexts = new WeakSet<BrowserContext>();
 
-function invalidateLoginStatus(context: BrowserContext): void {
+function invalidateLoginStatus(context?: BrowserContext): void {
   if (context) {
     verifiedLoggedInContexts.delete(context);
   }
@@ -311,6 +320,25 @@ const MYPAGE_INFO_URL = 'https://m.doctorville.co.kr/mypage/info';
 
 type LoginStatus = 'LOGGED_IN' | 'NOT_LOGGED_IN' | 'UNKNOWN';
 
+/**
+ * HTTP 기반 로그인 상태 검사
+ */
+async function checkLoginStatusHttp(): Promise<LoginStatus> {
+  try {
+    const res = await httpGet(MYPAGE_INFO_URL);
+    if (res.resultType === 'AUTH_EXPIRED') {
+      return 'NOT_LOGGED_IN';
+    }
+    return parseLoginStatusHtml(res.body, res.url);
+  } catch (err) {
+    console.warn('checkLoginStatusHttp error:', err);
+    return 'UNKNOWN';
+  }
+}
+
+/**
+ * Playwright Page 기반 로그인 상태 검사 (Fallback)
+ */
 async function checkLoginStatus(page: Page): Promise<LoginStatus> {
   await safeGoto(page, MYPAGE_INFO_URL, { waitUntil: 'domcontentloaded', timeout: 30000 }, 1);
   await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
@@ -340,16 +368,34 @@ async function checkLoginStatus(page: Page): Promise<LoginStatus> {
   return 'UNKNOWN';
 }
 
-async function ensureLoggedIn({ page, context }: { page: Page; context: BrowserContext }): Promise<void> {
+async function ensureLoggedIn(args?: { page?: Page; context?: BrowserContext }): Promise<void> {
+  const context = args?.context ?? args?.page?.context();
   if (context && verifiedLoggedInContexts.has(context)) {
     console.log('Login check: already verified for this browser context.');
     return;
   }
 
-  const isBlank = page.url() === 'about:blank' || !page.url();
-  if (isBlank) {
-    console.log('Current page is blank or empty. Checking login status via /mypage/info.');
+  // 1. HTTP 기반 로그인 검사 우선 시도
+  let status = await checkLoginStatusHttp();
+  if (status === 'LOGGED_IN') {
+    console.log('Login check (HTTP): logged in ("회원정보수정" text found).');
+    if (context) {
+      verifiedLoggedInContexts.add(context);
+    }
+    // Playwright page 및 context에 저장된 쿠키 동적 주입 (필요 시)
+    if (context) {
+      await loadCookies(context).catch(() => {});
+    }
+    return;
   }
+
+  console.log(`Login check (HTTP) returned status: ${status}. Proceeding to Playwright login check/flow.`);
+
+  if (!args?.page || !context) {
+    throw new Error('Playwright page or context is required for login fallback, but was not provided.');
+  }
+
+  const page = args.page;
 
   // 쿠키/로컬스토리지를 먼저 로드
   try {
@@ -359,13 +405,10 @@ async function ensureLoggedIn({ page, context }: { page: Page; context: BrowserC
     /* ignore */
   }
 
-  let status = await checkLoginStatus(page);
+  status = await checkLoginStatus(page);
 
   if (status === 'LOGGED_IN') {
-    if (isBlank) {
-      console.log('Navigated to /mypage/info.');
-    }
-    console.log('Login check: already logged in ("회원정보수정" button found).');
+    console.log('Login check (Playwright): already logged in.');
     if (context) {
       verifiedLoggedInContexts.add(context);
     }
@@ -383,11 +426,14 @@ async function ensureLoggedIn({ page, context }: { page: Page; context: BrowserC
   const loginTask = await import('../tasks/login');
   await loginTask.run({ page, context });
 
-  console.log('Login task completed. Verifying login status via /mypage/info.');
-  status = await checkLoginStatus(page);
+  console.log('Login task completed. Verifying login status via HTTP & Playwright.');
+  status = await checkLoginStatusHttp();
+  if (status !== 'LOGGED_IN') {
+    status = await checkLoginStatus(page);
+  }
 
   if (status === 'LOGGED_IN') {
-    console.log('Login verification successful ("회원정보수정" button found).');
+    console.log('Login verification successful.');
     if (context) {
       verifiedLoggedInContexts.add(context);
     }
@@ -395,14 +441,12 @@ async function ensureLoggedIn({ page, context }: { page: Page; context: BrowserC
     if (context) {
       invalidateLoginStatus(context);
     }
-    console.log('Login task completed, but /mypage/info still redirects to /member/login.');
-    console.log('Login verification failed.');
+    console.log('Login task completed, but login verification still failed.');
     throw new Error('Login verification failed.');
   } else {
     if (context) {
       invalidateLoginStatus(context);
     }
-    console.log('/mypage/info did not redirect to login, but "회원정보수정" button was not found.');
     console.log('Login status could not be verified.');
     throw new Error('Login status could not be verified.');
   }
@@ -460,7 +504,40 @@ async function ensureSeminarDetailReady(page: Page, url: string): Promise<void> 
   throw new Error(`세미나 상세 페이지 로딩 확인 실패("공유" 텍스트 미검출): ${url}`);
 }
 
+/**
+ * HTTP GET 기반 세미나 상세 페이지의 포인트 미지급 여부 검사
+ */
+
+/**
+ * HTTP GET 기반 세미나 상세 페이지의 포인트 미지급 여부 검사
+ * 성공 시 { status: 'success', excluded: boolean }
+ * 실패(오류/timeout/비정상 응답) 시 { status: 'error', error: string } 반환
+ */
+async function isSurveyPointExcludedSeminarHttp(url: string): Promise<SurveyPointExcludedResult> {
+  try {
+    const res = await httpGet(url);
+    if (res.resultType === 'AUTH_EXPIRED') {
+      return { status: 'auth_expired' };
+    }
+    if (res.status === 200 && res.body) {
+      const excluded = hasSurveyPointExcludedNoticeHtml(res.body);
+      return { status: 'success', excluded };
+    }
+    return { status: 'error', error: `HTTP status ${res.status}` };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { status: 'error', error: message };
+  }
+}
+
 async function isSurveyPointExcludedSeminar(context: BrowserContext, url: string): Promise<boolean> {
+  // 1. HTTP GET으로 먼저 검사
+  const httpResult = await isSurveyPointExcludedSeminarHttp(url);
+  if (httpResult.status === 'success') {
+    return httpResult.excluded;
+  }
+
+  // 2. HTTP 오류 시 Playwright fallback
   const page = await context.newPage();
   try {
     await ensureLoggedIn({ page, context });
@@ -485,6 +562,26 @@ function getSeminarIdFromUrl(url: string): string | null {
   }
 }
 
+/**
+ * 포인트 전환 가능 여부 API HTTP GET 조회
+ */
+export async function getPointConversionAvailabilityHttp(): Promise<{
+  available?: boolean;
+  availablePlannedAt?: string;
+  meridiem?: string;
+} | null> {
+  try {
+    const API_URL = 'https://api.doctorville.co.kr/api/point/conversion/availability';
+    const json = await httpGetJson<{ data?: { available?: boolean; availablePlannedAt?: string; meridiem?: string } }>(
+      API_URL,
+    );
+    return json?.data ?? null;
+  } catch (err) {
+    console.error('getPointConversionAvailabilityHttp error:', err);
+    return null;
+  }
+}
+
 export {
   invalidateLoginStatus,
   sendTelegram,
@@ -498,11 +595,13 @@ export {
   maskToken,
   ensureLoggedIn,
   checkLoginStatus,
+  checkLoginStatusHttp,
   escapeMarkdownV2,
   getSeminarIdFromUrl,
   hasSurveyPointExcludedNotice,
   ensureSeminarDetailReady,
   isSurveyPointExcludedSeminar,
+  isSurveyPointExcludedSeminarHttp,
 };
 
 const analyticsBlockedPages = new WeakSet<Page>();

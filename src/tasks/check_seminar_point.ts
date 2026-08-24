@@ -1,9 +1,11 @@
-import type { BrowserContext, Page } from 'playwright';
-import type { PlaywrightRunArgs } from '../types';
-import { safeGoto } from '../modules/utils';
+import { sendTelegram } from '../modules/utils';
+import type { TaskContext, TaskResult } from '../types';
+import { httpGetJson, httpPostForm, sendDoctorVilleRequest } from '../modules/http_client';
+import { parseRecentSeminarPointRowsHtml } from '../modules/html_parser';
 import * as logger from '../services/logger';
 
-const POINT_HISTORY_URL = 'https://www.doctorville.co.kr/my/point/pointUseHistoryList';
+const POINT_HISTORY_API = 'https://m-api.doctorville.co.kr/api/mw/my/point/histories/use';
+const POINT_HISTORY_PC_URL = 'https://www.doctorville.co.kr/my/point/pointUseHistoryList';
 
 export interface SeminarPointResult {
   found: boolean;
@@ -16,104 +18,189 @@ export interface SeminarPointResult {
   expiry?: string;
 }
 
-export async function parseRecentSeminarPointRows(page: Page): Promise<Map<string, SeminarPointResult>> {
-  const results = new Map<string, SeminarPointResult>();
-  const rows = await page.evaluate(() => {
-    const selectors = ['#useList table tbody tr', 'table tbody tr'];
-    for (const selector of selectors) {
-      const found = Array.from(document.querySelectorAll(selector));
-      if (found.length > 0) {
-        return found.map((row) =>
-          Array.from(row.querySelectorAll('td')).map((cell) => (cell.textContent || '').replace(/\s+/g, ' ').trim()),
-        );
-      }
-    }
-    return [] as string[][];
-  });
-
-  for (const cells of rows) {
-    if (cells.length < 5) continue;
-    const date = cells[0] || '';
-    const service = cells[1] || '';
-    const content = cells[2] || '';
-    const type = cells[3] || '';
-    const pointText = cells[4] || '';
-    const expiry = cells[5] || '';
-    if (type !== '적립') continue;
-
-    // 실제 지급내역: "8/14 설문 포인트 5544"
-    const idMatch = content.match(/설문\s*포인트\s*(\d+)/);
-    if (!idMatch) continue;
-    const seminarId = idMatch[1];
-    const pointMatch = pointText.match(/[+]?\s*([\d,]+)\s*P/i);
-    const point = pointMatch ? parseInt(pointMatch[1].replace(/,/g, ''), 10) : undefined;
-
-    // 최신 행이 먼저 오는 페이지를 기준으로 동일 ID의 첫 행을 사용한다.
-    if (!results.has(seminarId)) {
-      results.set(seminarId, { found: true, point, pointText, date, service, content, type: '적립', expiry });
-    }
-  }
-  return results;
+interface PointHistoryItem {
+  seq: number;
+  usn: number;
+  point: number;
+  pathSeq: number | string;
+  pathNm: string;
+  regDt: string;
+  pointUseTypeNm: string;
+  pointUseServiceNm: string;
 }
 
-/** 포인트 지급내역 테이블을 한 번만 파싱하여 요청된 세미나 ID와 매칭한다. */
+interface PointHistoriesApiResponse {
+  list?: {
+    items?: PointHistoryItem[];
+    totalCount?: number;
+  };
+}
+
+/**
+ * 하위 호환성을 위해 유지 (HTML String Parser로 연결)
+ */
+export async function parseRecentSeminarPointRows(page?: {
+  content: () => Promise<string>;
+}): Promise<Map<string, SeminarPointResult>> {
+  try {
+    if (!page || typeof page.content !== 'function') return new Map();
+    const html = await page.content();
+    return parseRecentSeminarPointRowsHtml(html);
+  } catch (_e) {
+    return new Map();
+  }
+}
+
 export interface SearchSeminarPointsResult {
   success: boolean;
   points: Map<string, SeminarPointResult>;
   error?: string;
 }
 
+function formatYYMMDD(d: Date): string {
+  const yy = String(d.getFullYear()).slice(-2);
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
+
+/**
+ * 포인트 지급내역을 모바일 JSON API(우선) 및 PC Form(폴백)으로 조회하여 세미나 포인트 매칭.
+ */
 export async function searchSeminarPoints(
-  context: BrowserContext,
+  _context?: unknown,
   seminarIds: string[] = [],
   daysBack = 30,
 ): Promise<SearchSeminarPointsResult> {
-  const page = await context.newPage();
   const results = new Map<string, SeminarPointResult>();
 
   try {
-    await safeGoto(page, POINT_HISTORY_URL, { waitUntil: 'domcontentloaded', timeout: 30000 }, 1);
-    await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
-
     const endDate = new Date();
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - daysBack);
-    const formatDate = (d: Date) => d.toISOString().split('T')[0];
 
-    await page.fill('input[name="startDt"], input#startDt', formatDate(startDate)).catch(() => {});
-    await page.fill('input[name="endDt"], input#endDt', formatDate(endDate)).catch(() => {});
-    await page.fill('input[name="keyword"], input#keyword', '').catch(() => {});
-    await page.click('button[type="submit"], input[type="submit"], button:has-text("검색")').catch(async () => {
-      await page.keyboard.press('Enter').catch(() => {});
+    const startDt = formatYYMMDD(startDate);
+    const endDt = formatYYMMDD(endDate);
+
+    const apiUrl = `${POINT_HISTORY_API}?page=1&pageSize=100&startDt=${startDt}&endDt=${endDt}`;
+    const apiRes = await sendDoctorVilleRequest(apiUrl, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json, text/plain, */*',
+      },
     });
-    await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
-    await page.waitForTimeout(500);
 
-    const parsed = await parseRecentSeminarPointRows(page);
+    if (apiRes.resultType === 'AUTH_EXPIRED') {
+      await sendTelegram('🔒 세션이 만료되었습니다. 로그인이 필요합니다.').catch(() => {});
+      return { success: false, points: results, error: 'AUTH_EXPIRED' };
+    }
+
+    if (apiRes.status === 200 && apiRes.body) {
+      try {
+        const parsedJson: PointHistoriesApiResponse = JSON.parse(apiRes.body);
+        const items = parsedJson.list?.items || [];
+
+        for (const item of items) {
+          if (item.pointUseTypeNm !== '적립') continue;
+          const pathNm = item.pathNm || '';
+          const pathSeqStr = String(item.pathSeq || '');
+
+          // 1) 심층설문 관리자 적립: '8/14 설문 포인트 5544'
+          const adminMatch = pathNm.match(/설문\s*포인트\s*(\d+)/);
+          if (adminMatch) {
+            const id = adminMatch[1];
+            if (!results.has(id)) {
+              results.set(id, {
+                found: true,
+                point: item.point,
+                pointText: `${Number(item.point).toLocaleString()}P`,
+                date: item.regDt,
+                service: item.pointUseServiceNm || '닥터빌',
+                content: item.pathNm,
+                type: '적립',
+              });
+            }
+          }
+
+          // 2) 라이브세미나 설문 적립: pathSeq 끝에 seminarId 포함
+          if (item.pointUseServiceNm === '라이브세미나' || pathNm.includes('세미나')) {
+            for (const id of seminarIds) {
+              if (pathSeqStr.endsWith(id) && !results.has(id)) {
+                results.set(id, {
+                  found: true,
+                  point: item.point,
+                  pointText: `${Number(item.point).toLocaleString()}P`,
+                  date: item.regDt,
+                  service: item.pointUseServiceNm || '라이브세미나',
+                  content: item.pathNm,
+                  type: '적립',
+                });
+              }
+            }
+          }
+        }
+
+        for (const seminarId of seminarIds) {
+          if (!results.has(seminarId)) results.set(seminarId, { found: false });
+        }
+
+        logger.info(`parsed recent seminar point rows (JSON API): items ${items.length}, matched: ${results.size}`);
+        return { success: true, points: results };
+      } catch (jsonErr) {
+        logger.warn('searchSeminarPoints JSON API parse error, falling back to HTML form:', jsonErr);
+      }
+    }
+
+    // JSON API 실패 시 PC Web 폼 폴백
+    const formatDateFull = (d: Date) => d.toISOString().split('T')[0];
+    const formData = {
+      startDt: formatDateFull(startDate),
+      endDt: formatDateFull(endDate),
+      keyword: '',
+      item: '',
+    };
+
+    const pcRes = await httpPostForm(POINT_HISTORY_PC_URL, formData);
+    if (pcRes.resultType === 'AUTH_EXPIRED') {
+      await sendTelegram('🔒 세션이 만료되었습니다. 로그인이 필요합니다.').catch(() => {});
+      return { success: false, points: results, error: 'AUTH_EXPIRED' };
+    }
+    if (pcRes.status !== 200 || !pcRes.body) {
+      return { success: false, points: results, error: `HTTP Status ${pcRes.status}` };
+    }
+
+    const parsed = parseRecentSeminarPointRowsHtml(pcRes.body);
     for (const [seminarId, result] of parsed) {
       results.set(seminarId, result);
     }
     for (const seminarId of seminarIds) {
       if (!results.has(seminarId)) results.set(seminarId, { found: false });
     }
-    logger.info(`parsed recent seminar point rows: ${parsed.size}, total returned: ${results.size}`);
+    logger.info(`parsed recent seminar point rows (PC Form fallback): ${parsed.size}, total: ${results.size}`);
     return { success: true, points: results };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
     logger.error('searchSeminarPoints error', error);
     return { success: false, points: results, error: errorMsg };
-  } finally {
-    await page.close().catch(() => {});
   }
 }
 
 export async function run(
-  { context }: PlaywrightRunArgs,
-  seminarId: string,
-): Promise<{ success: boolean; message: string; pointResult?: SeminarPointResult }> {
+  ctxOrId?: TaskContext | string,
+  seminarIdArg?: string,
+): Promise<TaskResult & { pointResult?: SeminarPointResult }> {
+  let seminarId = '';
+  if (typeof ctxOrId === 'string') {
+    seminarId = ctxOrId;
+  } else if (ctxOrId && typeof ctxOrId === 'object') {
+    seminarId = ctxOrId.args?.seminarId || seminarIdArg || '';
+  } else if (seminarIdArg) {
+    seminarId = seminarIdArg;
+  }
+
   if (!seminarId) return { success: false, message: '세미나 번호가 필요합니다.' };
   try {
-    const searchRes = await searchSeminarPoints(context, [seminarId], 60);
+    const searchRes = await searchSeminarPoints(undefined, [seminarId], 60);
     if (!searchRes.success) {
       return { success: false, message: `세미나 포인트 조회 중 오류: ${searchRes.error || '조회 실패'}` };
     }

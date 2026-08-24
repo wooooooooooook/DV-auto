@@ -128,6 +128,12 @@ function testTodayLinksFormatWithUserExample() {
       '<blockquote>🤖 <b>닥터빌 텔레그램방에 전송된 메시지입니다.</b>\n매일 오전 9시 링크모음 발송, 세미나 시작/종료, 퀴즈 정답 알림, 지금 가입하세요!\nhttps://t.me/+J1UGmvLA9jU4NjQ1</blockquote>',
     ),
   );
+  assert(
+    message.includes(
+      '<blockquote>✨세미나정보변경/포인트지급내역 알림 등 상세 알림을 받으려면 알림봇을 구독해주세요! https://t.me/DV_notice_bot </blockquote>',
+    ),
+    '알림봇 구독 안내 blockquote 누락',
+  );
 
   // 7. 인라인 키보드 버튼 및 링크 미리보기 비활성화 검증
   assert.strictEqual(options.parse_mode, 'HTML');
@@ -206,9 +212,6 @@ function testDateParsingAndCustomDateFormat() {
 
   console.log('✅ [Pass] 날짜 파싱 및 지정 날짜 포맷팅 검증을 성공적으로 통과했습니다!');
 }
-
-testTodayLinksFormatWithUserExample();
-testDateParsingAndCustomDateFormat();
 
 /**
  * 신규 세미나 필터링 로직 테스트 (seminar_list의 detectedDate 기준)
@@ -313,3 +316,85 @@ function testYesterdayAddedSeminarsFilter() {
 }
 
 testYesterdayAddedSeminarsFilter();
+
+function testPointConversionButtonConditions() {
+  console.log('--- [Test] 포인트 전환 버튼 표시 조건 테스트 시작 ---\n');
+
+  const baseInput: TodayLinksFormatInput = {
+    quizInfo: null,
+    seminarMessage: null,
+    storedNewSeminars: [],
+    pointConversionInfo: null,
+    targetDate: '2026-08-23 (8/23)',
+    isCustomDate: true,
+  };
+
+  const hasConversionButton = (input: TodayLinksFormatInput): boolean => {
+    const { options } = formatTodayLinksBroadcast(input);
+    return options.reply_markup.inline_keyboard.some((row) =>
+      row.some((btn) => btn.text === '💳 포인트 전환하러 가기'),
+    );
+  };
+
+  // 1. available: true -> 버튼 표시
+  const case1 = hasConversionButton({
+    ...baseInput,
+    pointConversionInfo: { available: true },
+  });
+  assert.strictEqual(case1, true, 'Case 1 실패: available: true 일 때는 버튼이 표시되어야 함');
+
+  // 2. available: false, availablePlannedAt = 오늘 (08월 23일) -> 버튼 표시
+  const case2 = hasConversionButton({
+    ...baseInput,
+    pointConversionInfo: {
+      available: false,
+      availablePlannedAt: '08월 23일',
+      meridiem: '오전',
+    },
+  });
+  assert.strictEqual(case2, true, 'Case 2 실패: availablePlannedAt이 오늘이면 버튼이 표시되어야 함');
+
+  // 3. available: false, availablePlannedAt = 내일 (08월 24일) -> 버튼 미표시
+  const case3 = hasConversionButton({
+    ...baseInput,
+    pointConversionInfo: {
+      available: false,
+      availablePlannedAt: '08월 24일',
+      meridiem: '오전',
+    },
+  });
+  assert.strictEqual(case3, false, 'Case 3 실패: availablePlannedAt이 내일이면 버튼이 미표시되어야 함');
+
+  // 4. available: false, availablePlannedAt = 과거 날짜 (08월 22일) -> 내년 롤오버되어 미표시
+  const case4 = hasConversionButton({
+    ...baseInput,
+    pointConversionInfo: {
+      available: false,
+      availablePlannedAt: '08월 22일',
+      meridiem: '오후',
+    },
+  });
+  assert.strictEqual(case4, false, 'Case 4 실패: 과거 날짜는 내년으로 롤오버되어 미표시되어야 함');
+
+  // 5. availablePlannedAt 없음/잘못된 형식 -> 버튼 미표시
+  const case5a = hasConversionButton({
+    ...baseInput,
+    pointConversionInfo: { available: false },
+  });
+  assert.strictEqual(case5a, false, 'Case 5a 실패: availablePlannedAt이 없으면 버튼 미표시');
+
+  const case5b = hasConversionButton({
+    ...baseInput,
+    pointConversionInfo: {
+      available: false,
+      availablePlannedAt: 'invalid date text',
+    },
+  });
+  assert.strictEqual(case5b, false, 'Case 5b 실패: availablePlannedAt 형식이 잘못되면 버튼 미표시');
+
+  console.log('✅ [Pass] 포인트 전환 버튼 조건 테스트 통과!\n');
+}
+
+testTodayLinksFormatWithUserExample();
+testDateParsingAndCustomDateFormat();
+testPointConversionButtonConditions();

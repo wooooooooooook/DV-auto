@@ -1,15 +1,17 @@
 import { Telegraf, type Context } from 'telegraf';
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import fs from 'fs/promises';
+import fsSync from 'fs';
 import https from 'https';
 import path from 'path';
-import { setBot } from './bot_instance';
+import { setBot, checkNoticeCooldown } from './bot_instance';
 import * as logger from './logger';
 import * as scheduler from '../core/scheduler';
 import * as runner from '../core/runner';
 import * as taskRegistry from '../core/taskRegistry';
 import { inspect } from '../modules/inspect';
 import { sendNotificationToChannel } from '../modules/utils';
+import { extractSeminarIds } from '../tasks/seminar_detail';
 
 const ADMIN_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const NOTICE_BOT_TOKEN = process.env.NOTICE_BOT_TOKEN;
@@ -225,6 +227,16 @@ if (noticeBot) {
   noticeBot.catch((err, ctx) => {
     logger.error(`Notice Bot Error for ${ctx.updateType}`, err);
   });
+
+  noticeBot.use(async (ctx, next) => {
+    const userId = ctx.from?.id;
+    if (userId && !checkNoticeCooldown(userId)) {
+      await ctx.reply('⏳ 요청이 너무 빠릅니다. 2초 후 다시 시도해주세요.').catch(() => {});
+      return;
+    }
+    return next();
+  });
+
   noticeBot.start((ctx) => ctx.reply('Welcome!'));
 }
 
@@ -246,12 +258,7 @@ const todayLinks = async (ctx: Context) => {
     }
   }
 
-  const promptMsg = targetDate
-    ? `[${targetDate}] 링크를 수집합니다... (백그라운드 실행)`
-    : '오늘의 링크를 수집합니다... (백그라운드 실행)';
-
   try {
-    await ctx.reply(promptMsg);
     runner
       .runTask(task, { args: targetDate ? { date: targetDate } : undefined })
       .then(async (result) => {
@@ -278,6 +285,63 @@ const todayLinks = async (ctx: Context) => {
   }
 };
 
+const createSeminarDetailHandler = (allowForce: boolean) => async (ctx: Context) => {
+  logger.info('User requested seminar detail', { from: ctx.from?.username, allowForce });
+  try {
+    const messageText = ctx.message && 'text' in ctx.message ? ctx.message.text : '';
+    const seminarIds = extractSeminarIds(messageText);
+    if (seminarIds.length === 0) {
+      return ctx.reply(
+        allowForce
+          ? '사용법: /seminar_detail <세미나번호> [force]\n예: /seminar_detail 5566 (목록 저장값 우선)\n   /seminar_detail 5566 force (실시간 API 강제 조회)\n   또는 /seminar_detail 5566 5567'
+          : '사용법: /seminar_detail <세미나번호> [세미나번호...]\n예: /seminar_detail 5566\n   또는 /seminar_detail 5566 5567',
+      );
+    }
+
+    const MAX_SEMINAR_IDS_PER_REQUEST = 10;
+    if (seminarIds.length > MAX_SEMINAR_IDS_PER_REQUEST) {
+      return ctx.reply('⚠️ 세미나 번호는 한 번에 최대 10개까지만 조회할 수 있습니다.');
+    }
+
+    const { run: runSeminarDetail, isForceRefresh } = await import('../tasks/seminar_detail');
+    const force = allowForce && isForceRefresh(messageText);
+    const result = await runSeminarDetail({
+      args: {
+        seminarIds,
+        seminarId: seminarIds[0],
+        preferStored: !force,
+        force,
+      },
+    });
+
+    if (result && typeof result === 'object') {
+      const r = result as {
+        message?: string;
+        success?: boolean;
+        rawMessages?: string[];
+        messages?: string[];
+      };
+
+      if (r.messages && r.messages.length > 1) {
+        for (const msg of r.messages) {
+          await ctx.reply(msg, { parse_mode: 'Markdown' });
+        }
+      } else if (r.success !== false && r.message) {
+        await ctx.reply(r.message, { parse_mode: 'Markdown' });
+      } else if (!r.success && r.message) {
+        await ctx.reply(r.message);
+      }
+
+      for (const rawMsg of r.rawMessages ?? []) {
+        await ctx.reply(rawMsg, { parse_mode: 'Markdown' });
+      }
+    }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    ctx.reply(`세미나 상세 조회 실패: ${message}`);
+  }
+};
+
 // --- Admin Bot Commands ---
 if (adminBot) {
   // ==========================================
@@ -293,7 +357,6 @@ if (adminBot) {
     }
 
     try {
-      await ctx.reply('Starting daily_routine...');
       runner
         .runTask(task)
         .then(async (result) => {
@@ -302,7 +365,10 @@ if (adminBot) {
               (result as { message: string }).message,
               (result as { options?: Record<string, unknown> }).options,
             );
-            if ((result as { imagePath?: string }).imagePath) {
+            if (
+              (result as { imagePath?: string }).imagePath &&
+              fsSync.existsSync((result as { imagePath: string }).imagePath)
+            ) {
               await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
               await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
             }
@@ -369,7 +435,6 @@ if (adminBot) {
     }
 
     try {
-      await ctx.reply('Starting apply_seminar... (백그라운드 실행)');
       runner
         .runTask(task)
         .then(async (result) => {
@@ -378,7 +443,10 @@ if (adminBot) {
               (result as { message: string }).message,
               (result as { options?: Record<string, unknown> }).options,
             );
-            if ((result as { imagePath?: string }).imagePath) {
+            if (
+              (result as { imagePath?: string }).imagePath &&
+              fsSync.existsSync((result as { imagePath: string }).imagePath)
+            ) {
               await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
               await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
             }
@@ -409,7 +477,6 @@ if (adminBot) {
     }
 
     try {
-      await ctx.reply('Starting today_quiz...');
       runner
         .runTask(task)
         .then(async (result) => {
@@ -418,7 +485,10 @@ if (adminBot) {
               (result as { message: string }).message,
               (result as { options?: Record<string, unknown> }).options,
             );
-            if ((result as { imagePath?: string }).imagePath) {
+            if (
+              (result as { imagePath?: string }).imagePath &&
+              fsSync.existsSync((result as { imagePath: string }).imagePath)
+            ) {
               await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
               await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
             }
@@ -449,7 +519,6 @@ if (adminBot) {
     }
 
     try {
-      await ctx.reply('Starting monitor_lunch_seminars... (백그라운드 실행)');
       runner
         .runTask(task)
         .then(async (result) => {
@@ -458,16 +527,15 @@ if (adminBot) {
               (result as { message: string }).message,
               (result as { options?: Record<string, unknown> }).options,
             );
-            if ((result as { imagePath?: string }).imagePath) {
+            if (
+              (result as { imagePath?: string }).imagePath &&
+              fsSync.existsSync((result as { imagePath: string }).imagePath)
+            ) {
               await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
               await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
             }
           } else if (typeof result === 'string') {
             await ctx.reply(result);
-          } else if (result === true) {
-            await ctx.reply('monitor_lunch_seminars finished successfully.');
-          } else {
-            await ctx.reply('monitor_lunch_seminars finished successfully.');
           }
         })
         .catch((e) => {
@@ -489,7 +557,6 @@ if (adminBot) {
     }
 
     try {
-      await ctx.reply('Starting monitor_dinner_seminars... (백그라운드 실행)');
       runner
         .runTask(task)
         .then(async (result) => {
@@ -498,16 +565,15 @@ if (adminBot) {
               (result as { message: string }).message,
               (result as { options?: Record<string, unknown> }).options,
             );
-            if ((result as { imagePath?: string }).imagePath) {
+            if (
+              (result as { imagePath?: string }).imagePath &&
+              fsSync.existsSync((result as { imagePath: string }).imagePath)
+            ) {
               await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
               await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
             }
           } else if (typeof result === 'string') {
             await ctx.reply(result);
-          } else if (result === true) {
-            await ctx.reply('monitor_dinner_seminars finished successfully.');
-          } else {
-            await ctx.reply('monitor_dinner_seminars finished successfully.');
           }
         })
         .catch((e) => {
@@ -558,7 +624,10 @@ if (adminBot) {
               (result as { message: string }).message,
               (result as { options?: Record<string, unknown> }).options,
             );
-            if ((result as { imagePath?: string }).imagePath) {
+            if (
+              (result as { imagePath?: string }).imagePath &&
+              fsSync.existsSync((result as { imagePath: string }).imagePath)
+            ) {
               await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
               await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
             } else {
@@ -850,47 +919,6 @@ if (adminBot) {
     }
   });
 
-  adminBot.command('refresh_seminar_point_exclusion', async (ctx) => {
-    logger.info('User requested to refresh seminar point exclusion flags', { from: ctx.from?.username });
-    const task = taskRegistry.getByName('refresh_seminar_point_exclusion');
-    if (!task) {
-      logger.error('refresh_seminar_point_exclusion task not found, cannot run');
-      return ctx.reply('refresh_seminar_point_exclusion task not found!');
-    }
-
-    try {
-      await ctx.reply('세미나 포인트미지급 여부를 전체 재확인합니다... (백그라운드 실행)');
-      runner
-        .runTask(task)
-        .then(async (result) => {
-          if (result && typeof result === 'object' && (result as { message?: string }).message) {
-            await ctx.reply(
-              (result as { message: string }).message,
-              (result as { options?: Record<string, unknown> }).options,
-            );
-            const screenshotPaths = (result as { screenshotPaths?: string[] }).screenshotPaths || [];
-            for (const screenshotPath of screenshotPaths) {
-              await ctx.replyWithPhoto({ source: screenshotPath });
-              await fs.unlink(screenshotPath).catch(() => {});
-            }
-          } else if (typeof result === 'string') {
-            await ctx.reply(result);
-          } else if (result === true) {
-            await ctx.reply('세미나 포인트미지급 여부 재확인이 완료되었습니다.');
-          } else {
-            await ctx.reply('세미나 포인트미지급 여부 재확인이 완료되었습니다.');
-          }
-        })
-        .catch((e) => {
-          const message = e instanceof Error ? e.message : String(e);
-          ctx.reply(`세미나 포인트미지급 여부 재확인 실패: ${message}`);
-        });
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Failed to start 세미나 포인트미지급 여부 재확인: ${message}`);
-    }
-  });
-
   // ==========================================
   // 3. 포인트 & 교환 (Points & Exchange)
   // ==========================================
@@ -904,14 +932,13 @@ if (adminBot) {
     }
 
     try {
-      await ctx.reply('포인트를 확인하는 중입니다... (백그라운드 실행)');
       runner
         .runTask(task)
         .then(async (result) => {
           if (result && typeof result === 'object' && (result as { message?: string }).message) {
             const msg = (result as { message: string }).message;
             const imagePath = (result as { imagePath?: string }).imagePath;
-            if (imagePath) {
+            if (imagePath && fsSync.existsSync(imagePath)) {
               await ctx.replyWithPhoto({ source: imagePath }, { caption: msg });
               await fs.unlink(imagePath).catch(() => {});
             } else {
@@ -952,8 +979,6 @@ if (adminBot) {
         );
       }
 
-      await ctx.reply(`${seminarIds.length}개 세미나 포인트 내역 확인 중... (백그라운드 실행)`);
-
       const result = await runner.runTask(task, { args: { seminarIds: seminarIds.join(',') } });
 
       if (result && typeof result === 'object') {
@@ -966,34 +991,8 @@ if (adminBot) {
     }
   });
 
-  // 최근 2주 심화 세미나 포인트 지급 일괄 확인
-  adminBot.command('check_advanced_seminars', async (ctx) => {
-    logger.info('User requested to check advanced seminars point', { from: ctx.from?.username });
-    const task = taskRegistry.getByName('check_advanced_seminars');
-    if (!task) {
-      logger.error('check_advanced_seminars task not found, cannot run');
-      return ctx.reply('check_advanced_seminars task not found!');
-    }
-
-    try {
-      await ctx.reply('최근 2주간 심화 세미나 포인트 지급 여부를 일괄 조회합니다... (약 1분 소요, 백그라운드 실행)');
-      runner
-        .runTask(task)
-        .then(async (result) => {
-          if (result && typeof result === 'object') {
-            const r = result as { message?: string };
-            if (r.message) await ctx.reply(r.message);
-          }
-        })
-        .catch((e) => {
-          const message = e instanceof Error ? e.message : String(e);
-          ctx.reply(`심화 세미나 포인트 일괄 조회 실패: ${message}`);
-        });
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Failed to start check_advanced_seminars: ${message}`);
-    }
-  });
+  // 세미나 상세 정보 조회
+  adminBot.command('seminar_detail', createSeminarDetailHandler(true));
 
   adminBot.command('naverpay_point_exchange', async (ctx) => {
     logger.info('User requested to run naverpay_point_exchange now', { from: ctx.from?.username });
@@ -1023,7 +1022,10 @@ if (adminBot) {
               (result as { message: string }).message,
               (result as { options?: Record<string, unknown> }).options,
             );
-            if ((result as { imagePath?: string }).imagePath) {
+            if (
+              (result as { imagePath?: string }).imagePath &&
+              fsSync.existsSync((result as { imagePath: string }).imagePath)
+            ) {
               await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
               await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
             }
@@ -1073,7 +1075,10 @@ if (adminBot) {
               (result as { message: string }).message,
               (result as { options?: Record<string, unknown> }).options,
             );
-            if ((result as { imagePath?: string }).imagePath) {
+            if (
+              (result as { imagePath?: string }).imagePath &&
+              fsSync.existsSync((result as { imagePath: string }).imagePath)
+            ) {
               await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
               await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
             }
@@ -1164,29 +1169,44 @@ if (adminBot) {
   });
 
   adminBot.command('update_app', async (ctx) => {
-    logger.info('User requested to run pnpm update:app', { from: ctx.from?.username });
+    logger.info('User requested to run update_app', { from: ctx.from?.username });
     try {
       await ctx.reply(
-        'Starting pnpm update:app... (백그라운드 실행)\n' +
-          '⚠️ 업데이트 중 서비스가 재시작되어 봇 응답이 잠시 끊길 수 있습니다.',
+        '🔄 앱 업데이트 및 빌드를 시작합니다...\n' +
+          '1. Git Pull & 의존성 설치\n' +
+          '2. TypeScript 빌드\n' +
+          '3. 서비스 파일 갱신',
       );
-      runShellCommand('pnpm run update:app')
+
+      // 1. 빌드 및 설정 동기 실행 (재시작 제외)
+      const buildCommand =
+        'git pull && pnpm install --frozen-lockfile && pnpm run build && cp deploy/doctorville-auto.service /etc/systemd/system/ && systemctl daemon-reload';
+
+      runShellCommand(buildCommand)
         .then(async ({ stdout, stderr }) => {
-          let message = 'pnpm update:app 완료';
+          let message = '✅ 앱 업데이트 및 빌드 성공!';
           if (stdout.trim()) {
             message += `\n\nstdout:\n${truncateMessage(stdout.trim())}`;
           }
           if (stderr.trim()) {
             message += `\n\nstderr:\n${truncateMessage(stderr.trim())}`;
           }
+          message += '\n\n🚀 서비스를 재시작합니다...';
           await ctx.reply(message);
+
+          // 2. 서비스 재시작을 독립(detached) 프로세스로 실행하여 데드락 및 타임아웃 방지
+          const restartProcess = spawn('systemctl', ['restart', 'doctorville-auto.service'], {
+            detached: true,
+            stdio: 'ignore',
+          });
+          restartProcess.unref();
         })
         .catch(async (error) => {
           const message = error instanceof Error ? error.message : String(error);
           const stdout = (error as Error & { stdout?: string }).stdout ?? '';
           const stderr = (error as Error & { stderr?: string }).stderr ?? '';
-          logger.error('pnpm update:app failed', error);
-          let reply = `pnpm update:app 실패: ${message}`;
+          logger.error('update_app failed', error);
+          let reply = `❌ 업데이트 실패:\n${message}`;
           if (stdout.trim()) {
             reply += `\n\nstdout:\n${truncateMessage(stdout.trim())}`;
           }
@@ -1197,7 +1217,7 @@ if (adminBot) {
         });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Failed to start pnpm update:app: ${message}`);
+      ctx.reply(`Failed to start update_app: ${message}`);
     }
   });
 
@@ -1303,10 +1323,12 @@ if (adminBot) {
 - /delete_seminar_quiz <키워드>: 족보 삭제
 - /list_quiz: quiz.json 등록 제품 목록
 - /delete_quiz <제품명>: quiz.json 항목 삭제
-- /refresh_seminar_point_exclusion: 모든 세미나의 포인트미지급 여부를 다시 확인해 캐시를 갱신합니다.
+- /seminar_detail <세미나번호> [force]: 세미나 상세 정보 조회 (force: 실시간 API 강제 조회)
 
 💰 포인트 & 교환:
 - /check_point: 현재 포인트를 확인합니다.
+- /check_seminar_point: 세미나 번호로 포인트 지급 확인
+- /check_advanced_seminars: 최근 2주 심화 세미나 포인트 일괄 확인 (방장 계정 기준)
 - /naverpay_point_exchange [횟수]: 네이버페이포인트교환 작업을 실행합니다. (기본값: 10)
 - /baemin_point_exchange [횟수]: 배민포인트교환 작업을 실행합니다. (기본값: 1)
 
@@ -1321,104 +1343,45 @@ if (adminBot) {
   });
 }
 
+const noticeTodayLinks = async (ctx: Context) => {
+  logger.info('User requested cached today_links on notice bot', { from: ctx.from?.username });
+  try {
+    const { getTodayLinksCache } = await import('../tasks/today_links');
+    const cache = getTodayLinksCache();
+    if (cache && cache.message) {
+      await ctx.reply(cache.message, cache.options as Parameters<Context['reply']>[1]);
+    } else {
+      await ctx.reply(
+        'ℹ️ 오늘의 링크 정보가 아직 생성되지 않았습니다. 매일 오전 9시 채널 공지 이후 조회하실 수 있습니다.',
+      );
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await ctx.reply(`오늘의 링크 조회 실패: ${message}`);
+  }
+};
+
 // --- Notice Bot Commands ---
 if (noticeBot) {
-  noticeBot.command('today_links', todayLinks);
-
-  noticeBot.command('current_seminars', async (ctx) => {
-    logger.info('User requested current seminars', { from: ctx.from?.username });
-    const task = taskRegistry.getByName('today_links');
-    if (!task) {
-      logger.error('today_links task not found, cannot run');
-      return ctx.reply('today_links task not found!');
-    }
-    try {
-      await ctx.reply('현재 예정된 세미나를 수집합니다... (백그라운드 실행)');
-      runner
-        .runTask(task)
-        .then(async (result) => {
-          if (result && typeof result === 'object') {
-            const r = result as { message?: string };
-            if (r.message) {
-              const seminarMatch = r.message.match(/📖[\s\S]*?(?=\n\n🆕|\n\n💳|\n\n<blockquote>|$)/);
-              if (seminarMatch) {
-                await ctx.reply(seminarMatch[0].trim());
-              } else {
-                await ctx.reply('예정된 세미나가 없습니다. ☕');
-              }
-            } else {
-              await ctx.reply('예정된 세미나가 없습니다. ☕');
-            }
-          } else {
-            await ctx.reply('예정된 세미나가 없습니다. ☕');
-          }
-        })
-        .catch((e) => {
-          const message = e instanceof Error ? e.message : String(e);
-          ctx.reply(`세미나 수집 중 오류 발생: ${message}`);
-        });
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Failed to start 세미나 수집: ${message}`);
-    }
-  });
+  noticeBot.command('today_links', noticeTodayLinks);
+  noticeBot.command('seminar_detail', createSeminarDetailHandler(false));
 
   noticeBot.command('help', (ctx) => {
     const message = `사용 가능한 명령어:
 
-- /today_links [날짜]: 오늘의 세미나/퀴즈/출석 링크 모음 (날짜 지정 가능: 예 /today_links 8/20, /today_links 내일)
-- /current_seminars: 현재 예정된 세미나 목록만 표시`;
+- /today_links: 오늘의 세미나/퀴즈/출석 링크 모음
+- /seminar_detail <세미나번호>: 세미나 상세 정보 조회 (예: /seminar_detail 5566)
+- /check_advanced_seminars: 최근 2주 심화 세미나 포인트 지급 현황 (방장 계정 기준)
+- /subscribe_seminar_changes: 세미나 정보 변경 알림 구독
+- /unsubscribe_seminar_changes: 세미나 정보 변경 알림 구독 해제`;
     ctx.reply(message);
   });
-}
-
-// adminBot에도 동일 핸들러 등록 (관리자도 사용 가능)
-if (adminBot) {
-  const currentSeminarsHandler = async (ctx: Context) => {
-    logger.info('User requested current seminars', { from: ctx.from?.username });
-    const task = taskRegistry.getByName('today_links');
-    if (!task) {
-      logger.error('today_links task not found, cannot run');
-      return ctx.reply('today_links task not found!');
-    }
-    try {
-      await ctx.reply('현재 예정된 세미나를 수집합니다... (백그라운드 실행)');
-      runner
-        .runTask(task)
-        .then(async (result) => {
-          if (result && typeof result === 'object') {
-            const r = result as { message?: string };
-            if (r.message) {
-              const seminarMatch = r.message.match(/📖[\s\S]*?(?=\n\n🆕|\n\n💳|\n\n<blockquote>|$)/);
-              if (seminarMatch) {
-                await ctx.reply(seminarMatch[0].trim());
-              } else {
-                await ctx.reply('예정된 세미나가 없습니다. ☕');
-              }
-            } else {
-              await ctx.reply('예정된 세미나가 없습니다. ☕');
-            }
-          } else {
-            await ctx.reply('예정된 세미나가 없습니다. ☕');
-          }
-        })
-        .catch((e) => {
-          const message = e instanceof Error ? e.message : String(e);
-          ctx.reply(`세미나 수집 중 오류 발생: ${message}`);
-        });
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Failed to start 세미나 수집: ${message}`);
-    }
-  };
-  adminBot.command('current_seminars', currentSeminarsHandler);
 }
 
 const adminCommands = [
   // 1. 루틴 / 실행
   { command: 'run_routine_now', description: '즉시 daily_routine 실행' },
   { command: 'today_links', description: '세미나/퀴즈 링크 모음 [날짜 지정 가능]' },
-  { command: 'current_seminars', description: '현재 예정된 세미나 목록 표시' },
   { command: 'broadcast_today_links', description: '오늘의 링크 채널 공지' },
   { command: 'apply_seminar_now', description: '즉시 세미나 신청(apply_seminar) 실행' },
   { command: 'run_quiz_now', description: '즉시 오늘의 퀴즈(today_quiz) 실행' },
@@ -1431,11 +1394,11 @@ const adminCommands = [
   { command: 'delete_seminar_quiz', description: '족보 삭제' },
   { command: 'list_quiz', description: 'quiz.json 등록 제품 목록' },
   { command: 'delete_quiz', description: 'quiz.json 항목 삭제' },
-  { command: 'refresh_seminar_point_exclusion', description: '세미나 포인트미지급 캐시 재확인' },
+  { command: 'seminar_detail', description: '세미나 번호로 상세 정보 조회 [force: 실시간 API 조회]' },
   // 3. 포인트 & 교환
   { command: 'check_point', description: '현재 포인트 확인' },
   { command: 'check_seminar_point', description: '세미나 번호로 포인트 지급 확인' },
-  { command: 'check_advanced_seminars', description: '최근 2주 심화 세미나 포인트 일괄 확인' },
+  { command: 'check_advanced_seminars', description: '최근 2주 심화 세미나 포인트 일괄 확인 (방장 계정 기준)' },
   { command: 'naverpay_point_exchange', description: '네이버페이포인트교환 실행' },
   { command: 'baemin_point_exchange', description: '배민포인트교환 실행' },
   // 4. 시스템 & 관리
@@ -1447,25 +1410,49 @@ const adminCommands = [
 ];
 
 const noticeCommands = [
-  { command: 'today_links', description: '세미나/퀴즈 링크 모음 [날짜 지정 가능]' },
-  { command: 'current_seminars', description: '현재 예정된 세미나 목록 표시' },
+  { command: 'today_links', description: '오늘의 세미나/퀴즈/출석 링크 모음' },
+  { command: 'seminar_detail', description: '세미나 번호로 상세 정보 조회' },
+  { command: 'check_advanced_seminars', description: '최근 2주 심화 세미나 포인트 확인 (방장 계정 기준)' },
+  { command: 'subscribe_seminar_changes', description: '세미나 정보 변경 알림 구독' },
+  { command: 'unsubscribe_seminar_changes', description: '세미나 정보 변경 알림 구독 해제' },
   { command: 'help', description: '도움말' },
 ];
+
+async function syncBotCommands(
+  bot: Telegraf,
+  commands: Array<{ command: string; description: string }>,
+  botLabel: string,
+): Promise<void> {
+  const scopes: Array<Parameters<Telegraf['telegram']['setMyCommands']>[1]> = [
+    { scope: { type: 'default' } },
+    { scope: { type: 'all_private_chats' } },
+    { scope: { type: 'all_group_chats' } },
+    { scope: { type: 'all_chat_administrators' } },
+  ];
+
+  for (const extra of scopes) {
+    try {
+      await bot.telegram.setMyCommands(commands, extra);
+    } catch (err) {
+      logger.warn(`Failed to set ${botLabel} commands for scope ${extra?.scope?.type}:`, err);
+    }
+  }
+}
 
 function launch(): void {
   if (adminBot) {
     adminBot.launch();
     logger.info('Admin bot started');
-    adminBot.telegram
-      .setMyCommands(adminCommands)
-      .catch((err) => logger.error('Failed to set admin bot commands', err));
+    syncBotCommands(adminBot, adminCommands, 'Admin bot').catch((err) =>
+      logger.error('Failed to sync admin bot commands', err),
+    );
   }
   if (noticeBot) {
     noticeBot.launch();
     logger.info('Notice bot started');
-    noticeBot.telegram
-      .setMyCommands(noticeCommands)
-      .catch((err) => logger.error('Failed to set notice bot commands', err));
+    syncBotCommands(noticeBot, noticeCommands, 'Notice bot').catch((err) =>
+      logger.error('Failed to sync notice bot commands', err),
+    );
   }
 }
 
