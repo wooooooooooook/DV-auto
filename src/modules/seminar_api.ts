@@ -5,6 +5,28 @@ import { isAuthExpiredHtml } from './html_parser';
 export const MAIN_FUTURE_SEMINARS_API_URL = 'https://m-api.doctorville.co.kr/api/mw/seminars/mainFuture';
 export const SEMINAR_DETAIL_API_URL = 'https://m-api.doctorville.co.kr/api/mw/seminars';
 
+export const ProcessState = {
+  PROCESS_ENTER: 1, // 입장하기 (라이브 입장 가능)
+  PROCESS_APPLY: 2, // 신청하기 (신청 필요/신청 가능)
+  PROCESS_CANCEL: 3, // 신청취소 (이미 신청 완료)
+  PROCESS_PREPARING: 4, // 대기 중 / 준비 중
+  PROCESS_EXCESS: 5, // 신청마감 (정원 초과)
+  PROCESS_STARTED: 6, // 라이브 진행 중 (OnAir)
+  PROCESS_END: 7, // 방송 종료
+  PROCESS_COMPLETED: 8, // 세미나 진행 완료
+} as const;
+
+export type ProcessStateType = (typeof ProcessState)[keyof typeof ProcessState];
+
+export const SurveyState = {
+  SURVEY_PROGRESS: 1, // 설문 진행 중 (참여 가능)
+  SURVEY_COMPLETED: 2, // 설문 참여 완료
+  SURVEY_CLOSED: 3, // 설문 마감 / 미제공 / 대상 아님
+  SURVEY_UNOPENED: 5, // 설문 미오픈 (진행 예정 / 설문 없음)
+} as const;
+
+export type SurveyStateType = (typeof SurveyState)[keyof typeof SurveyState];
+
 export interface SeminarSurveyInfo {
   point?: number | string | null;
   surveyId?: number | string | null;
@@ -64,9 +86,16 @@ export interface SeminarDetailApiResponse {
     seminarNm?: string;
     survey?: SeminarSurveyInfo | null;
     payPoint?: number | string | null;
+    processState?: number | string;
+    cancelProcessState?: number | string;
+    seminarCompleted?: number | string | boolean;
+    useSurvey?: string | boolean;
+    useDepthSurvey?: string | boolean;
     [key: string]: unknown;
   };
   survey?: SeminarSurveyInfo | null;
+  surveyState?: number | string;
+  isExistVod?: boolean;
   code?: number | string;
   message?: string;
   [key: string]: unknown;
@@ -77,6 +106,7 @@ export type FetchSeminarDetailResult =
       success: true;
       seminarId: string;
       survey?: SeminarSurveyInfo | null;
+      surveyState?: number;
       isPointExcluded: boolean;
       isAuthExpired?: false;
       errorMessage?: undefined;
@@ -184,6 +214,17 @@ export function convertApiItemToRawSeminar(item: FutureSeminarApiItem): RawSemin
   const seminarId = String(item.seminarId ?? '');
   const url = `https://m.doctorville.co.kr/cme/seminar/${seminarId}`;
   const isAdvancedSurvey = checkIsAdvancedSurvey(item.useDepthSurvey);
+  const processStateNum = item.processState !== undefined ? Number(item.processState) : undefined;
+  const cancelProcessStateNum = item.cancelProcessState !== undefined ? Number(item.cancelProcessState) : undefined;
+  const seminarCompletedNum =
+    item.seminarCompleted !== undefined
+      ? typeof item.seminarCompleted === 'boolean'
+        ? item.seminarCompleted
+          ? 1
+          : 0
+        : Number(item.seminarCompleted)
+      : undefined;
+  const hasIcoApply = processStateNum === ProcessState.PROCESS_APPLY;
 
   return {
     url,
@@ -194,6 +235,10 @@ export function convertApiItemToRawSeminar(item: FutureSeminarApiItem): RawSemin
     totalCount: item.maxPeopleCnt !== undefined && item.maxPeopleCnt !== null ? String(item.maxPeopleCnt) : '',
     nightTime,
     isAdvancedSurvey,
+    hasIcoApply,
+    processState: processStateNum,
+    cancelProcessState: cancelProcessStateNum,
+    seminarCompleted: seminarCompletedNum,
   };
 }
 
@@ -206,6 +251,16 @@ export function convertApiItemToSeminarListItem(item: FutureSeminarApiItem, refe
   const url = `https://m.doctorville.co.kr/cme/seminar/${seminarId}`;
   const isAdvancedSurvey = checkIsAdvancedSurvey(item.useDepthSurvey);
   const nowIso = referenceDate || new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+  const processStateNum = item.processState !== undefined ? Number(item.processState) : undefined;
+  const cancelProcessStateNum = item.cancelProcessState !== undefined ? Number(item.cancelProcessState) : undefined;
+  const seminarCompletedNum =
+    item.seminarCompleted !== undefined
+      ? typeof item.seminarCompleted === 'boolean'
+        ? item.seminarCompleted
+          ? 1
+          : 0
+        : Number(item.seminarCompleted)
+      : undefined;
 
   return {
     seminarId,
@@ -217,6 +272,9 @@ export function convertApiItemToSeminarListItem(item: FutureSeminarApiItem, refe
     totalCount: item.maxPeopleCnt !== undefined && item.maxPeopleCnt !== null ? String(item.maxPeopleCnt) : '',
     nightTime,
     isAdvancedSurvey,
+    processState: processStateNum,
+    cancelProcessState: cancelProcessStateNum,
+    seminarCompleted: seminarCompletedNum,
     detectedDate: nowIso,
   };
 }
@@ -355,11 +413,18 @@ export async function fetchSeminarDetail(
     // seminarDetail?.survey 또는 survey 객체 추출
     const survey = parsed.seminarDetail?.survey ?? parsed.survey ?? null;
     const isPointExcluded = checkIsPointExcluded(survey);
+    const surveyState =
+      parsed.surveyState !== undefined
+        ? Number(parsed.surveyState)
+        : parsed.seminarDetail && (parsed.seminarDetail as { surveyState?: unknown }).surveyState !== undefined
+          ? Number((parsed.seminarDetail as { surveyState?: unknown }).surveyState)
+          : undefined;
 
     return {
       success: true,
       seminarId: sid,
       survey,
+      surveyState,
       isPointExcluded,
       rawResponse: parsed,
     };

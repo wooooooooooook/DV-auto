@@ -48,6 +48,9 @@ export type SeminarListItem = {
   nightTime: boolean;
   isPointExcluded?: boolean;
   isAdvancedSurvey: boolean;
+  processState?: number;
+  cancelProcessState?: number;
+  seminarCompleted?: number;
   detectedDate?: string;
   detectedAt?: string;
 } & SeminarPointStatus;
@@ -95,6 +98,9 @@ export type RawSeminarData = {
   nightTime: boolean;
   isAdvancedSurvey: boolean;
   hasIcoApply?: boolean;
+  processState?: number;
+  cancelProcessState?: number;
+  seminarCompleted?: number;
 };
 
 const MEANINGFUL_FIELDS: Array<{
@@ -240,6 +246,9 @@ export function mergeSeminar(existing: SeminarListItem | undefined, incoming: Se
     nightTime: incoming.nightTime ?? existing.nightTime ?? false,
     isAdvancedSurvey: incoming.isAdvancedSurvey ?? existing.isAdvancedSurvey ?? false,
     isPointExcluded: incoming.isPointExcluded ?? existing.isPointExcluded,
+    processState: incoming.processState ?? existing.processState,
+    cancelProcessState: incoming.cancelProcessState ?? existing.cancelProcessState,
+    seminarCompleted: incoming.seminarCompleted ?? existing.seminarCompleted,
     pointPaid: existing.pointPaid === true ? true : (incoming.pointPaid ?? existing.pointPaid),
     point: existing.pointPaid === true ? existing.point : (incoming.point ?? existing.point),
     pointText: existing.pointPaid === true ? existing.pointText : (incoming.pointText ?? existing.pointText),

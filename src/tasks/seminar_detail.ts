@@ -1,5 +1,6 @@
 import { httpGetJson } from '../modules/http_client';
 import * as logger from '../services/logger';
+import { ProcessState, SurveyState } from '../modules/seminar_api';
 
 const SEMINAR_DETAIL_API = 'https://m-api.doctorville.co.kr/api/mw/seminars/';
 
@@ -197,15 +198,80 @@ function formatDateTime(
   return `${startMonthAndDay} ${startTime}~${endTime}`;
 }
 
-function formatStatus(processState: number, seminarCompleted: number, useSurvey: string): string {
-  // processState 의미 미검증: 알려진 값만 매핑, 나머지는 숫자 그대로 표시
-  if (seminarCompleted === 1) return '진행 완료';
-  if (processState === 8) return '진행 가능 (OPEN)'; // 예시에서 확인됨
-  if (processState === 1) return '신청 마감 (추정)';
-  if (processState === 2) return '진행 중 (추정)';
-  if (processState === 3) return '신청 대기 (추정)';
-  if (useSurvey === 'Y') return '설문 진행';
-  return `상태:${processState}`;
+export function formatStatus(processState?: number, seminarCompleted?: number, _cancelProcessState?: number): string {
+  if (seminarCompleted === 1 || processState === ProcessState.PROCESS_COMPLETED) {
+    return '진행 완료';
+  }
+  switch (processState) {
+    case ProcessState.PROCESS_ENTER: // 1
+      return '입장 가능 (LIVE)';
+    case ProcessState.PROCESS_APPLY: // 2
+      return '신청 가능';
+    case ProcessState.PROCESS_CANCEL: // 3
+      return '신청 완료 (진행 예정)';
+    case ProcessState.PROCESS_PREPARING: // 4
+      return '방송 준비 중';
+    case ProcessState.PROCESS_EXCESS: // 5
+      return '신청 마감 (정원 초과)';
+    case ProcessState.PROCESS_STARTED: // 6
+      return '방송 진행 중 (OnAir)';
+    case ProcessState.PROCESS_END: // 7
+      return '방송 종료';
+    default:
+      if (processState !== undefined && processState !== null) {
+        return `상태:${processState}`;
+      }
+      return '알 수 없음';
+  }
+}
+
+export function formatSurveyStatus(
+  useSurvey?: string,
+  surveyState?: number,
+  survey?: SeminarSurvey | null,
+  surveyApplyTy?: number,
+): string {
+  if (useSurvey === 'N') {
+    return '설문 없음';
+  }
+
+  const pointText =
+    survey?.point !== undefined && survey?.point !== null ? ` (${Number(survey.point).toLocaleString()}P)` : '';
+
+  // 사용자가 이미 설문 제출을 완료한 경우
+  if (surveyState === SurveyState.SURVEY_COMPLETED || surveyApplyTy === 1) {
+    return `설문 참여 완료${pointText}`;
+  }
+
+  switch (surveyState) {
+    case SurveyState.SURVEY_PROGRESS: // 1
+      return `설문 진행 중 (참여 가능)${pointText}`;
+    case SurveyState.SURVEY_CLOSED: // 3
+      return `설문 마감 / 미제공${pointText}`;
+    case SurveyState.SURVEY_UNOPENED: // 5
+      return `설문 미오픈 (진행 예정)${pointText}`;
+    default:
+      if (useSurvey === 'Y') {
+        return `설문 있음${pointText}`;
+      }
+      return '설문 미정';
+  }
+}
+
+export function formatMyParticipation(member: SeminarMember | null): string {
+  if (!member) {
+    return '미신청';
+  }
+
+  const applyStatus = member.applyTy === 1 ? '입장/시청 완료' : '신청 완료';
+  const applyDate = member.createDt ? ` (신청: ${member.createDt.substring(5, 16)})` : '';
+  const joinDate = member.joinDt ? ` (입장: ${member.joinDt.substring(5, 16)})` : '';
+  const surveyStatus = member.surveyApplyTy === 1 ? '설문완료' : '설문미참여';
+
+  if (member.joinDt) {
+    return `${applyStatus}${joinDate}, ${surveyStatus}`;
+  }
+  return `${applyStatus}${applyDate}, ${surveyStatus}`;
 }
 
 function stripHtml(html: string): string {
@@ -224,11 +290,15 @@ function buildSeminarUrl(seminarId: number): string {
   return `https://m.doctorville.co.kr/cme/seminar/${seminarId}`;
 }
 
-export function formatSeminarDetail(data: SeminarDetail): string {
+export function formatSeminarDetail(data: SeminarDetail, raw?: SeminarDetailResponse): string {
   const dateTime = formatDateTime(data.startDt, data.endDt, data.startTime, data.endTime, data.startMonthAndDay);
-  const status = formatStatus(data.processState, data.seminarCompleted, data.useSurvey);
+  const status = formatStatus(data.processState, data.seminarCompleted, data.cancelProcessState);
+  const surveyState = raw?.surveyState;
+  const surveyStatus = formatSurveyStatus(data.useSurvey, surveyState, data.survey, data.seminarMember?.surveyApplyTy);
+  const myParticipation = formatMyParticipation(data.seminarMember);
   const participantInfo = `${data.applyCnt} / ${data.maxPeopleCnt}`;
   const seminarUrl = buildSeminarUrl(data.seminarId);
+  const isPointExcluded = !data.survey || data.survey.point === undefined || Number(data.survey.point) <= 0;
 
   return [
     `*세미나 상세* (ID: ${data.seminarId})`,
@@ -239,9 +309,10 @@ export function formatSeminarDetail(data: SeminarDetail): string {
     `*분야:* ${data.diseaseCategoryNm} (${data.categoryCdNm})`,
     `*인원:* ${participantInfo}`,
     `*상태:* ${status}`,
+    `*내 참여:* ${myParticipation}`,
+    `*설문:* ${surveyStatus}${data.useDepthSurvey === 'Y' ? ' [심화설문]' : ''}`,
+    `*포인트:* ${isPointExcluded ? '미지급' : `${Number(data.survey?.point).toLocaleString()}P 지급`}`,
     `*VOD:* ${data.useVod === 'Y' ? '제공' : '미제공'}`,
-    `*설문:* ${data.useSurvey === 'Y' ? '있음' : '없음'} (심화: ${data.useDepthSurvey === 'Y' ? '있음' : '없음'})`,
-    `*설문ID:* ${data.surveyId ?? '없음'}`,
     `*URL:* ${seminarUrl}`,
   ].join('\n');
 }
@@ -287,7 +358,7 @@ export async function run({
     return { success: false, message: result.error || '세미나 정보를 가져올 수 없습니다.' };
   }
 
-  const formatted = formatSeminarDetail(result.data);
+  const formatted = formatSeminarDetail(result.data, result.raw);
   const rawMessages = result.raw ? formatRawResponse(result.raw) : undefined;
   return { success: true, message: formatted, rawMessages };
 }

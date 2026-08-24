@@ -35,7 +35,9 @@ async function testSeminarApiConversion() {
       surveyId: 101,
       point: 1000,
     },
-    processState: 'APPLY_ING',
+    processState: 2, // PROCESS_APPLY
+    cancelProcessState: -1,
+    seminarCompleted: 0,
   };
 
   const dt1 = parseSeminarDateTime(item1.startDt, item1.endDt);
@@ -55,7 +57,14 @@ async function testSeminarApiConversion() {
   assert.strictEqual(converted1.totalCount, '5000');
   assert.strictEqual(converted1.nightTime, false);
   assert.strictEqual(converted1.isAdvancedSurvey, true);
-  console.log('  ✓ [Pass] Case 1: 점심 세미나 변환 (심화설문)');
+  assert.strictEqual(converted1.processState, 2);
+  assert.strictEqual(converted1.cancelProcessState, -1);
+  assert.strictEqual(converted1.seminarCompleted, 0);
+
+  const raw1 = convertApiItemToRawSeminar(item1);
+  assert.strictEqual(raw1.hasIcoApply, true);
+  assert.strictEqual(raw1.processState, 2);
+  console.log('  ✓ [Pass] Case 1: 점심 세미나 변환 (심화설문, processState=2 -> hasIcoApply=true)');
 
   // Case 2: 저녁 세미나(17:00), 포인트 미지급(survey: null), 일반설문
   const item2: FutureSeminarApiItem = {
@@ -169,6 +178,7 @@ async function testSeminarApiConversion() {
         statusText: '200',
         headers: {},
         body: JSON.stringify({
+          surveyState: 2,
           seminarDetail: {
             seminarId: 5587,
             seminarNm: '전공의를 위한 응급실 증례강의',
@@ -188,6 +198,7 @@ async function testSeminarApiConversion() {
         statusText: '200',
         headers: {},
         body: JSON.stringify({
+          surveyState: 5,
           seminarDetail: {
             seminarId: 5576,
             seminarNm: '오피스요가',
@@ -214,12 +225,14 @@ async function testSeminarApiConversion() {
   assert.strictEqual(detail5587.success, true);
   assert.strictEqual(detail5587.isPointExcluded, false);
   assert.strictEqual(detail5587.survey?.point, 1000);
-  console.log('  ✓ [Pass] Case 7: fetchSeminarDetail - 포인트 1000P 지급 세미나 판정');
+  assert.strictEqual(detail5587.surveyState, 2);
+  console.log('  ✓ [Pass] Case 7: fetchSeminarDetail - 포인트 1000P 지급 및 surveyState=2 세미나 판정');
 
   const detail5576 = await fetchSeminarDetail(5576);
   assert.strictEqual(detail5576.success, true);
   assert.strictEqual(detail5576.isPointExcluded, true);
-  console.log('  ✓ [Pass] Case 8: fetchSeminarDetail - survey: null 일 때 포인트 미지급 판정');
+  assert.strictEqual(detail5576.surveyState, 5);
+  console.log('  ✓ [Pass] Case 8: fetchSeminarDetail - survey: null 및 surveyState=5 판정');
 
   (httpClientModule as unknown as { httpGet: unknown }).httpGet = originalHttpGet;
 
