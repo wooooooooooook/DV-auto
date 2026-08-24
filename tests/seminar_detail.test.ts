@@ -3,10 +3,17 @@ import {
   formatSurveyStatus,
   formatMyParticipation,
   formatSeminarDetail,
+  convertDetailToSeminarListItem,
+  updateStoredSeminarFromDetail,
+  extractSeminarIds,
+  run,
   type SeminarDetail,
   type SeminarDetailResponse,
 } from '../src/tasks/seminar_detail';
 import { ProcessState, SurveyState } from '../src/modules/seminar_api';
+import * as storage from '../src/services/storage';
+import { SEMINAR_LIST_KEY, type SeminarListItem } from '../src/tasks/apply_seminar';
+import * as httpClient from '../src/modules/http_client';
 
 function assert(condition: boolean, msg: string) {
   if (!condition) {
@@ -324,6 +331,149 @@ export async function runTests() {
     '입장완료 및 설문완료',
   );
   console.log('  ✓ [Pass] 내 참여 현황 매핑 검증 성공');
+
+  // Case 6: convertDetailToSeminarListItem 변환 검증
+  console.log('\n--- Case 6: convertDetailToSeminarListItem 변환 검증 ---');
+  const converted5574 = convertDetailToSeminarListItem(mock5574Detail, mock5574Raw);
+  assert(converted5574.seminarId === '5574', '5574 seminarId 일치');
+  assert(converted5574.name === '[재] ALL 4 ONE Symposium', '5574 name 일치');
+  assert(converted5574.date === '2026-08-21', '5574 date 일치');
+  assert(converted5574.time === '17:00~18:30', '5574 time 일치');
+  assert(converted5574.nightTime === true, '5574 17시는 nightTime=true');
+  assert(converted5574.isAdvancedSurvey === true, '5574 useDepthSurvey=Y 심화설문');
+  assert(converted5574.isPointExcluded === false, '5574 point 1000P 지급 세미나');
+  assert(converted5574.processState === 8, '5574 processState=8');
+  assert(converted5574.seminarCompleted === 1, '5574 seminarCompleted=1');
+  assert(converted5574.currentCount === '6274', '5574 currentCount 일치');
+  assert(converted5574.totalCount === '7000', '5574 totalCount 일치');
+  assert(converted5574.detectedDate === '2026-08-18', '5574 createDt 기준 detectedDate');
+
+  const converted5572 = convertDetailToSeminarListItem(mock5572Detail, mock5572Raw);
+  assert(converted5572.seminarId === '5572', '5572 seminarId 일치');
+  assert(converted5572.date === '2026-09-01', '5572 date 일치');
+  assert(converted5572.time === '13:00~13:40', '5572 time 일치');
+  assert(converted5572.nightTime === false, '5572 13시는 nightTime=false');
+  assert(converted5572.isPointExcluded === true, '5572 survey 없음 (포인트 미지급)');
+  assert(converted5572.processState === 3, '5572 processState=3 (신청완료)');
+  console.log('  ✓ [Pass] convertDetailToSeminarListItem 변환 검증 성공');
+
+  // Case 7: updateStoredSeminarFromDetail 신규 세미나 추가 검증
+  console.log('\n--- Case 7: updateStoredSeminarFromDetail 신규 세미나 추가 검증 ---');
+  const backupList = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
+  try {
+    storage.set(SEMINAR_LIST_KEY, []); // 초기화
+    const updated1 = updateStoredSeminarFromDetail(mock5574Detail, mock5574Raw);
+    assert(updated1.length === 1, '리스트에 1개 추가됨');
+    assert(updated1[0].seminarId === '5574', '추가된 세미나 ID 5574');
+    assert(updated1[0].name === '[재] ALL 4 ONE Symposium', '추가된 세미나 명 일치');
+
+    const updated2 = updateStoredSeminarFromDetail(mock5572Detail, mock5572Raw);
+    assert(updated2.length === 2, '리스트에 2개 추가됨');
+    assert(updated2[1].seminarId === '5572', '추가된 세미나 ID 5572');
+    console.log('  ✓ [Pass] updateStoredSeminarFromDetail 신규 세미나 추가 검증 성공');
+
+    // Case 8: updateStoredSeminarFromDetail 기존 세미나 정보 갱신 및 포인트 상태 보존 검증
+    console.log('\n--- Case 8: updateStoredSeminarFromDetail 기존 세미나 merge 검증 ---');
+    // 세미나 5574에 이미 포인트 지급 완료 정보가 있는 상태로 설정
+    storage.set(SEMINAR_LIST_KEY, [
+      {
+        seminarId: '5574',
+        name: '구 세미나명',
+        url: 'https://m.doctorville.co.kr/cme/seminar/5574',
+        date: '2026-08-21',
+        time: '17:00~18:30',
+        currentCount: '1000',
+        totalCount: '7000',
+        nightTime: true,
+        isAdvancedSurvey: false,
+        pointPaid: true,
+        point: 1000,
+        pointText: '1,000P',
+        pointDate: '2026-08-21',
+        pointCheckedAt: '2026-08-21T18:30:00Z',
+        detectedDate: '2026-08-15',
+        detectedAt: '2026-08-15T00:00:00Z',
+      },
+    ]);
+
+    const merged = updateStoredSeminarFromDetail(mock5574Detail, mock5574Raw);
+    assert(merged.length === 1, '동일 ID 세미나는 병합되어 1개 유지');
+    const item = merged[0];
+    assert(item.name === '[재] ALL 4 ONE Symposium', '최신 이름으로 갱신');
+    assert(item.currentCount === '6274', '최신 신청자 수(6274)로 갱신');
+    assert(item.isAdvancedSurvey === true, '최신 심화설문 여부(true)로 갱신');
+    assert(item.pointPaid === true, '기존 포인트 지급 상태(true) 보존');
+    assert(item.point === 1000, '기존 포인트 금액(1000) 보존');
+    assert(item.detectedDate === '2026-08-15', '기존 detectedDate 보존');
+    assert(item.detectedAt === '2026-08-15T00:00:00Z', '기존 detectedAt 보존');
+    console.log('  ✓ [Pass] updateStoredSeminarFromDetail 기존 세미나 merge 검증 성공');
+
+    // Case 9: run() 실행 시 리스트 자동 업데이트 통합 검증
+    console.log('\n--- Case 9: run() 실행 시 리스트 자동 업데이트 통합 검증 ---');
+    storage.set(SEMINAR_LIST_KEY, []);
+    const originalHttpGetJson = httpClient.httpGetJson;
+    (httpClient as any).httpGetJson = async (url: string) => {
+      if (url.includes('5574')) {
+        return mock5574Raw;
+      }
+      throw new Error('Not found');
+    };
+
+    try {
+      const runResult = await run({ args: { seminarId: '5574' } });
+      assert(runResult.success === true, 'run() 실행 성공');
+      const listAfterRun = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
+      assert(listAfterRun.length === 1, 'run() 실행 후 리스트에 1개 항목 등록됨');
+      assert(listAfterRun[0].seminarId === '5574', '등록된 항목 ID가 5574여야 함');
+      console.log('  ✓ [Pass] run() 실행 시 리스트 자동 업데이트 통합 검증 성공');
+    } finally {
+      (httpClient as any).httpGetJson = originalHttpGetJson;
+    }
+
+    // Case 10: extractSeminarIds 다양한 형식 파싱 검증
+    console.log('\n--- Case 10: extractSeminarIds 다양한 형식 파싱 검증 ---');
+    assert(extractSeminarIds('5566').join(',') === '5566', '단일 ID 파싱');
+    assert(extractSeminarIds('5566 5567 5568').join(',') === '5566,5567,5568', '공백 구분 여러 ID 파싱');
+    assert(extractSeminarIds('5566, 5567,5568').join(',') === '5566,5567,5568', '쉼표 구분 ID 파싱');
+    assert(extractSeminarIds('/seminar_detail 5566 5567').join(',') === '5566,5567', '명령어 포함 문자열 파싱');
+    assert(
+      extractSeminarIds('8/12 5525\n8/13 5526 5527').join(',') === '5525,5526,5527',
+      '줄바꿈 및 날짜 텍스트 포함 파싱',
+    );
+    assert(extractSeminarIds({ seminarId: '5566' }).join(',') === '5566', '객체 seminarId 파싱');
+    assert(extractSeminarIds({ seminarIds: '5566, 5567' }).join(',') === '5566,5567', '객체 seminarIds 문자열 파싱');
+    assert(extractSeminarIds({ seminarIds: ['5566', '5567'] }).join(',') === '5566,5567', '객체 seminarIds 배열 파싱');
+    assert(extractSeminarIds('5566 5566 5567').join(',') === '5566,5567', '중복 ID 제거 확인');
+    console.log('  ✓ [Pass] extractSeminarIds 파싱 검증 성공');
+
+    // Case 11: 복수 세미나 ID 조회 시 run() 실행 및 다중 세미나 리스트 업데이트 통합 검증
+    console.log('\n--- Case 11: 복수 세미나 ID 조회 시 run() 통합 검증 ---');
+    storage.set(SEMINAR_LIST_KEY, []);
+    (httpClient as any).httpGetJson = async (url: string) => {
+      if (url.includes('5574')) return mock5574Raw;
+      if (url.includes('5572')) return mock5572Raw;
+      throw new Error('Not found');
+    };
+
+    try {
+      const multiRunResult = await run({ args: { seminarIds: '5574 5572' } });
+      assert(multiRunResult.success === true, '복수 조회 run() 성공');
+      assert(Boolean(multiRunResult.messages && multiRunResult.messages.length === 2), '2개의 메시지 반환');
+      assert(Boolean(multiRunResult.results && multiRunResult.results.length === 2), '2개의 결과 아이템 반환');
+      assert(multiRunResult.results?.[0]?.seminarId === '5574', '첫번째 결과 5574');
+      assert(multiRunResult.results?.[1]?.seminarId === '5572', '두번째 결과 5572');
+
+      const listAfterMultiRun = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
+      assert(listAfterMultiRun.length === 2, '복수 조회 후 리스트에 2개 항목 모두 등록됨');
+      const idsInStorage = listAfterMultiRun.map((s) => s.seminarId).sort();
+      assert(idsInStorage.join(',') === '5572,5574', '저장된 세미나 ID 목록 일치');
+      console.log('  ✓ [Pass] 복수 세미나 ID 조회 시 run() 통합 검증 성공');
+    } finally {
+      (httpClient as any).httpGetJson = originalHttpGetJson;
+    }
+  } finally {
+    storage.set(SEMINAR_LIST_KEY, backupList);
+  }
 
   console.log('\n🎉 모든 seminar_detail 단위 테스트 성공!\n');
 }

@@ -1,6 +1,9 @@
 import { httpGetJson } from '../modules/http_client';
 import * as logger from '../services/logger';
-import { ProcessState, SurveyState } from '../modules/seminar_api';
+import { parseSeminarDateTime, checkIsAdvancedSurvey, ProcessState, SurveyState } from '../modules/seminar_api';
+import { SEMINAR_LIST_KEY, mergeSeminar, type SeminarListItem } from './apply_seminar';
+import * as storage from '../services/storage';
+import { getSeminarIdFromUrl } from '../modules/utils';
 
 const SEMINAR_DETAIL_API = 'https://m-api.doctorville.co.kr/api/mw/seminars/';
 
@@ -167,8 +170,81 @@ export interface SeminarAggreeInfo {
   isActive: number;
 }
 
+export function convertDetailToSeminarListItem(data: SeminarDetail, _raw?: SeminarDetailResponse): SeminarListItem {
+  const { date, time, nightTime } = parseSeminarDateTime(data.startDt, data.endDt);
+  const isAdvancedSurvey = checkIsAdvancedSurvey(data.useDepthSurvey);
+  const isPointExcluded = !data.survey || data.survey.point === undefined || Number(data.survey.point) <= 0;
+  const processStateNum = data.processState !== undefined ? Number(data.processState) : undefined;
+  const cancelProcessStateNum = data.cancelProcessState !== undefined ? Number(data.cancelProcessState) : undefined;
+  const seminarCompletedNum =
+    data.seminarCompleted !== undefined
+      ? typeof data.seminarCompleted === 'boolean'
+        ? data.seminarCompleted
+          ? 1
+          : 0
+        : Number(data.seminarCompleted)
+      : undefined;
+
+  let detectedDate = '';
+  if (typeof data.createDt === 'string' && data.createDt.trim().length > 0) {
+    detectedDate = data.createDt.split(' ')[0] || '';
+  }
+  if (!detectedDate) {
+    detectedDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+  }
+
+  const now = new Date().toISOString();
+
+  return {
+    seminarId: String(data.seminarId),
+    name: data.seminarNm || '',
+    url: `https://m.doctorville.co.kr/cme/seminar/${data.seminarId}`,
+    date: date || '',
+    time: time || '',
+    currentCount: data.applyCnt !== undefined && data.applyCnt !== null ? String(data.applyCnt) : '',
+    totalCount: data.maxPeopleCnt !== undefined && data.maxPeopleCnt !== null ? String(data.maxPeopleCnt) : '',
+    nightTime,
+    isAdvancedSurvey,
+    isPointExcluded,
+    processState: processStateNum,
+    cancelProcessState: cancelProcessStateNum,
+    seminarCompleted: seminarCompletedNum,
+    detectedDate,
+    detectedAt: now,
+  };
+}
+
+export function updateStoredSeminarFromDetail(data: SeminarDetail, raw?: SeminarDetailResponse): SeminarListItem[] {
+  const currentList = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
+  const sid = String(data.seminarId);
+  const incoming = convertDetailToSeminarListItem(data, raw);
+
+  let found = false;
+  const updatedList = currentList.map((item) => {
+    const itemId = item.seminarId || getSeminarIdFromUrl(item.url);
+    if (itemId && itemId === sid) {
+      found = true;
+      return mergeSeminar(item, {
+        ...incoming,
+        detectedDate: item.detectedDate || incoming.detectedDate,
+        detectedAt: item.detectedAt || incoming.detectedAt,
+      });
+    }
+    return item;
+  });
+
+  if (!found) {
+    updatedList.push(incoming);
+  }
+
+  storage.set(SEMINAR_LIST_KEY, updatedList);
+  logger.info(`Updated seminar_list with seminar ${sid} from detail inquiry`);
+  return updatedList;
+}
+
 export async function fetchSeminarDetail(
   seminarId: string,
+  options?: { updateList?: boolean },
 ): Promise<{ success: boolean; data?: SeminarDetail; raw?: SeminarDetailResponse; error?: string }> {
   try {
     const url = `${SEMINAR_DETAIL_API}${seminarId}`;
@@ -176,6 +252,14 @@ export async function fetchSeminarDetail(
 
     if (!response.seminarDetail) {
       return { success: false, error: '세미나 정보를 찾을 수 없습니다.' };
+    }
+
+    if (options?.updateList !== false) {
+      try {
+        updateStoredSeminarFromDetail(response.seminarDetail, response);
+      } catch (err) {
+        logger.warn(`Failed to update seminar list for seminar ${seminarId}:`, err);
+      }
     }
 
     return { success: true, data: response.seminarDetail, raw: response };
@@ -343,22 +427,141 @@ export function formatRawResponse(raw: SeminarDetailResponse): string[] {
   return chunks.map((chunk, idx) => `*Raw API Response (${idx + 1}/${chunks.length}):*\n\`\`\`json\n${chunk}\n\`\`\``);
 }
 
-export async function run({
-  args,
-}: {
-  args: { seminarId: string };
-}): Promise<{ success: boolean; message: string; rawMessages?: string[] }> {
-  const seminarId = args?.seminarId;
-  if (!seminarId) {
-    return { success: false, message: '세미나 ID가 필요합니다. 예: /seminar_detail 5566' };
+export function extractSeminarIds(
+  input?: string | string[] | { seminarId?: string | string[]; seminarIds?: string | string[] },
+): string[] {
+  if (!input) return [];
+  const rawList: string[] = [];
+
+  const addValue = (v: unknown) => {
+    if (typeof v === 'number') {
+      rawList.push(String(v));
+    } else if (typeof v === 'string') {
+      const tokens = v.split(/[\s,]+/);
+      for (const token of tokens) {
+        const cleaned = token.trim();
+        if (/^\d+$/.test(cleaned)) {
+          rawList.push(cleaned);
+        } else {
+          const matched = cleaned.match(/\b\d{4,6}\b/g);
+          if (matched) rawList.push(...matched);
+        }
+      }
+    } else if (Array.isArray(v)) {
+      for (const item of v) addValue(item);
+    }
+  };
+
+  if (typeof input === 'object' && !Array.isArray(input)) {
+    if ('seminarIds' in input) addValue(input.seminarIds);
+    if ('seminarId' in input) addValue(input.seminarId);
+  } else {
+    addValue(input);
   }
 
-  const result = await fetchSeminarDetail(seminarId);
-  if (!result.success || !result.data) {
-    return { success: false, message: result.error || '세미나 정보를 가져올 수 없습니다.' };
+  return Array.from(new Set(rawList));
+}
+
+export interface SeminarDetailResultItem {
+  seminarId: string;
+  success: boolean;
+  data?: SeminarDetail;
+  message: string;
+  error?: string;
+}
+
+export interface SeminarDetailRunResult {
+  success: boolean;
+  message: string;
+  messages?: string[];
+  rawMessages?: string[];
+  results?: SeminarDetailResultItem[];
+}
+
+export async function run(
+  input?:
+    | {
+        args?: { seminarId?: string | string[]; seminarIds?: string | string[] };
+        seminarId?: string | string[];
+        seminarIds?: string | string[];
+      }
+    | string
+    | string[],
+): Promise<SeminarDetailRunResult> {
+  let ids: string[] = [];
+  if (typeof input === 'string' || Array.isArray(input)) {
+    ids = extractSeminarIds(input);
+  } else if (input && typeof input === 'object') {
+    ids = extractSeminarIds(input.args || input);
   }
 
-  const formatted = formatSeminarDetail(result.data, result.raw);
-  const rawMessages = result.raw ? formatRawResponse(result.raw) : undefined;
-  return { success: true, message: formatted, rawMessages };
+  if (ids.length === 0) {
+    return {
+      success: false,
+      message: '세미나 ID가 필요합니다. 예: /seminar_detail 5566 또는 /seminar_detail 5566 5567',
+    };
+  }
+
+  // 단일 세미나 조회인 경우 (기존 동작 및 rawMessages 완벽 호환)
+  if (ids.length === 1) {
+    const seminarId = ids[0];
+    const result = await fetchSeminarDetail(seminarId);
+    if (!result.success || !result.data) {
+      return { success: false, message: result.error || '세미나 정보를 가져올 수 없습니다.' };
+    }
+
+    const formatted = formatSeminarDetail(result.data, result.raw);
+    const rawMessages = result.raw ? formatRawResponse(result.raw) : undefined;
+    return {
+      success: true,
+      message: formatted,
+      messages: [formatted],
+      rawMessages,
+      results: [
+        {
+          seminarId,
+          success: true,
+          data: result.data,
+          message: formatted,
+        },
+      ],
+    };
+  }
+
+  // 복수 세미나 조회인 경우
+  const formattedMessages: string[] = [];
+  const results: SeminarDetailResultItem[] = [];
+
+  for (const seminarId of ids) {
+    const result = await fetchSeminarDetail(seminarId);
+    if (result.success && result.data) {
+      const formatted = formatSeminarDetail(result.data, result.raw);
+      formattedMessages.push(formatted);
+      results.push({
+        seminarId,
+        success: true,
+        data: result.data,
+        message: formatted,
+      });
+    } else {
+      const errMsg = `*세미나 상세* (ID: ${seminarId})\n❌ 조회 실패: ${result.error || '정보를 찾을 수 없습니다.'}`;
+      formattedMessages.push(errMsg);
+      results.push({
+        seminarId,
+        success: false,
+        message: errMsg,
+        error: result.error,
+      });
+    }
+  }
+
+  const successCount = results.filter((r) => r.success).length;
+  const overallSuccess = successCount > 0;
+
+  return {
+    success: overallSuccess,
+    message: formattedMessages.join('\n\n────────────────\n\n'),
+    messages: formattedMessages,
+    results,
+  };
 }

@@ -320,11 +320,7 @@ taskRegistry.registerTask(checkSeminarPointTask);
 const seminarDetailTask: Task = {
   name: 'seminar_detail',
   run: async (ctx) => {
-    const seminarId = ctx.args?.seminarId;
-    if (!seminarId) {
-      return { success: false, message: '세미나 ID가 필요합니다. 예: /seminar_detail 5566' };
-    }
-    return await seminarDetailTaskModule.run({ args: { seminarId } });
+    return await seminarDetailTaskModule.run(ctx);
   },
 };
 taskRegistry.registerTask(seminarDetailTask);

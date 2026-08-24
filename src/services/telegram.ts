@@ -11,6 +11,7 @@ import * as runner from '../core/runner';
 import * as taskRegistry from '../core/taskRegistry';
 import { inspect } from '../modules/inspect';
 import { sendNotificationToChannel } from '../modules/utils';
+import { extractSeminarIds } from '../tasks/seminar_detail';
 
 const ADMIN_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const NOTICE_BOT_TOKEN = process.env.NOTICE_BOT_TOKEN;
@@ -934,18 +935,35 @@ if (adminBot) {
 
     try {
       const messageText = ctx.message?.text || '';
-      const args = messageText.split(' ').slice(1);
-      const seminarId = args[0]?.trim();
-      if (!seminarId) {
-        return ctx.reply('사용법: /seminar_detail <세미나번호>\n예: /seminar_detail 5566');
+      const seminarIds = extractSeminarIds(messageText);
+      if (seminarIds.length === 0) {
+        return ctx.reply(
+          '사용법: /seminar_detail <세미나번호> [세미나번호...]\n예: /seminar_detail 5566\n   또는 /seminar_detail 5566 5567 5568\n   또는 여러 줄 입력:\n8/12 5525\n8/13 5526 5527',
+        );
       }
 
-      const result = await runner.runTask(task, { args: { seminarId } });
+      const result = await runner.runTask(task, {
+        args: { seminarIds: seminarIds.join(','), seminarId: seminarIds[0] },
+      });
 
       if (result && typeof result === 'object') {
-        const r = result as { message?: string; success?: boolean; rawMessages?: string[] };
-        if (r.success !== false && r.message) await ctx.reply(r.message, { parse_mode: 'Markdown' });
-        else if (!r.success && r.message) await ctx.reply(r.message);
+        const r = result as {
+          message?: string;
+          success?: boolean;
+          rawMessages?: string[];
+          messages?: string[];
+        };
+
+        if (r.messages && r.messages.length > 1) {
+          for (const msg of r.messages) {
+            await ctx.reply(msg, { parse_mode: 'Markdown' });
+          }
+        } else if (r.success !== false && r.message) {
+          await ctx.reply(r.message, { parse_mode: 'Markdown' });
+        } else if (!r.success && r.message) {
+          await ctx.reply(r.message);
+        }
+
         for (const rawMsg of r.rawMessages ?? []) {
           await ctx.reply(rawMsg, { parse_mode: 'Markdown' });
         }
@@ -1440,7 +1458,7 @@ const adminCommands = [
   { command: 'delete_seminar_quiz', description: '족보 삭제' },
   { command: 'list_quiz', description: 'quiz.json 등록 제품 목록' },
   { command: 'delete_quiz', description: 'quiz.json 항목 삭제' },
-  { command: 'seminar_detail', description: '세미나 번호로 상세 정보 조회' },
+  { command: 'seminar_detail', description: '세미나 번호로 상세 정보 조회 (여러 개 가능)' },
   // 3. 포인트 & 교환
   { command: 'check_point', description: '현재 포인트 확인' },
   { command: 'check_seminar_point', description: '세미나 번호로 포인트 지급 확인' },
