@@ -370,20 +370,12 @@ const monitorLunchSeminarsTask: Task = {
   schedule: LUNCH_MONITOR_CRON,
   timezone: TIMEZONE,
   run: async (ctx) => {
-    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    try {
-      await utils.ensureLoggedIn({ page, context });
-      await applySeminarTask
-        .run({ page, context })
-        .catch((err) =>
-          logger.warn('monitor_lunch_seminars: apply_seminar 선실행 실패, 모니터링은 계속 진행합니다', err),
-        );
-      return await monitorLunchSeminars.run({ page, context, isAutoResume: ctx.isAutoResume });
-    } finally {
-      await browser.close();
-    }
+    await applySeminarTask
+      .run()
+      .catch((err) =>
+        logger.warn('monitor_lunch_seminars: apply_seminar 선실행 실패, 모니터링은 계속 진행합니다', err),
+      );
+    return await monitorLunchSeminars.run({ isAutoResume: ctx.isAutoResume });
   },
 };
 taskRegistry.registerTask(monitorLunchSeminarsTask);
@@ -393,20 +385,12 @@ const monitorDinnerSeminarsTask: Task = {
   schedule: DINNER_MONITOR_CRON,
   timezone: TIMEZONE,
   run: async (ctx) => {
-    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    try {
-      await utils.ensureLoggedIn({ page, context });
-      await applySeminarTask
-        .run({ page, context })
-        .catch((err) =>
-          logger.warn('monitor_dinner_seminars: apply_seminar 선실행 실패, 모니터링은 계속 진행합니다', err),
-        );
-      return await monitorDinnerSeminars.run({ page, context, isAutoResume: ctx.isAutoResume });
-    } finally {
-      await browser.close();
-    }
+    await applySeminarTask
+      .run()
+      .catch((err) =>
+        logger.warn('monitor_dinner_seminars: apply_seminar 선실행 실패, 모니터링은 계속 진행합니다', err),
+      );
+    return await monitorDinnerSeminars.run({ isAutoResume: ctx.isAutoResume });
   },
 };
 taskRegistry.registerTask(monitorDinnerSeminarsTask);

@@ -9,6 +9,7 @@ console.log('===========================================================\n');
 const testFiles = [
   'seminar_api.test.ts',
   'seminar_detail.test.ts',
+  'monitor_seminars_api.test.ts',
   'apply_seminar_changes.test.ts',
   'apply_seminar_http_precheck.test.ts',
   'apply_seminar_no_browser.test.ts',
