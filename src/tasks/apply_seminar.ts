@@ -885,9 +885,16 @@ export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<Ta
       await sendSeminarChangesToSubscribers(changeNotificationText).catch(() => {});
     }
 
-    const completionCount = mainHtmlBody ? parseCompletionCountHtml(mainHtmlBody) : currentSeminars.length;
+    // 신청 가능한 세미나가 있으면 Playwright 전체 실행으로 위임
+    const hasApplyTarget = currentSeminars.some((s) => s.hasIcoApply);
+    if (hasApplyTarget) {
+      // run()은 자체적으로 저장소 갱신·알림·포인트 동기화를 모두 수행하므로
+      // 여기까지 한 작업은 버리고 run() 결과만 반환
+      return run({}, { ...options, notifyNewSeminarsToTelegram: false, silentIfNoNew: true });
+    }
+
     const totalSeminarsAvailable = currentSeminars.length;
-    const message = `✅ ${completionCount}개 세미나 신청 완료! (${completionCount}/${totalSeminarsAvailable})`;
+    const message = `🔄 세미나 목록 갱신 완료 (${totalSeminarsAvailable}개)`;
 
     const result: TaskResult = { success: true, message };
     if (silentIfNoNew && newlyAdded.length === 0) result.silent = true;
