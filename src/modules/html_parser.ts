@@ -8,6 +8,7 @@ export function isAuthExpiredHtml(html: string): boolean {
 import * as cheerio from 'cheerio';
 import type { RawSeminarData } from '../tasks/apply_seminar';
 import type { SeminarPointResult } from '../tasks/check_seminar_point';
+import { ProcessState } from './seminar_api';
 
 /**
  * 로그인 상태 확인 HTML 파싱
@@ -84,7 +85,18 @@ export function parseSeminarListHtml(
 
       const isAdvancedSurvey = $link.find('.ic_survey').length > 0;
 
-      const hasIcoApply = $link.find('.ico_apply').length > 0;
+      const hasIcoApply = $link.find(".ico_apply").length > 0;
+      const isCompletion = $link.find(".ico_completion").length > 0;
+      const isFinish = $link.find(".ico_finish").length > 0;
+
+      let processState: number | undefined;
+      if (hasIcoApply) {
+        processState = ProcessState.PROCESS_APPLY;
+      } else if (isCompletion) {
+        processState = ProcessState.PROCESS_CANCEL;
+      } else if (isFinish) {
+        processState = ProcessState.PROCESS_EXCESS;
+      }
 
       const absoluteUrl = new URL(href, baseUrl).toString();
 
@@ -98,6 +110,7 @@ export function parseSeminarListHtml(
         nightTime,
         isAdvancedSurvey,
         hasIcoApply,
+        processState,
       });
     });
   });

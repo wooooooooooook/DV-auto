@@ -19,6 +19,7 @@ import {
   parseSeminarDateTime,
   checkIsAdvancedSurvey,
   checkIsPointExcluded,
+  ProcessState,
 } from '../modules/seminar_api';
 import { searchSeminarPoints } from './check_seminar_point';
 import * as storage from '../services/storage';
@@ -665,8 +666,17 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
   let totalSeminarsAvailable = currentSeminars.length;
 
   if (!hasApplyTarget) {
-    const completionCount = mainHtmlBody ? parseCompletionCountHtml(mainHtmlBody) : totalSeminarsAvailable;
-    const message = `✅ ${completionCount}개 세미나 신청 완료! (${completionCount}/${totalSeminarsAvailable})`;
+    const completionCount = currentSeminars.filter(
+      (s) => s.processState === ProcessState.PROCESS_CANCEL
+    ).length;
+    const closedCount = currentSeminars.filter(
+      (s) => s.processState === ProcessState.PROCESS_EXCESS
+    ).length;
+
+    let message = `✅ ${completionCount}개 세미나 신청 완료! (${completionCount}/${totalSeminarsAvailable})`;
+    if (closedCount > 0) {
+      message += `\n ${closedCount}개는 신청 마감되어 신청하지 못했습니다.`;
+    }
 
     const result: TaskResult = { success: true, message };
     if (options.silentIfNoNew && newlyAdded.length === 0) result.silent = true;
