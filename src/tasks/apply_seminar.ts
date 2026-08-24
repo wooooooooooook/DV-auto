@@ -740,8 +740,8 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
   }
 
   try {
-    // 1단계: HTTP API로 세미나 신청 시도 (약관 처리 포함)
-    const apiAppliedIds = new Set<string>();
+    // 1단계: HTTP API로 세미나 신청 시도 (약관 처리 및 fetchSeminarDetail 재조회 검증 포함)
+    const confirmedAppliedIds = new Set<string>();
     for (const seminarId of targetSeminarIds) {
       try {
         const applyRes = await applySeminarWithTerms(seminarId);
@@ -750,41 +750,20 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
           await sendTelegram(msg).catch(() => {});
           return { success: false, message: msg };
         }
-        if (applyRes.success) {
-          apiAppliedIds.add(seminarId);
+        if (applyRes.success && isAppliedSeminar(applyRes.processState)) {
+          confirmedAppliedIds.add(seminarId);
         } else {
           console.warn(
-            `[apply_seminar] seminarId ${seminarId} API 신청 실패, Playwright 폴백 예정:`,
+            `[apply_seminar] seminarId ${seminarId} API 신청 실패 (상태 미확정), Playwright 폴백 대상에 추가:`,
             applyRes.errorMessage,
           );
         }
       } catch (err) {
-        console.warn(`[apply_seminar] seminarId ${seminarId} API 신청 중 예외 발생, Playwright 폴백 예정:`, err);
+        console.warn(`[apply_seminar] seminarId ${seminarId} API 신청 중 예외 발생, Playwright 폴백 대상에 추가:`, err);
       }
     }
 
-    // 신청 결과 1차 검증 (상세 API 재조회)
-    const confirmedAppliedIds = new Set<string>();
-    for (const seminarId of targetSeminarIds) {
-      try {
-        const detailRes = await fetchSeminarDetail(seminarId);
-        if (detailRes.success && detailRes.rawResponse && typeof detailRes.rawResponse === 'object') {
-          const rawDetail = detailRes.rawResponse as { seminarDetail?: { processState?: number | string } };
-          const ps = Number(rawDetail.seminarDetail?.processState);
-          if (isAppliedSeminar(ps)) {
-            confirmedAppliedIds.add(seminarId);
-          }
-        } else if (apiAppliedIds.has(seminarId)) {
-          confirmedAppliedIds.add(seminarId);
-        }
-      } catch {
-        if (apiAppliedIds.has(seminarId)) {
-          confirmedAppliedIds.add(seminarId);
-        }
-      }
-    }
-
-    // 2단계: API로 신청되지 않은 세미나가 있는 경우에만 Playwright 브라우저 폴백 실행
+    // 2단계: API로 신청 완료(isAppliedSeminar=true)가 확정되지 않은 세미나에 대해 Playwright 브라우저 폴백 실행
     const fallbackTargets = targetSeminarIds.filter((id) => !confirmedAppliedIds.has(id));
 
     let page = ctx.page;

@@ -150,6 +150,26 @@ export type FetchSeminarDetailResult =
     };
 
 /**
+ * processState 기반 신청 완료 여부 판정
+ * PROCESS_CANCEL(3) = 이미 신청 완료 (취소 가능 상태)
+ * PROCESS_ENTER(1) = 입장 가능 (신청 완료)
+ * PROCESS_STARTED(6), PROCESS_END(7), PROCESS_COMPLETED(8) = 이미 진행/종료
+ */
+export function isAppliedSeminar(processState?: number | string): boolean {
+  if (processState === undefined || processState === null) return false;
+  const psNum = Number(processState);
+  return (
+    [
+      ProcessState.PROCESS_CANCEL,
+      ProcessState.PROCESS_ENTER,
+      ProcessState.PROCESS_STARTED,
+      ProcessState.PROCESS_END,
+      ProcessState.PROCESS_COMPLETED,
+    ] as number[]
+  ).includes(psNum);
+}
+
+/**
  * 24시간제 기준 야간(저녁) 세미나 여부 판별 (16시 이후 시작)
  */
 export function isNightTimeSeminar(startHour: number): boolean {
@@ -681,27 +701,50 @@ export async function applySeminarApi(
   }
 }
 
+export interface ApplySeminarResult extends ApiOperationResult {
+  alreadyApplied?: boolean;
+  processState?: number;
+}
+
 /**
  * 약관 확인 및 (선택) 미포함 약관 동의 후 세미나 신청 진행
+ * 1. 사전 상태 조회: 이미 신청 완료 상태인지 확인하여 오해 방지
+ * 2. (선택) 미포함 약관이 있으면 약관 동의 제출
+ * 3. 세미나 신청 API (applySeminarApi) 호출
+ * 4. 성공 응답이 오더라도 즉시 성공 처리하지 않고, fetchSeminarDetail(seminarId)를 재조회하여
+ *    isAppliedSeminar(processState)가 true일 때만 최종 신청 성공 확정 (false이면 실패로 간주)
  */
 export async function applySeminarWithTerms(
   seminarId: number | string,
   termsInfo?: TermsInfo | null,
-): Promise<ApiOperationResult> {
+): Promise<ApplySeminarResult> {
   const sid = String(seminarId).trim();
 
+  // 1. 사전 상태 및 약관 정보 확인
   let currentTermsInfo = termsInfo;
-  if (currentTermsInfo === undefined) {
-    const detail = await fetchSeminarDetail(sid);
-    if (detail.isAuthExpired) {
-      return { success: false, isAuthExpired: true, errorMessage: detail.errorMessage };
+  const preDetail = await fetchSeminarDetail(sid);
+  if (preDetail.isAuthExpired) {
+    return { success: false, isAuthExpired: true, errorMessage: preDetail.errorMessage };
+  }
+
+  if (preDetail.success && preDetail.rawResponse?.seminarDetail) {
+    const prePs = Number(preDetail.rawResponse.seminarDetail.processState);
+    if (isAppliedSeminar(prePs)) {
+      // 이미 신청 완료된 세미나인 경우
+      return {
+        success: true,
+        alreadyApplied: true,
+        isAuthExpired: false,
+        processState: prePs,
+        rawResponse: preDetail.rawResponse,
+      };
     }
-    if (detail.success) {
-      currentTermsInfo = (detail.rawResponse as SeminarDetailApiResponse)?.termsInfo ?? null;
+    if (currentTermsInfo === undefined) {
+      currentTermsInfo = preDetail.rawResponse.termsInfo ?? null;
     }
   }
 
-  // (선택)이 포함되지 않은 필수/일반 약관 옵션 ID 목록 추출
+  // 2. (선택)이 포함되지 않은 필수/일반 약관 옵션 ID 목록 추출 및 동의 제출
   const requiredTermsIds = getRequiredTermsOptionIds(currentTermsInfo);
   if (requiredTermsIds.length > 0) {
     const termsRes = await submitSeminarTermsAgree(sid, requiredTermsIds);
@@ -716,11 +759,52 @@ export async function applySeminarWithTerms(
     }
   }
 
-  // 세미나 신청 API 호출
+  // 3. 세미나 신청 API 호출
   const applyRes = await applySeminarApi(sid);
   if (applyRes.isAuthExpired) {
     return { success: false, isAuthExpired: true, errorMessage: applyRes.errorMessage };
   }
 
-  return applyRes;
+  if (!applyRes.success) {
+    return {
+      success: false,
+      isAuthExpired: false,
+      errorMessage: applyRes.errorMessage || '세미나 신청 API 호출 실패',
+      rawResponse: applyRes.rawResponse,
+    };
+  }
+
+  // 4. API가 성공 응답을 반환하더라도 상세 API를 재조회하여 isAppliedSeminar(processState) 검증
+  const postDetail = await fetchSeminarDetail(sid);
+  if (postDetail.isAuthExpired) {
+    return { success: false, isAuthExpired: true, errorMessage: postDetail.errorMessage };
+  }
+
+  if (!postDetail.success || !postDetail.rawResponse?.seminarDetail) {
+    return {
+      success: false,
+      isAuthExpired: false,
+      errorMessage: `신청 API 호출 성공 후 상세 재조회 실패: ${postDetail.errorMessage || '응답 없음'}`,
+      rawResponse: postDetail.rawResponse ?? applyRes.rawResponse,
+    };
+  }
+
+  const postPs = Number(postDetail.rawResponse.seminarDetail.processState);
+  if (!isAppliedSeminar(postPs)) {
+    return {
+      success: false,
+      isAuthExpired: false,
+      processState: postPs,
+      errorMessage: `신청 API 성공 응답 수신 후 상태 재조회 결과 미신청 상태 유지됨 (processState: ${postPs})`,
+      rawResponse: postDetail.rawResponse,
+    };
+  }
+
+  return {
+    success: true,
+    alreadyApplied: false,
+    isAuthExpired: false,
+    processState: postPs,
+    rawResponse: postDetail.rawResponse,
+  };
 }

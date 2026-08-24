@@ -121,6 +121,8 @@ async function testApplySeminarHttpPrecheck() {
 
     (seminarApiModule as unknown as { applySeminarWithTerms: unknown }).applySeminarWithTerms = async () => ({
       success: true,
+      alreadyApplied: false,
+      processState: ProcessState.PROCESS_CANCEL,
       isAuthExpired: false,
     });
 

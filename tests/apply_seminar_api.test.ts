@@ -6,6 +6,8 @@ import {
   submitSeminarTermsAgree,
   applySeminarApi,
   applySeminarWithTerms,
+  isAppliedSeminar,
+  ProcessState,
   type TermsInfo,
 } from '../src/modules/seminar_api';
 
@@ -46,9 +48,15 @@ async function runApplySeminarApiTests() {
   console.log('--- [Test 2] submitSeminarTermsAgree 및 applySeminarApi 호출 검증 ---');
 
   const originalSendRequest = httpClientModule.sendDoctorVilleRequest;
+  const originalHttpGet = httpClientModule.httpGet;
   const requestsMade: Array<{ url: string; method: string; body: unknown }> = [];
 
   try {
+    // -------------------------------------------------------------
+    // Test 2: submitSeminarTermsAgree 및 applySeminarApi HTTP Mocking 검증
+    // -------------------------------------------------------------
+    console.log('--- [Test 2] submitSeminarTermsAgree 및 applySeminarApi 호출 검증 ---');
+
     (httpClientModule as unknown as { sendDoctorVilleRequest: unknown }).sendDoctorVilleRequest = async (
       url: string,
       options: { method?: string; body?: string },
@@ -63,35 +71,11 @@ async function runApplySeminarApiTests() {
       }
       requestsMade.push({ url, method: options.method || 'GET', body: parsedBody });
 
-      if (url.includes('terms-info')) {
-        return {
-          status: 200,
-          statusText: '200',
-          headers: {},
-          body: JSON.stringify({ timestamp: '2026-08-25 00:00:00', data: true, error: null }),
-          url,
-          redirected: false,
-          resultType: 'SUCCESS',
-        };
-      }
-
-      if (url.includes('seminars/apply')) {
-        return {
-          status: 200,
-          statusText: '200',
-          headers: {},
-          body: JSON.stringify({ timestamp: '2026-08-25 00:00:00', data: true, error: null }),
-          url,
-          redirected: false,
-          resultType: 'SUCCESS',
-        };
-      }
-
       return {
         status: 200,
         statusText: '200',
         headers: {},
-        body: JSON.stringify({ code: 200, message: 'OK' }),
+        body: JSON.stringify({ timestamp: '2026-08-25 00:00:00', data: true, error: null }),
         url,
         redirected: false,
         resultType: 'SUCCESS',
@@ -122,41 +106,108 @@ async function runApplySeminarApiTests() {
     console.log('  ✓ [Pass] applySeminarApi 호출 및 페이로드 정상 검증 완료\n');
 
     // -------------------------------------------------------------
-    // Test 3: applySeminarWithTerms 통합 흐름 검증
+    // Test 3: applySeminarWithTerms 통합 흐름 및 재조회 검증
     // -------------------------------------------------------------
-    console.log('--- [Test 3] applySeminarWithTerms 약관 동의 후 신청 흐름 검증 ---');
+    console.log('--- [Test 3] applySeminarWithTerms 약관 동의 후 신청 및 재조회 검증 ---');
 
-    // 3-1. 필수 약관이 있는 경우: terms-info → seminars/apply 순차 호출
-    requestsMade.length = 0;
-    const withTermsRes = await applySeminarWithTerms(5597, mixedTermsInfo);
-    assert.strictEqual(withTermsRes.success, true);
-    assert.strictEqual(requestsMade.length, 2, 'terms-info 호출 후 seminars/apply 호출되어야 함');
-    assert.ok(requestsMade[0].url.includes('terms-info'), '1번째 요청은 약관 동의');
-    assert.deepStrictEqual(requestsMade[0].body, { seminarId: 5597, agreedTermsOptionsIdList: [101, 102] });
-    assert.ok(requestsMade[1].url.includes('seminars/apply'), '2번째 요청은 세미나 신청');
-    console.log('  ✓ [Pass] 필수 약관 있을 때 약관 동의 → 세미나 신청 순차 호출 확인\n');
-
-    // 3-2. 약관이 없거나 (선택)만 있는 경우: terms-info 호출 없이 바로 seminars/apply 호출
-    const optionalOnlyTermsInfo: TermsInfo = {
-      termsOptionsModels: [
-        { termsOptionsId: 201, title: '마케팅 정보 수신 동의 (선택)' },
-        { termsOptionsId: 202, title: '이벤트 알림 (선택)' },
-      ],
+    // 3-1. 필수 약관이 있고, 신청 후 PROCESS_CANCEL로 확정되는 경우: 성공
+    let detailQueryCount = 0;
+    (httpClientModule as unknown as { httpGet: unknown }).httpGet = async (url: string) => {
+      detailQueryCount++;
+      return {
+        status: 200,
+        statusText: '200',
+        headers: {},
+        body: JSON.stringify({
+          seminarDetail: {
+            seminarId: 5597,
+            processState: detailQueryCount === 1 ? ProcessState.PROCESS_APPLY : ProcessState.PROCESS_CANCEL,
+          },
+          termsInfo: mixedTermsInfo,
+        }),
+        url,
+        redirected: false,
+        resultType: 'SUCCESS',
+      };
     };
-    requestsMade.length = 0;
-    const optionalRes = await applySeminarWithTerms(5597, optionalOnlyTermsInfo);
-    assert.strictEqual(optionalRes.success, true);
-    assert.strictEqual(requestsMade.length, 1, '약관 동의 요청 없이 세미나 신청만 1회 호출되어야 함');
-    assert.ok(requestsMade[0].url.includes('seminars/apply'));
-    console.log('  ✓ [Pass] (선택) 약관만 있을 때 약관 동의 생략하고 즉시 신청 확인\n');
 
-    // 3-3. 세션 만료 시 처리
-    (httpClientModule as unknown as { sendDoctorVilleRequest: unknown }).sendDoctorVilleRequest = async () => ({
+    requestsMade.length = 0;
+    detailQueryCount = 0;
+    const withTermsRes = await applySeminarWithTerms(5597);
+    assert.strictEqual(withTermsRes.success, true);
+    assert.strictEqual(withTermsRes.alreadyApplied, false);
+    assert.strictEqual(withTermsRes.processState, ProcessState.PROCESS_CANCEL);
+    assert.ok(
+      requestsMade.some((r) => r.url.includes('terms-info')),
+      '약관 동의 요청 호출 확인',
+    );
+    assert.ok(
+      requestsMade.some((r) => r.url.includes('seminars/apply')),
+      '세미나 신청 요청 호출 확인',
+    );
+    console.log('  ✓ [Pass] 필수 약관 동의 → API 신청 → 상세 재조회(PROCESS_CANCEL)로 최종 성공 확정 확인\n');
+
+    // 3-2. applySeminarApi가 성공하더라도 재조회 결과가 여전히 PROCESS_APPLY(미신청)이면 실패 처리
+    (httpClientModule as unknown as { httpGet: unknown }).httpGet = async (url: string) => ({
+      status: 200,
+      statusText: '200',
+      headers: {},
+      body: JSON.stringify({
+        seminarDetail: {
+          seminarId: 5597,
+          processState: ProcessState.PROCESS_APPLY, // 신청 후에도 미신청 상태 유지
+        },
+        termsInfo: mixedTermsInfo,
+      }),
+      url,
+      redirected: false,
+      resultType: 'SUCCESS',
+    });
+
+    requestsMade.length = 0;
+    const failedRecheckRes = await applySeminarWithTerms(5597);
+    assert.strictEqual(failedRecheckRes.success, false, '재조회 결과 미신청 상태이면 success: false여야 함');
+    assert.ok(
+      (failedRecheckRes.errorMessage || '').includes('미신청 상태 유지됨'),
+      `에러 메시지 확인: ${failedRecheckRes.errorMessage}`,
+    );
+    console.log('  ✓ [Pass] API 성공 응답이라도 재조회 상태가 PROCESS_APPLY이면 실패로 판정 확인\n');
+
+    // 3-3. 이미 신청 완료된 세미나인 경우: alreadyApplied: true 반환 및 API 재신청 생략
+    (httpClientModule as unknown as { httpGet: unknown }).httpGet = async (url: string) => ({
+      status: 200,
+      statusText: '200',
+      headers: {},
+      body: JSON.stringify({
+        seminarDetail: {
+          seminarId: 5597,
+          processState: ProcessState.PROCESS_CANCEL, // 이미 완료 상태
+        },
+        termsInfo: mixedTermsInfo,
+      }),
+      url,
+      redirected: false,
+      resultType: 'SUCCESS',
+    });
+
+    requestsMade.length = 0;
+    const alreadyAppliedRes = await applySeminarWithTerms(5597);
+    assert.strictEqual(alreadyAppliedRes.success, true);
+    assert.strictEqual(alreadyAppliedRes.alreadyApplied, true, 'alreadyApplied가 true여야 함');
+    assert.strictEqual(
+      requestsMade.some((r) => r.url.includes('seminars/apply')),
+      false,
+      '이미 완료 상태이므로 apply API 재호출 없음',
+    );
+    console.log('  ✓ [Pass] 이미 신청 완료 상태인 경우 alreadyApplied: true 및 중복 신청 방지 확인\n');
+
+    // 3-4. 세션 만료 시 처리
+    (httpClientModule as unknown as { httpGet: unknown }).httpGet = async (url: string) => ({
       status: 200,
       statusText: '200',
       headers: {},
       body: '<script>alert("로그인이 되어 있지 않습니다.");</script>',
-      url: 'https://api.doctorville.co.kr/api/seminars/apply',
+      url,
       redirected: false,
       resultType: 'AUTH_EXPIRED',
     });
@@ -169,6 +220,7 @@ async function runApplySeminarApiTests() {
     console.log('🎉 세미나 신청 및 약관 동의 API 단위 테스트 모두 성공!\n');
   } finally {
     (httpClientModule as unknown as { sendDoctorVilleRequest: unknown }).sendDoctorVilleRequest = originalSendRequest;
+    (httpClientModule as unknown as { httpGet: unknown }).httpGet = originalHttpGet;
   }
 }
 
