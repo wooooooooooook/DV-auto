@@ -1418,20 +1418,41 @@ const noticeCommands = [
   { command: 'help', description: '도움말' },
 ];
 
+async function syncBotCommands(
+  bot: Telegraf,
+  commands: Array<{ command: string; description: string }>,
+  botLabel: string,
+): Promise<void> {
+  const scopes: Array<Parameters<Telegraf['telegram']['setMyCommands']>[1]> = [
+    { scope: { type: 'default' } },
+    { scope: { type: 'all_private_chats' } },
+    { scope: { type: 'all_group_chats' } },
+    { scope: { type: 'all_chat_administrators' } },
+  ];
+
+  for (const extra of scopes) {
+    try {
+      await bot.telegram.setMyCommands(commands, extra);
+    } catch (err) {
+      logger.warn(`Failed to set ${botLabel} commands for scope ${extra?.scope?.type}:`, err);
+    }
+  }
+}
+
 function launch(): void {
   if (adminBot) {
     adminBot.launch();
     logger.info('Admin bot started');
-    adminBot.telegram
-      .setMyCommands(adminCommands)
-      .catch((err) => logger.error('Failed to set admin bot commands', err));
+    syncBotCommands(adminBot, adminCommands, 'Admin bot').catch((err) =>
+      logger.error('Failed to sync admin bot commands', err),
+    );
   }
   if (noticeBot) {
     noticeBot.launch();
     logger.info('Notice bot started');
-    noticeBot.telegram
-      .setMyCommands(noticeCommands)
-      .catch((err) => logger.error('Failed to set notice bot commands', err));
+    syncBotCommands(noticeBot, noticeCommands, 'Notice bot').catch((err) =>
+      logger.error('Failed to sync notice bot commands', err),
+    );
   }
 }
 
