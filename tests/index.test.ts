@@ -13,6 +13,7 @@ const testFiles = [
   'apply_seminar_changes.test.ts',
   'point_only_seminar_detail.test.ts',
   'apply_seminar_http_precheck.test.ts',
+  'apply_seminar_result_count.test.ts',
   'apply_seminar_no_browser.test.ts',
   'today_links_format.test.ts',
   'seminar_main_tasks.test.ts',

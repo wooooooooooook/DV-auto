@@ -19,6 +19,8 @@ import {
   parseSeminarDateTime,
   checkIsAdvancedSurvey,
   checkIsPointExcluded,
+  ProcessState,
+  type ProcessStateType,
 } from '../modules/seminar_api';
 import { searchSeminarPoints } from './check_seminar_point';
 import * as storage from '../services/storage';
@@ -120,6 +122,25 @@ const MEANINGFUL_FIELDS: Array<{
   { key: 'isPointExcluded', label: '포인트미지급' },
   { key: 'isAdvancedSurvey', label: '심화설문' },
 ];
+
+/**
+ * processState 기반 신청 완료 여부 판정
+ * PROCESS_CANCEL(3) = 이미 신청 완료 (취소 가능 상태)
+ * PROCESS_ENTER(1) = 입장 가능 (신청 완료)
+ * PROCESS_STARTED(6), PROCESS_END(7), PROCESS_COMPLETED(8) = 이미 진행/종료
+ */
+export function isAppliedSeminar(processState?: number): boolean {
+  if (processState === undefined) return false;
+  return (
+    [
+      ProcessState.PROCESS_CANCEL,
+      ProcessState.PROCESS_ENTER,
+      ProcessState.PROCESS_STARTED,
+      ProcessState.PROCESS_END,
+      ProcessState.PROCESS_COMPLETED,
+    ] as number[]
+  ).includes(processState);
+}
 
 export function getSeminarInfoChanges(existing: SeminarListItem, incoming: SeminarListItem): SeminarFieldChange[] {
   const changes: SeminarFieldChange[] = [];
@@ -665,8 +686,26 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
   let totalSeminarsAvailable = currentSeminars.length;
 
   if (!hasApplyTarget) {
-    const completionCount = mainHtmlBody ? parseCompletionCountHtml(mainHtmlBody) : totalSeminarsAvailable;
-    const message = `✅ ${completionCount}개 세미나 신청 완료! (${completionCount}/${totalSeminarsAvailable})`;
+    // API 경로: processState 기반으로 정확한 신청 완료 건수 계산
+    const appliedCount = currentSeminars.filter((s) => isAppliedSeminar(s.processState)).length;
+    // HTML fallback 경로: .ico_completion 파싱
+    const completionCount = mainHtmlBody ? parseCompletionCountHtml(mainHtmlBody) : appliedCount;
+
+    const unappliedCount = totalSeminarsAvailable - completionCount;
+    let message: string;
+    if (unappliedCount <= 0) {
+      message = `✅ ${completionCount}개 세미나 신청 완료! (${completionCount}/${totalSeminarsAvailable})`;
+    } else {
+      const excessCount = currentSeminars.filter((s) => s.processState === ProcessState.PROCESS_EXCESS).length;
+      message = `✅ ${completionCount}개 세미나 신청 완료 (${completionCount}/${totalSeminarsAvailable})`;
+      if (excessCount > 0) {
+        message += `\n⚠️ ${excessCount}개 정원 초과로 신청 불가`;
+      }
+      const otherUnapplied = unappliedCount - excessCount;
+      if (otherUnapplied > 0) {
+        message += `\n📋 ${otherUnapplied}개 미신청 (대기 중/신청 필요)`;
+      }
+    }
 
     const result: TaskResult = { success: true, message };
     if (options.silentIfNoNew && newlyAdded.length === 0) result.silent = true;
