@@ -114,7 +114,7 @@ export async function getTodaysSeminarsFromApi(
           : undefined;
 
       const isAdvancedSurvey = checkIsAdvancedSurvey(item.useDepthSurvey);
-      const isPointExcluded = checkIsPointExcluded(item.survey);
+      const isPointExcluded = false; // 메인 API 응답에는 survey.point가 없으므로 기본 false로 시작하고 상세 조회 시 갱신
       const hasSurvey = item.useSurvey !== false && item.useSurvey !== 'N' && item.useSurvey !== 0;
 
       let statusText = '대기중';
@@ -612,8 +612,8 @@ async function monitorSeminars(
         await sendTelegram(`[${periodName}] Seminar already available: ${info.name}`);
         const targetUrl = info.seminarId ? `${SEMINAR_DETAIL_PAGE}${info.seminarId}` : url;
 
-        // 포인트미지급 여부 재확인 (필요시 detail API 조회)
-        let isPointExcluded = info.isSurveyPointExcluded;
+        // 포인트미지급 여부 재확인 (detail API 조회)
+        let isPointExcluded = false;
         if (info.seminarId) {
           const detailCheck = await checkSeminarEndStatusFromApi(info.seminarId);
           isPointExcluded = detailCheck.isPointExcluded;
@@ -672,8 +672,11 @@ async function monitorSeminars(
       `[${periodName}] 총 ${Object.keys(monitoringList).length}개의 세미나 감시를 시작합니다.\n${initialSeminarNames}`,
     );
 
+    let loopIteration = 0;
+
     // 2. API 모니터링 루프 (1분 폴링)
     while (Object.keys(monitoringList).length > 0) {
+      loopIteration++;
       const currentTime = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
       if (currentTime.getHours() >= endHour) {
         const remainingSeminars = Object.values(monitoringList).map(
@@ -710,6 +713,16 @@ async function monitorSeminars(
         if (!monitoringList[url]) {
           monitoringList[url] = info;
         }
+      }
+
+      // 5분마다 하트비트 로깅 (5 iterations)
+      if (loopIteration % 5 === 0) {
+        const activeSummary = Object.values(monitoringList)
+          .map((s) => `${s.name}(${s.status},입장=${s.autoEnterDone ? '완료' : '미완료'})`)
+          .join(', ');
+        console.log(
+          `[${periodName}] 모니터링 진행 중 (남은 세미나: ${Object.keys(monitoringList).length}건: ${activeSummary})`,
+        );
       }
 
       const monitoredUrls = [...Object.keys(monitoringList)];
@@ -777,54 +790,69 @@ async function monitorSeminars(
           }
         }
 
-        // ── B. 입장 감시 (API 기반) ──────────────────────────────────
+        // ── B. 입장 감시 및 자동 입장 ────────────────────────────────
         const isReadyForEntry =
           mergedSeminarInfo.processState === ProcessState.PROCESS_ENTER ||
           mergedSeminarInfo.processState === ProcessState.PROCESS_STARTED ||
           currentInfo?.status === '입장하기';
 
-        if (isReadyForEntry && !monitoredInfo.isEntryStarted) {
-          console.log(`[${periodName}] Seminar newly ready for entry: ${name} (${seminarId})`);
+        if (isReadyForEntry) {
+          // 1) 신규 입장 가능 상태 감지 (공지 및 첫 입장 시도)
+          if (!monitoredInfo.isEntryStarted) {
+            console.log(`[${periodName}] Seminar newly ready for entry: ${name} (${seminarId})`);
 
-          // 포인트미지급 여부 재확인
-          let isPointExcluded = mergedSeminarInfo.isSurveyPointExcluded;
-          if (seminarId) {
-            const detailCheck = await checkSeminarEndStatusFromApi(seminarId);
-            isPointExcluded = detailCheck.isPointExcluded;
-            mergedSeminarInfo.isSurveyPointExcluded = isPointExcluded;
+            // 포인트미지급 여부 재확인 (detail API)
+            let isPointExcluded = false;
+            if (seminarId) {
+              const detailCheck = await checkSeminarEndStatusFromApi(seminarId);
+              isPointExcluded = detailCheck.isPointExcluded;
+              mergedSeminarInfo.isSurveyPointExcluded = isPointExcluded;
+            }
+
+            // Playwright 온디맨드 자동 입장
+            await withBrowserContext(providedContext, async (ctx) => {
+              mergedSeminarInfo.autoEnterDone = await checkAndPerformAutoEnter(
+                ctx,
+                seminarId,
+                url,
+                name,
+                '입장하기',
+                mergedSeminarInfo.autoEnterDone,
+              );
+            });
+
+            mergedSeminarInfo.isEntryStarted = true;
+
+            // 포인트미지급 세미나: 채널 공지 없이 관리자 알림(스크린샷) 후 모니터링 목록에서 제외
+            if (isPointExcluded) {
+              console.log(
+                `[monitor_seminars] ${name} is point-excluded. Entry only, no channel notice, no end monitoring. (During Loop)`,
+              );
+              const trackingKey = getSeminarTrackingKey(url, seminarId);
+              excludedSeminarKeys.add(trackingKey);
+              delete monitoringList[url];
+              continue;
+            }
+
+            const advancedSurveySuffix = mergedSeminarInfo.isAdvancedSurvey ? ' [심화설문]' : '';
+            let message = `🟢세미나시작\n**${name}**${advancedSurveySuffix}\n${targetUrl}`;
+            if (!mergedSeminarInfo.hasSurvey) {
+              message += `\n(설문이 없는 세미나인 것 같습니다)`;
+            }
+            await sendNotificationToChannel(message);
+          } else if (!mergedSeminarInfo.autoEnterDone) {
+            // 2) 이미 공지는 나갔으나 입장이 아직 완료되지 않은 경우 재입장 시도
+            await withBrowserContext(providedContext, async (ctx) => {
+              mergedSeminarInfo.autoEnterDone = await checkAndPerformAutoEnter(
+                ctx,
+                seminarId,
+                url,
+                name,
+                '입장하기',
+                mergedSeminarInfo.autoEnterDone,
+              );
+            });
           }
-
-          // Playwright 온디맨드 자동 입장
-          await withBrowserContext(providedContext, async (ctx) => {
-            mergedSeminarInfo.autoEnterDone = await checkAndPerformAutoEnter(
-              ctx,
-              seminarId,
-              url,
-              name,
-              '입장하기',
-              mergedSeminarInfo.autoEnterDone,
-            );
-          });
-
-          mergedSeminarInfo.isEntryStarted = true;
-
-          // 포인트미지급 세미나: 채널 공지 없이 관리자 알림(스크린샷) 후 모니터링 목록에서 제외
-          if (isPointExcluded) {
-            console.log(
-              `[monitor_seminars] ${name} is point-excluded. Entry only, no channel notice, no end monitoring. (During Loop)`,
-            );
-            const trackingKey = getSeminarTrackingKey(url, seminarId);
-            excludedSeminarKeys.add(trackingKey);
-            delete monitoringList[url];
-            continue;
-          }
-
-          const advancedSurveySuffix = mergedSeminarInfo.isAdvancedSurvey ? ' [심화설문]' : '';
-          let message = `🟢세미나시작\n**${name}**${advancedSurveySuffix}\n${targetUrl}`;
-          if (!mergedSeminarInfo.hasSurvey) {
-            message += `\n(설문이 없는 세미나인 것 같습니다)`;
-          }
-          await sendNotificationToChannel(message);
         }
 
         monitoringList[url] = mergedSeminarInfo;

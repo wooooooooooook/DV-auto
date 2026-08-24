@@ -146,7 +146,9 @@ export function checkIsAdvancedSurvey(useDepthSurvey?: boolean | string | number
  */
 export function checkIsPointExcluded(survey?: SeminarSurveyInfo | null): boolean {
   if (!survey) return true;
-  if (survey.point === undefined || survey.point === null) return true;
+  if (survey.point === undefined || survey.point === null) {
+    return false;
+  }
 
   const pointNum = Number(survey.point);
   if (Number.isNaN(pointNum) || pointNum <= 0) {

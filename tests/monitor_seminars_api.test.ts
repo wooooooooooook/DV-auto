@@ -87,7 +87,7 @@ async function runTests() {
   assert.strictEqual(dinnerKeys.length, 1, '2026-08-24 저녁 세미나는 1건이어야 함 (5538)');
   const sem5538 = Object.values(dinnerRes.seminars)[0];
   assert.strictEqual(sem5538.seminarId, '5538');
-  assert.strictEqual(sem5538.isSurveyPointExcluded, true, 'survey가 null이므로 포인트 미지급');
+  assert.strictEqual(sem5538.isSurveyPointExcluded, false, '메인 목록 API 아이템은 상세 조회 전까지 기본 false');
 
   console.log('  ✓ getTodaysSeminarsFromApi: 날짜/시간대 필터링 및 상태/플래그 판정 검증 완료\n');
 
