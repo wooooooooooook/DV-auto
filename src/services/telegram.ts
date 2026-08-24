@@ -1,5 +1,5 @@
 import { Telegraf, type Context } from 'telegraf';
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import fs from 'fs/promises';
 import fsSync from 'fs';
 import https from 'https';
@@ -1183,29 +1183,44 @@ if (adminBot) {
   });
 
   adminBot.command('update_app', async (ctx) => {
-    logger.info('User requested to run pnpm update:app', { from: ctx.from?.username });
+    logger.info('User requested to run update_app', { from: ctx.from?.username });
     try {
       await ctx.reply(
-        'Starting pnpm update:app... (백그라운드 실행)\n' +
-          '⚠️ 업데이트 중 서비스가 재시작되어 봇 응답이 잠시 끊길 수 있습니다.',
+        '🔄 앱 업데이트 및 빌드를 시작합니다...\n' +
+          '1. Git Pull & 의존성 설치\n' +
+          '2. TypeScript 빌드\n' +
+          '3. 서비스 파일 갱신',
       );
-      runShellCommand('pnpm run update:app')
+
+      // 1. 빌드 및 설정 동기 실행 (재시작 제외)
+      const buildCommand =
+        'git pull && pnpm install --frozen-lockfile && pnpm run build && cp deploy/doctorville-auto.service /etc/systemd/system/ && systemctl daemon-reload';
+
+      runShellCommand(buildCommand)
         .then(async ({ stdout, stderr }) => {
-          let message = 'pnpm update:app 완료';
+          let message = '✅ 앱 업데이트 및 빌드 성공!';
           if (stdout.trim()) {
             message += `\n\nstdout:\n${truncateMessage(stdout.trim())}`;
           }
           if (stderr.trim()) {
             message += `\n\nstderr:\n${truncateMessage(stderr.trim())}`;
           }
+          message += '\n\n🚀 서비스를 재시작합니다...';
           await ctx.reply(message);
+
+          // 2. 서비스 재시작을 독립(detached) 프로세스로 실행하여 데드락 및 타임아웃 방지
+          const restartProcess = spawn('systemctl', ['restart', 'doctorville-auto.service'], {
+            detached: true,
+            stdio: 'ignore',
+          });
+          restartProcess.unref();
         })
         .catch(async (error) => {
           const message = error instanceof Error ? error.message : String(error);
           const stdout = (error as Error & { stdout?: string }).stdout ?? '';
           const stderr = (error as Error & { stderr?: string }).stderr ?? '';
-          logger.error('pnpm update:app failed', error);
-          let reply = `pnpm update:app 실패: ${message}`;
+          logger.error('update_app failed', error);
+          let reply = `❌ 업데이트 실패:\n${message}`;
           if (stdout.trim()) {
             reply += `\n\nstdout:\n${truncateMessage(stdout.trim())}`;
           }
@@ -1216,7 +1231,7 @@ if (adminBot) {
         });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Failed to start pnpm update:app: ${message}`);
+      ctx.reply(`Failed to start update_app: ${message}`);
     }
   });
 

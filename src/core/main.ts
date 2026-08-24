@@ -479,6 +479,31 @@ function checkAndResumeTasks(): void {
 }
 checkAndNotifyPointConversion().catch((err) => logger.error('Startup point-conversion check failed:', err));
 checkAndResumeTasks();
+function setupGracefulShutdown(): void {
+  let isShuttingDown = false;
+  const handleShutdown = (signal: string) => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    logger.info(`Received ${signal}, starting graceful shutdown...`);
+    try {
+      stopFastPolling();
+      telegram.stop();
+    } catch (e) {
+      logger.error('Error during graceful shutdown:', e);
+    }
+    // 즉시 종료하여 systemd timeout 방지
+    setTimeout(() => {
+      logger.info('Graceful shutdown finished, exiting process.');
+      process.exit(0);
+    }, 500).unref();
+  };
+
+  process.on('SIGTERM', () => handleShutdown('SIGTERM'));
+  process.on('SIGINT', () => handleShutdown('SIGINT'));
+}
+
+setupGracefulShutdown();
+
 telegram.launch();
 const nowStr = new Date().toLocaleString('ko-KR', { timeZone: TIMEZONE });
 utils
