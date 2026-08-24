@@ -7,6 +7,30 @@ const bots: Partial<Record<BotName, Telegraf | null>> = {
   notice: null,
 };
 
+const NOTICE_USER_COOLDOWN_MS = 2000;
+const noticeUserLastRequestMap = new Map<number, number>();
+
+function checkNoticeCooldown(userId: number, cooldownMs = NOTICE_USER_COOLDOWN_MS): boolean {
+  const now = Date.now();
+  const lastTime = noticeUserLastRequestMap.get(userId) || 0;
+  if (now - lastTime < cooldownMs) {
+    return false;
+  }
+  noticeUserLastRequestMap.set(userId, now);
+  if (noticeUserLastRequestMap.size > 5000) {
+    for (const [uid, time] of noticeUserLastRequestMap.entries()) {
+      if (now - time > 60000) {
+        noticeUserLastRequestMap.delete(uid);
+      }
+    }
+  }
+  return true;
+}
+
+function clearNoticeCooldowns(): void {
+  noticeUserLastRequestMap.clear();
+}
+
 function setBot(name: BotName, instance: Telegraf | null): void {
   if (Object.prototype.hasOwnProperty.call(bots, name)) {
     bots[name] = instance;
@@ -15,6 +39,10 @@ function setBot(name: BotName, instance: Telegraf | null): void {
     if (instance) {
       instance.command('check_advanced_seminars', async (ctx: Context) => {
         try {
+          if (name === 'notice' && ctx.from?.id && !checkNoticeCooldown(ctx.from.id)) {
+            await ctx.reply('⏳ 요청이 너무 빠릅니다. 2초 후 다시 시도해주세요.');
+            return;
+          }
           const { runCached } = await import('../tasks/check_advanced_seminars');
           const result = runCached();
           await ctx.reply(result.message);
@@ -27,6 +55,10 @@ function setBot(name: BotName, instance: Telegraf | null): void {
       if (name === 'notice') {
         instance.command(['today_links', '오늘의링크', '링크'], async (ctx: Context) => {
           try {
+            if (ctx.from?.id && !checkNoticeCooldown(ctx.from.id)) {
+              await ctx.reply('⏳ 요청이 너무 빠릅니다. 2초 후 다시 시도해주세요.');
+              return;
+            }
             const { getTodayLinksCache } = await import('../tasks/today_links');
             const cache = getTodayLinksCache();
             if (cache && cache.message) {
@@ -47,6 +79,10 @@ function setBot(name: BotName, instance: Telegraf | null): void {
         ['subscribe_seminar_changes', 'subscribe_seminar', 'subscribe', '세미나변경알림구독', '구독'],
         async (ctx: Context) => {
           try {
+            if (name === 'notice' && ctx.from?.id && !checkNoticeCooldown(ctx.from.id)) {
+              await ctx.reply('⏳ 요청이 너무 빠릅니다. 2초 후 다시 시도해주세요.');
+              return;
+            }
             const chatId = ctx.chat?.id;
             if (!chatId) {
               await ctx.reply('⚠️ 유효하지 않은 채팅방 ID입니다.');
@@ -72,6 +108,10 @@ function setBot(name: BotName, instance: Telegraf | null): void {
         ['unsubscribe_seminar_changes', 'unsubscribe_seminar', 'unsubscribe', '구독해제', '세미나변경알림구독해제'],
         async (ctx: Context) => {
           try {
+            if (name === 'notice' && ctx.from?.id && !checkNoticeCooldown(ctx.from.id)) {
+              await ctx.reply('⏳ 요청이 너무 빠릅니다. 2초 후 다시 시도해주세요.');
+              return;
+            }
             const chatId = ctx.chat?.id;
             if (!chatId) {
               await ctx.reply('⚠️ 유효하지 않은 채팅방 ID입니다.');
@@ -98,4 +138,4 @@ function getBot(name: BotName): Telegraf | null {
   return (bots[name] as Telegraf | null | undefined) ?? null;
 }
 
-export { setBot, getBot, BotName };
+export { setBot, getBot, BotName, checkNoticeCooldown, clearNoticeCooldowns };

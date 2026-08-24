@@ -214,31 +214,75 @@ export function convertDetailToSeminarListItem(data: SeminarDetail, _raw?: Semin
   };
 }
 
+const SEMINAR_RETENTION_DAYS = 60;
+
+export function isSeminarExpired(
+  seminarDate: string | undefined,
+  referenceDate: string,
+  retentionDays = SEMINAR_RETENTION_DAYS,
+): boolean {
+  if (!seminarDate) return false;
+  const match = seminarDate.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  let isoDate = '';
+  if (match) {
+    isoDate = `${match[1]}-${String(match[2]).padStart(2, '0')}-${String(match[3]).padStart(2, '0')}`;
+  } else {
+    const md = seminarDate.match(/^(\d{1,2})\s*[-/.]\s*(\d{1,2})/);
+    if (md) {
+      const year = new Date().getFullYear();
+      isoDate = `${year}-${String(md[1]).padStart(2, '0')}-${String(md[2]).padStart(2, '0')}`;
+    }
+  }
+  if (!isoDate) return false;
+  const todayMs = Date.parse(`${referenceDate}T00:00:00+09:00`);
+  const dateMs = Date.parse(`${isoDate}T00:00:00+09:00`);
+  if (Number.isNaN(todayMs) || Number.isNaN(dateMs)) return false;
+  return todayMs - dateMs > retentionDays * 24 * 60 * 60 * 1000;
+}
+
 export function updateStoredSeminarFromDetail(data: SeminarDetail, raw?: SeminarDetailResponse): SeminarListItem[] {
   const currentList = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
   const sid = String(data.seminarId);
   const incoming = convertDetailToSeminarListItem(data, raw);
+  const referenceDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+
+  // 60일 이상 지난 과거 세미나는 새로 추가하지 않음
+  const isIncomingExpired = isSeminarExpired(incoming.date || data.startDt, referenceDate);
 
   let found = false;
-  const updatedList = currentList.map((item) => {
+  const updatedList: SeminarListItem[] = [];
+
+  for (const item of currentList) {
     const itemId = item.seminarId || getSeminarIdFromUrl(item.url);
     if (itemId && itemId === sid) {
       found = true;
-      return mergeSeminar(item, {
-        ...incoming,
-        detectedDate: item.detectedDate || incoming.detectedDate,
-        detectedAt: item.detectedAt || incoming.detectedAt,
-      });
+      if (!isIncomingExpired) {
+        updatedList.push(
+          mergeSeminar(item, {
+            ...incoming,
+            detectedDate: item.detectedDate || incoming.detectedDate,
+            detectedAt: item.detectedAt || incoming.detectedAt,
+          }),
+        );
+      }
+    } else {
+      // 기존 목록에서도 60일 지난 세미나 정리
+      if (!isSeminarExpired(item.date, referenceDate)) {
+        updatedList.push(item);
+      }
     }
-    return item;
-  });
+  }
 
-  if (!found) {
+  if (!found && !isIncomingExpired) {
     updatedList.push(incoming);
   }
 
   storage.set(SEMINAR_LIST_KEY, updatedList);
-  logger.info(`Updated seminar_list with seminar ${sid} from detail inquiry`);
+  if (isIncomingExpired) {
+    logger.info(`세미나 ${sid}는 60일 이상 지난 세미나이므로 seminar_list에 저장하지 않았습니다.`);
+  } else {
+    logger.info(`Updated seminar_list with seminar ${sid} from detail inquiry`);
+  }
   return updatedList;
 }
 

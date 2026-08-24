@@ -4,7 +4,7 @@ import fs from 'fs/promises';
 import fsSync from 'fs';
 import https from 'https';
 import path from 'path';
-import { setBot } from './bot_instance';
+import { setBot, checkNoticeCooldown } from './bot_instance';
 import * as logger from './logger';
 import * as scheduler from '../core/scheduler';
 import * as runner from '../core/runner';
@@ -227,6 +227,16 @@ if (noticeBot) {
   noticeBot.catch((err, ctx) => {
     logger.error(`Notice Bot Error for ${ctx.updateType}`, err);
   });
+
+  noticeBot.use(async (ctx, next) => {
+    const userId = ctx.from?.id;
+    if (userId && !checkNoticeCooldown(userId)) {
+      await ctx.reply('⏳ 요청이 너무 빠릅니다. 2초 후 다시 시도해주세요.').catch(() => {});
+      return;
+    }
+    return next();
+  });
+
   noticeBot.start((ctx) => ctx.reply('Welcome!'));
 }
 
@@ -286,6 +296,11 @@ const createSeminarDetailHandler = (allowForce: boolean) => async (ctx: Context)
           ? '사용법: /seminar_detail <세미나번호> [force]\n예: /seminar_detail 5566 (목록 저장값 우선)\n   /seminar_detail 5566 force (실시간 API 강제 조회)\n   또는 /seminar_detail 5566 5567'
           : '사용법: /seminar_detail <세미나번호> [세미나번호...]\n예: /seminar_detail 5566\n   또는 /seminar_detail 5566 5567',
       );
+    }
+
+    const MAX_SEMINAR_IDS_PER_REQUEST = 10;
+    if (seminarIds.length > MAX_SEMINAR_IDS_PER_REQUEST) {
+      return ctx.reply('⚠️ 세미나 번호는 한 번에 최대 10개까지만 조회할 수 있습니다.');
     }
 
     const { run: runSeminarDetail, isForceRefresh } = await import('../tasks/seminar_detail');

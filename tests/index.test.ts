@@ -19,6 +19,7 @@ const testFiles = [
   'check_advanced_seminars_cache.test.ts',
   'seminar_change_subscription.test.ts',
   'today_links_cache.test.ts',
+  'notice_rate_limit_and_retention.test.ts',
   'html_parser.test.ts',
   'login_check.test.ts',
   'http_session_expiry.test.ts',
