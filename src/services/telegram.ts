@@ -247,12 +247,7 @@ const todayLinks = async (ctx: Context) => {
     }
   }
 
-  const promptMsg = targetDate
-    ? `[${targetDate}] 링크를 수집합니다... (백그라운드 실행)`
-    : '오늘의 링크를 수집합니다... (백그라운드 실행)';
-
   try {
-    await ctx.reply(promptMsg);
     runner
       .runTask(task, { args: targetDate ? { date: targetDate } : undefined })
       .then(async (result) => {
@@ -294,7 +289,6 @@ if (adminBot) {
     }
 
     try {
-      await ctx.reply('Starting daily_routine...');
       runner
         .runTask(task)
         .then(async (result) => {
@@ -373,7 +367,6 @@ if (adminBot) {
     }
 
     try {
-      await ctx.reply('Starting apply_seminar... (백그라운드 실행)');
       runner
         .runTask(task)
         .then(async (result) => {
@@ -416,7 +409,6 @@ if (adminBot) {
     }
 
     try {
-      await ctx.reply('Starting today_quiz...');
       runner
         .runTask(task)
         .then(async (result) => {
@@ -459,7 +451,6 @@ if (adminBot) {
     }
 
     try {
-      await ctx.reply('Starting monitor_lunch_seminars... (백그라운드 실행)');
       runner
         .runTask(task)
         .then(async (result) => {
@@ -477,10 +468,6 @@ if (adminBot) {
             }
           } else if (typeof result === 'string') {
             await ctx.reply(result);
-          } else if (result === true) {
-            await ctx.reply('monitor_lunch_seminars finished successfully.');
-          } else {
-            await ctx.reply('monitor_lunch_seminars finished successfully.');
           }
         })
         .catch((e) => {
@@ -502,7 +489,6 @@ if (adminBot) {
     }
 
     try {
-      await ctx.reply('Starting monitor_dinner_seminars... (백그라운드 실행)');
       runner
         .runTask(task)
         .then(async (result) => {
@@ -520,10 +506,6 @@ if (adminBot) {
             }
           } else if (typeof result === 'string') {
             await ctx.reply(result);
-          } else if (result === true) {
-            await ctx.reply('monitor_dinner_seminars finished successfully.');
-          } else {
-            await ctx.reply('monitor_dinner_seminars finished successfully.');
           }
         })
         .catch((e) => {
@@ -882,7 +864,6 @@ if (adminBot) {
     }
 
     try {
-      await ctx.reply('포인트를 확인하는 중입니다... (백그라운드 실행)');
       runner
         .runTask(task)
         .then(async (result) => {
@@ -930,8 +911,6 @@ if (adminBot) {
         );
       }
 
-      await ctx.reply(`${seminarIds.length}개 세미나 포인트 내역 확인 중... (백그라운드 실행)`);
-
       const result = await runner.runTask(task, { args: { seminarIds: seminarIds.join(',') } });
 
       if (result && typeof result === 'object') {
@@ -961,8 +940,6 @@ if (adminBot) {
         return ctx.reply('사용법: /seminar_detail <세미나번호>\n예: /seminar_detail 5566');
       }
 
-      await ctx.reply(`세미나 ${seminarId} 상세 정보 조회 중...`);
-
       const result = await runner.runTask(task, { args: { seminarId } });
 
       if (result && typeof result === 'object') {
@@ -989,7 +966,7 @@ if (adminBot) {
     }
 
     try {
-      await ctx.reply('최근 2주간 심화 세미나 포인트 지급 여부를 일괄 조회합니다... (약 1분 소요, 백그라운드 실행)');
+      await ctx.reply('최근 2주간 심화 세미나 포인트 지급 여부를 일괄 조회합니다...');
       runner
         .runTask(task)
         .then(async (result) => {
@@ -1366,7 +1343,6 @@ if (noticeBot) {
       return ctx.reply('today_links task not found!');
     }
     try {
-      await ctx.reply('현재 예정된 세미나를 수집합니다... (백그라운드 실행)');
       runner
         .runTask(task)
         .then(async (result) => {

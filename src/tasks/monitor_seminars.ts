@@ -677,7 +677,7 @@ async function monitorSeminars(
     }
 
     if (Object.keys(monitoringList).length === 0) {
-      await sendTelegram(`[${periodName}] ${periodName}에 감시할 세미나가 없습니다.`);
+      console.log(`[${periodName}] 예정된 세미나가 없어 알림 없이 모니터링을 종료합니다.`);
       return true;
     }
 

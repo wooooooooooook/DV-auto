@@ -481,6 +481,40 @@ async function runTests() {
 
   console.log('  ✓ isAutoResume: true 및 입장이력 존재 시 자동입장 생략 검증 완료!\n');
 
+  // ── Test 5: 예정된 세미나가 없는 경우 알림 없이 종료 검증 ──────────────
+  console.log('--- [Test 5] 예정된 세미나가 없는 경우 텔레그램 알림 없이 종료 검증 ---');
+
+  const emptyTelegramMessages: string[] = [];
+  const emptyChannelMessages: string[] = [];
+
+  (utilsModule as unknown as { sendNotificationToChannel: unknown }).sendNotificationToChannel = async (
+    msg: string,
+  ) => {
+    emptyChannelMessages.push(msg);
+    return true;
+  };
+  (utilsModule as unknown as { sendTelegram: unknown }).sendTelegram = async (msg: string) => {
+    emptyTelegramMessages.push(msg);
+    return true;
+  };
+
+  (seminarApiModule as unknown as { fetchMainFutureSeminars: unknown }).fetchMainFutureSeminars = async () => ({
+    success: true,
+    items: [],
+    rawResponse: {},
+  });
+
+  const emptyMonitorSuccess = await monitorSeminars('테스트빈세미나', currentHour, currentHour + 2, {
+    pollIntervalMs: 10,
+    context: resumeMockContext,
+  });
+
+  assert.strictEqual(emptyMonitorSuccess, true, '세미나가 없어도 정상 종료(true)를 반환해야 함');
+  assert.strictEqual(emptyTelegramMessages.length, 0, '세미나가 없을 때 텔레그램 알림을 전송하지 않아야 함');
+  assert.strictEqual(emptyChannelMessages.length, 0, '세미나가 없을 때 채널 알림을 전송하지 않아야 함');
+
+  console.log('  ✓ 예정된 세미나가 없는 경우 알림 없이 종료 검증 완료!\n');
+
   // Clean up mocks
   (seminarApiModule as unknown as { fetchMainFutureSeminars: unknown }).fetchMainFutureSeminars =
     originalFetchMainFuture;
