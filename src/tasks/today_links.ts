@@ -10,6 +10,13 @@ import {
   findOptionByAnswer,
   type QuizQuestion,
 } from './seminar_quiz';
+import {
+  fetchMainFutureSeminars,
+  fetchSeminarDetail,
+  parseSeminarDateTime,
+  checkIsAdvancedSurvey,
+  checkIsPointExcluded,
+} from '../modules/seminar_api';
 
 const QUIZ_LIST_URLS = [
   'https://www.doctorville.co.kr/product/medicineList',
@@ -476,6 +483,7 @@ type ParsedSeminarItem = {
   seminarId: string | null;
   classAttr: string;
   isAdvancedSurvey: boolean;
+  isPointExcluded?: boolean;
 };
 
 function isDateMatching(dateText: string, target: DateTarget): boolean {
@@ -579,14 +587,39 @@ async function collectTodaySeminarMessage(
   const seminarTitlePrefix = isCustomDate ? `[${todayString}]` : '오늘의';
 
   try {
-    await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'domcontentloaded', timeout: 30000 }, 1);
+    let parsedSeminars: ParsedSeminarItem[] = [];
+    const dateTarget: DateTarget = { todayString, isoDate, targetMonth, targetDay };
 
-    const parsedSeminars = await page.locator('.list_cont').evaluateAll(parseSeminarsFromNodes, {
-      todayString,
-      isoDate,
-      targetMonth,
-      targetDay,
-    });
+    const apiRes = await fetchMainFutureSeminars();
+    if (apiRes.success) {
+      for (const item of apiRes.items) {
+        const { date, time, nightTime } = parseSeminarDateTime(item.startDt, item.endDt);
+        if (!isDateMatching(date, dateTarget)) continue;
+
+        const seminarId = String(item.seminarId ?? '');
+        const seminarLink = `https://m.doctorville.co.kr/cme/seminar/${seminarId}`;
+        const isAdvancedSurvey = checkIsAdvancedSurvey(item.useDepthSurvey);
+        parsedSeminars.push({
+          title: item.seminarNm || '세미나',
+          time,
+          seminarLink,
+          fullUrl: seminarLink,
+          seminarId,
+          classAttr: nightTime ? 'night_time' : '',
+          isAdvancedSurvey,
+        });
+      }
+    } else {
+      console.warn('[today_links] fetchMainFutureSeminars 실패, DOM fallback 시도:', apiRes.errorMessage);
+      await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'domcontentloaded', timeout: 30000 }, 1);
+
+      parsedSeminars = await page.locator('.list_cont').evaluateAll(parseSeminarsFromNodes, {
+        todayString,
+        isoDate,
+        targetMonth,
+        targetDay,
+      });
+    }
 
     if (!parsedSeminars || parsedSeminars.length === 0) {
       return {
@@ -616,18 +649,30 @@ async function collectTodaySeminarMessage(
     const uncachedSeminarItems: Array<{ link: string; cacheKey: string }> = [];
     for (const item of parsedSeminars) {
       const pointExcludedKey = item.seminarId || item.fullUrl;
+      if (typeof item.isPointExcluded === 'boolean') {
+        pointExcludedCache.set(pointExcludedKey, item.isPointExcluded);
+        continue;
+      }
       const storedPointExcluded = findPointExcludedFromStoredSeminars(storedSeminars, item.seminarId, item.fullUrl);
       if (typeof storedPointExcluded === 'boolean') {
         pointExcludedCache.set(pointExcludedKey, storedPointExcluded);
-      } else {
-        const httpLink = item.seminarId
-          ? 'https://www.doctorville.co.kr/seminar/seminarDetail?seminarId=' + item.seminarId
-          : item.seminarLink;
+      } else if (item.seminarId) {
+        // detail API로 비동기 확인
+        try {
+          const detailRes = await fetchSeminarDetail(item.seminarId);
+          if (detailRes.success) {
+            pointExcludedCache.set(pointExcludedKey, detailRes.isPointExcluded);
+            continue;
+          }
+        } catch (_e) {}
+        const httpLink = 'https://www.doctorville.co.kr/seminar/seminarDetail?seminarId=' + item.seminarId;
         uncachedSeminarItems.push({ link: httpLink, cacheKey: pointExcludedKey });
+      } else {
+        uncachedSeminarItems.push({ link: item.seminarLink, cacheKey: pointExcludedKey });
       }
     }
 
-    if (uncachedSeminarItems.length > 0) {
+    if (uncachedSeminarItems.length > 0 && page) {
       await batchCheckPointExcluded(page.context(), uncachedSeminarItems, pointExcludedCache);
     }
 

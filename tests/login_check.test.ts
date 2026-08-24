@@ -1,5 +1,6 @@
 import assert from 'assert';
 import { checkLoginStatus, ensureLoggedIn, invalidateLoginStatus } from '../src/modules/utils';
+import * as httpClientModule from '../src/modules/http_client';
 
 // Helper mock functions
 function createMockPage(
@@ -187,6 +188,17 @@ async function runTests() {
   // Case 8 — BrowserContext cache and deduplication test
   {
     console.log('Case 8: Same BrowserContext caching & deduplication test');
+    const originalHttpGet = httpClientModule.httpGet;
+    (httpClientModule as unknown as { httpGet: unknown }).httpGet = async () => ({
+      status: 200,
+      statusText: '200',
+      headers: {},
+      body: '<html><body>로그인 필요</body></html>',
+      url: 'https://m.doctorville.co.kr/mypage/info',
+      redirected: false,
+      resultType: 'SUCCESS' as const,
+    });
+
     let gotoCount = 0;
     const mockPage = {
       url: () => 'about:blank',
@@ -220,6 +232,7 @@ async function runTests() {
     await ensureLoggedIn({ page: mockPage as never, context: contextA as never });
     assert.strictEqual(gotoCount, 3, 'After invalidateLoginStatus, ensureLoggedIn should re-check login status');
 
+    (httpClientModule as unknown as { httpGet: unknown }).httpGet = originalHttpGet;
     console.log('  ✓ BrowserContext login state cache, context separation, and invalidation verified');
   }
 

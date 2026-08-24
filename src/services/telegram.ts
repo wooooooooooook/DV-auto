@@ -869,47 +869,6 @@ if (adminBot) {
     }
   });
 
-  adminBot.command('refresh_seminar_point_exclusion', async (ctx) => {
-    logger.info('User requested to refresh seminar point exclusion flags', { from: ctx.from?.username });
-    const task = taskRegistry.getByName('refresh_seminar_point_exclusion');
-    if (!task) {
-      logger.error('refresh_seminar_point_exclusion task not found, cannot run');
-      return ctx.reply('refresh_seminar_point_exclusion task not found!');
-    }
-
-    try {
-      await ctx.reply('세미나 포인트미지급 여부를 전체 재확인합니다... (백그라운드 실행)');
-      runner
-        .runTask(task)
-        .then(async (result) => {
-          if (result && typeof result === 'object' && (result as { message?: string }).message) {
-            await ctx.reply(
-              (result as { message: string }).message,
-              (result as { options?: Record<string, unknown> }).options,
-            );
-            const screenshotPaths = (result as { screenshotPaths?: string[] }).screenshotPaths || [];
-            for (const screenshotPath of screenshotPaths) {
-              await ctx.replyWithPhoto({ source: screenshotPath });
-              await fs.unlink(screenshotPath).catch(() => {});
-            }
-          } else if (typeof result === 'string') {
-            await ctx.reply(result);
-          } else if (result === true) {
-            await ctx.reply('세미나 포인트미지급 여부 재확인이 완료되었습니다.');
-          } else {
-            await ctx.reply('세미나 포인트미지급 여부 재확인이 완료되었습니다.');
-          }
-        })
-        .catch((e) => {
-          const message = e instanceof Error ? e.message : String(e);
-          ctx.reply(`세미나 포인트미지급 여부 재확인 실패: ${message}`);
-        });
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Failed to start 세미나 포인트미지급 여부 재확인: ${message}`);
-    }
-  });
-
   // ==========================================
   // 3. 포인트 & 교환 (Points & Exchange)
   // ==========================================
@@ -1363,7 +1322,6 @@ if (adminBot) {
 - /delete_seminar_quiz <키워드>: 족보 삭제
 - /list_quiz: quiz.json 등록 제품 목록
 - /delete_quiz <제품명>: quiz.json 항목 삭제
-- /refresh_seminar_point_exclusion: 모든 세미나의 포인트미지급 여부를 다시 확인해 캐시를 갱신합니다.
 
 💰 포인트 & 교환:
 - /check_point: 현재 포인트를 확인합니다.
@@ -1491,7 +1449,6 @@ const adminCommands = [
   { command: 'delete_seminar_quiz', description: '족보 삭제' },
   { command: 'list_quiz', description: 'quiz.json 등록 제품 목록' },
   { command: 'delete_quiz', description: 'quiz.json 항목 삭제' },
-  { command: 'refresh_seminar_point_exclusion', description: '세미나 포인트미지급 캐시 재확인' },
   { command: 'seminar_detail', description: '세미나 번호로 상세 정보 조회' },
   // 3. 포인트 & 교환
   { command: 'check_point', description: '현재 포인트 확인' },

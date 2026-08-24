@@ -17,7 +17,6 @@ import * as monitorLunchSeminars from '../tasks/monitor_lunch_seminars';
 import * as monitorDinnerSeminars from '../tasks/monitor_dinner_seminars';
 import * as naverpayPointExchangeTask from '../tasks/naverpay_point_exchange';
 import * as baeminPointExchangeTask from '../tasks/baemin_point_exchange';
-import * as refreshSeminarPointExclusionTaskModule from '../tasks/refresh_seminar_point_exclusion';
 import * as checkPointTaskModule from '../tasks/check_point';
 import * as checkSeminarPointTaskModule from '../tasks/check_seminar_point';
 import * as checkAdvancedSeminarsTaskModule from '../tasks/check_advanced_seminars';
@@ -210,15 +209,20 @@ const applySeminarExtraTask: Task = {
   name: 'apply_seminar_extra',
   schedule: APPLY_SEMINAR_EXTRA_CRON,
   timezone: TIMEZONE,
+  options: {
+    notifyNewSeminarsToChannel: true,
+    notifyNewSeminarsToTelegram: true,
+    silentIfNoNew: true,
+    checkAdvancedPointStatus: true,
+  },
   run: async (_ctx, options) => {
-    return await applySeminarTask.runHttpOnly(
-      options || {
-        notifyNewSeminarsToChannel: true,
-        notifyNewSeminarsToTelegram: true,
-        silentIfNoNew: true,
-        checkAdvancedPointStatus: true,
-      },
-    );
+    return await applySeminarTask.runHttpOnly({
+      notifyNewSeminarsToChannel: true,
+      notifyNewSeminarsToTelegram: true,
+      silentIfNoNew: true,
+      checkAdvancedPointStatus: true,
+      ...options,
+    });
   },
 };
 taskRegistry.registerTask(applySeminarExtraTask);
@@ -236,11 +240,13 @@ taskRegistry.registerTask(pointConversionCheckTask);
 scheduler.scheduleTaskCron(pointConversionCheckTask);
 const applySeminarTaskStandalone: Task = {
   name: 'apply_seminar',
+  options: { notifyNewSeminarsToChannel: false, notifyNewSeminarsToTelegram: true },
   run: async (ctx, options) => {
-    return await applySeminarTask.run(
-      ctx,
-      options || { notifyNewSeminarsToChannel: false, notifyNewSeminarsToTelegram: true },
-    );
+    return await applySeminarTask.run(ctx, {
+      notifyNewSeminarsToChannel: false,
+      notifyNewSeminarsToTelegram: true,
+      ...options,
+    });
   },
 };
 taskRegistry.registerTask(applySeminarTaskStandalone);
@@ -359,13 +365,6 @@ const runSeminarQuizTask: Task = {
   },
 };
 taskRegistry.registerTask(runSeminarQuizTask);
-const refreshSeminarPointExclusionTask: Task = {
-  name: 'refresh_seminar_point_exclusion',
-  run: async () => {
-    return await refreshSeminarPointExclusionTaskModule.run();
-  },
-};
-taskRegistry.registerTask(refreshSeminarPointExclusionTask);
 const monitorLunchSeminarsTask: Task = {
   name: 'monitor_lunch_seminars',
   schedule: LUNCH_MONITOR_CRON,

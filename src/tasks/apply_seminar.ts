@@ -11,6 +11,12 @@ import {
 } from '../modules/utils';
 import { httpGet } from '../modules/http_client';
 import { parseSeminarListHtml, parseCompletionCountHtml } from '../modules/html_parser';
+import {
+  fetchMainFutureSeminars,
+  fetchSeminarDetail,
+  convertApiItemToRawSeminar,
+  convertApiItemToSeminarListItem,
+} from '../modules/seminar_api';
 import { searchSeminarPoints } from './check_seminar_point';
 import * as storage from '../services/storage';
 
@@ -290,7 +296,7 @@ function migrateLegacySeminarStorage(referenceDate: string): SeminarListItem[] {
   return retained;
 }
 
-function refreshStoredSeminarList(
+export function refreshStoredSeminarList(
   current: SeminarListItem[],
   stored: SeminarListItem[],
   referenceDate: string,
@@ -445,16 +451,35 @@ export type ApplySeminarOptions = {
 async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Promise<TaskResult> {
   const { notifyNewSeminarsToChannel = false, notifyNewSeminarsToTelegram = true } = options;
 
-  let mainRes;
+  let currentSeminars: RawSeminarData[] = [];
+  let normalizedCurrentSeminars: SeminarListItem[] = [];
+  const referenceDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+  let mainHtmlBody = '';
+
   try {
-    mainRes = await httpGet(SEMINAR_PAGE);
-    if (mainRes.resultType === 'AUTH_EXPIRED') {
-      const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
-      await sendTelegram(msg).catch(() => {});
-      return { success: false, message: msg };
-    }
-    if (mainRes.status !== 200 || !mainRes.body) {
-      throw new Error(`HTTP GET ${SEMINAR_PAGE} failed with status ${mainRes.status}`);
+    const apiRes = await fetchMainFutureSeminars();
+    if (apiRes.success) {
+      currentSeminars = apiRes.items.map(convertApiItemToRawSeminar);
+      normalizedCurrentSeminars = apiRes.items.map((item) => convertApiItemToSeminarListItem(item, referenceDate));
+    } else {
+      if (apiRes.isAuthExpired) {
+        const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
+        await sendTelegram(msg).catch(() => {});
+        return { success: false, message: msg };
+      }
+      console.warn('fetchMainFutureSeminars 실패, HTML 파싱 fallback 시도:', apiRes.errorMessage);
+      const mainRes = await httpGet(SEMINAR_PAGE);
+      if (mainRes.resultType === 'AUTH_EXPIRED') {
+        const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
+        await sendTelegram(msg).catch(() => {});
+        return { success: false, message: msg };
+      }
+      if (mainRes.status !== 200 || !mainRes.body) {
+        throw new Error(apiRes.errorMessage || `HTTP GET ${SEMINAR_PAGE} failed with status ${mainRes.status}`);
+      }
+      mainHtmlBody = mainRes.body;
+      currentSeminars = parseSeminarListHtml(mainRes.body);
+      normalizedCurrentSeminars = normalizeParsedSeminars(currentSeminars, referenceDate);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -463,9 +488,6 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
     return { success: false, message: `세미나 신청 작업 오류: ${message}` };
   }
 
-  const currentSeminars = parseSeminarListHtml(mainRes.body);
-  const referenceDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
-  const normalizedCurrentSeminars = normalizeParsedSeminars(currentSeminars, referenceDate);
   const storedSeminars = migrateLegacySeminarStorage(referenceDate);
 
   const { seminars, newlyAdded, infoChanges } = refreshStoredSeminarList(
@@ -480,14 +502,34 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
     const newlyAddedWithFlags: SeminarListItem[] = [];
     for (const item of newlyAdded) {
       const seminarId = getSeminarIdFromUrl(item.url);
-      const link = seminarId ? `${SEMINAR_DETAIL_SSR_PAGE}${seminarId}` : item.url;
-      const pointExRes = await isSurveyPointExcludedSeminarHttp(link);
-      if (pointExRes.status === 'auth_expired') {
-        const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
-        await sendTelegram(msg).catch(() => {});
-        return { success: false, message: msg };
+      let isPointExcluded = item.isPointExcluded;
+
+      // isPointExcluded 가 미정인 경우 detail API 우선 조회
+      if (typeof isPointExcluded !== 'boolean') {
+        if (seminarId) {
+          const detailRes = await fetchSeminarDetail(seminarId);
+          if (detailRes.isAuthExpired) {
+            const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
+            await sendTelegram(msg).catch(() => {});
+            return { success: false, message: msg };
+          }
+          if (detailRes.success) {
+            isPointExcluded = detailRes.isPointExcluded;
+          }
+        }
+
+        // detail API 실패 시 HTML fallback
+        if (typeof isPointExcluded !== 'boolean') {
+          const link = seminarId ? `${SEMINAR_DETAIL_SSR_PAGE}${seminarId}` : item.url;
+          const pointExRes = await isSurveyPointExcludedSeminarHttp(link);
+          if (pointExRes.status === 'auth_expired') {
+            const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
+            await sendTelegram(msg).catch(() => {});
+            return { success: false, message: msg };
+          }
+          isPointExcluded = pointExRes.status === 'success' ? pointExRes.excluded : undefined;
+        }
       }
-      const isPointExcluded = pointExRes.status === 'success' ? pointExRes.excluded : item.isPointExcluded;
       newlyAddedWithFlags.push({ ...item, seminarId, isPointExcluded });
     }
 
@@ -525,7 +567,7 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
   let totalSeminarsAvailable = currentSeminars.length;
 
   if (!hasApplyTarget) {
-    const completionCount = parseCompletionCountHtml(mainRes.body);
+    const completionCount = mainHtmlBody ? parseCompletionCountHtml(mainHtmlBody) : totalSeminarsAvailable;
     const message = `✅ ${completionCount}개 세미나 신청 완료! (${completionCount}/${totalSeminarsAvailable})`;
 
     const result: TaskResult = { success: true, message };
@@ -630,26 +672,48 @@ export const applySeminarExtraTask = {
   schedule: '*/10 6-23 * * *',
   options: { notifyNewSeminarsToTelegram: false, silentIfNoNew: true, checkAdvancedPointStatus: true },
   run: (_args: unknown, options?: ApplySeminarOptions) =>
-    runHttpOnly(options || { notifyNewSeminarsToTelegram: false, silentIfNoNew: true, checkAdvancedPointStatus: true }),
+    runHttpOnly({
+      notifyNewSeminarsToTelegram: false,
+      silentIfNoNew: true,
+      checkAdvancedPointStatus: true,
+      ...options,
+    }),
 };
 
 export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<TaskResult> {
-  const { notifyNewSeminarsToChannel = false, notifyNewSeminarsToTelegram = true } = options;
+  const { notifyNewSeminarsToChannel = false, notifyNewSeminarsToTelegram = true, silentIfNoNew = true } = options;
 
   try {
-    const mainRes = await httpGet(SEMINAR_PAGE);
-    if (mainRes.resultType === 'AUTH_EXPIRED') {
-      const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
-      await sendTelegram(msg).catch(() => {});
-      return { success: false, message: msg };
-    }
-    if (mainRes.status !== 200 || !mainRes.body) {
-      throw new Error(`HTTP GET ${SEMINAR_PAGE} failed with status ${mainRes.status}`);
+    let currentSeminars: RawSeminarData[] = [];
+    let normalizedCurrentSeminars: SeminarListItem[] = [];
+    const referenceDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+    let mainHtmlBody = '';
+
+    const apiRes = await fetchMainFutureSeminars();
+    if (apiRes.success) {
+      currentSeminars = apiRes.items.map(convertApiItemToRawSeminar);
+      normalizedCurrentSeminars = apiRes.items.map((item) => convertApiItemToSeminarListItem(item, referenceDate));
+    } else {
+      if (apiRes.isAuthExpired) {
+        const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
+        await sendTelegram(msg).catch(() => {});
+        return { success: false, message: msg };
+      }
+      console.warn('runHttpOnly: fetchMainFutureSeminars 실패, HTML 파싱 fallback 시도:', apiRes.errorMessage);
+      const mainRes = await httpGet(SEMINAR_PAGE);
+      if (mainRes.resultType === 'AUTH_EXPIRED') {
+        const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
+        await sendTelegram(msg).catch(() => {});
+        return { success: false, message: msg };
+      }
+      if (mainRes.status !== 200 || !mainRes.body) {
+        throw new Error(apiRes.errorMessage || `HTTP GET ${SEMINAR_PAGE} failed with status ${mainRes.status}`);
+      }
+      mainHtmlBody = mainRes.body;
+      currentSeminars = parseSeminarListHtml(mainRes.body);
+      normalizedCurrentSeminars = normalizeParsedSeminars(currentSeminars, referenceDate);
     }
 
-    const currentSeminars = parseSeminarListHtml(mainRes.body);
-    const referenceDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
-    const normalizedCurrentSeminars = normalizeParsedSeminars(currentSeminars, referenceDate);
     const storedSeminars = migrateLegacySeminarStorage(referenceDate);
 
     const { seminars, newlyAdded, infoChanges } = refreshStoredSeminarList(
@@ -664,14 +728,32 @@ export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<Ta
       const newlyAddedWithFlags: SeminarListItem[] = [];
       for (const item of newlyAdded) {
         const seminarId = getSeminarIdFromUrl(item.url);
-        const link = seminarId ? `${SEMINAR_DETAIL_SSR_PAGE}${seminarId}` : item.url;
-        const pointExRes = await isSurveyPointExcludedSeminarHttp(link);
-        if (pointExRes.status === 'auth_expired') {
-          const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
-          await sendTelegram(msg).catch(() => {});
-          return { success: false, message: msg };
+        let isPointExcluded = item.isPointExcluded;
+
+        if (typeof isPointExcluded !== 'boolean') {
+          if (seminarId) {
+            const detailRes = await fetchSeminarDetail(seminarId);
+            if (detailRes.isAuthExpired) {
+              const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
+              await sendTelegram(msg).catch(() => {});
+              return { success: false, message: msg };
+            }
+            if (detailRes.success) {
+              isPointExcluded = detailRes.isPointExcluded;
+            }
+          }
+
+          if (typeof isPointExcluded !== 'boolean') {
+            const link = seminarId ? `${SEMINAR_DETAIL_SSR_PAGE}${seminarId}` : item.url;
+            const pointExRes = await isSurveyPointExcludedSeminarHttp(link);
+            if (pointExRes.status === 'auth_expired') {
+              const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
+              await sendTelegram(msg).catch(() => {});
+              return { success: false, message: msg };
+            }
+            isPointExcluded = pointExRes.status === 'success' ? pointExRes.excluded : undefined;
+          }
         }
-        const isPointExcluded = pointExRes.status === 'success' ? pointExRes.excluded : item.isPointExcluded;
         newlyAddedWithFlags.push({ ...item, seminarId, isPointExcluded });
       }
 
@@ -704,12 +786,12 @@ export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<Ta
       await sendTelegram(changeNotificationText).catch(() => {});
     }
 
-    const completionCount = parseCompletionCountHtml(mainRes.body);
+    const completionCount = mainHtmlBody ? parseCompletionCountHtml(mainHtmlBody) : currentSeminars.length;
     const totalSeminarsAvailable = currentSeminars.length;
     const message = `✅ ${completionCount}개 세미나 신청 완료! (${completionCount}/${totalSeminarsAvailable})`;
 
     const result: TaskResult = { success: true, message };
-    if (options.silentIfNoNew && newlyAdded.length === 0) result.silent = true;
+    if (silentIfNoNew && newlyAdded.length === 0) result.silent = true;
     return result;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
