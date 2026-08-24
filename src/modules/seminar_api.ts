@@ -154,12 +154,15 @@ export function checkIsAdvancedSurvey(useDepthSurvey?: boolean | string | number
 
 /**
  * 포인트 미지급 세미나 여부 판별
- * survey?.point 가 없거나 0 이하인 경우 true (포인트 미지급)
+ * survey 객체가 없거나, point 값이 없거나 0 이하인 경우 true (포인트 미지급)
+ *
+ * 방어적 판정: survey 객체가 있어도 point가 undefined/null이면
+ * API 스키마 변경 등으로 인한 누락 가능성이 있으므로 미지급으로 간주
  */
 export function checkIsPointExcluded(survey?: SeminarSurveyInfo | null): boolean {
   if (!survey) return true;
   if (survey.point === undefined || survey.point === null) {
-    return false;
+    return true;
   }
 
   const pointNum = Number(survey.point);
@@ -359,8 +362,9 @@ export async function fetchMainFutureSeminars(
     const items = parsed.futureSeminarList?.items;
     if (!Array.isArray(items)) {
       return {
-        success: true,
-        items: [],
+        success: false,
+        isAuthExpired: false,
+        errorMessage: `API 응답 구조 이상: futureSeminarList.items가 배열이 아닙니다 (타입: ${typeof items}, futureSeminarList 타입: ${typeof parsed.futureSeminarList})`,
         rawResponse: parsed,
       };
     }

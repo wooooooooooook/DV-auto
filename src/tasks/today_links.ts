@@ -908,7 +908,7 @@ function formatTodayLinksBroadcast(input: TodayLinksFormatInput): TodayLinksForm
 
   message += `\n<blockquote>🤖 <b>닥터빌 텔레그램방에 전송된 메시지입니다.</b>
 매일 오전 9시 링크모음 발송, 세미나 시작/종료, 퀴즈 정답 알림, 지금 가입하세요!
-https://t.me/+J1UGmvLA9jU4NjQ1</blockquote>`;
+https://t.me/+J1UGmvLA9jU4NjQ1</blockquote>\n<blockquote>✨세미나정보변경/포인트지급내역 알림 등 상세 알림을 받으려면 알림봇을 구독해주세요! https://t.me/DV_notice_bot </blockquote>`;
 
   const inlineKeyboard: Array<Array<{ text: string; url: string }>> = [];
 

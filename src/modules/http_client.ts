@@ -117,6 +117,8 @@ export async function sendDoctorVilleRequest(url: string, options: HttpRequestOp
   const maxRedirects = options.maxRedirects ?? 5;
 
   let currentUrl = url;
+  let currentMethod = method;
+  let currentBody = options.body;
   let redirectCount = 0;
   let isRedirected = false;
 
@@ -126,17 +128,17 @@ export async function sendDoctorVilleRequest(url: string, options: HttpRequestOp
 
     try {
       let bodyData: string | Buffer | Uint8Array | undefined = undefined;
-      if (options.body instanceof URLSearchParams) {
-        bodyData = options.body.toString();
+      if (currentBody instanceof URLSearchParams) {
+        bodyData = currentBody.toString();
         if (!headers['Content-Type']) {
           headers['Content-Type'] = 'application/x-www-form-urlencoded';
         }
       } else {
-        bodyData = options.body;
+        bodyData = currentBody;
       }
 
       const res = await request(currentUrl, {
-        method,
+        method: currentMethod,
         headers,
         body: bodyData,
         signal: controller.signal,
@@ -153,6 +155,7 @@ export async function sendDoctorVilleRequest(url: string, options: HttpRequestOp
       }
 
       // redirect 처리 (301, 302, 303, 307, 308)
+      // RFC 7231: 301/302/303 → GET 전환 + body 제거, 307/308 → method/body 유지
       if (followRedirects && [301, 302, 303, 307, 308].includes(status)) {
         const location = resHeaders['location'];
         const locationUrl = Array.isArray(location) ? location[0] : location;
@@ -160,6 +163,24 @@ export async function sendDoctorVilleRequest(url: string, options: HttpRequestOp
           redirectCount++;
           isRedirected = true;
           currentUrl = new URL(locationUrl, currentUrl).toString();
+
+          // 301, 302, 303: 브라우저 표준 동작 — GET으로 전환, body 제거
+          if ([301, 302, 303].includes(status)) {
+            currentMethod = 'GET';
+            currentBody = undefined;
+            delete headers['Content-Type'];
+            delete headers['Content-Length'];
+          }
+          // 307, 308: 원래 method와 body 유지 (그대로 진행)
+
+          // redirect 대상 URL에 맞는 Cookie 재생성
+          const newCookieHeader = getCookieHeader(currentUrl);
+          if (newCookieHeader) {
+            headers['Cookie'] = newCookieHeader;
+          } else {
+            delete headers['Cookie'];
+          }
+
           // drain body
           await res.body.text().catch(() => {});
           continue;
