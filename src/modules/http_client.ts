@@ -248,3 +248,16 @@ export async function httpGetJson<T>(url: string, headers?: Record<string, strin
   });
   return JSON.parse(res.body) as T;
 }
+
+export async function httpPostJson<T>(url: string, data?: unknown, headers?: Record<string, string>): Promise<T> {
+  const res = await sendDoctorVilleRequest(url, {
+    method: 'POST',
+    body: data !== undefined ? JSON.stringify(data) : undefined,
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json, text/plain, */*',
+      ...headers,
+    },
+  });
+  return JSON.parse(res.body) as T;
+}

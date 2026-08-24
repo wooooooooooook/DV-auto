@@ -283,15 +283,7 @@ taskRegistry.registerTask(todayLinksTask);
 const checkPointTask: Task = {
   name: 'check_point',
   run: async () => {
-    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    try {
-      await utils.ensureLoggedIn({ page, context });
-      return await checkPointTaskModule.run({ page, context });
-    } finally {
-      await browser.close();
-    }
+    return await checkPointTaskModule.run();
   },
 };
 taskRegistry.registerTask(checkPointTask);
