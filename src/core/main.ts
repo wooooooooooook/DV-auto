@@ -108,7 +108,17 @@ async function checkAndNotifyPointConversion(): Promise<void> {
     if (prev !== null) {
       if (available)
         await utils.sendNotificationToChannel(
-          '네이버페이포인트 전환이 가능해졌습니다\nhttps://www.doctorville.co.kr/my/point/pointUseHistoryList',
+          [
+            '네이버페이포인트 전환이 가능해졌습니다',
+            'https://www.doctorville.co.kr/my/point/pointUseHistoryList',
+            '',
+            '[Q&A]',
+            'Q. 연동된 네이버 계정 없음',
+            'A. 아닙니다 광클하세요',
+            '',
+            'Q. 포인트 월 한도 초과 안내 : 네이버페이포인트 전환에 실패했습니다.',
+            'A. 아닙니다 광클하세요',
+          ].join('\n'),
         );
       else
         await utils.sendNotificationToChannel(
