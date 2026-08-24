@@ -89,20 +89,38 @@ export function run(): { success: boolean; message: string } {
       };
     }
 
-    const entries = [...unique.values()].sort((a, b) => b.date.localeCompare(a.date));
-    const lines = entries.map(({ date, seminar }) => {
-      const pointStatus =
-        seminar.pointPaid === true
-          ? ` → ✅ ${seminar.pointText ?? `${seminar.point ?? 0}P`} 지급됨`
-          : seminar.pointCheckedAt
-            ? ' → ❌ 미지급'
-            : ' → ⏳ 조회 대기';
-      return `${date} | ${seminar.name || '세미나'} | ID: ${seminar.seminarId} | 판별: seminar_list${pointStatus}`;
+    const entries = [...unique.values()].sort((a, b) => {
+      const dateCmp = a.date.localeCompare(b.date);
+      if (dateCmp !== 0) return dateCmp;
+      return (a.seminar.seminarId || '').localeCompare(b.seminar.seminarId || '');
     });
+
+    const groupedByDate = new Map<string, Array<{ seminar: SeminarRecord }>>();
+    for (const entry of entries) {
+      const list = groupedByDate.get(entry.date) || [];
+      list.push(entry);
+      groupedByDate.set(entry.date, list);
+    }
+
+    const dateSections: string[] = [];
+    for (const [date, items] of groupedByDate.entries()) {
+      const itemLines = items.map(({ seminar }) => {
+        const rawName = seminar.name || '세미나';
+        const truncatedName = rawName.length > 10 ? `${rawName.slice(0, 10)}...` : rawName;
+        const pointStatus =
+          seminar.pointPaid === true
+            ? `✅ ${seminar.pointText ?? `${seminar.point ?? 0}P`} 지급됨`
+            : seminar.pointCheckedAt
+              ? '❌ 미지급'
+              : '⏳ 조회 대기';
+        return `${seminar.seminarId} | ${truncatedName} | ${pointStatus}`;
+      });
+      dateSections.push(`📅 ${date}\n${itemLines.join('\n')}`);
+    }
 
     return {
       success: true,
-      message: `⭐ 최근 2주 심화설문 ${entries.length}건 (${pastStr} ~ ${todayStr})\n\n${lines.join('\n')}`,
+      message: `⭐ 최근 2주 심화설문 ${entries.length}건 (${pastStr} ~ ${todayStr})\n\n${dateSections.join('\n\n')}`,
     };
   } catch (e) {
     return {

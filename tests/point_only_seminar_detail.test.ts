@@ -200,7 +200,7 @@ async function testPointOnlySeminarDetail() {
     const checkResult = checkAdvancedSeminarsModule.run();
     assert.strictEqual(checkResult.success, true);
     assert(
-      checkResult.message.includes('당뇨병 최신 지견 심화 세미나'),
+      checkResult.message.includes('당뇨병 최신 지견') && checkResult.message.includes('5999'),
       '5999 심화 세미나가 check_advanced_seminars 목록에 포함되어야 함',
     );
     assert(checkResult.message.includes('5,000P 지급됨'), '5999 심화 세미나의 포인트 지급 상태가 표기되어야 함');
