@@ -277,6 +277,42 @@ async function runAllTests() {
 
     console.log('  ✓ [Pass] a:has(.ico_apply) 및 .ico_completion 코드 미존재 확인\n');
 
+    // ======================================================================
+    // ⑥ seminarId 추출 실패 시 정상 종료가 아닌 명확한 오류(success: false) 반환
+    // ======================================================================
+    console.log('--- [Test ⑥] seminarId 추출 실패 시 명확한 오류 반환 ---');
+    storage.set(SEMINAR_LIST_KEY, []);
+    browserLaunchCount = 0;
+    safeGotoUrls.length = 0;
+    sentMessages.length = 0;
+
+    // 잘못된 URL 및 빈 seminarId를 반환하는 시나리오
+    (seminarApiModule as unknown as { fetchMainFutureSeminars: unknown }).fetchMainFutureSeminars = async () => ({
+      success: true,
+      items: [
+        {
+          seminarId: '',
+          seminarNm: 'ID 추출 불가 세미나',
+          startDt: '2026-08-25 13:00:00',
+          endDt: '2026-08-25 14:00:00',
+          processState: ProcessState.PROCESS_APPLY,
+        },
+      ],
+      rawResponse: { futureSeminarList: { items: [] } },
+    });
+
+    const result6 = await runApplySeminar({}, { notifyNewSeminarsToTelegram: false });
+    assert.strictEqual(result6.success, false, '⑥ seminarId 추출 실패 시 success는 false여야 함');
+    assert.ok(
+      (result6.message || '').includes('seminarId) 추출 실패'),
+      `⑥ 에러 메시지에 seminarId 추출 실패 포함: "${result6.message}"`,
+    );
+    assert.ok(
+      sentMessages.some((msg) => msg.includes('seminarId) 추출 실패')),
+      '⑥ 텔레그램 오류 메시지 발송 확인',
+    );
+    console.log(`  ✓ [Pass] seminarId 추출 실패 시 명확한 오류 반환 확인: "${result6.message}"\n`);
+
     console.log('🎉 모든 Playwright 직접 상세페이지 진입 테스트 통과!\n');
   } finally {
     (seminarApiModule as unknown as { fetchMainFutureSeminars: unknown }).fetchMainFutureSeminars =

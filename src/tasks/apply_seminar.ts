@@ -718,17 +718,24 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
   }
 
   // applyTargets에서 seminarId 추출 (상세페이지 직접 진입용)
-  const targetSeminarIds = applyTargets
-    .map((s) => s.seminarId || getSeminarIdFromUrl(s.url))
-    .filter((id): id is string => !!id);
+  const targetSeminarIds: string[] = [];
+  const invalidTargets: RawSeminarData[] = [];
 
-  if (targetSeminarIds.length === 0) {
-    // seminarId 추출 실패 시 신청 대상 없음으로 처리
-    const appliedCount = currentSeminars.filter((s) => isAppliedSeminar(s.processState)).length;
-    const message = `✅ ${appliedCount}개 세미나 신청 완료 (${appliedCount}/${totalSeminarsAvailable})`;
-    const result: TaskResult = { success: true, message };
-    if (options.silentIfNoNew && newlyAdded.length === 0) result.silent = true;
-    return result;
+  for (const target of applyTargets) {
+    const id = target.seminarId || getSeminarIdFromUrl(target.url);
+    if (id) {
+      targetSeminarIds.push(id);
+    } else {
+      invalidTargets.push(target);
+    }
+  }
+
+  if (invalidTargets.length > 0 || targetSeminarIds.length === 0) {
+    const failedNames = invalidTargets.map((t) => t.name || t.url).join(', ');
+    const errorMessage = `신청 대상 세미나 ID(seminarId) 추출 실패 (${invalidTargets.length}건: ${failedNames})`;
+    console.error('apply_seminar seminarId extraction error:', errorMessage);
+    await sendTelegram(`❗ 세미나 신청 작업 오류: ${errorMessage}`).catch(() => {});
+    return { success: false, message: `세미나 신청 작업 오류: ${errorMessage}` };
   }
 
   let page = ctx.page;
