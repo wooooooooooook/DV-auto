@@ -5,6 +5,7 @@ import path from 'path';
 import { chromium } from 'playwright';
 import * as httpClientModule from '../src/modules/http_client';
 import * as utilsModule from '../src/modules/utils';
+import * as checkSeminarPointModule from '../src/tasks/check_seminar_point';
 import { applySeminarExtraTask } from '../src/tasks/apply_seminar';
 import * as storage from '../src/services/storage';
 
@@ -13,6 +14,7 @@ const COOKIE_FILE = path.join(process.cwd(), 'cookies.json');
 async function runTests() {
   console.log('--- [Test] HTTP Session Expiry & Error Classification Tests Started ---');
 
+  const originalSearchSeminarPoints = checkSeminarPointModule.searchSeminarPoints;
   // Backup original cookies.json
   let originalCookies: string | null = null;
   if (fs.existsSync(COOKIE_FILE)) {
@@ -120,6 +122,10 @@ async function runTests() {
     const mockExpiredHtml = '<script>alert("로그인이 되어 있지 않습니다.\\n로그인 해주시기 바랍니다.");</script>';
 
     const originalHttpGet = httpClientModule.httpGet;
+    (checkSeminarPointModule as unknown as { searchSeminarPoints: unknown }).searchSeminarPoints = async () => ({
+      success: true,
+      points: new Map(),
+    });
     (httpClientModule as unknown as { httpGet: unknown }).httpGet = async (
       url: string,
       _headers?: Record<string, string>,
@@ -244,6 +250,8 @@ async function runTests() {
 
     console.log('🎉 모든 HTTP 세션 만료 및 오류 구분 테스트 통과!');
   } finally {
+    (checkSeminarPointModule as unknown as { searchSeminarPoints: unknown }).searchSeminarPoints =
+      originalSearchSeminarPoints;
     server.close();
     if (originalCookies !== null) {
       fs.writeFileSync(COOKIE_FILE, originalCookies, 'utf8');

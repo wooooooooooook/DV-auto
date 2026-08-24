@@ -7,6 +7,7 @@ type SeminarRecord = {
   name?: string;
   url: string;
   date?: string;
+  detectedDate?: string;
   seminarId?: string | null;
   isAdvancedSurvey?: boolean;
   pointPaid?: boolean;
@@ -75,7 +76,7 @@ export function run(): { success: boolean; message: string } {
 
     for (const stored of seminarList) {
       const seminarId = getSeminarId(stored);
-      const normalizedDate = normalizeSeminarDate(stored.date, todayStr);
+      const normalizedDate = normalizeSeminarDate(stored.date || stored.detectedDate, todayStr);
       if (!seminarId || !normalizedDate || normalizedDate < pastStr || normalizedDate > todayStr) continue;
       if (stored.isAdvancedSurvey !== true) continue;
       unique.set(seminarId, { date: normalizedDate, seminar: { ...stored, seminarId } });

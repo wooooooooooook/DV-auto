@@ -3,6 +3,7 @@ import { chromium } from 'playwright';
 import { run as runApplySeminar, SEMINAR_LIST_KEY } from '../src/tasks/apply_seminar';
 import * as httpClientModule from '../src/modules/http_client';
 import * as utilsModule from '../src/modules/utils';
+import * as checkSeminarPointModule from '../src/tasks/check_seminar_point';
 import * as storage from '../src/services/storage';
 
 async function testApplySeminarHttpPrecheck() {
@@ -14,7 +15,13 @@ async function testApplySeminarHttpPrecheck() {
   const originalEnsureLoggedIn = utilsModule.ensureLoggedIn;
   const originalSafeGoto = utilsModule.safeGoto;
   const originalSendTelegram = utilsModule.sendTelegram;
+  const originalSearchSeminarPoints = checkSeminarPointModule.searchSeminarPoints;
   const originalLaunch = chromium.launch;
+
+  (checkSeminarPointModule as unknown as { searchSeminarPoints: unknown }).searchSeminarPoints = async () => ({
+    success: true,
+    points: new Map(),
+  });
 
   let safeGotoCallCount = 0;
   let browserLaunchCount = 0;
@@ -245,6 +252,8 @@ async function testApplySeminarHttpPrecheck() {
 
     console.log('🎉 모든 apply_seminar HTTP pre-check 테스트 성공적 통과!\n');
   } finally {
+    (checkSeminarPointModule as unknown as { searchSeminarPoints: unknown }).searchSeminarPoints =
+      originalSearchSeminarPoints;
     (httpClientModule as unknown as { httpGet: unknown }).httpGet = originalHttpGet;
     (utilsModule as unknown as { ensureLoggedIn: unknown }).ensureLoggedIn = originalEnsureLoggedIn;
     (utilsModule as unknown as { safeGoto: unknown }).safeGoto = originalSafeGoto;

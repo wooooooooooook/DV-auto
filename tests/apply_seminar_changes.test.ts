@@ -297,6 +297,7 @@ async function testApplySeminarChanges() {
 
     // 12. apply_seminar_extra 실행 시 아무런 변경(신규/정보/포인트)이 없을 때 메시지를 보내지 않고 silent=true 검증
     console.log('--- Case 12: apply_seminar_extra 아무 작업도 하지 않았을 때 메시지 미전송 검증 ---');
+    mockPointHistory.clear();
     sentTelegramMessages.length = 0;
     sentChannelMessages.length = 0;
 

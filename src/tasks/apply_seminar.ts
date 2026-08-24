@@ -16,9 +16,13 @@ import {
   fetchSeminarDetail,
   convertApiItemToRawSeminar,
   convertApiItemToSeminarListItem,
+  parseSeminarDateTime,
+  checkIsAdvancedSurvey,
+  checkIsPointExcluded,
 } from '../modules/seminar_api';
 import { searchSeminarPoints } from './check_seminar_point';
 import * as storage from '../services/storage';
+import * as logger from '../services/logger';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
@@ -352,13 +356,65 @@ export function refreshStoredSeminarList(
   return { seminars, newlyAdded, infoChanges };
 }
 
-export async function refreshSeminarPointStatus(
-  context: TaskContext['context'],
-  seminars: SeminarListItem[],
-): Promise<{ seminars: SeminarListItem[]; pointChanges: SeminarPointChange[] }> {
-  if (!context) return { seminars, pointChanges: [] };
+async function fetchAndPopulateSeminarInfo(
+  seminarId: string,
+  fallbackDate?: string,
+): Promise<Partial<SeminarListItem>> {
+  try {
+    const detailRes = await fetchSeminarDetail(seminarId);
+    if (!detailRes.success || !detailRes.rawResponse?.seminarDetail) {
+      return {};
+    }
+    const d = detailRes.rawResponse.seminarDetail;
+    const startDt = typeof d.startDt === 'string' ? d.startDt : undefined;
+    const endDt = typeof d.endDt === 'string' ? d.endDt : undefined;
+    const { date, time, nightTime } = parseSeminarDateTime(startDt, endDt);
+    const isAdvancedSurvey = checkIsAdvancedSurvey(d.useDepthSurvey);
+    const isPointExcluded = detailRes.isPointExcluded ?? checkIsPointExcluded(d.survey);
+    const processStateNum = d.processState !== undefined ? Number(d.processState) : undefined;
+    const cancelProcessStateNum = d.cancelProcessState !== undefined ? Number(d.cancelProcessState) : undefined;
+    const seminarCompletedNum =
+      d.seminarCompleted !== undefined
+        ? typeof d.seminarCompleted === 'boolean'
+          ? d.seminarCompleted
+            ? 1
+            : 0
+          : Number(d.seminarCompleted)
+        : undefined;
 
-  const searchRes = await searchSeminarPoints(context, [], 60);
+    let detectedDate = date;
+    if (!detectedDate && typeof d.createDt === 'string') {
+      detectedDate = d.createDt.split(' ')[0] || '';
+    }
+    if (!detectedDate && fallbackDate) {
+      detectedDate = fallbackDate;
+    }
+
+    return {
+      name: typeof d.seminarNm === 'string' ? d.seminarNm : '',
+      date,
+      time,
+      nightTime,
+      currentCount: d.applyCnt !== undefined && d.applyCnt !== null ? String(d.applyCnt) : '',
+      totalCount: d.maxPeopleCnt !== undefined && d.maxPeopleCnt !== null ? String(d.maxPeopleCnt) : '',
+      isAdvancedSurvey,
+      isPointExcluded,
+      processState: processStateNum,
+      cancelProcessState: cancelProcessStateNum,
+      seminarCompleted: seminarCompletedNum,
+      detectedDate: detectedDate || '',
+    };
+  } catch (err) {
+    logger.warn(`Failed to fetch seminar detail for ID ${seminarId}:`, err);
+    return {};
+  }
+}
+
+export async function refreshSeminarPointStatus(
+  _context?: TaskContext['context'],
+  seminars: SeminarListItem[] = [],
+): Promise<{ seminars: SeminarListItem[]; pointChanges: SeminarPointChange[] }> {
+  const searchRes = await searchSeminarPoints(undefined, [], 60);
   if (!searchRes.success) {
     console.warn(
       'refreshSeminarPointStatus: point history query failed, keeping seminar_list status intact:',
@@ -370,67 +426,98 @@ export async function refreshSeminarPointStatus(
   const checkedAt = new Date().toISOString();
   const pointChanges: SeminarPointChange[] = [];
 
-  const updatedSeminars = seminars.map((seminar) => {
-    if (seminar.pointPaid === true) {
-      return seminar;
+  const updatedSeminars: SeminarListItem[] = [];
+  for (const seminar of seminars) {
+    const id = seminar.seminarId || getSeminarIdFromUrl(seminar.url);
+    let currentItem = { ...seminar };
+
+    // 만약 기존 세미나 메타데이터(이름 또는 일자)가 비어 있는 경우, detail API로 정보 채우기
+    if (id && (!currentItem.name || !currentItem.date)) {
+      const extra = await fetchAndPopulateSeminarInfo(id, currentItem.detectedDate || currentItem.date);
+      currentItem = {
+        ...currentItem,
+        name: extra.name || currentItem.name || '',
+        date: extra.date || currentItem.date || '',
+        time: extra.time || currentItem.time || '',
+        nightTime: extra.nightTime ?? currentItem.nightTime ?? false,
+        currentCount: extra.currentCount || currentItem.currentCount || '',
+        totalCount: extra.totalCount || currentItem.totalCount || '',
+        isAdvancedSurvey: extra.isAdvancedSurvey ?? currentItem.isAdvancedSurvey ?? false,
+        isPointExcluded: extra.isPointExcluded ?? currentItem.isPointExcluded,
+        processState: extra.processState ?? currentItem.processState,
+        cancelProcessState: extra.cancelProcessState ?? currentItem.cancelProcessState,
+        seminarCompleted: extra.seminarCompleted ?? currentItem.seminarCompleted,
+        detectedDate: extra.detectedDate || currentItem.detectedDate || '',
+      };
     }
 
-    const id = seminar.seminarId || getSeminarIdFromUrl(seminar.url);
+    if (currentItem.pointPaid === true) {
+      updatedSeminars.push(currentItem);
+      continue;
+    }
+
     if (id && parsedPoints.has(id)) {
       const pointResult = parsedPoints.get(id)!;
       if (pointResult.found && pointResult.type === '적립') {
         pointChanges.push({
           seminarId: id,
-          name: seminar.name,
+          name: currentItem.name,
           point: pointResult.point,
           pointText: pointResult.pointText,
           pointDate: pointResult.date,
           pointContent: pointResult.content,
         });
 
-        return {
-          ...seminar,
+        updatedSeminars.push({
+          ...currentItem,
           pointPaid: true,
           point: pointResult.point,
           pointDate: pointResult.date,
           pointText: pointResult.pointText,
           pointContent: pointResult.content,
           pointCheckedAt: checkedAt,
-        };
+        });
+        continue;
       }
     }
 
-    return {
-      ...seminar,
+    updatedSeminars.push({
+      ...currentItem,
       pointPaid: false,
       pointCheckedAt: checkedAt,
-    };
-  });
+    });
+  }
 
   for (const [id, pointResult] of parsedPoints) {
     if (!pointResult.found || pointResult.type !== '적립') continue;
 
     const exists = updatedSeminars.some((item) => (item.seminarId || getSeminarIdFromUrl(item.url)) === id);
     if (!exists) {
+      // 포인트 목록에서만 신규 발견된 경우: seminar detail API로 세미나 메타데이터 채우기
+      const detailInfo = await fetchAndPopulateSeminarInfo(id, pointResult.date);
+
       const newItem: SeminarListItem = {
         seminarId: id,
-        name: '',
+        name: detailInfo.name || '',
         url: `https://m.doctorville.co.kr/cme/seminar/${id}`,
-        date: '',
-        time: '',
-        currentCount: '',
-        totalCount: '',
-        nightTime: false,
-        isAdvancedSurvey: false,
-        isPointExcluded: false,
+        date: detailInfo.date || '',
+        time: detailInfo.time || '',
+        currentCount: detailInfo.currentCount || '',
+        totalCount: detailInfo.totalCount || '',
+        nightTime: detailInfo.nightTime ?? false,
+        isAdvancedSurvey: detailInfo.isAdvancedSurvey ?? false,
+        isPointExcluded: detailInfo.isPointExcluded ?? false,
+        processState: detailInfo.processState,
+        cancelProcessState: detailInfo.cancelProcessState,
+        seminarCompleted: detailInfo.seminarCompleted,
         pointPaid: true,
         point: pointResult.point,
         pointDate: pointResult.date,
         pointText: pointResult.pointText,
         pointContent: pointResult.content,
         pointCheckedAt: checkedAt,
-        detectedDate: '',
-        detectedAt: '',
+        detectedDate: detailInfo.detectedDate || '',
+        detectedAt: checkedAt,
       };
       updatedSeminars.push(newItem);
 
