@@ -478,21 +478,126 @@ export interface SeminarDetailRunResult {
   results?: SeminarDetailResultItem[];
 }
 
+export function getStoredSeminar(seminarId: string): SeminarListItem | null {
+  const currentList = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
+  const found = currentList.find((item) => {
+    const sid = item.seminarId || getSeminarIdFromUrl(item.url);
+    return sid === seminarId;
+  });
+  if (found && found.name) {
+    return found;
+  }
+  return null;
+}
+
+export function formatStoredSeminarDetail(item: SeminarListItem): string {
+  const sid = item.seminarId || getSeminarIdFromUrl(item.url) || '알 수 없음';
+  const lines: string[] = [`*세미나 상세* (ID: ${sid})`, ''];
+  lines.push(`*제목:* ${item.name || '제목 없음'}`);
+  const dateTime = `${item.date || ''} ${item.time || ''}`.trim();
+  if (dateTime) {
+    lines.push(`*일시:* ${dateTime}`);
+  }
+  if (item.currentCount || item.totalCount) {
+    const countInfo =
+      item.currentCount && item.totalCount
+        ? `${item.currentCount} / ${item.totalCount}`
+        : item.totalCount
+          ? `${item.totalCount}명 정원`
+          : `${item.currentCount}명`;
+    lines.push(`*인원:* ${countInfo}`);
+  }
+  if (item.processState !== undefined || item.seminarCompleted !== undefined) {
+    lines.push(`*상태:* ${formatStatus(item.processState, item.seminarCompleted, item.cancelProcessState)}`);
+  }
+  if (item.isAdvancedSurvey !== undefined || item.isPointExcluded !== undefined) {
+    const surveyText = item.isAdvancedSurvey
+      ? '설문 있음 [심화설문]'
+      : item.isPointExcluded
+        ? '설문 없음'
+        : '설문 있음';
+    lines.push(`*설문:* ${surveyText}`);
+  }
+  if (item.pointPaid === true) {
+    lines.push(`*포인트:* ✅ ${item.pointText ?? `${item.point ? Number(item.point).toLocaleString() : 0}P`} 지급됨`);
+  } else if (item.isPointExcluded === true) {
+    lines.push(`*포인트:* 미지급`);
+  } else if (item.pointCheckedAt) {
+    lines.push(`*포인트:* ❌ 미지급 (조회완료)`);
+  } else if (item.point !== undefined && Number(item.point) > 0) {
+    lines.push(`*포인트:* ${Number(item.point).toLocaleString()}P 지급`);
+  } else if (item.isPointExcluded === false) {
+    lines.push(`*포인트:* 지급 대상`);
+  }
+  const url = item.url || (item.seminarId ? `https://m.doctorville.co.kr/cme/seminar/${item.seminarId}` : '');
+  if (url) {
+    lines.push(`*URL:* ${url}`);
+  }
+
+  return lines.join('\n');
+}
+
+export function isForceRefresh(input?: unknown): boolean {
+  if (typeof input === 'string') {
+    return /(?:^|\s)(?:force|refresh|-f|--force|api)(?:\s|$)/i.test(input.trim());
+  }
+  if (Array.isArray(input)) {
+    return input.some((item) => typeof item === 'string' && isForceRefresh(item));
+  }
+  if (input && typeof input === 'object') {
+    const obj = input as Record<string, unknown>;
+    if (obj.preferStored === false || obj.force === true) return true;
+    if (typeof obj.args === 'object' && obj.args !== null) {
+      const argsObj = obj.args as Record<string, unknown>;
+      if (argsObj.preferStored === false || argsObj.force === true) return true;
+      if (typeof argsObj.rawText === 'string') return isForceRefresh(argsObj.rawText);
+    }
+  }
+  return false;
+}
+
 export async function run(
   input?:
     | {
-        args?: { seminarId?: string | string[]; seminarIds?: string | string[] };
+        args?: {
+          seminarId?: string | string[];
+          seminarIds?: string | string[];
+          preferStored?: boolean;
+          force?: boolean;
+          rawText?: string;
+        };
         seminarId?: string | string[];
         seminarIds?: string | string[];
+        preferStored?: boolean;
+        force?: boolean;
       }
     | string
     | string[],
+  options?: { preferStored?: boolean; force?: boolean },
 ): Promise<SeminarDetailRunResult> {
   let ids: string[] = [];
+  let preferStored = options?.preferStored ?? true;
+
+  if (options?.force === true) {
+    preferStored = false;
+  }
+
   if (typeof input === 'string' || Array.isArray(input)) {
     ids = extractSeminarIds(input);
+    if (isForceRefresh(input)) {
+      preferStored = false;
+    }
   } else if (input && typeof input === 'object') {
     ids = extractSeminarIds(input.args || input);
+    if (input.args?.preferStored !== undefined) {
+      preferStored = input.args.preferStored;
+    } else if (input.preferStored !== undefined) {
+      preferStored = input.preferStored;
+    }
+
+    if (input.args?.force === true || input.force === true || isForceRefresh(input.args?.rawText)) {
+      preferStored = false;
+    }
   }
 
   if (ids.length === 0) {
@@ -502,9 +607,28 @@ export async function run(
     };
   }
 
-  // 단일 세미나 조회인 경우 (기존 동작 및 rawMessages 완벽 호환)
+  // 단일 세미나 조회인 경우 (저장된 목록 우선 반환)
   if (ids.length === 1) {
     const seminarId = ids[0];
+    if (preferStored) {
+      const stored = getStoredSeminar(seminarId);
+      if (stored) {
+        const formatted = formatStoredSeminarDetail(stored);
+        return {
+          success: true,
+          message: formatted,
+          messages: [formatted],
+          results: [
+            {
+              seminarId,
+              success: true,
+              message: formatted,
+            },
+          ],
+        };
+      }
+    }
+
     const result = await fetchSeminarDetail(seminarId);
     if (!result.success || !result.data) {
       return { success: false, message: result.error || '세미나 정보를 가져올 수 없습니다.' };
@@ -533,6 +657,20 @@ export async function run(
   const results: SeminarDetailResultItem[] = [];
 
   for (const seminarId of ids) {
+    if (preferStored) {
+      const stored = getStoredSeminar(seminarId);
+      if (stored) {
+        const formatted = formatStoredSeminarDetail(stored);
+        formattedMessages.push(formatted);
+        results.push({
+          seminarId,
+          success: true,
+          message: formatted,
+        });
+        continue;
+      }
+    }
+
     const result = await fetchSeminarDetail(seminarId);
     if (result.success && result.data) {
       const formatted = formatSeminarDetail(result.data, result.raw);

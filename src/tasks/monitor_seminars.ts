@@ -1,7 +1,14 @@
 import type { BrowserContext, Page } from 'playwright';
 import fs from 'fs/promises';
 import path from 'path';
-import { safeGoto, sendNotificationToChannel, sendTelegram, ensureLoggedIn, sleep } from '../modules/utils';
+import {
+  safeGoto,
+  sendNotificationToChannel,
+  sendTelegram,
+  ensureLoggedIn,
+  loadCookies,
+  sleep,
+} from '../modules/utils';
 import {
   fetchMainFutureSeminars,
   fetchSeminarDetail,
@@ -55,6 +62,7 @@ export async function withBrowserContext<T>(
   const HEADLESS = (process.env.HEADLESS || 'true').toLowerCase() === 'true';
   const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
   const context = await browser.newContext();
+  await loadCookies(context).catch(() => {});
   try {
     return await callback(context);
   } finally {
@@ -228,6 +236,7 @@ export async function handleSeminarEndAndQuiz(
   let foundSurveyButton = false;
 
   try {
+    await ensureLoggedIn({ page: surveyPage, context });
     await safeGoto(surveyPage, targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
     await surveyPage.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
 
@@ -523,6 +532,7 @@ export async function checkAndPerformAutoEnter(
     const screenshotPath = path.join(process.cwd(), `seminar_entry_${screenshotKey}.png`);
     try {
       const page = await context.newPage();
+      await ensureLoggedIn({ page, context });
       await safeGoto(page, targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
       await page.screenshot({ path: screenshotPath, fullPage: false });
       await sendTelegram(entryMessage, screenshotPath);

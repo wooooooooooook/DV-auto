@@ -85,7 +85,7 @@ export function run(): { success: boolean; message: string } {
     if (!unique.size) {
       return {
         success: true,
-        message: `최근 2주(${pastStr} ~ ${todayStr}) 심화설문 세미나가 없습니다.`,
+        message: `최근 2주(${pastStr} ~ ${todayStr}) 심화설문 세미나가 없습니다.\n(※ 방장 계정 기준)`,
       };
     }
 
@@ -120,7 +120,7 @@ export function run(): { success: boolean; message: string } {
 
     return {
       success: true,
-      message: `⭐ 최근 2주 심화설문 ${entries.length}건 (${pastStr} ~ ${todayStr})\n\n${dateSections.join('\n\n')}`,
+      message: `⭐ 최근 2주 심화설문 ${entries.length}건 (${pastStr} ~ ${todayStr})\n(※ 방장 계정 기준)\n\n${dateSections.join('\n\n')}`,
     };
   } catch (e) {
     return {
@@ -130,6 +130,26 @@ export function run(): { success: boolean; message: string } {
   }
 }
 
+const CACHE_TTL_MS = 10 * 60 * 1000; // 10분
+
+let cachedResult: { timestamp: number; result: { success: boolean; message: string } } | null = null;
+
+export function clearCache(): void {
+  cachedResult = null;
+}
+
+export function runCached(ttlMs: number = CACHE_TTL_MS): { success: boolean; message: string } {
+  const now = Date.now();
+  if (cachedResult && now - cachedResult.timestamp < ttlMs) {
+    return cachedResult.result;
+  }
+  const result = run();
+  if (result.success) {
+    cachedResult = { timestamp: now, result };
+  }
+  return result;
+}
+
 export async function checkAdvancedSeminars(): Promise<{ success: boolean; message: string }> {
-  return run();
+  return runCached();
 }

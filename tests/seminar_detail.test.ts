@@ -3,6 +3,9 @@ import {
   formatSurveyStatus,
   formatMyParticipation,
   formatSeminarDetail,
+  formatStoredSeminarDetail,
+  getStoredSeminar,
+  isForceRefresh,
   convertDetailToSeminarListItem,
   updateStoredSeminarFromDetail,
   extractSeminarIds,
@@ -468,6 +471,86 @@ export async function runTests() {
       const idsInStorage = listAfterMultiRun.map((s) => s.seminarId).sort();
       assert(idsInStorage.join(',') === '5572,5574', '저장된 세미나 ID 목록 일치');
       console.log('  ✓ [Pass] 복수 세미나 ID 조회 시 run() 통합 검증 성공');
+    } finally {
+      (httpClient as any).httpGetJson = originalHttpGetJson;
+    }
+
+    // Case 12: preferStored = true 시 list에 저장된 값 우선 반환 검증 (API 호출 없음)
+    console.log('\n--- Case 12: list 저장값 우선 반환 (API 미호출) 검증 ---');
+    const mockStoredItem: SeminarListItem = {
+      seminarId: '8888',
+      name: '골다공증 치료 가이드라인',
+      url: 'https://m.doctorville.co.kr/cme/seminar/8888',
+      date: '2026-08-25',
+      time: '13:00~14:00',
+      currentCount: '250',
+      totalCount: '500',
+      nightTime: false,
+      isAdvancedSurvey: true,
+      isPointExcluded: false,
+      processState: 2, // 신청 가능
+      pointPaid: true,
+      point: 3000,
+      pointText: '3,000P',
+    };
+    storage.set(SEMINAR_LIST_KEY, [mockStoredItem]);
+
+    let apiCalled = false;
+    (httpClient as any).httpGetJson = async () => {
+      apiCalled = true;
+      throw new Error('API should not be called when item exists in stored list');
+    };
+
+    try {
+      const storedRunResult = await run({ args: { seminarId: '8888' } });
+      assert(storedRunResult.success === true, '저장된 세미나 우선 반환 성공');
+      assert(!apiCalled, '저장된 세미나 조회 시 API가 호출되지 않아야 함');
+      assert(storedRunResult.message.includes('골다공증 치료 가이드라인'), '저장된 세미나명 포함');
+      assert(storedRunResult.message.includes('3,000P 지급됨'), '포인트 지급 상태 포함');
+      assert(storedRunResult.message.includes('심화설문'), '심화설문 정보 포함');
+      console.log('  ✓ [Pass] list 저장값 우선 반환 및 API 미호출 검증 성공');
+    } finally {
+      (httpClient as any).httpGetJson = originalHttpGetJson;
+    }
+
+    // Case 13: formatStoredSeminarDetail 포맷팅 검증
+    console.log('\n--- Case 13: formatStoredSeminarDetail 포맷팅 검증 ---');
+    const formattedStored = formatStoredSeminarDetail(mockStoredItem);
+    assert(formattedStored.includes('*세미나 상세* (ID: 8888)'), 'ID 헤더 포함');
+    assert(formattedStored.includes('*제목:* 골다공증 치료 가이드라인'), '제목 포함');
+    assert(formattedStored.includes('*일시:* 2026-08-25 13:00~14:00'), '일시 포함');
+    assert(formattedStored.includes('*인원:* 250 / 500'), '인원 정보 포함');
+    assert(formattedStored.includes('*상태:* 신청 가능'), '상태 매핑 확인');
+    assert(formattedStored.includes('*포인트:* ✅ 3,000P 지급됨'), '포인트 상태 확인');
+    // Case 14: force 옵션 및 isForceRefresh 검증
+    console.log('\n--- Case 14: force 옵션 및 isForceRefresh 검증 ---');
+    assert(isForceRefresh('5566 force') === true, 'force 문자열 감지');
+    assert(isForceRefresh('5566 refresh') === true, 'refresh 문자열 감지');
+    assert(isForceRefresh('5566 -f') === true, '-f 문자열 감지');
+    assert(isForceRefresh('5566') === false, '일반 문자열은 false');
+
+    let forceApiCalled: boolean = false;
+    (httpClient as any).httpGetJson = async (url: string) => {
+      forceApiCalled = true;
+      if (url.includes('8888')) {
+        return {
+          ...mock5574Raw,
+          seminarDetail: {
+            ...mock5574Detail,
+            seminarId: 8888,
+            seminarNm: '골다공증 최신 치료 (API 실시간 갱신)',
+          },
+        };
+      }
+      throw new Error('Not found');
+    };
+
+    try {
+      const forceResult = await run('/seminar_detail 8888 force');
+      assert(forceResult.success === true, 'force 실행 성공');
+      assert(forceApiCalled, 'force 입력 시 API가 반드시 호출되어야 함');
+      assert(forceResult.message.includes('API 실시간 갱신'), 'API에서 갱신된 세미나명 반영 확인');
+      console.log('  ✓ [Pass] force 옵션으로 API 강제 호출 및 최신 정보 갱신 검증 성공');
     } finally {
       (httpClient as any).httpGetJson = originalHttpGetJson;
     }

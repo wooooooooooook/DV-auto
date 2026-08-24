@@ -275,6 +275,58 @@ const todayLinks = async (ctx: Context) => {
   }
 };
 
+const createSeminarDetailHandler = (allowForce: boolean) => async (ctx: Context) => {
+  logger.info('User requested seminar detail', { from: ctx.from?.username, allowForce });
+  try {
+    const messageText = ctx.message && 'text' in ctx.message ? ctx.message.text : '';
+    const seminarIds = extractSeminarIds(messageText);
+    if (seminarIds.length === 0) {
+      return ctx.reply(
+        allowForce
+          ? '사용법: /seminar_detail <세미나번호> [force]\n예: /seminar_detail 5566 (목록 저장값 우선)\n   /seminar_detail 5566 force (실시간 API 강제 조회)\n   또는 /seminar_detail 5566 5567'
+          : '사용법: /seminar_detail <세미나번호> [세미나번호...]\n예: /seminar_detail 5566\n   또는 /seminar_detail 5566 5567',
+      );
+    }
+
+    const { run: runSeminarDetail, isForceRefresh } = await import('../tasks/seminar_detail');
+    const force = allowForce && isForceRefresh(messageText);
+    const result = await runSeminarDetail({
+      args: {
+        seminarIds,
+        seminarId: seminarIds[0],
+        preferStored: !force,
+        force,
+      },
+    });
+
+    if (result && typeof result === 'object') {
+      const r = result as {
+        message?: string;
+        success?: boolean;
+        rawMessages?: string[];
+        messages?: string[];
+      };
+
+      if (r.messages && r.messages.length > 1) {
+        for (const msg of r.messages) {
+          await ctx.reply(msg, { parse_mode: 'Markdown' });
+        }
+      } else if (r.success !== false && r.message) {
+        await ctx.reply(r.message, { parse_mode: 'Markdown' });
+      } else if (!r.success && r.message) {
+        await ctx.reply(r.message);
+      }
+
+      for (const rawMsg of r.rawMessages ?? []) {
+        await ctx.reply(rawMsg, { parse_mode: 'Markdown' });
+      }
+    }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    ctx.reply(`세미나 상세 조회 실패: ${message}`);
+  }
+};
+
 // --- Admin Bot Commands ---
 if (adminBot) {
   // ==========================================
@@ -925,83 +977,7 @@ if (adminBot) {
   });
 
   // 세미나 상세 정보 조회
-  adminBot.command('seminar_detail', async (ctx) => {
-    logger.info('User requested seminar detail', { from: ctx.from?.username });
-    const task = taskRegistry.getByName('seminar_detail');
-    if (!task) {
-      logger.error('seminar_detail task not found, cannot run');
-      return ctx.reply('seminar_detail task not found!');
-    }
-
-    try {
-      const messageText = ctx.message?.text || '';
-      const seminarIds = extractSeminarIds(messageText);
-      if (seminarIds.length === 0) {
-        return ctx.reply(
-          '사용법: /seminar_detail <세미나번호> [세미나번호...]\n예: /seminar_detail 5566\n   또는 /seminar_detail 5566 5567 5568\n   또는 여러 줄 입력:\n8/12 5525\n8/13 5526 5527',
-        );
-      }
-
-      const result = await runner.runTask(task, {
-        args: { seminarIds: seminarIds.join(','), seminarId: seminarIds[0] },
-      });
-
-      if (result && typeof result === 'object') {
-        const r = result as {
-          message?: string;
-          success?: boolean;
-          rawMessages?: string[];
-          messages?: string[];
-        };
-
-        if (r.messages && r.messages.length > 1) {
-          for (const msg of r.messages) {
-            await ctx.reply(msg, { parse_mode: 'Markdown' });
-          }
-        } else if (r.success !== false && r.message) {
-          await ctx.reply(r.message, { parse_mode: 'Markdown' });
-        } else if (!r.success && r.message) {
-          await ctx.reply(r.message);
-        }
-
-        for (const rawMsg of r.rawMessages ?? []) {
-          await ctx.reply(rawMsg, { parse_mode: 'Markdown' });
-        }
-      }
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Failed to start seminar_detail: ${message}`);
-    }
-  });
-
-  // 최근 2주 심화 세미나 포인트 지급 일괄 확인
-  adminBot.command('check_advanced_seminars', async (ctx) => {
-    logger.info('User requested to check advanced seminars point', { from: ctx.from?.username });
-    const task = taskRegistry.getByName('check_advanced_seminars');
-    if (!task) {
-      logger.error('check_advanced_seminars task not found, cannot run');
-      return ctx.reply('check_advanced_seminars task not found!');
-    }
-
-    try {
-      await ctx.reply('최근 2주간 심화 세미나 포인트 지급 여부를 일괄 조회합니다...');
-      runner
-        .runTask(task)
-        .then(async (result) => {
-          if (result && typeof result === 'object') {
-            const r = result as { message?: string };
-            if (r.message) await ctx.reply(r.message);
-          }
-        })
-        .catch((e) => {
-          const message = e instanceof Error ? e.message : String(e);
-          ctx.reply(`심화 세미나 포인트 일괄 조회 실패: ${message}`);
-        });
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Failed to start check_advanced_seminars: ${message}`);
-    }
-  });
+  adminBot.command('seminar_detail', createSeminarDetailHandler(true));
 
   adminBot.command('naverpay_point_exchange', async (ctx) => {
     logger.info('User requested to run naverpay_point_exchange now', { from: ctx.from?.username });
@@ -1332,9 +1308,12 @@ if (adminBot) {
 - /delete_seminar_quiz <키워드>: 족보 삭제
 - /list_quiz: quiz.json 등록 제품 목록
 - /delete_quiz <제품명>: quiz.json 항목 삭제
+- /seminar_detail <세미나번호> [force]: 세미나 상세 정보 조회 (force: 실시간 API 강제 조회)
 
 💰 포인트 & 교환:
 - /check_point: 현재 포인트를 확인합니다.
+- /check_seminar_point: 세미나 번호로 포인트 지급 확인
+- /check_advanced_seminars: 최근 2주 심화 세미나 포인트 일괄 확인 (방장 계정 기준)
 - /naverpay_point_exchange [횟수]: 네이버페이포인트교환 작업을 실행합니다. (기본값: 10)
 - /baemin_point_exchange [횟수]: 배민포인트교환 작업을 실행합니다. (기본값: 1)
 
@@ -1352,100 +1331,24 @@ if (adminBot) {
 // --- Notice Bot Commands ---
 if (noticeBot) {
   noticeBot.command('today_links', todayLinks);
-
-  noticeBot.command('current_seminars', async (ctx) => {
-    logger.info('User requested current seminars', { from: ctx.from?.username });
-    const task = taskRegistry.getByName('today_links');
-    if (!task) {
-      logger.error('today_links task not found, cannot run');
-      return ctx.reply('today_links task not found!');
-    }
-    try {
-      runner
-        .runTask(task)
-        .then(async (result) => {
-          if (result && typeof result === 'object') {
-            const r = result as { message?: string };
-            if (r.message) {
-              const seminarMatch = r.message.match(/📖[\s\S]*?(?=\n\n🆕|\n\n💳|\n\n<blockquote>|$)/);
-              if (seminarMatch) {
-                await ctx.reply(seminarMatch[0].trim());
-              } else {
-                await ctx.reply('예정된 세미나가 없습니다. ☕');
-              }
-            } else {
-              await ctx.reply('예정된 세미나가 없습니다. ☕');
-            }
-          } else {
-            await ctx.reply('예정된 세미나가 없습니다. ☕');
-          }
-        })
-        .catch((e) => {
-          const message = e instanceof Error ? e.message : String(e);
-          ctx.reply(`세미나 수집 중 오류 발생: ${message}`);
-        });
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Failed to start 세미나 수집: ${message}`);
-    }
-  });
+  noticeBot.command('seminar_detail', createSeminarDetailHandler(false));
 
   noticeBot.command('help', (ctx) => {
     const message = `사용 가능한 명령어:
 
 - /today_links [날짜]: 오늘의 세미나/퀴즈/출석 링크 모음 (날짜 지정 가능: 예 /today_links 8/20, /today_links 내일)
-- /current_seminars: 현재 예정된 세미나 목록만 표시`;
+- /seminar_detail <세미나번호>: 세미나 상세 정보 조회 (예: /seminar_detail 5566)
+- /check_advanced_seminars: 최근 2주 심화 세미나 포인트 지급 현황 (방장 계정 기준)
+- /subscribe_seminar_changes: 세미나 정보 변경 알림 구독
+- /unsubscribe_seminar_changes: 세미나 정보 변경 알림 구독 해제`;
     ctx.reply(message);
   });
-}
-
-// adminBot에도 동일 핸들러 등록 (관리자도 사용 가능)
-if (adminBot) {
-  const currentSeminarsHandler = async (ctx: Context) => {
-    logger.info('User requested current seminars', { from: ctx.from?.username });
-    const task = taskRegistry.getByName('today_links');
-    if (!task) {
-      logger.error('today_links task not found, cannot run');
-      return ctx.reply('today_links task not found!');
-    }
-    try {
-      await ctx.reply('현재 예정된 세미나를 수집합니다... (백그라운드 실행)');
-      runner
-        .runTask(task)
-        .then(async (result) => {
-          if (result && typeof result === 'object') {
-            const r = result as { message?: string };
-            if (r.message) {
-              const seminarMatch = r.message.match(/📖[\s\S]*?(?=\n\n🆕|\n\n💳|\n\n<blockquote>|$)/);
-              if (seminarMatch) {
-                await ctx.reply(seminarMatch[0].trim());
-              } else {
-                await ctx.reply('예정된 세미나가 없습니다. ☕');
-              }
-            } else {
-              await ctx.reply('예정된 세미나가 없습니다. ☕');
-            }
-          } else {
-            await ctx.reply('예정된 세미나가 없습니다. ☕');
-          }
-        })
-        .catch((e) => {
-          const message = e instanceof Error ? e.message : String(e);
-          ctx.reply(`세미나 수집 중 오류 발생: ${message}`);
-        });
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Failed to start 세미나 수집: ${message}`);
-    }
-  };
-  adminBot.command('current_seminars', currentSeminarsHandler);
 }
 
 const adminCommands = [
   // 1. 루틴 / 실행
   { command: 'run_routine_now', description: '즉시 daily_routine 실행' },
   { command: 'today_links', description: '세미나/퀴즈 링크 모음 [날짜 지정 가능]' },
-  { command: 'current_seminars', description: '현재 예정된 세미나 목록 표시' },
   { command: 'broadcast_today_links', description: '오늘의 링크 채널 공지' },
   { command: 'apply_seminar_now', description: '즉시 세미나 신청(apply_seminar) 실행' },
   { command: 'run_quiz_now', description: '즉시 오늘의 퀴즈(today_quiz) 실행' },
@@ -1458,11 +1361,11 @@ const adminCommands = [
   { command: 'delete_seminar_quiz', description: '족보 삭제' },
   { command: 'list_quiz', description: 'quiz.json 등록 제품 목록' },
   { command: 'delete_quiz', description: 'quiz.json 항목 삭제' },
-  { command: 'seminar_detail', description: '세미나 번호로 상세 정보 조회 (여러 개 가능)' },
+  { command: 'seminar_detail', description: '세미나 번호로 상세 정보 조회 [force: 실시간 API 조회]' },
   // 3. 포인트 & 교환
   { command: 'check_point', description: '현재 포인트 확인' },
   { command: 'check_seminar_point', description: '세미나 번호로 포인트 지급 확인' },
-  { command: 'check_advanced_seminars', description: '최근 2주 심화 세미나 포인트 일괄 확인' },
+  { command: 'check_advanced_seminars', description: '최근 2주 심화 세미나 포인트 일괄 확인 (방장 계정 기준)' },
   { command: 'naverpay_point_exchange', description: '네이버페이포인트교환 실행' },
   { command: 'baemin_point_exchange', description: '배민포인트교환 실행' },
   // 4. 시스템 & 관리
@@ -1475,7 +1378,10 @@ const adminCommands = [
 
 const noticeCommands = [
   { command: 'today_links', description: '세미나/퀴즈 링크 모음 [날짜 지정 가능]' },
-  { command: 'current_seminars', description: '현재 예정된 세미나 목록 표시' },
+  { command: 'seminar_detail', description: '세미나 번호로 상세 정보 조회' },
+  { command: 'check_advanced_seminars', description: '최근 2주 심화 세미나 포인트 확인 (방장 계정 기준)' },
+  { command: 'subscribe_seminar_changes', description: '세미나 정보 변경 알림 구독' },
+  { command: 'unsubscribe_seminar_changes', description: '세미나 정보 변경 알림 구독 해제' },
   { command: 'help', description: '도움말' },
 ];
 

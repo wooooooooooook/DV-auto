@@ -16,6 +16,8 @@ const testFiles = [
   'apply_seminar_no_browser.test.ts',
   'today_links_format.test.ts',
   'seminar_main_tasks.test.ts',
+  'check_advanced_seminars_cache.test.ts',
+  'seminar_change_subscription.test.ts',
   'html_parser.test.ts',
   'login_check.test.ts',
   'http_session_expiry.test.ts',

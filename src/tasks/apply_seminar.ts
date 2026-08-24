@@ -23,6 +23,7 @@ import {
 import { searchSeminarPoints } from './check_seminar_point';
 import * as storage from '../services/storage';
 import * as logger from '../services/logger';
+import { sendSeminarChangesToSubscribers } from '../services/seminar_subscribers';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
@@ -656,6 +657,7 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
   const changeNotificationText = formatSeminarChangeNotification(infoChanges, pointChanges);
   if (changeNotificationText) {
     await sendTelegram(changeNotificationText).catch(() => {});
+    await sendSeminarChangesToSubscribers(changeNotificationText).catch(() => {});
   }
 
   const hasApplyTarget = currentSeminars.some((s) => s.hasIcoApply);
@@ -880,6 +882,7 @@ export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<Ta
     const changeNotificationText = formatSeminarChangeNotification(infoChanges, pointChanges);
     if (changeNotificationText) {
       await sendTelegram(changeNotificationText).catch(() => {});
+      await sendSeminarChangesToSubscribers(changeNotificationText).catch(() => {});
     }
 
     const completionCount = mainHtmlBody ? parseCompletionCountHtml(mainHtmlBody) : currentSeminars.length;
