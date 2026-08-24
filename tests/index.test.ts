@@ -15,6 +15,7 @@ const testFiles = [
   'apply_seminar_http_precheck.test.ts',
   'apply_seminar_result_count.test.ts',
   'apply_seminar_no_browser.test.ts',
+  'apply_seminar_direct_entry.test.ts',
   'today_links_format.test.ts',
   'seminar_main_tasks.test.ts',
   'check_advanced_seminars_cache.test.ts',

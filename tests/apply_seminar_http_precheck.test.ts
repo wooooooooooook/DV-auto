@@ -2,15 +2,38 @@ import assert from 'node:assert';
 import { chromium } from 'playwright';
 import { run as runApplySeminar, SEMINAR_LIST_KEY } from '../src/tasks/apply_seminar';
 import * as httpClientModule from '../src/modules/http_client';
+import * as seminarApiModule from '../src/modules/seminar_api';
 import * as utilsModule from '../src/modules/utils';
 import * as checkSeminarPointModule from '../src/tasks/check_seminar_point';
 import * as storage from '../src/services/storage';
+import { ProcessState } from '../src/modules/seminar_api';
+
+function createFutureSeminarApiItem(
+  seminarId: number,
+  processState: number,
+  applyCnt: number = 100,
+  maxPeopleCnt: number = 5000,
+): seminarApiModule.FutureSeminarApiItem {
+  return {
+    seminarId,
+    seminarNm: `세미나 ${seminarId}`,
+    startDt: '2026-08-25 13:00:00',
+    endDt: '2026-08-25 14:00:00',
+    maxPeopleCnt,
+    applyCnt,
+    processState,
+    cancelProcessState: 0,
+    seminarCompleted: 0,
+  };
+}
 
 async function testApplySeminarHttpPrecheck() {
   console.log('===========================================================');
   console.log('  apply_seminar HTTP pre-check 및 조건부 Playwright 실행 테스트');
   console.log('===========================================================\n');
 
+  const originalFetchMainFuture = seminarApiModule.fetchMainFutureSeminars;
+  const originalFetchDetail = seminarApiModule.fetchSeminarDetail;
   const originalHttpGet = httpClientModule.httpGet;
   const originalEnsureLoggedIn = utilsModule.ensureLoggedIn;
   const originalSafeGoto = utilsModule.safeGoto;
@@ -25,6 +48,7 @@ async function testApplySeminarHttpPrecheck() {
 
   let safeGotoCallCount = 0;
   let browserLaunchCount = 0;
+  const safeGotoUrls: string[] = [];
   const sentTelegramMessages: string[] = [];
 
   (utilsModule as unknown as { sendTelegram: unknown }).sendTelegram = async (msg: string) => {
@@ -36,8 +60,9 @@ async function testApplySeminarHttpPrecheck() {
     return true;
   };
 
-  (utilsModule as unknown as { safeGoto: unknown }).safeGoto = async () => {
+  (utilsModule as unknown as { safeGoto: unknown }).safeGoto = async (_page: unknown, url: string) => {
     safeGotoCallCount++;
+    safeGotoUrls.push(url);
     return true;
   };
 
@@ -46,153 +71,87 @@ async function testApplySeminarHttpPrecheck() {
     return originalLaunch.bind(chromium)(...args);
   };
 
-  const createMockPage = (options: { applyCount?: number; completionCount?: number } = {}) => {
-    const { applyCount = 0, completionCount = 1 } = options;
-    return {
-      context: () => ({}),
-      locator: (selector: string) => {
-        if (selector === 'a.list_detail') return { count: async () => 1 };
-        if (selector === '.ico_finish') return { count: async () => 0 };
-        if (selector === 'a:has(.ico_apply)') {
-          return {
-            evaluateAll: async () => {
-              const items = [];
-              for (let i = 0; i < applyCount; i++) {
-                items.push({
-                  href: `https://www.doctorville.co.kr/seminar/seminarDetail?seminarId=${100 + i}`,
-                  text: '신청하기',
-                });
-              }
-              return items;
-            },
-          };
-        }
-        if (selector === 'a:has(.ico_completion)') return { count: async () => completionCount };
-        return {
-          count: async () => 0,
-          evaluateAll: async () => [],
-          isVisible: async () => false,
-          click: async () => {},
-        };
-      },
+  const createMockPage = () => ({
+    context: () => ({}),
+    locator: (_selector: string) => ({
+      count: async () => 0,
+      evaluateAll: async () => [],
+      isVisible: async () => false,
       click: async () => {},
-      waitForSelector: async () => {},
-      waitForTimeout: async () => {},
-      screenshot: async () => {},
-    };
-  };
-
-  const HTML_NO_APPLY = `
-    <div class="list_cont">
-      <div class="seminar_day"><span class="date">8/25</span></div>
-      <a class="list_detail" href="/seminar/seminarDetail?seminarId=100">
-        <div class="list_tit"><span class="tit">기존 세미나 100</span></div>
-        <span class="txt_num time">19:00</span>
-        <div class="person"><span class="txt_num">10</span><span class="total"><span class="txt_num">/100</span></span></div>
-        <span class="ico_completion">신청완료</span>
-      </a>
-    </div>
-  `;
-
-  const HTML_WITH_APPLY = `
-    <div class="list_cont">
-      <div class="seminar_day"><span class="date">8/25</span></div>
-      <a class="list_detail" href="/seminar/seminarDetail?seminarId=100">
-        <div class="list_tit"><span class="tit">신청 가능 세미나 100</span></div>
-        <span class="txt_num time">19:00</span>
-        <div class="person"><span class="txt_num">10</span><span class="total"><span class="txt_num">/100</span></span></div>
-        <span class="ico_apply">신청하기</span>
-      </a>
-    </div>
-  `;
-
-  const HTML_NEW_WITHOUT_APPLY = `
-    <div class="list_cont">
-      <div class="seminar_day"><span class="date">8/25</span></div>
-      <a class="list_detail" href="/seminar/seminarDetail?seminarId=100">
-        <div class="list_tit"><span class="tit">기존 세미나 100</span></div>
-        <span class="txt_num time">19:00</span>
-        <div class="person"><span class="txt_num">10</span><span class="total"><span class="txt_num">/100</span></span></div>
-        <span class="ico_completion">신청완료</span>
-      </a>
-      <a class="list_detail" href="/seminar/seminarDetail?seminarId=200">
-        <div class="list_tit"><span class="tit">신규 세미나 200</span></div>
-        <span class="txt_num time">20:00</span>
-        <div class="person"><span class="txt_num">5</span><span class="total"><span class="txt_num">/50</span></span></div>
-        <span class="ico_completion">신청완료</span>
-      </a>
-    </div>
-  `;
+    }),
+    click: async () => {},
+    waitForSelector: async () => {},
+    waitForTimeout: async () => {},
+    screenshot: async () => {},
+  });
 
   try {
-    // --- Case A: HTTP HTML에 .ico_apply 없음 -> safeGoto/Playwright 미호출 ---
-    console.log('--- Case A: HTTP HTML에 .ico_apply 없음 ---');
+    // --- Case A: API에서 모든 세미나가 신청 완료 → Playwright 미실행 ---
+    console.log('--- Case A: API에서 모든 세미나가 신청 완료 (PROCESS_CANCEL) ---');
     safeGotoCallCount = 0;
+    safeGotoUrls.length = 0;
     browserLaunchCount = 0;
-    (httpClientModule as unknown as { httpGet: unknown }).httpGet = async () => ({
-      status: 200,
-      body: HTML_NO_APPLY,
-      resultType: 'SUCCESS',
+    storage.set(SEMINAR_LIST_KEY, []);
+
+    (seminarApiModule as unknown as { fetchMainFutureSeminars: unknown }).fetchMainFutureSeminars = async () => ({
+      success: true,
+      items: [createFutureSeminarApiItem(100, ProcessState.PROCESS_CANCEL, 10, 100)],
+      rawResponse: { futureSeminarList: { items: [] } },
     });
 
     const resultA = await runApplySeminar({}, { notifyNewSeminarsToTelegram: false });
     assert.strictEqual(resultA.success, true);
-    assert.strictEqual(safeGotoCallCount, 0, 'safeGoto should NOT be called when no .ico_apply');
-    assert.strictEqual(browserLaunchCount, 0, 'Chromium should NOT be launched when no .ico_apply');
+    assert.strictEqual(safeGotoCallCount, 0, 'safeGoto should NOT be called when all applied');
+    assert.strictEqual(browserLaunchCount, 0, 'Chromium should NOT be launched when all applied');
     console.log('  ✓ [Pass] safeGoto 및 브라우저 실행 없이 정상 완료\n');
 
-    // --- Case B: HTTP HTML에 .ico_apply 1개 이상 -> Playwright 신청 단계 진입 ---
-    console.log('--- Case B: HTTP HTML에 .ico_apply 1개 이상 ---');
+    // --- Case B: API에서 PROCESS_APPLY 세미나 1개 → Playwright 신청 단계 진입 ---
+    console.log('--- Case B: API에서 PROCESS_APPLY 세미나 1개 있음 ---');
     safeGotoCallCount = 0;
-    (httpClientModule as unknown as { httpGet: unknown }).httpGet = async () => ({
-      status: 200,
-      body: HTML_WITH_APPLY,
-      resultType: 'SUCCESS',
+    safeGotoUrls.length = 0;
+    storage.set(SEMINAR_LIST_KEY, []);
+
+    (seminarApiModule as unknown as { fetchMainFutureSeminars: unknown }).fetchMainFutureSeminars = async () => ({
+      success: true,
+      items: [createFutureSeminarApiItem(100, ProcessState.PROCESS_APPLY, 10, 100)],
+      rawResponse: { futureSeminarList: { items: [] } },
     });
 
-    const mockPageB = createMockPage({ applyCount: 1, completionCount: 1 });
+    (seminarApiModule as unknown as { fetchSeminarDetail: unknown }).fetchSeminarDetail = async (id: string) => ({
+      success: true,
+      seminarId: String(id),
+      isPointExcluded: false,
+      hasEntryHistory: false,
+      rawResponse: {
+        seminarDetail: { seminarId: Number(id), processState: ProcessState.PROCESS_CANCEL },
+      },
+    });
+
+    const mockPageB = createMockPage();
     const resultB = await runApplySeminar({ page: mockPageB as never }, { notifyNewSeminarsToTelegram: false });
     assert.strictEqual(resultB.success, true);
-    assert.ok(safeGotoCallCount >= 1, 'safeGoto should be called when .ico_apply exists');
-    console.log('  ✓ [Pass] Playwright 진입 후 세미나 신청 로직 정상 수행\n');
+    assert.ok(safeGotoCallCount >= 1, 'safeGoto should be called for PROCESS_APPLY seminar');
+    // 상세 URL로 직접 진입 확인
+    assert.ok(
+      safeGotoUrls.some((u) => u.includes('/cme/seminar/100')),
+      `상세 URL 포함: ${JSON.stringify(safeGotoUrls)}`,
+    );
+    // 목록 페이지 미호출 확인
+    assert.ok(
+      !safeGotoUrls.some((u) => u.includes('seminar/main')),
+      `목록 페이지 미호출: ${JSON.stringify(safeGotoUrls)}`,
+    );
+    console.log('  ✓ [Pass] Playwright 진입 후 상세페이지 직접 신청 로직 정상 수행\n');
 
-    // --- Case C: 새 세미나는 없지만 기존 세미나에 .ico_apply 있음 -> Playwright 신청 실행 ---
-    console.log('--- Case C: 새 세미나는 없지만 기존 세미나에 .ico_apply 있음 ---');
-    storage.set(SEMINAR_LIST_KEY, [
-      {
-        seminarId: '100',
-        name: '신청 가능 세미나 100',
-        url: 'https://www.doctorville.co.kr/seminar/seminarDetail?seminarId=100',
-        date: '2026-08-25',
-        time: '19:00',
-        currentCount: '10',
-        totalCount: '100',
-        nightTime: false,
-        isAdvancedSurvey: false,
-      },
-    ]);
-    safeGotoCallCount = 0;
-    (httpClientModule as unknown as { httpGet: unknown }).httpGet = async () => ({
-      status: 200,
-      body: HTML_WITH_APPLY,
-      resultType: 'SUCCESS',
-    });
-
-    const mockPageC = createMockPage({ applyCount: 1, completionCount: 1 });
-    const resultC = await runApplySeminar({ page: mockPageC as never }, { notifyNewSeminarsToTelegram: false });
-    assert.strictEqual(resultC.success, true);
-    assert.ok(safeGotoCallCount >= 1, 'safeGoto should be called even if no new seminar when .ico_apply exists');
-    console.log('  ✓ [Pass] 신규 세미나가 없더라도 .ico_apply가 있으면 Playwright 신청 실행\n');
-
-    // --- Case D: 새 세미나는 있지만 .ico_apply 없음 -> Playwright 신청 미실행 ---
-    console.log('--- Case D: 새 세미나는 있지만 .ico_apply 없음 ---');
+    // --- Case C: 기존 세미나 있지만 PROCESS_APPLY 세미나 추가됨 → Playwright 신청 실행 ---
+    console.log('--- Case C: 기존 세미나 있지만 PROCESS_APPLY 세미나 추가 ---');
     storage.set(SEMINAR_LIST_KEY, [
       {
         seminarId: '100',
         name: '기존 세미나 100',
-        url: 'https://www.doctorville.co.kr/seminar/seminarDetail?seminarId=100',
+        url: 'https://m.doctorville.co.kr/cme/seminar/100',
         date: '2026-08-25',
-        time: '19:00',
+        time: '13:00~14:00',
         currentCount: '10',
         totalCount: '100',
         nightTime: false,
@@ -200,25 +159,75 @@ async function testApplySeminarHttpPrecheck() {
       },
     ]);
     safeGotoCallCount = 0;
+    safeGotoUrls.length = 0;
+
+    (seminarApiModule as unknown as { fetchMainFutureSeminars: unknown }).fetchMainFutureSeminars = async () => ({
+      success: true,
+      items: [
+        createFutureSeminarApiItem(100, ProcessState.PROCESS_CANCEL, 10, 100),
+        createFutureSeminarApiItem(200, ProcessState.PROCESS_APPLY, 5, 50),
+      ],
+      rawResponse: { futureSeminarList: { items: [] } },
+    });
+
+    const mockPageC = createMockPage();
+    const resultC = await runApplySeminar({ page: mockPageC as never }, { notifyNewSeminarsToTelegram: false });
+    assert.strictEqual(resultC.success, true);
+    assert.ok(safeGotoCallCount >= 1, 'safeGoto should be called for new PROCESS_APPLY seminar');
+    assert.ok(
+      safeGotoUrls.some((u) => u.includes('/cme/seminar/200')),
+      `200 상세 URL 포함: ${JSON.stringify(safeGotoUrls)}`,
+    );
+    console.log('  ✓ [Pass] PROCESS_APPLY 세미나 존재 시 Playwright 신청 실행\n');
+
+    // --- Case D: 새 세미나는 있지만 모두 PROCESS_CANCEL → Playwright 미실행 ---
+    console.log('--- Case D: 새 세미나 있지만 PROCESS_CANCEL → Playwright 미실행 ---');
+    storage.set(SEMINAR_LIST_KEY, [
+      {
+        seminarId: '100',
+        name: '기존 세미나 100',
+        url: 'https://m.doctorville.co.kr/cme/seminar/100',
+        date: '2026-08-25',
+        time: '13:00~14:00',
+        currentCount: '10',
+        totalCount: '100',
+        nightTime: false,
+        isAdvancedSurvey: false,
+      },
+    ]);
+    safeGotoCallCount = 0;
+    safeGotoUrls.length = 0;
     browserLaunchCount = 0;
-    (httpClientModule as unknown as { httpGet: unknown }).httpGet = async () => ({
-      status: 200,
-      body: HTML_NEW_WITHOUT_APPLY,
-      resultType: 'SUCCESS',
+
+    (seminarApiModule as unknown as { fetchMainFutureSeminars: unknown }).fetchMainFutureSeminars = async () => ({
+      success: true,
+      items: [
+        createFutureSeminarApiItem(100, ProcessState.PROCESS_CANCEL, 10, 100),
+        createFutureSeminarApiItem(200, ProcessState.PROCESS_CANCEL, 5, 50),
+      ],
+      rawResponse: { futureSeminarList: { items: [] } },
     });
 
     const resultD = await runApplySeminar({}, { notifyNewSeminarsToTelegram: false });
     assert.strictEqual(resultD.success, true);
-    assert.strictEqual(safeGotoCallCount, 0, 'safeGoto should NOT be called when new seminar has no .ico_apply');
+    assert.strictEqual(safeGotoCallCount, 0, 'safeGoto should NOT be called when new seminar is already applied');
     assert.strictEqual(browserLaunchCount, 0, 'Chromium should NOT be launched');
     const storedD = storage.get<unknown[]>(SEMINAR_LIST_KEY) || [];
     assert.strictEqual(storedD.length, 2, 'New seminar should be saved via HTTP processing');
-    console.log('  ✓ [Pass] 새 세미나가 있어도 .ico_apply가 없으면 Playwright 미실행 및 HTTP 수집 완료\n');
+    console.log('  ✓ [Pass] 새 세미나가 있어도 PROCESS_APPLY가 없으면 Playwright 미실행 및 HTTP 수집 완료\n');
 
-    // --- Case E: HTTP 요청 실패 / AUTH_EXPIRED -> Playwright fallback 없이 에러 처리 ---
-    console.log('--- Case E: HTTP 요청 AUTH_EXPIRED 발생 시 Playwright fallback 없음 ---');
+    // --- Case E: API 실패 + HTML fallback 경로의 AUTH_EXPIRED → Playwright 없이 에러 처리 ---
+    console.log('--- Case E: API 실패 + HTML AUTH_EXPIRED 발생 시 Playwright fallback 없음 ---');
     safeGotoCallCount = 0;
+    safeGotoUrls.length = 0;
     browserLaunchCount = 0;
+
+    (seminarApiModule as unknown as { fetchMainFutureSeminars: unknown }).fetchMainFutureSeminars = async () => ({
+      success: false,
+      isAuthExpired: false,
+      errorMessage: 'API 실패',
+    });
+
     (httpClientModule as unknown as { httpGet: unknown }).httpGet = async () => ({
       status: 200,
       body: '<script>alert("로그인이 되어 있지 않습니다.");</script>',
@@ -227,31 +236,48 @@ async function testApplySeminarHttpPrecheck() {
 
     const resultE = await runApplySeminar({}, { notifyNewSeminarsToTelegram: false });
     assert.strictEqual(resultE.success, false);
-    assert.ok(resultE.message.includes('로그인이 필요합니다'));
+    assert.ok((resultE.message || '').includes('로그인이 필요합니다'));
     assert.strictEqual(safeGotoCallCount, 0, 'safeGoto should NOT be called on AUTH_EXPIRED');
     assert.strictEqual(browserLaunchCount, 0, 'Chromium should NOT be launched on AUTH_EXPIRED');
     console.log('  ✓ [Pass] AUTH_EXPIRED 발생 시 Playwright fallback 없이 정상 세션 만료 반환\n');
 
-    // --- Case F: HTTP에서는 .ico_apply가 있었지만 Playwright 진입 후 사라짐 ---
-    console.log('--- Case F: HTTP에서는 .ico_apply가 있었지만 Playwright 진입 후 사라짐 ---');
+    // --- Case F: PROCESS_APPLY 있지만 신청 후 실패 (processState가 바뀌지 않음) ---
+    console.log('--- Case F: PROCESS_APPLY → 신청 시도했지만 실패 (processState 변경 안 됨) ---');
     safeGotoCallCount = 0;
-    (httpClientModule as unknown as { httpGet: unknown }).httpGet = async () => ({
-      status: 200,
-      body: HTML_WITH_APPLY,
-      resultType: 'SUCCESS',
+    safeGotoUrls.length = 0;
+    storage.set(SEMINAR_LIST_KEY, []);
+
+    (seminarApiModule as unknown as { fetchMainFutureSeminars: unknown }).fetchMainFutureSeminars = async () => ({
+      success: true,
+      items: [createFutureSeminarApiItem(100, ProcessState.PROCESS_APPLY, 10, 100)],
+      rawResponse: { futureSeminarList: { items: [] } },
     });
 
-    const mockPageF = createMockPage({ applyCount: 0, completionCount: 1 });
+    // 신청 후에도 여전히 PROCESS_APPLY → 실패로 판정
+    (seminarApiModule as unknown as { fetchSeminarDetail: unknown }).fetchSeminarDetail = async (id: string) => ({
+      success: true,
+      seminarId: String(id),
+      isPointExcluded: false,
+      hasEntryHistory: false,
+      rawResponse: {
+        seminarDetail: { seminarId: Number(id), processState: ProcessState.PROCESS_APPLY },
+      },
+    });
+
+    const mockPageF = createMockPage();
     const resultF = await runApplySeminar({ page: mockPageF as never }, { notifyNewSeminarsToTelegram: false });
     assert.strictEqual(resultF.success, true);
     assert.ok(
-      resultF.message.includes('신청 완료'),
-      'Task should succeed even if apply target disappeared in Playwright',
+      (resultF.message || '').includes('마감 등의 사유로 신청 실패'),
+      `Task should report failure: "${resultF.message}"`,
     );
-    console.log('  ✓ [Pass] Playwright 진입 후 신청 대상이 없어져도 오류가 아닌 정상 완료 처리\n');
+    console.log('  ✓ [Pass] 신청 후 processState 변경 안 되면 실패로 정확히 보고\n');
 
     console.log('🎉 모든 apply_seminar HTTP pre-check 테스트 성공적 통과!\n');
   } finally {
+    (seminarApiModule as unknown as { fetchMainFutureSeminars: unknown }).fetchMainFutureSeminars =
+      originalFetchMainFuture;
+    (seminarApiModule as unknown as { fetchSeminarDetail: unknown }).fetchSeminarDetail = originalFetchDetail;
     (checkSeminarPointModule as unknown as { searchSeminarPoints: unknown }).searchSeminarPoints =
       originalSearchSeminarPoints;
     (httpClientModule as unknown as { httpGet: unknown }).httpGet = originalHttpGet;

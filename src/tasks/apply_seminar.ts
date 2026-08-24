@@ -96,6 +96,7 @@ type LegacyNewSeminars = {
 };
 
 export type RawSeminarData = {
+  seminarId?: string | null;
   url: string;
   name: string;
   date: string;
@@ -681,9 +682,13 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
     await sendSeminarChangesToSubscribers(changeNotificationText).catch(() => {});
   }
 
-  const hasApplyTarget = currentSeminars.some((s) => s.hasIcoApply);
+  // API processState 기반: 미신청 && PROCESS_APPLY 세미나만 Playwright 대상
+  const applyTargets = currentSeminars.filter(
+    (s) => !isAppliedSeminar(s.processState) && s.processState === ProcessState.PROCESS_APPLY,
+  );
+  const hasApplyTarget = applyTargets.length > 0;
 
-  let totalSeminarsAvailable = currentSeminars.length;
+  const totalSeminarsAvailable = currentSeminars.length;
 
   if (!hasApplyTarget) {
     // API 경로: processState 기반으로 정확한 신청 완료 건수 계산
@@ -712,6 +717,20 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
     return result;
   }
 
+  // applyTargets에서 seminarId 추출 (상세페이지 직접 진입용)
+  const targetSeminarIds = applyTargets
+    .map((s) => s.seminarId || getSeminarIdFromUrl(s.url))
+    .filter((id): id is string => !!id);
+
+  if (targetSeminarIds.length === 0) {
+    // seminarId 추출 실패 시 신청 대상 없음으로 처리
+    const appliedCount = currentSeminars.filter((s) => isAppliedSeminar(s.processState)).length;
+    const message = `✅ ${appliedCount}개 세미나 신청 완료 (${appliedCount}/${totalSeminarsAvailable})`;
+    const result: TaskResult = { success: true, message };
+    if (options.silentIfNoNew && newlyAdded.length === 0) result.silent = true;
+    return result;
+  }
+
   let page = ctx.page;
   let context = ctx.context;
   let createdBrowser: import('playwright').Browser | null = null;
@@ -728,19 +747,10 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
 
     await ensureLoggedIn({ page, context: context ?? page.context() });
 
-    await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'domcontentloaded', timeout: 30000 }, 1);
-    const totalSeminarLinks = page.locator('a.list_detail');
-    totalSeminarsAvailable = await totalSeminarLinks.count();
-    const closedCount = await page.locator('.ico_finish').count();
-    const applyLocator = page.locator('a:has(.ico_apply)');
-    const items = await applyLocator.evaluateAll((nodes) =>
-      nodes.map((n) => ({ href: n.getAttribute('href'), text: (n.textContent || '').trim() })),
-    );
-    const attemptedApplyCount = items.length;
-
-    for (const item of items) {
-      if (!item.href) continue;
-      await safeGoto(page, item.href, { waitUntil: 'load', timeout: 30000 }, 1);
+    // 각 신청 대상 세미나의 상세페이지로 직접 진입하여 신청
+    for (const seminarId of targetSeminarIds) {
+      const detailUrl = `${SEMINAR_DETAIL_PAGE}${seminarId}`;
+      await safeGoto(page, detailUrl, { waitUntil: 'load', timeout: 30000 }, 1);
       await page.click('a#applyLiveSeminarMemberBtn', { timeout: 5000 }).catch(() => {});
       try {
         await page.waitForSelector('.agg_confirm', { timeout: 2000 });
@@ -763,13 +773,39 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
       await page.waitForTimeout(500);
     }
 
-    await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'domcontentloaded', timeout: 30000 }, 1);
+    // 신청 결과 확인: 각 대상에 대해 detail API 재조회로 개별 확인
+    let successCount = 0;
+    let failCount = 0;
+    for (const seminarId of targetSeminarIds) {
+      try {
+        const detailRes = await fetchSeminarDetail(seminarId);
+        if (detailRes.success && detailRes.rawResponse?.seminarDetail) {
+          const ps = Number(detailRes.rawResponse.seminarDetail.processState);
+          if (isAppliedSeminar(ps)) {
+            successCount++;
+          } else {
+            failCount++;
+          }
+        } else {
+          failCount++;
+        }
+      } catch {
+        failCount++;
+      }
+    }
 
-    const appliedCount = await page.locator('a:has(.ico_completion)').count();
-    let message = `✅ ${appliedCount}개 세미나 신청 완료! (${appliedCount}/${totalSeminarsAvailable})`;
-    const failedToApplyCount = attemptedApplyCount - appliedCount;
-    if (failedToApplyCount > 0) message += `\n (${failedToApplyCount}개는 마감 등의 사유로 신청 실패)`;
-    if (closedCount > 0) message += `\n ${closedCount}개는 신청 마감되어 신청하지 못했습니다.`;
+    // 기존 이미 신청된 세미나 수
+    const previouslyApplied = currentSeminars.filter((s) => isAppliedSeminar(s.processState)).length;
+    const totalApplied = previouslyApplied + successCount;
+
+    let message = `✅ ${totalApplied}개 세미나 신청 완료! (${totalApplied}/${totalSeminarsAvailable})`;
+    if (failCount > 0) {
+      message += `\n (${failCount}개는 마감 등의 사유로 신청 실패)`;
+    }
+    const excessCount = currentSeminars.filter((s) => s.processState === ProcessState.PROCESS_EXCESS).length;
+    if (excessCount > 0) {
+      message += `\n⚠️ ${excessCount}개 정원 초과로 신청 불가`;
+    }
 
     const baseScreenshotDir = path.join(process.cwd(), 'screenshot');
     await fs.mkdir(baseScreenshotDir, { recursive: true });
@@ -924,8 +960,10 @@ export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<Ta
       await sendSeminarChangesToSubscribers(changeNotificationText).catch(() => {});
     }
 
-    // 신청 가능한 세미나가 있으면 Playwright 전체 실행으로 위임
-    const hasApplyTarget = currentSeminars.some((s) => s.hasIcoApply);
+    // 신청 가능한 세미나가 있으면 Playwright 전체 실행으로 위임 (processState 기반)
+    const hasApplyTarget = currentSeminars.some(
+      (s) => !isAppliedSeminar(s.processState) && s.processState === ProcessState.PROCESS_APPLY,
+    );
     if (hasApplyTarget) {
       // run()은 자체적으로 저장소 갱신·알림·포인트 동기화를 모두 수행하므로
       // 여기까지 한 작업은 버리고 run() 결과만 반환

@@ -554,8 +554,12 @@ async function isSurveyPointExcludedSeminar(context: BrowserContext, url: string
 
 function getSeminarIdFromUrl(url: string): string | null {
   try {
-    const urlObj = new URL(url);
-    return urlObj.searchParams.get('seminarId');
+    const urlObj = new URL(url, 'https://www.doctorville.co.kr');
+    const param = urlObj.searchParams.get('seminarId');
+    if (param) return param;
+    const match = urlObj.pathname.match(/(?:\/cme)?\/seminar\/(\d+)/i);
+    if (match) return match[1];
+    return null;
   } catch (_e) {
     console.error('Failed to extract seminarId from URL:', url, _e);
     return null;

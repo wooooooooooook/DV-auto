@@ -258,6 +258,7 @@ export function convertApiItemToRawSeminar(item: FutureSeminarApiItem): RawSemin
   const hasIcoApply = processStateNum === ProcessState.PROCESS_APPLY;
 
   return {
+    seminarId,
     url,
     name: item.seminarNm || '세미나',
     date,
