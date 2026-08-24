@@ -1328,15 +1328,33 @@ if (adminBot) {
   });
 }
 
+const noticeTodayLinks = async (ctx: Context) => {
+  logger.info('User requested cached today_links on notice bot', { from: ctx.from?.username });
+  try {
+    const { getTodayLinksCache } = await import('../tasks/today_links');
+    const cache = getTodayLinksCache();
+    if (cache && cache.message) {
+      await ctx.reply(cache.message, cache.options as Parameters<Context['reply']>[1]);
+    } else {
+      await ctx.reply(
+        'ℹ️ 오늘의 링크 정보가 아직 생성되지 않았습니다. 매일 오전 9시 채널 공지 이후 조회하실 수 있습니다.',
+      );
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await ctx.reply(`오늘의 링크 조회 실패: ${message}`);
+  }
+};
+
 // --- Notice Bot Commands ---
 if (noticeBot) {
-  noticeBot.command('today_links', todayLinks);
+  noticeBot.command('today_links', noticeTodayLinks);
   noticeBot.command('seminar_detail', createSeminarDetailHandler(false));
 
   noticeBot.command('help', (ctx) => {
     const message = `사용 가능한 명령어:
 
-- /today_links [날짜]: 오늘의 세미나/퀴즈/출석 링크 모음 (날짜 지정 가능: 예 /today_links 8/20, /today_links 내일)
+- /today_links: 오늘의 세미나/퀴즈/출석 링크 모음
 - /seminar_detail <세미나번호>: 세미나 상세 정보 조회 (예: /seminar_detail 5566)
 - /check_advanced_seminars: 최근 2주 심화 세미나 포인트 지급 현황 (방장 계정 기준)
 - /subscribe_seminar_changes: 세미나 정보 변경 알림 구독
@@ -1377,7 +1395,7 @@ const adminCommands = [
 ];
 
 const noticeCommands = [
-  { command: 'today_links', description: '세미나/퀴즈 링크 모음 [날짜 지정 가능]' },
+  { command: 'today_links', description: '오늘의 세미나/퀴즈/출석 링크 모음' },
   { command: 'seminar_detail', description: '세미나 번호로 상세 정보 조회' },
   { command: 'check_advanced_seminars', description: '최근 2주 심화 세미나 포인트 확인 (방장 계정 기준)' },
   { command: 'subscribe_seminar_changes', description: '세미나 정보 변경 알림 구독' },

@@ -24,6 +24,25 @@ function setBot(name: BotName, instance: Telegraf | null): void {
         }
       });
 
+      if (name === 'notice') {
+        instance.command(['today_links', '오늘의링크', '링크'], async (ctx: Context) => {
+          try {
+            const { getTodayLinksCache } = await import('../tasks/today_links');
+            const cache = getTodayLinksCache();
+            if (cache && cache.message) {
+              await ctx.reply(cache.message, cache.options as Parameters<Context['reply']>[1]);
+            } else {
+              await ctx.reply(
+                'ℹ️ 오늘의 링크 정보가 아직 생성되지 않았습니다. 매일 오전 9시 채널 공지 이후 조회하실 수 있습니다.',
+              );
+            }
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            await ctx.reply(`오늘의 링크 조회 실패: ${message}`);
+          }
+        });
+      }
+
       instance.command(
         ['subscribe_seminar_changes', 'subscribe_seminar', 'subscribe', '세미나변경알림구독', '구독'],
         async (ctx: Context) => {
