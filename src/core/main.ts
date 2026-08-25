@@ -34,9 +34,7 @@ const APPLY_SEMINAR_EXTRA_CRON = '*/10 6-23 * * *';
 const LUNCH_MONITOR_CRON = '0 11 * * *';
 const DINNER_MONITOR_CRON = '0 16 * * *';
 const MONITOR_RESUME_DURATION_HOURS = 5;
-const POINT_CONVERSION_API_URL = 'https://api.doctorville.co.kr/api/point/conversion/availability';
 const POINT_CONVERSION_STATE_FILE = path.join(process.cwd(), 'storage', 'point_conversion_state.json');
-type PointConversionResponse = { data?: { available?: boolean; availablePlannedAt?: string; meridiem?: string } };
 let isFastPolling = false;
 let fastPollingInterval: NodeJS.Timeout | null = null;
 function readConversionState(): boolean | null {
@@ -70,33 +68,13 @@ function isAfterFivePMKST(): boolean {
 }
 async function checkAndNotifyPointConversion(): Promise<void> {
   if (isAfterFivePMKST() && isFastPolling) stopFastPolling();
-  const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
-  const context = await browser.newContext();
-  const page = await context.newPage();
   try {
-    await utils.ensureLoggedIn({ page, context });
-    await page
-      .goto('https://www.doctorville.co.kr/main', { waitUntil: 'domcontentloaded', timeout: 15000 })
-      .catch(() => {});
-    let response: PointConversionResponse | null = null;
-    try {
-      response = (await page.evaluate(async (apiUrl: string) => {
-        const res = await fetch(apiUrl, { credentials: 'include' });
-        const text = await res.text();
-        if (!res.ok || !text) return null;
-        try {
-          return JSON.parse(text);
-        } catch {
-          return null;
-        }
-      }, POINT_CONVERSION_API_URL)) as PointConversionResponse | null;
-    } catch (_err) {
-      /* ignore */
-    }
-    if (!response || response.data === undefined) return;
-    const available = response.data.available === true;
-    const plannedAt = response.data.availablePlannedAt ?? '';
-    const meridiem = response.data.meridiem ?? '';
+    const data = await utils.getPointConversionAvailabilityHttp();
+    if (!data) return;
+
+    const available = data.available === true;
+    const plannedAt = data.availablePlannedAt ?? '';
+    const meridiem = data.meridiem ?? '';
     const isToday = plannedAt === getTodayKoreanString();
     if (!isToday) {
       if (isFastPolling) stopFastPolling();
@@ -124,8 +102,8 @@ async function checkAndNotifyPointConversion(): Promise<void> {
           `네이버페이포인트 전환 마감되었습니다. 다음 전환 가능 예정: ${plannedAt} ${meridiem}`,
         );
     }
-  } finally {
-    await browser.close();
+  } catch (err) {
+    logger.error('checkAndNotifyPointConversion error:', err);
   }
 }
 function startFastPolling(): void {
@@ -160,43 +138,80 @@ const scheduledTask: Task = {
   schedule: DAILY_ROUTINE_CRON,
   timezone: TIMEZONE,
   run: async () => {
-    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
-    const context = await browser.newContext({
-      userAgent:
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
-    });
-    const page = await context.newPage();
     try {
-      const tasks = [
-        { name: 'attendance', task: attendanceTask },
-        { name: 'apply_seminar', task: applySeminarTask },
-        { name: 'today_quiz', task: todayQuizTaskModule },
-        { name: 'today_links', task: todayLinksTaskModule },
-      ];
-      for (const { name, task } of tasks) {
-        try {
-          if (name !== 'apply_seminar') {
-            await utils.ensureLoggedIn({ page, context });
-          }
-          const taskResultRaw = await task.run({ page, context });
-          const taskResult: TaskResult =
-            typeof taskResultRaw === 'object' && taskResultRaw !== null
-              ? (taskResultRaw as TaskResult)
-              : { success: Boolean(taskResultRaw) };
-          if (taskResult.message)
-            await utils
-              .sendTelegram(taskResult.message, taskResult.imagePath ?? null, taskResult.options ?? {})
-              .catch((e) => logger.error(`Failed to send Telegram message for ${name} task result:`, e));
-        } catch (err) {
-          logger.error(`Error during ${name} task:`, err);
-          const message = err instanceof Error ? err.message : String(err);
-          await utils.sendTelegram(`daily_routine 중 ${name} 작업 실패: ${message}`).catch(() => {});
+      // 1. 출석체크 (100% 순수 HTTP)
+      try {
+        logger.info('daily_routine: Running attendance task (HTTP).');
+        const attendanceRes = await attendanceTask.run();
+        if (attendanceRes?.message) {
+          await utils
+            .sendTelegram(attendanceRes.message, null, {})
+            .catch((e) => logger.error('Failed to send Telegram message for attendance:', e));
         }
+      } catch (err) {
+        logger.error('Error during attendance task:', err);
+        const message = err instanceof Error ? err.message : String(err);
+        await utils.sendTelegram(`daily_routine 중 attendance 작업 실패: ${message}`).catch(() => {});
+      }
+
+      // 2. 세미나 신청 & 목록 수집 (100% HTTP 우선, 실패 시 내부 온디맨드 브라우저)
+      try {
+        logger.info('daily_routine: Running apply_seminar task (HTTP 우선).');
+        const applyRes = await applySeminarTask.run();
+        if (applyRes?.message) {
+          await utils
+            .sendTelegram(applyRes.message, null, applyRes.options ?? {})
+            .catch((e) => logger.error('Failed to send Telegram message for apply_seminar:', e));
+        }
+      } catch (err) {
+        logger.error('Error during apply_seminar task:', err);
+        const message = err instanceof Error ? err.message : String(err);
+        await utils.sendTelegram(`daily_routine 중 apply_seminar 작업 실패: ${message}`).catch(() => {});
+      }
+
+      // 3. 오늘의 퀴즈 (온디맨드 브라우저 론치 후 퀴즈 풀이 및 퀴즈 정보 캐싱)
+      try {
+        logger.info('daily_routine: Running today_quiz task (온디맨드 브라우저).');
+        const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
+        const context = await browser.newContext({
+          userAgent:
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
+        });
+        const page = await context.newPage();
+        try {
+          await utils.ensureLoggedIn({ page, context });
+          const quizRes = await todayQuizTaskModule.run({ page, context });
+          if (quizRes?.message) {
+            await utils
+              .sendTelegram(quizRes.message, quizRes.imagePath ?? null, {})
+              .catch((e) => logger.error('Failed to send Telegram message for today_quiz:', e));
+          }
+        } finally {
+          await context.close().catch(() => {});
+          await browser.close().catch(() => {});
+        }
+      } catch (err) {
+        logger.error('Error during today_quiz task:', err);
+        const message = err instanceof Error ? err.message : String(err);
+        await utils.sendTelegram(`daily_routine 중 today_quiz 작업 실패: ${message}`).catch(() => {});
+      }
+
+      // 4. 오늘의 링크 모음 (100% 순수 HTTP, 캐시된 퀴즈 정보 활용)
+      try {
+        logger.info('daily_routine: Running today_links task (HTTP).');
+        const linksRes = await todayLinksTaskModule.run({});
+        if (linksRes?.message) {
+          await utils
+            .sendTelegram(linksRes.message, null, linksRes.options ?? {})
+            .catch((e) => logger.error('Failed to send Telegram message for today_links:', e));
+        }
+      } catch (err) {
+        logger.error('Error during today_links task:', err);
+        const message = err instanceof Error ? err.message : String(err);
+        await utils.sendTelegram(`daily_routine 중 today_links 작업 실패: ${message}`).catch(() => {});
       }
     } finally {
       await utils.sendTelegram('🕗 데일리 루틴 작업이 종료되었습니다.').catch(() => {});
-      await context.close().catch(() => {});
-      await browser.close().catch(() => {});
     }
     return true;
   },
@@ -267,15 +282,7 @@ taskRegistry.registerTask(todayQuizTask);
 const todayLinksTask: Task = {
   name: 'today_links',
   run: async (ctx, options) => {
-    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    try {
-      await utils.ensureLoggedIn({ page, context });
-      return await todayLinksTaskModule.run({ page, context, args: ctx.args }, options);
-    } finally {
-      await browser.close();
-    }
+    return await todayLinksTaskModule.run({ args: ctx.args }, options);
   },
 };
 taskRegistry.registerTask(todayLinksTask);

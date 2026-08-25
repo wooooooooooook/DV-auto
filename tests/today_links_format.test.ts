@@ -86,10 +86,10 @@ function testTodayLinksFormatWithUserExample() {
     ),
   );
 
-  // 5. 포인트 전환 안내
-  assert(message.includes('💳 <b>오늘 네이버페이포인트 전환 가능 예정입니다. 전환 가능 알림을 기다려주세요!</b>'));
+  // 5. 포인트 전환 안내 (available: true 일 때 현재 전환 가능 문구)
+  assert(message.includes('💳 <b>현재 네이버페이 포인트 전환 가능합니다.</b>'));
 
-  // 5-1. 포인트 전환 예정일 (D-Day 표시) 검증
+  // 5-1. 포인트 전환 예정일 (D-2 표시) 검증
   const ddayInput: TodayLinksFormatInput = {
     ...mockInput,
     pointConversionInfo: {
@@ -106,6 +106,7 @@ function testTodayLinksFormatWithUserExample() {
     `D-day 표시 검증 실패: ${ddayMessage}`,
   );
 
+  // 5-2. 포인트 전환 예정일이 오늘인 경우 (D-Day) 전환 예정 알림 문구 검증
   const dday0Input: TodayLinksFormatInput = {
     ...mockInput,
     pointConversionInfo: {
@@ -118,7 +119,7 @@ function testTodayLinksFormatWithUserExample() {
   };
   const { message: dday0Message } = formatTodayLinksBroadcast(dday0Input);
   assert(
-    dday0Message.includes('💳 <b>다음 네이버페이포인트 전환가능일:</b> 08월 23일 오전 (D-Day)'),
+    dday0Message.includes('💳 <b>오늘 네이버페이포인트 전환 가능 예정입니다. 전환 가능 알림을 기다려주세요!</b>'),
     `D-Day(당일) 검증 실패: ${dday0Message}`,
   );
 
@@ -395,6 +396,45 @@ function testPointConversionButtonConditions() {
   console.log('✅ [Pass] 포인트 전환 버튼 조건 테스트 통과!\n');
 }
 
+async function testTodayQuizCacheIntegration() {
+  console.log('--- [Test] today_quiz 캐시 및 today_links 연동 테스트 시작 ---');
+  const storage = await import('../src/services/storage');
+  const { TODAY_QUIZ_INFO_KEY } = await import('../src/tasks/today_quiz');
+  type CachedTodayQuizInfo = import('../src/tasks/today_quiz').CachedTodayQuizInfo;
+  const todayLinks = await import('../src/tasks/today_links');
+
+  const todayIso = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' as const });
+
+  // 1. 캐시 저장
+  storage.set<CachedTodayQuizInfo>(TODAY_QUIZ_INFO_KEY, {
+    date: todayIso,
+    link: 'https://www.doctorville.co.kr/product/productView?pId=999',
+    productTitle: '테스트약품',
+    answers: [2, 3, 1],
+  });
+
+  // 2. todayLinks.run을 브라우저(page) 없이 실행
+  const res = await todayLinks.run({});
+  assert.strictEqual(res.success, true, 'todayLinks.run() without page should succeed');
+  assert.ok(res.message.includes('테스트약품'), '캐시된 퀴즈 제목이 메시지에 포함되어야 함');
+  assert.ok(res.message.includes('231'), '캐시된 정답 번호가 메시지에 포함되어야 함');
+
+  // 3. 퀴즈 없음 캐시 테스트
+  storage.set<CachedTodayQuizInfo>(TODAY_QUIZ_INFO_KEY, {
+    date: todayIso,
+    link: null,
+  });
+  const resNoQuiz = await todayLinks.run({});
+  assert.strictEqual(resNoQuiz.success, true, 'todayLinks.run() without quiz should succeed');
+  assert.ok(resNoQuiz.message.includes('오늘은 퀴즈가 없습니다. ☕'), '퀴즈 없음 시 안내 문구가 포함되어야 함');
+
+  console.log('✅ [Pass] today_quiz 캐시 연동 테스트 통과!\n');
+}
+
 testTodayLinksFormatWithUserExample();
 testDateParsingAndCustomDateFormat();
 testPointConversionButtonConditions();
+testTodayQuizCacheIntegration().catch((e) => {
+  console.error('testTodayQuizCacheIntegration failed:', e);
+  process.exit(1);
+});

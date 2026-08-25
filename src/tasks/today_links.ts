@@ -1,7 +1,13 @@
 import type { BrowserContext } from 'playwright';
 import quizMapping from '../../data/quiz.json';
 import type { PlaywrightRunArgs } from '../types';
-import { safeGoto, getSeminarIdFromUrl, hasSurveyPointExcludedNotice } from '../modules/utils';
+import {
+  safeGoto,
+  getSeminarIdFromUrl,
+  hasSurveyPointExcludedNotice,
+  getPointConversionAvailabilityHttp,
+  isSurveyPointExcludedSeminarHttp,
+} from '../modules/utils';
 import * as storage from '../services/storage';
 import {
   loadCheatsheet,
@@ -10,6 +16,7 @@ import {
   findOptionByAnswer,
   type QuizQuestion,
 } from './seminar_quiz';
+import { TODAY_QUIZ_INFO_KEY, type CachedTodayQuizInfo } from './today_quiz';
 import {
   fetchMainFutureSeminars,
   fetchSeminarDetail,
@@ -89,10 +96,24 @@ function escapeHtml(text: string): string {
 }
 
 /**
- * today_links 전용: networkidle 대기 없이 빠른 DOM 로드로 포인트미지급 여부 검사
+ * today_links 전용: HTTP 요청 우선 검사 후 필요 시 빠른 DOM 로드로 포인트미지급 여부 검사
  */
-async function checkPointExcludedFast(context: BrowserContext, url: string): Promise<boolean> {
+async function checkPointExcludedFast(url: string, context?: BrowserContext): Promise<boolean> {
   const start = Date.now();
+  try {
+    const httpRes = await isSurveyPointExcludedSeminarHttp(url);
+    if (httpRes.status === 'success') {
+      console.log(
+        `[today_links] 포인트미지급 HTTP 확인 완료 (${Date.now() - start}ms, 결과: ${httpRes.excluded}): ${url}`,
+      );
+      return httpRes.excluded;
+    }
+  } catch (_e) {
+    /* ignore and fallback */
+  }
+
+  if (!context) return false;
+
   const page = await context.newPage();
   try {
     await safeGoto(page, url, { waitUntil: 'domcontentloaded', timeout: 8000 }, 1);
@@ -102,7 +123,9 @@ async function checkPointExcludedFast(context: BrowserContext, url: string): Pro
       .waitFor({ state: 'attached', timeout: 3000 })
       .catch(() => {});
     const isExcluded = await hasSurveyPointExcludedNotice(page);
-    console.log(`[today_links] 포인트미지급 확인 완료 (${Date.now() - start}ms, 결과: ${isExcluded}): ${url}`);
+    console.log(
+      `[today_links] 포인트미지급 DOM fallback 확인 완료 (${Date.now() - start}ms, 결과: ${isExcluded}): ${url}`,
+    );
     return isExcluded;
   } catch (_e) {
     console.warn(`[today_links] 포인트미지급 확인 실패 (${Date.now() - start}ms): ${url}`);
@@ -113,17 +136,17 @@ async function checkPointExcludedFast(context: BrowserContext, url: string): Pro
 }
 
 /**
- * 미확인 세미나 목록을 병렬(concurrency=4)로 빠르게 일괄 확인
+ * 미확인 세미나 목록을 병렬(concurrency=4)로 빠르게 일괄 확인 (HTTP 우선, 필요 시 브라우저 fallback)
  */
 async function batchCheckPointExcluded(
-  context: BrowserContext,
   items: Array<{ link: string; cacheKey: string }>,
   cache: Map<string, boolean>,
+  context?: BrowserContext,
 ): Promise<void> {
   const targets = items.filter((item) => !cache.has(item.cacheKey));
   if (targets.length === 0) return;
 
-  console.log(`[today_links] 포인트미지급 병렬 일괄 확인 시작 (총 ${targets.length}건)`);
+  console.log(`[today_links] 포인트미지급 병렬 일괄 확인 시작 (총 ${targets.length}건, HTTP 우선)`);
   const startTime = Date.now();
 
   const concurrency = 4;
@@ -132,7 +155,7 @@ async function batchCheckPointExcluded(
     await Promise.all(
       batch.map(async (target) => {
         try {
-          const isExcluded = await checkPointExcludedFast(context, target.link);
+          const isExcluded = await checkPointExcludedFast(target.link, context);
           cache.set(target.cacheKey, isExcluded);
         } catch {
           cache.set(target.cacheKey, false);
@@ -439,10 +462,32 @@ async function findQuizHref(page: PlaywrightRunArgs['page']): Promise<string | n
   return null;
 }
 
-async function collectQuizInfo(page: PlaywrightRunArgs['page']): Promise<QuizInfo | null> {
+async function collectQuizInfo(page?: PlaywrightRunArgs['page']): Promise<QuizInfo | null> {
   try {
-    const href = await findQuizHref(page);
+    const { isoDate } = getTodayDateStrings();
 
+    // 1. today_quiz가 실행되어 스토리지에 캐시된 오늘자 퀴즈 정보가 있는지 먼저 확인
+    const cachedQuiz = storage.get<CachedTodayQuizInfo>(TODAY_QUIZ_INFO_KEY);
+    if (cachedQuiz && cachedQuiz.date === isoDate) {
+      console.log('[today_links] 캐시된 오늘의 퀴즈 정보를 사용합니다:', cachedQuiz);
+      if (!cachedQuiz.link) return null;
+
+      // temp_answers 갱신 여부 확인 (사용자가 텔레그램 답장으로 정답을 갱신했을 수 있음)
+      const tempAnswers = cachedQuiz.productTitle ? getTempQuizAnswers(isoDate, cachedQuiz.productTitle) : null;
+      return {
+        link: cachedQuiz.link,
+        productTitle: cachedQuiz.productTitle,
+        answers: tempAnswers || cachedQuiz.answers,
+      };
+    }
+
+    // 2. 캐시가 없고 page가 제공되지 않은 경우 브라우저 탐색 생략
+    if (!page) {
+      console.log('[today_links] 오늘자 퀴즈 캐시가 없고 브라우저 페이지가 제공되지 않아 퀴즈 탐색을 건너뜁니다.');
+      return null;
+    }
+
+    const href = await findQuizHref(page);
     if (!href) return null;
 
     await safeGoto(page, href, { waitUntil: 'load', timeout: 30000 }, 1);
@@ -457,7 +502,6 @@ async function collectQuizInfo(page: PlaywrightRunArgs['page']): Promise<QuizInf
               .catch(() => '')
           ).trim()
         : '';
-    const { isoDate } = getTodayDateStrings();
 
     // 1. seminar_quiz_cheatsheet(족보)에서 먼저 탐색
     let answers: Array<string | number> = (await findAnswersByCheatsheet(page)) || [];
@@ -598,7 +642,7 @@ function parseSeminarsFromNodes(nodes: Array<Element>, target: DateTarget): Pars
 }
 
 async function collectTodaySeminarMessage(
-  page: PlaywrightRunArgs['page'],
+  page?: PlaywrightRunArgs['page'],
   customDateInput?: string,
 ): Promise<SeminarMessageResult> {
   const { todayString, isoDate, isCustomDate, targetMonth, targetDay } = getTodayDateStrings(customDateInput);
@@ -629,7 +673,7 @@ async function collectTodaySeminarMessage(
           isAdvancedSurvey,
         });
       }
-    } else {
+    } else if (page) {
       console.warn('[today_links] fetchMainFutureSeminars 실패, DOM fallback 시도:', apiRes.errorMessage);
       await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'domcontentloaded', timeout: 30000 }, 1);
 
@@ -639,6 +683,11 @@ async function collectTodaySeminarMessage(
         targetMonth,
         targetDay,
       });
+    } else {
+      console.warn(
+        '[today_links] fetchMainFutureSeminars 실패 및 page 미제공으로 DOM fallback 생략:',
+        apiRes.errorMessage,
+      );
     }
 
     if (!parsedSeminars || parsedSeminars.length === 0) {
@@ -692,8 +741,8 @@ async function collectTodaySeminarMessage(
       }
     }
 
-    if (uncachedSeminarItems.length > 0 && page) {
-      await batchCheckPointExcluded(page.context(), uncachedSeminarItems, pointExcludedCache);
+    if (uncachedSeminarItems.length > 0) {
+      await batchCheckPointExcluded(uncachedSeminarItems, pointExcludedCache, page?.context());
     }
 
     for (const item of parsedSeminars) {
@@ -753,25 +802,34 @@ async function collectTodaySeminarMessage(
   }
 }
 
-async function collectPointConversionInfo(page: PlaywrightRunArgs['page']): Promise<PointConversionInfo | null> {
+async function collectPointConversionInfo(page?: PlaywrightRunArgs['page']): Promise<PointConversionInfo | null> {
   try {
-    const currentUrl = page.url();
-    if (!currentUrl.includes('doctorville.co.kr')) {
-      await safeGoto(page, BASE_URL, { waitUntil: 'domcontentloaded', timeout: 15000 }, 1);
+    const httpData = await getPointConversionAvailabilityHttp();
+    if (httpData) {
+      return httpData;
     }
-    const response = (await page.evaluate(async (apiUrl: string) => {
-      try {
-        const res = await fetch(apiUrl, { credentials: 'include' });
-        if (!res.ok) return null;
-        const text = await res.text();
-        if (!text) return null;
-        return JSON.parse(text);
-      } catch {
-        return null;
-      }
-    }, POINT_CONVERSION_API_URL)) as { data?: PointConversionInfo } | null;
 
-    return response?.data ?? null;
+    if (page) {
+      const currentUrl = page.url();
+      if (!currentUrl.includes('doctorville.co.kr')) {
+        await safeGoto(page, BASE_URL, { waitUntil: 'domcontentloaded', timeout: 15000 }, 1);
+      }
+      const response = (await page.evaluate(async (apiUrl: string) => {
+        try {
+          const res = await fetch(apiUrl, { credentials: 'include' });
+          if (!res.ok) return null;
+          const text = await res.text();
+          if (!text) return null;
+          return JSON.parse(text);
+        } catch {
+          return null;
+        }
+      }, POINT_CONVERSION_API_URL)) as { data?: PointConversionInfo } | null;
+
+      return response?.data ?? null;
+    }
+
+    return null;
   } catch (err) {
     console.error('[today_links] 포인트 전환 정보 조회 실패:', err);
     return null;
@@ -825,6 +883,9 @@ function getPointConversionDdayLabel(plannedAt: string | undefined, todayIsoOver
 function formatPointConversionMessage(info: PointConversionInfo | null, todayIsoOverride?: string): string {
   if (!info) return '';
   if (info.available) {
+    return `💳 <b>현재 네이버페이 포인트 전환 가능합니다.</b>\n${POINT_CONVERSION_URL}`;
+  }
+  if (isPointConversionDay(info, todayIsoOverride)) {
     return `💳 <b>오늘 네이버페이포인트 전환 가능 예정입니다. 전환 가능 알림을 기다려주세요!</b>\n${POINT_CONVERSION_URL}`;
   }
   const plannedParts = [info.availablePlannedAt, info.meridiem].map((s) => s?.trim()).filter(Boolean);
@@ -944,7 +1005,7 @@ https://t.me/+J1UGmvLA9jU4NjQ1</blockquote>\n<blockquote>✨세미나정보변�
   return { message, options };
 }
 
-async function run({ page, args }: PlaywrightRunArgs, taskOptions?: Record<string, unknown>) {
+async function run({ page, args }: Partial<PlaywrightRunArgs> = {}, taskOptions?: Record<string, unknown>) {
   try {
     const inputDate = (
       args?.date ||
@@ -990,7 +1051,7 @@ async function run({ page, args }: PlaywrightRunArgs, taskOptions?: Record<strin
       }
 
       if (uncachedItems.length > 0) {
-        await batchCheckPointExcluded(page.context(), uncachedItems, pointExcludedCache);
+        await batchCheckPointExcluded(uncachedItems, pointExcludedCache, page?.context());
       }
 
       storedNewSeminars = storedNewSeminars.map((item) => {

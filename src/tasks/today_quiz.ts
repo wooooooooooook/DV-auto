@@ -14,7 +14,15 @@ const QUIZ_LIST_URLS = [
   'https://www.doctorville.co.kr/product/medicineList',
   'https://www.doctorville.co.kr/product/instrumentList',
 ];
-const TODAY_QUIZ_TEMP_KEY = 'today_quiz:temp_answers';
+export const TODAY_QUIZ_TEMP_KEY = 'today_quiz:temp_answers';
+export const TODAY_QUIZ_INFO_KEY = 'today_quiz:today_info';
+
+export type CachedTodayQuizInfo = {
+  date: string;
+  link: string | null;
+  productTitle?: string;
+  answers?: Array<string | number>;
+};
 
 type TempQuizAnswers = {
   date: string;
@@ -101,52 +109,91 @@ async function notifyTodayQuizUnknownQuestions(
   productTitle: string,
   href: string,
 ): Promise<void> {
-  const questions = await parseTodayQuizQuestions(page);
-  if (questions.length === 0) return;
-  const message = formatTodayQuizUnknownQuestions(productTitle, questions, href);
-  await sendTelegram(message).catch(() => {});
+  try {
+    const questions = await parseTodayQuizQuestions(page);
+    if (questions.length === 0) return;
+
+    const message = formatTodayQuizUnknownQuestions(productTitle, questions, href);
+    await sendTelegram(message).catch((err) => {
+      console.error('[today_quiz] 족보 미등록 알림 전송 실패:', err);
+    });
+  } catch (err) {
+    console.error('[today_quiz] 족보 미등록 질문 파싱/알림 중 오류:', err);
+  }
 }
 
 async function findAnswersByCheatsheet(page: PlaywrightRunArgs['page']): Promise<CheatsheetMatchResult> {
-  try {
-    const cheatsheet = await loadCheatsheet();
-    if (Object.keys(cheatsheet).length === 0) return { answers: null, reason: 'no_keyword' };
+  const cheatsheet = await loadCheatsheet();
+  if (Object.keys(cheatsheet).length === 0) {
+    return { answers: null, reason: 'no_keyword' };
+  }
 
-    const questions = await parseTodayQuizQuestions(page);
-    if (questions.length === 0) return { answers: null, reason: 'no_keyword' };
+  const questions = await parseTodayQuizQuestions(page);
+  if (questions.length === 0) {
+    return { answers: null, reason: 'no_keyword' };
+  }
 
-    const result: Array<string | number> = [];
-    for (const q of questions) {
-      console.log(`[today_quiz] 매칭 시도 문제: ${q.questionText.substring(0, 30)}...`);
-      const matches = findMatchingKeywords(q.questionText, cheatsheet);
-      const bestMatch = resolveBestKeywordMatch(q.questionText, q.options, cheatsheet);
-      if (bestMatch) {
-        const answerKeyword = cheatsheet[bestMatch.keyword];
-        console.log(
-          `[today_quiz] 매칭 성공: ${bestMatch.keyword} -> ${answerKeyword} (보기 ${bestMatch.option.index}번)`,
-        );
-        result.push(bestMatch.option.index);
-        continue;
-      }
+  const answers: Array<string | number> = [];
+  for (const q of questions) {
+    console.log(`[today_quiz] 매칭 시도 문제: ${q.questionText.substring(0, 30)}...`);
 
-      if (matches.length > 0) {
-        const answerKeyword = cheatsheet[matches[0]];
-        const resolvedOption = findOptionByAnswer(q.options, answerKeyword);
-        return {
-          answers: null,
-          reason: 'keyword_matched_but_option_not_found',
-          keyword: matches[0],
-          answerText: answerKeyword,
-          optionIndex: resolvedOption ? resolvedOption.index : -1,
-          availableOptions: q.options,
-        };
-      }
-      console.warn(`[today_quiz] 문제에 대한 정답을 찾지 못했습니다: ${q.questionText.substring(0, 50)}...`);
+    // 1. 단일 키워드 매칭 우선 (resolveBestKeywordMatch)
+    const bestMatch = resolveBestKeywordMatch(q.questionText, q.options, cheatsheet);
+    if (bestMatch) {
+      console.log(
+        `[today_quiz] 단일 매칭 성공: ${bestMatch.keyword} -> ${cheatsheet[bestMatch.keyword]} (보기 ${bestMatch.option.index}번: ${bestMatch.option.text})`,
+      );
+      answers.push(bestMatch.option.index);
+      continue;
+    }
+
+    // 2. 다중 매칭 폴백 (findMatchingKeywords)
+    const matches = findMatchingKeywords(q.questionText, cheatsheet);
+    if (matches.length === 0) {
+      console.log(`[today_quiz] 문제에서 족보 키워드를 찾지 못함: ${q.questionText.substring(0, 30)}...`);
       return { answers: null, reason: 'no_keyword' };
     }
-    return { answers: result, reason: 'ok' };
-  } catch (e) {
-    console.error('[today_quiz] 족보 매칭 중 오류', e);
+
+    // 3. 다중 키워드 매칭: 키워드 순서대로 정답 매칭 시도
+    let matchedOption: { index: number; text: string } | null = null;
+    let matchedKeyword = '';
+    for (const kw of matches) {
+      const answerKeyword = cheatsheet[kw];
+      const opt = findOptionByAnswer(q.options, answerKeyword);
+      if (opt) {
+        matchedOption = opt;
+        matchedKeyword = kw;
+        break;
+      }
+    }
+
+    if (matchedOption) {
+      console.log(
+        `[today_quiz] 다중 매칭 성공: ${matchedKeyword} -> ${cheatsheet[matchedKeyword]} (보기 ${matchedOption.index}번: ${matchedOption.text})`,
+      );
+      answers.push(matchedOption.index);
+      continue;
+    }
+
+    // 4. 키워드는 매칭되었으나 정답 보기를 찾지 못한 경우
+    const firstKeyword = matches[0];
+    const expectedAnswer = cheatsheet[firstKeyword];
+    console.warn(
+      `[today_quiz] 키워드 '${firstKeyword}' 매칭되었으나 보기에서 정답 '${expectedAnswer}'을 찾지 못함 (보기 수: ${q.options.length})`,
+    );
+    return {
+      answers: null,
+      reason: 'keyword_matched_but_option_not_found',
+      keyword: firstKeyword,
+      answerText: expectedAnswer,
+      optionIndex: 0,
+      availableOptions: q.options.map((o) => ({ index: o.index, text: o.text })),
+    };
+  }
+
+  if (answers.length === questions.length) {
+    return { answers, reason: 'ok' };
+  } else {
     return { answers: null, reason: 'no_keyword' };
   }
 }
@@ -197,11 +244,19 @@ async function run({ page }: PlaywrightRunArgs) {
     const href = await findQuizHref(page);
 
     if (!href) {
+      storage.set<CachedTodayQuizInfo>(TODAY_QUIZ_INFO_KEY, {
+        date: getTodayIsoDate(),
+        link: null,
+      });
       return { success: true, message: '오늘의 퀴즈가 없습니다.' };
     }
 
     // Go to the quiz page
     await safeGoto(page, href, { waitUntil: 'load', timeout: 30000 }, 2);
+
+    const titleElem = page.locator('#product_title');
+    const titleCount = await titleElem.count();
+    const initialProductTitle = titleCount ? (await titleElem.first().innerText()).trim() : '';
 
     // Click the banner button to open the quiz popup
     const btn = page.locator('#btn_quiz_banner');
@@ -218,6 +273,11 @@ async function run({ page }: PlaywrightRunArgs) {
         } catch (_e) {
           // ignore screenshot errors
         }
+        storage.set<CachedTodayQuizInfo>(TODAY_QUIZ_INFO_KEY, {
+          date: getTodayIsoDate(),
+          link: href,
+          productTitle: initialProductTitle || undefined,
+        });
         return { success: true, message: '오늘의 퀴즈는 이미 완료되었습니다. ' + href, imagePath: shot };
       }
       await btn
@@ -235,15 +295,22 @@ async function run({ page }: PlaywrightRunArgs) {
     const pop = page.locator('#quizLayerPop');
     const visible = await pop.isVisible().catch(() => false);
     if (!visible) {
+      storage.set<CachedTodayQuizInfo>(TODAY_QUIZ_INFO_KEY, {
+        date: getTodayIsoDate(),
+        link: href,
+        productTitle: initialProductTitle || undefined,
+      });
       return { success: false, message: '퀴즈 팝업이 열리지 않았습니다. 직접 퀴즈를 풀어주세요. ' + href };
     }
 
     // Get product title
-    const titleElem = page.locator('#product_title');
-    const titleCount = await titleElem.count();
-    const productTitle = titleCount ? (await titleElem.first().innerText()).trim() : '';
+    const productTitle = initialProductTitle || (titleCount ? (await titleElem.first().innerText()).trim() : '');
 
     if (!productTitle) {
+      storage.set<CachedTodayQuizInfo>(TODAY_QUIZ_INFO_KEY, {
+        date: getTodayIsoDate(),
+        link: href,
+      });
       return { success: false, message: '제품 제목을 찾을 수 없습니다. 직접 퀴즈를 풀어주세요. ' + href };
     }
 
@@ -251,7 +318,6 @@ async function run({ page }: PlaywrightRunArgs) {
     console.log(`[today_quiz] "${productTitle}" 족보(seminar_quiz_cheatsheet)에서 정답 찾기를 먼저 시도합니다.`);
     const cheatsheetResult = await findAnswersByCheatsheet(page);
     let answers = cheatsheetResult.answers || [];
-    let answersSource: 'cheatsheet' | 'mapping' | 'none' = answers.length > 0 ? 'cheatsheet' : 'none';
 
     // 2. 족보에서 정답을 찾지 못한 경우 -> 관리자 봇에 등록 메시지 전송 후 quiz.json에서 탐색
     if (answers.length === 0) {
@@ -265,9 +331,16 @@ async function run({ page }: PlaywrightRunArgs) {
       if (mappingAnswers && Array.isArray(mappingAnswers) && mappingAnswers.length > 0) {
         console.log(`[today_quiz] quiz.json에서 "${productTitle}"에 대한 정답을 찾았습니다:`, mappingAnswers);
         answers = mappingAnswers;
-        answersSource = 'mapping';
       }
     }
+
+    // 퀴즈 정보 캐시 저장
+    storage.set<CachedTodayQuizInfo>(TODAY_QUIZ_INFO_KEY, {
+      date: getTodayIsoDate(),
+      link: href,
+      productTitle,
+      answers: answers.length > 0 ? answers : undefined,
+    });
 
     if (!answers || answers.length === 0) {
       return { success: true, message: `정답이 등록되지 않았습니다. 직접 퀴즈를 풀어주세요. ${href}` };
