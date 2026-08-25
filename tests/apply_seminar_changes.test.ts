@@ -6,7 +6,6 @@ import {
   run as runApplySeminar,
   runHttpOnly,
   applySeminarExtraTask,
-  SEMINAR_LIST_KEY,
   type SeminarListItem,
   type SeminarInfoChange,
   type SeminarPointChange,
@@ -15,6 +14,7 @@ import * as runner from '../src/core/runner';
 import * as utilsModule from '../src/modules/utils';
 import * as checkSeminarPointModule from '../src/tasks/check_seminar_point';
 import * as storage from '../src/services/storage';
+import * as seminarRepo from '../src/services/seminar_repository';
 import type { PlaywrightRunArgs } from '../src/types';
 
 async function testApplySeminarChanges() {
@@ -271,7 +271,7 @@ async function testApplySeminarChanges() {
         pointPaid: false,
       },
     ];
-    storage.set(SEMINAR_LIST_KEY, storedList);
+    seminarRepo.setAllSeminars(storedList);
 
     sentTelegramMessages.length = 0;
     sentChannelMessages.length = 0;
@@ -318,7 +318,7 @@ async function testApplySeminarChanges() {
         pointPaid: true,
       },
     ];
-    storage.set(SEMINAR_LIST_KEY, currentStoredList);
+    seminarRepo.setAllSeminars(currentStoredList);
 
     // 1) runHttpOnly() 직접 실행 (옵션 미지정/기본값)
     const directResult = await runHttpOnly();

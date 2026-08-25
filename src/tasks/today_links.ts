@@ -8,8 +8,10 @@ import {
   hasSurveyPointExcludedNotice,
   getPointConversionAvailabilityHttp,
   isSurveyPointExcludedSeminarHttp,
+  truncateTelegramMessage,
 } from '../modules/utils';
 import * as storage from '../services/storage';
+import * as seminarRepo from '../services/seminar_repository';
 import {
   loadCheatsheet,
   findMatchingKeywords,
@@ -89,7 +91,6 @@ type TempQuizAnswers = {
   answers: Array<string | number>;
 };
 const TODAY_SEMINAR_KEY = 'today_seminars';
-const SEMINAR_LIST_KEY = 'apply_seminar:seminar_list';
 
 function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -388,19 +389,7 @@ function getTodayDateStrings(customDateInput?: string) {
 }
 
 function getYesterdayAddedSeminars(yesterdayIso: string): StoredNewSeminars['seminars'] {
-  const storedSeminars =
-    storage.get<
-      Array<{
-        name: string;
-        url: string;
-        seminarId: string | null;
-        isPointExcluded?: boolean;
-        isAdvancedSurvey?: boolean;
-        date?: string;
-        time?: string;
-        detectedDate?: string;
-      }>
-    >(SEMINAR_LIST_KEY) || [];
+  const storedSeminars = seminarRepo.getAllSeminars();
 
   return storedSeminars
     .filter((seminar) => seminar.detectedDate === yesterdayIso)
@@ -708,8 +697,7 @@ async function collectTodaySeminarMessage(
 
     const lunchSeminars: string[] = [];
     const dinnerSeminars: string[] = [];
-    const storedSeminars =
-      storage.get<Array<{ url: string; seminarId?: string | null; isPointExcluded?: boolean }>>(SEMINAR_LIST_KEY) || [];
+    const storedSeminars = seminarRepo.getAllSeminars();
     const pointExcludedCache = new Map<string, boolean>();
 
     const isDinnerSeminar = (classAttr: string, time: string): boolean => {
@@ -957,18 +945,39 @@ function formatTodayLinksBroadcast(input: TodayLinksFormatInput): TodayLinksForm
   }
 
   if (storedNewSeminars.length > 0) {
-    const newSeminarList = storedNewSeminars
-      .map((item, index) => {
-        const link = item.seminarId ? `${SEMINAR_DETAIL_PAGE}${item.seminarId}` : item.url;
-        const pointExcludedSuffix = item.isPointExcluded ? ' 🚫[포인트미지급]' : '';
-        const advancedSurveySuffix = item.isAdvancedSurvey ? ' ✨<b>[심화설문]</b>' : '';
-        const dateTimePrefix = item.date || item.time ? `[${item.date}${item.time ? ' ' + item.time : ''}] ` : '';
-        const nameDisplay = item.isPointExcluded ? `<s>${escapeHtml(item.name)}</s>` : escapeHtml(item.name);
-        return `${index + 1}. ${dateTimePrefix}${nameDisplay}${pointExcludedSuffix}${advancedSurveySuffix}\n${link}`;
-      })
-      .join('\n');
+    const formattedItems: string[] = [];
+    let truncatedCount = 0;
 
-    message += `\n🆕 <b>어제 추가된 신규 세미나</b>\n${newSeminarList}\n`;
+    // 출석, 퀴즈, 오늘 세미나, 포인트 전환, 하단 안내 문구 등의 기본 길이 확보
+    const baseNewSeminarHeader = '\n🆕 <b>어제 추가된 신규 세미나</b>\n';
+    const estimatedFooterLength = 700;
+    const maxNewSeminarTextLength = Math.max(500, 3600 - message.length - estimatedFooterLength);
+
+    let currentLength = 0;
+    for (let i = 0; i < storedNewSeminars.length; i++) {
+      const item = storedNewSeminars[i];
+      const link = item.seminarId ? `${SEMINAR_DETAIL_PAGE}${item.seminarId}` : item.url;
+      const pointExcludedSuffix = item.isPointExcluded ? ' 🚫[포인트미지급]' : '';
+      const advancedSurveySuffix = item.isAdvancedSurvey ? ' ✨<b>[심화설문]</b>' : '';
+      const dateTimePrefix = item.date || item.time ? `[${item.date}${item.time ? ' ' + item.time : ''}] ` : '';
+      const nameDisplay = item.isPointExcluded ? `<s>${escapeHtml(item.name)}</s>` : escapeHtml(item.name);
+      const line = `${i + 1}. ${dateTimePrefix}${nameDisplay}${pointExcludedSuffix}${advancedSurveySuffix}\n${link}`;
+
+      if (currentLength + line.length + 100 > maxNewSeminarTextLength && i < storedNewSeminars.length - 1) {
+        truncatedCount = storedNewSeminars.length - i;
+        break;
+      }
+
+      formattedItems.push(line);
+      currentLength += line.length + 1;
+    }
+
+    let newSeminarList = formattedItems.join('\n');
+    if (truncatedCount > 0) {
+      newSeminarList += `\n... 외 ${truncatedCount}개 신규 세미나 생략 (세미나 목록 바로가기 버튼에서 확인)`;
+    }
+
+    message += `${baseNewSeminarHeader}${newSeminarList}\n`;
   }
 
   const pointConversionMessage = formatPointConversionMessage(
@@ -982,6 +991,9 @@ function formatTodayLinksBroadcast(input: TodayLinksFormatInput): TodayLinksForm
   message += `\n<blockquote>🤖 <b>닥터빌 텔레그램방에 전송된 메시지입니다.</b>
 매일 오전 9시 링크모음 발송, 세미나 시작/종료, 퀴즈 정답 알림, 지금 가입하세요!
 https://t.me/+J1UGmvLA9jU4NjQ1</blockquote>\n<blockquote>✨세미나정보변경/포인트지급내역 알림 등 상세 알림을 받으려면 알림봇을 구독해주세요! https://t.me/DV_notice_bot </blockquote>`;
+
+  // 최종 메시지 길이가 텔레그램 한도(4096자)를 초과하지 않도록 HTML 안전 Truncation 적용
+  message = truncateTelegramMessage(message, { parseMode: 'HTML', maxLength: 4000 });
 
   const inlineKeyboard: Array<Array<{ text: string; url: string }>> = [];
 
@@ -1036,9 +1048,7 @@ async function run({ page, args }: Partial<PlaywrightRunArgs> = {}, taskOptions?
       let updatedMissingPointFlag = false;
       const pointExcludedCache = new Map<string, boolean>();
 
-      const storedSeminars =
-        storage.get<Array<{ url: string; seminarId?: string | null; isPointExcluded?: boolean }>>(SEMINAR_LIST_KEY) ||
-        [];
+      const storedSeminars = seminarRepo.getAllSeminars();
 
       const uncachedItems: Array<{ link: string; cacheKey: string }> = [];
 
@@ -1077,23 +1087,20 @@ async function run({ page, args }: Partial<PlaywrightRunArgs> = {}, taskOptions?
       });
 
       if (updatedMissingPointFlag) {
-        const currentSeminarsInList =
-          storage.get<Array<{ url: string; seminarId?: string | number | null; isPointExcluded?: boolean }>>(
-            SEMINAR_LIST_KEY,
-          ) || [];
-        const updatedNewSeminarsMap = new Map(storedNewSeminars.map((s) => [String(s.seminarId || s.url), s]));
-        const updatedList = currentSeminarsInList.map((s) => {
-          const key = String(s.seminarId || s.url);
-          const updatedNew = updatedNewSeminarsMap.get(key);
-          if (updatedNew) {
-            return {
-              ...s,
-              isPointExcluded: updatedNew.isPointExcluded,
-            };
+        for (const item of storedNewSeminars) {
+          if (typeof item.isPointExcluded === 'boolean') {
+            const sid = item.seminarId || getSeminarIdFromUrl(item.url);
+            if (sid) {
+              const existing = seminarRepo.getSeminarById(sid);
+              if (existing && existing.isPointExcluded !== item.isPointExcluded) {
+                seminarRepo.upsertSeminar({
+                  ...existing,
+                  isPointExcluded: item.isPointExcluded,
+                });
+              }
+            }
           }
-          return s;
-        });
-        storage.set(SEMINAR_LIST_KEY, updatedList);
+        }
       }
     }
 

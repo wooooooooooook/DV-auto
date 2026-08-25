@@ -94,11 +94,20 @@ async function runTests() {
   assert.strictEqual(sem5538.seminarId, '5538');
   assert.strictEqual(sem5538.isSurveyPointExcluded, false, '저장소에 없는 메인 목록 API 아이템은 기본 false');
 
-  // 저장소(SEMINAR_LIST_KEY)에 isPointExcluded: true로 기저장된 경우 우선 참조 검증
-  const storageModule = await import('../src/services/storage');
-  const { SEMINAR_LIST_KEY } = await import('../src/tasks/apply_seminar');
-  storageModule.set(SEMINAR_LIST_KEY, [
-    { seminarId: '5538', name: '저녁 포인트 미지급 세미나', url: '', isPointExcluded: true, isAdvancedSurvey: false },
+  // 저장소(seminars 테이블)에 isPointExcluded: true로 기저장된 경우 우선 참조 검증
+  const seminarRepoModule = await import('../src/services/seminar_repository');
+  seminarRepoModule.setAllSeminars([
+    {
+      seminarId: '5538',
+      name: '저녁 포인트 미지급 세미나',
+      url: 'https://m.doctorville.co.kr/cme/seminar/5538',
+      time: '19:00',
+      currentCount: '0',
+      totalCount: '10',
+      nightTime: true,
+      isPointExcluded: true,
+      isAdvancedSurvey: false,
+    },
   ]);
   const dinnerResWithStorage = await getTodaysSeminarsFromApi(17, 22, '2026-08-24');
   const sem5538Stored = Object.values(dinnerResWithStorage.seminars)[0];
@@ -107,7 +116,7 @@ async function runTests() {
     true,
     '저장소에 저장된 isPointExcluded=true 값을 우선 반영해야 함',
   );
-  storageModule.deleteKey(SEMINAR_LIST_KEY);
+  seminarRepoModule.clearSeminars();
 
   console.log('  ✓ getTodaysSeminarsFromApi: 날짜/시간대 필터링 및 저장소 기반 isPointExcluded 판정 검증 완료\n');
 

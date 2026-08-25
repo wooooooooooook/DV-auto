@@ -6,6 +6,7 @@ import {
   type TodayLinksFormatInput,
 } from '../src/tasks/today_links';
 import * as storage from '../src/services/storage';
+import * as seminarRepo from '../src/services/seminar_repository';
 
 /**
  * 사용자가 제공한 예시 문구를 바탕으로 구성한 테스트 케이스
@@ -233,15 +234,17 @@ function testYesterdayAddedSeminarsFilter() {
   const yesterdayIso = '2026-08-17';
   const twoDaysAgoIso = '2026-08-16';
 
-  // storage를 깨끗이 비우고 테스트 데이터 주입
-  const SEMINAR_LIST_KEY = 'apply_seminar:seminar_list';
-  const testSeminars = [
+  // seminarRepo를 깨끗이 비우고 테스트 데이터 주입
+  const testSeminars: seminarRepo.SeminarListItem[] = [
     {
       name: '전날 세미나 큰 ID',
       url: 'https://m.doctorville.co.kr/cme/seminar/5580',
       seminarId: '5580',
       isPointExcluded: false,
       isAdvancedSurvey: false,
+      nightTime: false,
+      currentCount: '0',
+      totalCount: '100',
       date: '2026-08-18',
       time: '13:00~14:00',
       detectedDate: yesterdayIso,
@@ -253,6 +256,9 @@ function testYesterdayAddedSeminarsFilter() {
       seminarId: '5570',
       isPointExcluded: false,
       isAdvancedSurvey: false,
+      nightTime: false,
+      currentCount: '0',
+      totalCount: '100',
       date: '2026-08-18',
       time: '13:00~14:00',
       detectedDate: yesterdayIso,
@@ -264,6 +270,9 @@ function testYesterdayAddedSeminarsFilter() {
       seminarId: '222',
       isPointExcluded: false,
       isAdvancedSurvey: false,
+      nightTime: false,
+      currentCount: '0',
+      totalCount: '100',
       date: '2026-08-18',
       time: '13:00~14:00',
       detectedDate: todayIso,
@@ -275,6 +284,9 @@ function testYesterdayAddedSeminarsFilter() {
       seminarId: '333',
       isPointExcluded: false,
       isAdvancedSurvey: false,
+      nightTime: false,
+      currentCount: '0',
+      totalCount: '100',
       date: '2026-08-16',
       time: '13:00~14:00',
       detectedDate: twoDaysAgoIso,
@@ -286,12 +298,15 @@ function testYesterdayAddedSeminarsFilter() {
       seminarId: '444',
       isPointExcluded: false,
       isAdvancedSurvey: false,
+      nightTime: false,
+      currentCount: '0',
+      totalCount: '100',
       date: '2026-08-18',
       time: '13:00~14:00',
     },
   ];
 
-  storage.set(SEMINAR_LIST_KEY, testSeminars);
+  seminarRepo.setAllSeminars(testSeminars);
 
   // 실행
   const result = getYesterdayAddedSeminars(yesterdayIso);
@@ -314,7 +329,7 @@ function testYesterdayAddedSeminarsFilter() {
   console.log('\\n✅ [Pass] 신규 세미나 필터링 로직 검증 통과!\\n');
 
   // 정리
-  storage.deleteKey(SEMINAR_LIST_KEY);
+  seminarRepo.clearSeminars();
 }
 
 testYesterdayAddedSeminarsFilter();

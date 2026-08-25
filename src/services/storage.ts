@@ -30,6 +30,35 @@ function initDatabase(db: Database.Database): void {
       updated_at INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS seminars (
+      seminar_id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      url TEXT NOT NULL,
+      date TEXT,
+      time TEXT,
+      current_count TEXT,
+      total_count TEXT,
+      night_time INTEGER DEFAULT 0,
+      is_point_excluded INTEGER,
+      is_advanced_survey INTEGER DEFAULT 0,
+      process_state INTEGER,
+      cancel_process_state INTEGER,
+      seminar_completed INTEGER,
+      point_paid INTEGER DEFAULT 0,
+      point INTEGER,
+      point_text TEXT,
+      point_date TEXT,
+      point_content TEXT,
+      point_checked_at TEXT,
+      detected_date TEXT,
+      detected_at TEXT,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_seminars_date ON seminars(date);
+    CREATE INDEX IF NOT EXISTS idx_seminars_advanced ON seminars(is_advanced_survey, date);
+    CREATE INDEX IF NOT EXISTS idx_seminars_point_paid ON seminars(point_paid);
+
     CREATE TABLE IF NOT EXISTS _migration_meta (
       name TEXT PRIMARY KEY,
       migrated_at INTEGER NOT NULL
@@ -122,6 +151,107 @@ export function migrateFromJsonIfNeeded(db: Database.Database, jsonFilePath: str
   return true;
 }
 
+/**
+ * kv_store의 apply_seminar:seminar_list 데이터를 SQLite seminars 테이블로 단일 트랜잭션으로 안전하게 이관합니다.
+ */
+export function migrateSeminarListTableIfNeeded(db: Database.Database): boolean {
+  const metaCheck = db.prepare('SELECT name FROM _migration_meta WHERE name = ?').get('seminar_table_migration') as
+    | { name: string }
+    | undefined;
+
+  if (metaCheck) {
+    return false;
+  }
+
+  const row = db.prepare('SELECT value FROM kv_store WHERE key = ?').get('apply_seminar:seminar_list') as
+    | { value: string }
+    | undefined;
+
+  if (!row || !row.value) {
+    db.prepare('INSERT OR IGNORE INTO _migration_meta (name, migrated_at) VALUES (?, ?)').run(
+      'seminar_table_migration',
+      Date.now(),
+    );
+    return false;
+  }
+
+  let items: Array<Record<string, unknown>>;
+  try {
+    items = JSON.parse(row.value) as Array<Record<string, unknown>>;
+  } catch (err) {
+    throw new Error(
+      `Seminar table migration failed: unable to parse seminar_list JSON: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  if (!Array.isArray(items)) {
+    throw new Error('Seminar table migration failed: seminar_list must be an array.');
+  }
+
+  const now = Date.now();
+  const migrateTx = db.transaction(() => {
+    const insertStmt = db.prepare(`
+      INSERT OR REPLACE INTO seminars (
+        seminar_id, name, url, date, time, current_count, total_count,
+        night_time, is_point_excluded, is_advanced_survey, process_state,
+        cancel_process_state, seminar_completed, point_paid, point,
+        point_text, point_date, point_content, point_checked_at,
+        detected_date, detected_at, updated_at
+      ) VALUES (
+        ?, ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?,
+        ?, ?, ?, ?,
+        ?, ?, ?, ?,
+        ?, ?, ?
+      )
+    `);
+
+    for (const item of items) {
+      const seminarId =
+        (typeof item.seminarId === 'string' && item.seminarId) ||
+        (typeof item.url === 'string' && item.url.match(/(?:seminarId=|\/)(\d+)$/)?.[1]) ||
+        (typeof item.url === 'string' && item.url) ||
+        null;
+
+      if (!seminarId) continue;
+
+      insertStmt.run(
+        seminarId,
+        typeof item.name === 'string' ? item.name : '',
+        typeof item.url === 'string' ? item.url : `https://m.doctorville.co.kr/cme/seminar/${seminarId}`,
+        typeof item.date === 'string' ? item.date : null,
+        typeof item.time === 'string' ? item.time : '',
+        typeof item.currentCount === 'string' ? item.currentCount : '',
+        typeof item.totalCount === 'string' ? item.totalCount : '',
+        item.nightTime ? 1 : 0,
+        typeof item.isPointExcluded === 'boolean' ? (item.isPointExcluded ? 1 : 0) : null,
+        item.isAdvancedSurvey ? 1 : 0,
+        typeof item.processState === 'number' ? item.processState : null,
+        typeof item.cancelProcessState === 'number' ? item.cancelProcessState : null,
+        typeof item.seminarCompleted === 'number' ? item.seminarCompleted : null,
+        item.pointPaid ? 1 : 0,
+        typeof item.point === 'number' ? item.point : null,
+        typeof item.pointText === 'string' ? item.pointText : null,
+        typeof item.pointDate === 'string' ? item.pointDate : null,
+        typeof item.pointContent === 'string' ? item.pointContent : null,
+        typeof item.pointCheckedAt === 'string' ? item.pointCheckedAt : null,
+        typeof item.detectedDate === 'string' ? item.detectedDate : null,
+        typeof item.detectedAt === 'string' ? item.detectedAt : null,
+        now,
+      );
+    }
+
+    db.prepare('DELETE FROM kv_store WHERE key = ?').run('apply_seminar:seminar_list');
+    db.prepare('INSERT OR REPLACE INTO _migration_meta (name, migrated_at) VALUES (?, ?)').run(
+      'seminar_table_migration',
+      now,
+    );
+  });
+
+  migrateTx();
+  return true;
+}
+
 function getDb(): Database.Database {
   if (!dbInstance) {
     if (currentDbPath !== ':memory:') {
@@ -134,6 +264,8 @@ function getDb(): Database.Database {
     initDatabase(dbInstance);
     // state.json이 존재하면 자동 마이그레이션 수행
     migrateFromJsonIfNeeded(dbInstance);
+    // kv_store에 남은 seminar_list가 있으면 seminars 테이블로 자동 마이그레이션
+    migrateSeminarListTableIfNeeded(dbInstance);
   }
   return dbInstance;
 }
@@ -155,6 +287,7 @@ export function setDatabasePath(dbPath: string, autoMigrate: boolean = false): v
   if (autoMigrate) {
     migrateFromJsonIfNeeded(dbInstance);
   }
+  migrateSeminarListTableIfNeeded(dbInstance);
 }
 
 /**
@@ -180,11 +313,66 @@ export function getDatabase(): Database.Database {
 
 /**
  * 저장소에서 키에 해당하는 값을 가져옵니다.
+ * - 'apply_seminar:seminar_list' 키인 경우 seminars 테이블의 모든 레코드를 조회하여 호환성을 유지합니다.
  * - 키가 존재하지 않는 경우 fallback을 반환합니다.
  * - DB 오류나 데이터 손상 시 예외를 발생시킵니다.
  */
 function get<T = unknown>(key: string, fallback: T | null = null): T | null {
   const db = getDb();
+  if (key === 'apply_seminar:seminar_list') {
+    const rows = db.prepare('SELECT * FROM seminars ORDER BY date DESC, seminar_id DESC').all() as Array<{
+      seminar_id: string;
+      name: string;
+      url: string;
+      date: string | null;
+      time: string;
+      current_count: string;
+      total_count: string;
+      night_time: number;
+      is_point_excluded: number | null;
+      is_advanced_survey: number;
+      process_state: number | null;
+      cancel_process_state: number | null;
+      seminar_completed: number | null;
+      point_paid: number;
+      point: number | null;
+      point_text: string | null;
+      point_date: string | null;
+      point_content: string | null;
+      point_checked_at: string | null;
+      detected_date: string | null;
+      detected_at: string | null;
+    }>;
+    if (rows.length === 0) {
+      return fallback;
+    }
+    const items = rows.map((row) => ({
+      seminarId: row.seminar_id,
+      name: row.name,
+      url: row.url,
+      date: row.date ?? undefined,
+      time: row.time,
+      currentCount: row.current_count,
+      totalCount: row.total_count,
+      nightTime: row.night_time === 1,
+      isPointExcluded:
+        row.is_point_excluded === null || row.is_point_excluded === undefined ? undefined : row.is_point_excluded === 1,
+      isAdvancedSurvey: row.is_advanced_survey === 1,
+      processState: row.process_state ?? undefined,
+      cancelProcessState: row.cancel_process_state ?? undefined,
+      seminarCompleted: row.seminar_completed ?? undefined,
+      pointPaid: row.point_paid === 1,
+      point: row.point ?? undefined,
+      pointText: row.point_text ?? undefined,
+      pointDate: row.point_date ?? undefined,
+      pointContent: row.point_content ?? undefined,
+      pointCheckedAt: row.point_checked_at ?? undefined,
+      detectedDate: row.detected_date ?? undefined,
+      detectedAt: row.detected_at ?? undefined,
+    }));
+    return items as unknown as T;
+  }
+
   const stmt = db.prepare('SELECT value FROM kv_store WHERE key = ?');
   const row = stmt.get(key) as { value: string } | undefined;
   if (!row) {
@@ -201,10 +389,70 @@ function get<T = unknown>(key: string, fallback: T | null = null): T | null {
 
 /**
  * 저장소에 키/값을 저장합니다.
+ * - 'apply_seminar:seminar_list' 키인 경우 seminars 테이블에 반영하여 호환성을 유지합니다.
  * - DB 오류 시 예외를 발생시킵니다.
  */
 function set<T = unknown>(key: string, value: T): void {
   const db = getDb();
+  if (key === 'apply_seminar:seminar_list' && Array.isArray(value)) {
+    const now = Date.now();
+    const tx = db.transaction(() => {
+      db.prepare('DELETE FROM seminars').run();
+      const insertStmt = db.prepare(`
+        INSERT OR REPLACE INTO seminars (
+          seminar_id, name, url, date, time, current_count, total_count,
+          night_time, is_point_excluded, is_advanced_survey, process_state,
+          cancel_process_state, seminar_completed, point_paid, point,
+          point_text, point_date, point_content, point_checked_at,
+          detected_date, detected_at, updated_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?,
+          ?, ?, ?, ?,
+          ?, ?, ?, ?,
+          ?, ?, ?
+        )
+      `);
+
+      for (const item of value as Array<Record<string, unknown>>) {
+        const sid =
+          (typeof item.seminarId === 'string' && item.seminarId) ||
+          (typeof item.url === 'string' && item.url.match(/(?:seminarId=|\/)(\d+)$/)?.[1]) ||
+          (typeof item.url === 'string' && item.url) ||
+          null;
+
+        if (!sid) continue;
+
+        insertStmt.run(
+          sid,
+          typeof item.name === 'string' ? item.name : '',
+          typeof item.url === 'string' ? item.url : `https://m.doctorville.co.kr/cme/seminar/${sid}`,
+          typeof item.date === 'string' ? item.date : null,
+          typeof item.time === 'string' ? item.time : '',
+          typeof item.currentCount === 'string' ? item.currentCount : '',
+          typeof item.totalCount === 'string' ? item.totalCount : '',
+          item.nightTime ? 1 : 0,
+          typeof item.isPointExcluded === 'boolean' ? (item.isPointExcluded ? 1 : 0) : null,
+          item.isAdvancedSurvey ? 1 : 0,
+          typeof item.processState === 'number' ? item.processState : null,
+          typeof item.cancelProcessState === 'number' ? item.cancelProcessState : null,
+          typeof item.seminarCompleted === 'number' ? item.seminarCompleted : null,
+          item.pointPaid ? 1 : 0,
+          typeof item.point === 'number' ? item.point : null,
+          typeof item.pointText === 'string' ? item.pointText : null,
+          typeof item.pointDate === 'string' ? item.pointDate : null,
+          typeof item.pointContent === 'string' ? item.pointContent : null,
+          typeof item.pointCheckedAt === 'string' ? item.pointCheckedAt : null,
+          typeof item.detectedDate === 'string' ? item.detectedDate : null,
+          typeof item.detectedAt === 'string' ? item.detectedAt : null,
+          now,
+        );
+      }
+    });
+    tx();
+    return;
+  }
+
   const serialized = JSON.stringify(value);
   const now = Date.now();
   const stmt = db.prepare(`
@@ -216,10 +464,14 @@ function set<T = unknown>(key: string, value: T): void {
 
 /**
  * 저장소에서 키를 삭제합니다.
+ * - 'apply_seminar:seminar_list' 키인 경우 seminars 테이블도 함께 비웁니다.
  * - DB 오류 시 예외를 발생시킵니다.
  */
 function deleteKey(key: string): void {
   const db = getDb();
+  if (key === 'apply_seminar:seminar_list') {
+    db.prepare('DELETE FROM seminars').run();
+  }
   const stmt = db.prepare('DELETE FROM kv_store WHERE key = ?');
   stmt.run(key);
 }
@@ -248,6 +500,7 @@ function getAll(): Record<string, unknown> {
 function clear(): void {
   const db = getDb();
   db.prepare('DELETE FROM kv_store').run();
+  db.prepare('DELETE FROM seminars').run();
 }
 
 export { get, set, deleteKey, getAll, clear };

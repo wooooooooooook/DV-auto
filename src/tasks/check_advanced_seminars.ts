@@ -1,22 +1,9 @@
-import * as storage from '../services/storage';
-import { SEMINAR_LIST_KEY } from './apply_seminar';
+import * as seminarRepo from '../services/seminar_repository';
+import type { SeminarListItem } from '../services/seminar_repository';
 
 const LOOKBACK_DAYS = 14;
 
-type SeminarRecord = {
-  name?: string;
-  url: string;
-  date?: string;
-  detectedDate?: string;
-  seminarId?: string | null;
-  isAdvancedSurvey?: boolean;
-  pointPaid?: boolean;
-  point?: number;
-  pointText?: string;
-  pointDate?: string;
-  pointContent?: string;
-  pointCheckedAt?: string;
-};
+type SeminarRecord = SeminarListItem;
 
 function getKstDate(): string {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -71,14 +58,13 @@ export function run(): { success: boolean; message: string } {
   try {
     const todayStr = getKstDate();
     const pastStr = getDateDaysAgo(todayStr, LOOKBACK_DAYS);
-    const seminarList = storage.get<SeminarRecord[]>(SEMINAR_LIST_KEY, []) || [];
+    const seminarList = seminarRepo.getAdvancedSeminars(pastStr, todayStr);
     const unique = new Map<string, { date: string; seminar: SeminarRecord }>();
 
     for (const stored of seminarList) {
-      const seminarId = getSeminarId(stored);
+      const seminarId = stored.seminarId || getSeminarId(stored);
       const normalizedDate = normalizeSeminarDate(stored.date || stored.detectedDate, todayStr);
       if (!seminarId || !normalizedDate || normalizedDate < pastStr || normalizedDate > todayStr) continue;
-      if (stored.isAdvancedSurvey !== true) continue;
       unique.set(seminarId, { date: normalizedDate, seminar: { ...stored, seminarId } });
     }
 

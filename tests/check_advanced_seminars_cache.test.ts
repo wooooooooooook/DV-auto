@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import * as storage from '../src/services/storage';
-import { SEMINAR_LIST_KEY } from '../src/tasks/apply_seminar';
+import * as seminarRepo from '../src/services/seminar_repository';
 import * as checkAdvancedSeminarsModule from '../src/tasks/check_advanced_seminars';
 import { setBot } from '../src/services/bot_instance';
 import type { Telegraf } from 'telegraf';
@@ -8,11 +8,11 @@ import type { Telegraf } from 'telegraf';
 async function runTests(): Promise<void> {
   console.log('=== [Test] check_advanced_seminars Cache & NoticeBot Support Tests Started ===\n');
 
-  const originalStoredList = storage.get(SEMINAR_LIST_KEY);
+  const originalStoredList = seminarRepo.getAllSeminars();
 
   try {
     // 1. 방장 계정 기준 텍스트 포함 확인 (빈 목록)
-    storage.set(SEMINAR_LIST_KEY, []);
+    seminarRepo.clearSeminars();
     checkAdvancedSeminarsModule.clearCache();
     const emptyResult = checkAdvancedSeminarsModule.run();
     assert.strictEqual(emptyResult.success, true);
@@ -25,11 +25,16 @@ async function runTests(): Promise<void> {
     // 2. 세미나 데이터 추가 후 응답 메시지 검증
     const today = new Date();
     const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    storage.set(SEMINAR_LIST_KEY, [
+    seminarRepo.setAllSeminars([
       {
         seminarId: '9991',
         name: '당뇨병 최신 진료지침',
+        url: 'https://m.doctorville.co.kr/cme/seminar/9991',
         date: todayStr,
+        time: '19:00',
+        currentCount: '10',
+        totalCount: '100',
+        nightTime: false,
         isAdvancedSurvey: true,
         pointPaid: true,
         pointText: '5,000P',
@@ -45,7 +50,7 @@ async function runTests(): Promise<void> {
 
     // 3. 10분 캐시 검증
     // storage 내용을 변경하더라도 clearCache가 호출되지 않으면 이전 캐시 결과 반환해야 함
-    storage.set(SEMINAR_LIST_KEY, []);
+    seminarRepo.clearSeminars();
     const cachedResult = checkAdvancedSeminarsModule.runCached();
     assert.strictEqual(
       cachedResult.message,
@@ -93,7 +98,7 @@ async function runTests(): Promise<void> {
     console.log('\n🎉 모든 check_advanced_seminars 캐시 및 공지봇 연동 테스트 통과!');
   } finally {
     if (originalStoredList !== undefined) {
-      storage.set(SEMINAR_LIST_KEY, originalStoredList);
+      seminarRepo.setAllSeminars(originalStoredList);
     }
     checkAdvancedSeminarsModule.clearCache();
   }

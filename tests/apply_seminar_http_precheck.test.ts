@@ -1,10 +1,11 @@
 import assert from 'node:assert';
 import { chromium } from 'playwright';
-import { run as runApplySeminar, SEMINAR_LIST_KEY } from '../src/tasks/apply_seminar';
+import { run as runApplySeminar } from '../src/tasks/apply_seminar';
 import * as httpClientModule from '../src/modules/http_client';
 import * as seminarApiModule from '../src/modules/seminar_api';
 import * as utilsModule from '../src/modules/utils';
 import * as checkSeminarPointModule from '../src/tasks/check_seminar_point';
+import * as seminarRepo from '../src/services/seminar_repository';
 import * as storage from '../src/services/storage';
 import { ProcessState } from '../src/modules/seminar_api';
 
@@ -110,7 +111,7 @@ async function testApplySeminarHttpPrecheck() {
     safeGotoCallCount = 0;
     safeGotoUrls.length = 0;
     browserLaunchCount = 0;
-    storage.set(SEMINAR_LIST_KEY, []);
+    seminarRepo.clearSeminars();
 
     (seminarApiModule as unknown as { fetchMainFutureSeminars: unknown }).fetchMainFutureSeminars = async () => ({
       success: true,
@@ -129,7 +130,7 @@ async function testApplySeminarHttpPrecheck() {
     safeGotoCallCount = 0;
     safeGotoUrls.length = 0;
     browserLaunchCount = 0;
-    storage.set(SEMINAR_LIST_KEY, []);
+    seminarRepo.clearSeminars();
 
     (seminarApiModule as unknown as { fetchMainFutureSeminars: unknown }).fetchMainFutureSeminars = async () => ({
       success: true,
@@ -164,7 +165,7 @@ async function testApplySeminarHttpPrecheck() {
     console.log('--- Case B2: PROCESS_APPLY 세미나 1개 → HTTP API 실패 시 Playwright 폴백 ---');
     safeGotoCallCount = 0;
     safeGotoUrls.length = 0;
-    storage.set(SEMINAR_LIST_KEY, []);
+    seminarRepo.clearSeminars();
 
     (seminarApiModule as unknown as { fetchMainFutureSeminars: unknown }).fetchMainFutureSeminars = async () => ({
       success: true,
@@ -212,7 +213,7 @@ async function testApplySeminarHttpPrecheck() {
 
     // --- Case C: 기존 세미나 있지만 PROCESS_APPLY 세미나 추가됨 → API 실패 시 Playwright 신청 실행 ---
     console.log('--- Case C: 기존 세미나 있지만 PROCESS_APPLY 세미나 추가 ---');
-    storage.set(SEMINAR_LIST_KEY, [
+    seminarRepo.setAllSeminars([
       {
         seminarId: '100',
         name: '기존 세미나 100',
@@ -270,7 +271,7 @@ async function testApplySeminarHttpPrecheck() {
 
     // --- Case D: 새 세미나는 있지만 모두 PROCESS_CANCEL → Playwright 미실행 ---
     console.log('--- Case D: 새 세미나 있지만 PROCESS_CANCEL → Playwright 미실행 ---');
-    storage.set(SEMINAR_LIST_KEY, [
+    seminarRepo.setAllSeminars([
       {
         seminarId: '100',
         name: '기존 세미나 100',
@@ -300,7 +301,7 @@ async function testApplySeminarHttpPrecheck() {
     assert.strictEqual(resultD.success, true);
     assert.strictEqual(safeGotoCallCount, 0, 'safeGoto should NOT be called when new seminar is already applied');
     assert.strictEqual(browserLaunchCount, 0, 'Chromium should NOT be launched');
-    const storedD = storage.get<unknown[]>(SEMINAR_LIST_KEY) || [];
+    const storedD = seminarRepo.getAllSeminars();
     assert.strictEqual(storedD.length, 2, 'New seminar should be saved via HTTP processing');
     console.log('  ✓ [Pass] 새 세미나가 있어도 PROCESS_APPLY가 없으면 Playwright 미실행 및 HTTP 수집 완료\n');
 
@@ -333,7 +334,7 @@ async function testApplySeminarHttpPrecheck() {
     console.log('--- Case F: PROCESS_APPLY → 신청 시도했지만 실패 (processState 변경 안 됨) ---');
     safeGotoCallCount = 0;
     safeGotoUrls.length = 0;
-    storage.set(SEMINAR_LIST_KEY, []);
+    seminarRepo.clearSeminars();
 
     (seminarApiModule as unknown as { fetchMainFutureSeminars: unknown }).fetchMainFutureSeminars = async () => ({
       success: true,

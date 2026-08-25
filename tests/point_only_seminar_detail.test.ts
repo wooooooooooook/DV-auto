@@ -2,7 +2,8 @@ import assert from 'node:assert';
 import * as seminarApiModule from '../src/modules/seminar_api';
 import * as checkSeminarPointModule from '../src/tasks/check_seminar_point';
 import * as checkAdvancedSeminarsModule from '../src/tasks/check_advanced_seminars';
-import { refreshSeminarPointStatus, SEMINAR_LIST_KEY, type SeminarListItem } from '../src/tasks/apply_seminar';
+import { refreshSeminarPointStatus, type SeminarListItem } from '../src/tasks/apply_seminar';
+import * as seminarRepo from '../src/services/seminar_repository';
 import * as storage from '../src/services/storage';
 
 async function testPointOnlySeminarDetail() {
@@ -14,7 +15,7 @@ async function testPointOnlySeminarDetail() {
   const originalSearchSeminarPoints = checkSeminarPointModule.searchSeminarPoints;
 
   // 테스트 종료 후 복구를 위한 storage 백업
-  const originalStoredList = storage.get(SEMINAR_LIST_KEY);
+  const originalStoredList = seminarRepo.getAllSeminars();
 
   try {
     // 1. 포인트 테이블에만 존재하는 심화 세미나 (ID: 5999) 및 일반 세미나 (ID: 5888)
@@ -196,7 +197,7 @@ async function testPointOnlySeminarDetail() {
 
     console.log('--- Case 4: check_advanced_seminars 조회 연동 검증 ---');
     // storage에 저장된 updated 세미나 목록으로 check_advanced_seminars 실행
-    storage.set(SEMINAR_LIST_KEY, updated);
+    seminarRepo.setAllSeminars(updated);
     const checkResult = checkAdvancedSeminarsModule.run();
     assert.strictEqual(checkResult.success, true);
     assert(
@@ -218,7 +219,7 @@ async function testPointOnlySeminarDetail() {
     (checkSeminarPointModule as unknown as { searchSeminarPoints: unknown }).searchSeminarPoints =
       originalSearchSeminarPoints;
     if (originalStoredList !== undefined) {
-      storage.set(SEMINAR_LIST_KEY, originalStoredList);
+      seminarRepo.setAllSeminars(originalStoredList);
     }
   }
 }
