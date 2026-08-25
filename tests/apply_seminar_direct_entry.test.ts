@@ -7,6 +7,7 @@ import * as checkSeminarPointModule from '../src/tasks/check_seminar_point';
 import * as storage from '../src/services/storage';
 import { ProcessState } from '../src/modules/seminar_api';
 import fs from 'fs';
+import path from 'path';
 
 function createFutureSeminarApiItem(
   seminarId: number,
@@ -48,6 +49,24 @@ async function runAllTests() {
   (checkSeminarPointModule as unknown as { searchSeminarPoints: unknown }).searchSeminarPoints = async () => ({
     success: true,
     points: new Map(),
+  });
+
+  (seminarApiModule as unknown as { fetchSeminarDetail: unknown }).fetchSeminarDetail = async (
+    id: number | string,
+  ) => ({
+    success: true,
+    isPointExcluded: false,
+    rawResponse: {
+      seminarDetail: {
+        seminarId: Number(id),
+        seminarNm: `세미나 ${id}`,
+        intro: '',
+        applyCnt: 10,
+        maxPeopleCnt: 100,
+        useDepthSurvey: false,
+        processState: 2,
+      },
+    },
   });
 
   (utilsModule as unknown as { sendTelegram: unknown }).sendTelegram = async (msg: string) => {
@@ -257,10 +276,7 @@ async function runAllTests() {
     // ⑤ 목록 페이지의 a:has(.ico_apply)를 Playwright로 조회하는 코드가 신청 흐름에 남아 있지 않음
     // ======================================================================
     console.log('--- [Test ⑤] 코드에서 a:has(.ico_apply) Playwright 조회 코드 미존재 확인 ---');
-    const sourceCode = fs.readFileSync(
-      require('path').join(__dirname, '..', 'src', 'tasks', 'apply_seminar.ts'),
-      'utf-8',
-    );
+    const sourceCode = fs.readFileSync(path.join(__dirname, '..', 'src', 'tasks', 'apply_seminar.ts'), 'utf-8');
 
     // run() 함수에서 Playwright 구간 (ensureLoggedIn 이후) 에 a:has(.ico_apply) 조회가 없어야 함
     // applyLocator 또는 page.locator('a:has(.ico_apply)') 패턴이 있는지 확인

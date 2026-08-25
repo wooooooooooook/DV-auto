@@ -2,8 +2,8 @@ import assert from 'node:assert';
 import * as storage from '../src/services/storage';
 import { SEMINAR_LIST_KEY } from '../src/tasks/apply_seminar';
 import * as checkAdvancedSeminarsModule from '../src/tasks/check_advanced_seminars';
-import { setBot, getBot } from '../src/services/bot_instance';
-import type { Telegraf, Context } from 'telegraf';
+import { setBot } from '../src/services/bot_instance';
+import type { Telegraf } from 'telegraf';
 
 async function runTests(): Promise<void> {
   console.log('=== [Test] check_advanced_seminars Cache & NoticeBot Support Tests Started ===\n');

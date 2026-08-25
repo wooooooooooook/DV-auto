@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { chromium, type Page, type BrowserContext } from 'playwright';
+import { chromium } from 'playwright';
 import path from 'node:path';
 import { collectTodaySeminarMessage } from '../src/tasks/today_links';
 
@@ -24,7 +24,7 @@ async function runTests() {
 
   for (const tc of testCases) {
     await page.goto(FIXTURE_URL, { waitUntil: 'domcontentloaded' });
-    const result = await collectTodaySeminarMessage(page as any, tc.dateInput);
+    const result = await collectTodaySeminarMessage(page, tc.dateInput);
     console.log(`[${tc.dateInput}] lunch=${result.lunchSeminarIds.length}, dinner=${result.dinnerSeminarIds.length}`);
     assert.strictEqual(result.lunchSeminarIds.length, tc.expectedLunch, 'Lunch count mismatch');
     assert.strictEqual(result.dinnerSeminarIds.length, tc.expectedDinner, 'Dinner count mismatch');
@@ -39,14 +39,14 @@ async function runTests() {
   const dateFormats = ['8/18', '08/18', '8.18', '8월 18일', '2026.08.18', '2026-08-18', '8/18 (화)', '8/18화요일'];
   for (const fmt of dateFormats) {
     await page.goto(FIXTURE_URL, { waitUntil: 'domcontentloaded' });
-    const res = await collectTodaySeminarMessage(page as any, fmt);
+    const res = await collectTodaySeminarMessage(page, fmt);
     assert.strictEqual(res.lunchSeminarIds.length, 3, `(${fmt}) lunch`);
     assert.strictEqual(res.dinnerSeminarIds.length, 5, `(${fmt}) dinner`);
   }
 
   // Specific IDs check
   await page.goto(FIXTURE_URL, { waitUntil: 'domcontentloaded' });
-  const idsRes = await collectTodaySeminarMessage(page as any, '2026-08-18');
+  const idsRes = await collectTodaySeminarMessage(page, '2026-08-18');
   assert.deepStrictEqual(idsRes.lunchSeminarIds, ['5552', '5553', '5567']);
   assert.deepStrictEqual(idsRes.dinnerSeminarIds, ['5555', '5561', '5568', '5560', '5488']);
 

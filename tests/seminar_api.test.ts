@@ -6,10 +6,8 @@ import {
   checkHasEntryHistory,
   convertApiItemToRawSeminar,
   convertApiItemToSeminarListItem,
-  fetchMainFutureSeminars,
   fetchSeminarDetail,
   type FutureSeminarApiItem,
-  type MainFutureSeminarsApiResponse,
 } from '../src/modules/seminar_api';
 import * as httpClientModule from '../src/modules/http_client';
 import { refreshStoredSeminarList, type SeminarListItem } from '../src/tasks/apply_seminar';

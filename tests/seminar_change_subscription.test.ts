@@ -8,7 +8,7 @@ import {
   sendSeminarChangesToSubscribers,
 } from '../src/services/seminar_subscribers';
 import { setBot } from '../src/services/bot_instance';
-import type { Telegraf, Context } from 'telegraf';
+import type { Telegraf } from 'telegraf';
 
 async function runTests(): Promise<void> {
   console.log('=== [Test] 세미나 정보 변경 알림 구독 및 발송 테스트 시작 ===\n');

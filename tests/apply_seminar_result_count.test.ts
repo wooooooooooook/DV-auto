@@ -53,6 +53,7 @@ async function testResultCountAccuracy() {
   console.log('--- [Test 2] 신청 결과 집계 정확성: 혼합 processState 시나리오 ---');
 
   const originalFetchMainFuture = seminarApiModule.fetchMainFutureSeminars;
+  const originalFetchDetail = seminarApiModule.fetchSeminarDetail;
   const originalSearchSeminarPoints = checkSeminarPointModule.searchSeminarPoints;
   const originalSendTelegram = utilsModule.sendTelegram;
   const sentMessages: string[] = [];
@@ -61,6 +62,24 @@ async function testResultCountAccuracy() {
     sentMessages.push(msg);
     return true;
   };
+
+  (seminarApiModule as unknown as { fetchSeminarDetail: unknown }).fetchSeminarDetail = async (
+    id: number | string,
+  ) => ({
+    success: true,
+    isPointExcluded: false,
+    rawResponse: {
+      seminarDetail: {
+        seminarId: Number(id),
+        seminarNm: `세미나 ${id}`,
+        intro: '',
+        applyCnt: 10,
+        maxPeopleCnt: 100,
+        useDepthSurvey: false,
+        processState: 2,
+      },
+    },
+  });
 
   (checkSeminarPointModule as unknown as { searchSeminarPoints: unknown }).searchSeminarPoints = async () => ({
     success: true,
@@ -179,6 +198,7 @@ async function testResultCountAccuracy() {
   } finally {
     (seminarApiModule as unknown as { fetchMainFutureSeminars: unknown }).fetchMainFutureSeminars =
       originalFetchMainFuture;
+    (seminarApiModule as unknown as { fetchSeminarDetail: unknown }).fetchSeminarDetail = originalFetchDetail;
     (checkSeminarPointModule as unknown as { searchSeminarPoints: unknown }).searchSeminarPoints =
       originalSearchSeminarPoints;
     (utilsModule as unknown as { sendTelegram: unknown }).sendTelegram = originalSendTelegram;

@@ -3,7 +3,7 @@ import * as storage from '../src/services/storage';
 import { SEMINAR_LIST_KEY, type SeminarListItem } from '../src/tasks/apply_seminar';
 import { isSeminarExpired, updateStoredSeminarFromDetail, type SeminarDetail } from '../src/tasks/seminar_detail';
 import { checkNoticeCooldown, clearNoticeCooldowns, setBot } from '../src/services/bot_instance';
-import type { Telegraf, Context } from 'telegraf';
+import type { Telegraf } from 'telegraf';
 
 async function runTests(): Promise<void> {
   console.log('=== [Test] 공지봇 어뷰징 방지 및 세미나 60일 보존 테스트 시작 ===\n');
@@ -50,7 +50,7 @@ async function runTests(): Promise<void> {
 
     // 첫 요청 성공
     await registeredCommands['today_links'](mockCtx);
-    const firstReply = replyMsg;
+    assert.ok(replyMsg.length > 0, '첫 요청 시 응답 메시지가 있어야 함');
 
     // 즉시 두 번째 요청 -> 쿨다운 메시지
     replyMsg = '';

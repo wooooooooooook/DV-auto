@@ -1,6 +1,4 @@
 import dns from 'dns';
-import fs from 'fs';
-import path from 'path';
 import dotenv from 'dotenv';
 import { chromium } from 'playwright';
 import * as scheduler from './scheduler';
@@ -8,6 +6,7 @@ import { runTask } from './runner';
 import * as taskRegistry from './taskRegistry';
 import * as logger from '../services/logger';
 import * as telegram from '../services/telegram';
+import * as storage from '../services/storage';
 import * as utils from '../modules/utils';
 import * as attendanceTask from '../tasks/attendance';
 import * as applySeminarTask from '../tasks/apply_seminar';
@@ -22,7 +21,7 @@ import * as checkSeminarPointTaskModule from '../tasks/check_seminar_point';
 import * as checkAdvancedSeminarsTaskModule from '../tasks/check_advanced_seminars';
 import * as runSeminarQuizTaskModule from '../tasks/run_seminar_quiz';
 import * as seminarDetailTaskModule from '../tasks/seminar_detail';
-import type { Task, TaskResult } from '../types';
+import type { Task } from '../types';
 
 dns.setDefaultResultOrder('ipv4first');
 dotenv.config();
@@ -34,25 +33,14 @@ const APPLY_SEMINAR_EXTRA_CRON = '*/10 6-23 * * *';
 const LUNCH_MONITOR_CRON = '0 11 * * *';
 const DINNER_MONITOR_CRON = '0 16 * * *';
 const MONITOR_RESUME_DURATION_HOURS = 5;
-const POINT_CONVERSION_STATE_FILE = path.join(process.cwd(), 'storage', 'point_conversion_state.json');
+const POINT_CONVERSION_STATE_KEY = 'point_conversion:last_available';
 let isFastPolling = false;
 let fastPollingInterval: NodeJS.Timeout | null = null;
 function readConversionState(): boolean | null {
-  try {
-    const raw = fs.readFileSync(POINT_CONVERSION_STATE_FILE, 'utf8');
-    const parsed = JSON.parse(raw) as { lastAvailable?: boolean };
-    return typeof parsed.lastAvailable === 'boolean' ? parsed.lastAvailable : null;
-  } catch {
-    return null;
-  }
+  return storage.get<boolean>(POINT_CONVERSION_STATE_KEY, null);
 }
 function writeConversionState(available: boolean): void {
-  try {
-    fs.mkdirSync(path.dirname(POINT_CONVERSION_STATE_FILE), { recursive: true });
-    fs.writeFileSync(POINT_CONVERSION_STATE_FILE, JSON.stringify({ lastAvailable: available }, null, 2));
-  } catch (err) {
-    logger.warn('point conversion state 저장 실패', err);
-  }
+  storage.set(POINT_CONVERSION_STATE_KEY, available);
 }
 function getTodayKoreanString(): string {
   const now = new Date();

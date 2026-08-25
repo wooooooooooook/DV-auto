@@ -408,7 +408,7 @@ export function formatMyParticipation(member: SeminarMember | null): string {
   return `${applyStatus}${applyDate}, ${surveyStatus}`;
 }
 
-function stripHtml(html: string): string {
+function _stripHtml(html: string): string {
   return html
     .replace(/<[^>]*>/g, '')
     .replace(

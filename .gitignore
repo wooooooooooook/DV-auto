@@ -2,6 +2,10 @@
 node_modules/
 screenshot/
 data/state.json
+data/*.db
+data/*.db-wal
+data/*.db-shm
+*.bak
 cookies.json
 localstorage.json
 dist/

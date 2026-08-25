@@ -374,7 +374,7 @@ type SeminarQuizResult = {
 async function processSeminarQuiz(
   page: Page,
   seminarId?: string,
-  isAdvancedSurvey?: boolean,
+  _isAdvancedSurvey?: boolean,
 ): Promise<SeminarQuizResult> {
   const seminarName = seminarId;
   try {

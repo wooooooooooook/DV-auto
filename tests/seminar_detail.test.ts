@@ -1,10 +1,10 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import {
   formatStatus,
   formatSurveyStatus,
   formatMyParticipation,
   formatSeminarDetail,
   formatStoredSeminarDetail,
-  getStoredSeminar,
   isForceRefresh,
   convertDetailToSeminarListItem,
   updateStoredSeminarFromDetail,

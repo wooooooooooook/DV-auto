@@ -8,7 +8,6 @@ import {
 } from '../src/tasks/monitor_seminars';
 import * as seminarApiModule from '../src/modules/seminar_api';
 import * as utilsModule from '../src/modules/utils';
-import * as monitorSeminarsModule from '../src/tasks/monitor_seminars';
 import * as seminarQuizModule from '../src/tasks/seminar_quiz';
 
 async function runTests() {

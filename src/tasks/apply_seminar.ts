@@ -21,7 +21,6 @@ import {
   checkIsAdvancedSurvey,
   checkIsPointExcluded,
   ProcessState,
-  type ProcessStateType,
 } from '../modules/seminar_api';
 import { searchSeminarPoints } from './check_seminar_point';
 import * as storage from '../services/storage';
@@ -966,7 +965,6 @@ export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<Ta
     let currentSeminars: RawSeminarData[] = [];
     let normalizedCurrentSeminars: SeminarListItem[] = [];
     const referenceDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
-    let mainHtmlBody = '';
 
     const apiRes = await fetchMainFutureSeminars();
     if (apiRes.success) {
@@ -988,7 +986,6 @@ export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<Ta
       if (mainRes.status !== 200 || !mainRes.body) {
         throw new Error(apiRes.errorMessage || `HTTP GET ${SEMINAR_PAGE} failed with status ${mainRes.status}`);
       }
-      mainHtmlBody = mainRes.body;
       currentSeminars = parseSeminarListHtml(mainRes.body);
       normalizedCurrentSeminars = normalizeParsedSeminars(currentSeminars, referenceDate);
     }
