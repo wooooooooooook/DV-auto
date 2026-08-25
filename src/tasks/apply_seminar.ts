@@ -242,32 +242,27 @@ function migrateLegacySeminarStorage(referenceDate: string): SeminarListItem[] {
   const legacyNew = storage.get<LegacyNewSeminars>(LEGACY_NEW_SEMINAR_KEY);
 
   if (legacyHistory.length > 0 || legacyNew?.seminars?.length) {
-    const current = seminarRepo.getAllSeminars();
-    const merged = new Map<string, SeminarListItem>();
-    for (const seminar of current) merged.set(seminarKey(seminar), seminar);
+    const toUpsert: SeminarListItem[] = [];
 
     for (const entry of legacyHistory) {
       if (!entry.seminar) continue;
-      const seminar = {
+      toUpsert.push({
         ...entry.seminar,
         detectedDate: entry.seminar.detectedDate ?? entry.detectedDate,
         detectedAt: entry.seminar.detectedAt ?? entry.detectedAt,
-      };
-      const key = seminarKey(seminar);
-      merged.set(key, seminarRepo.mergeSeminarRecord(merged.get(key), seminar));
+      });
     }
 
     for (const seminar of legacyNew?.seminars || []) {
-      const key = seminarKey(seminar);
-      merged.set(
-        key,
-        seminarRepo.mergeSeminarRecord(merged.get(key), {
-          ...seminar,
-          detectedDate: seminar.detectedDate ?? legacyNew?.date,
-        }),
-      );
+      toUpsert.push({
+        ...seminar,
+        detectedDate: seminar.detectedDate ?? legacyNew?.date,
+      });
     }
-    seminarRepo.setAllSeminars([...merged.values()]);
+
+    if (toUpsert.length > 0) {
+      seminarRepo.upsertSeminars(toUpsert);
+    }
     storage.deleteKey(LEGACY_NEW_SEMINAR_KEY);
     storage.deleteKey(LEGACY_HISTORY_KEY);
   }
@@ -469,10 +464,13 @@ export async function refreshSeminarPointStatus(
   const checkedAt = new Date().toISOString();
   const pointChanges: SeminarPointChange[] = [];
 
+  const changedSeminars: SeminarListItem[] = [];
+
   const updatedSeminars: SeminarListItem[] = [];
   for (const seminar of seminars) {
     const id = seminar.seminarId || getSeminarIdFromUrl(seminar.url);
     let currentItem = { ...seminar };
+    let hasChanged = false;
 
     // 만약 기존 세미나 메타데이터(이름 또는 일자)가 비어 있는 경우, detail API로 정보 채우기
     if (id && (!currentItem.name || !currentItem.date)) {
@@ -492,9 +490,13 @@ export async function refreshSeminarPointStatus(
         seminarCompleted: extra.seminarCompleted ?? currentItem.seminarCompleted,
         detectedDate: extra.detectedDate || currentItem.detectedDate || '',
       };
+      hasChanged = true;
     }
 
     if (currentItem.pointPaid === true) {
+      if (hasChanged) {
+        changedSeminars.push(currentItem);
+      }
       updatedSeminars.push(currentItem);
       continue;
     }
@@ -511,7 +513,7 @@ export async function refreshSeminarPointStatus(
           pointContent: pointResult.content,
         });
 
-        updatedSeminars.push({
+        const updatedItem: SeminarListItem = {
           ...currentItem,
           pointPaid: true,
           point: pointResult.point,
@@ -519,16 +521,20 @@ export async function refreshSeminarPointStatus(
           pointText: pointResult.pointText,
           pointContent: pointResult.content,
           pointCheckedAt: checkedAt,
-        });
+        };
+        changedSeminars.push(updatedItem);
+        updatedSeminars.push(updatedItem);
         continue;
       }
     }
 
-    updatedSeminars.push({
+    const updatedItem: SeminarListItem = {
       ...currentItem,
       pointPaid: false,
       pointCheckedAt: checkedAt,
-    });
+    };
+    changedSeminars.push(updatedItem);
+    updatedSeminars.push(updatedItem);
   }
 
   for (const [id, pointResult] of parsedPoints) {
@@ -562,6 +568,7 @@ export async function refreshSeminarPointStatus(
         detectedDate: detailInfo.detectedDate || '',
         detectedAt: checkedAt,
       };
+      changedSeminars.push(newItem);
       updatedSeminars.push(newItem);
 
       pointChanges.push({
@@ -575,7 +582,9 @@ export async function refreshSeminarPointStatus(
     }
   }
 
-  seminarRepo.setAllSeminars(updatedSeminars);
+  if (changedSeminars.length > 0) {
+    seminarRepo.upsertSeminars(changedSeminars);
+  }
   return { seminars: updatedSeminars, pointChanges };
 }
 
@@ -644,7 +653,9 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
     referenceDate,
   );
 
-  seminarRepo.setAllSeminars(seminars);
+  if (enrichedSeminars.length > 0) {
+    seminarRepo.upsertSeminars(enrichedSeminars);
+  }
 
   if (newlyAdded.length > 0) {
     const newSeminarMessage = newlyAdded
@@ -947,7 +958,9 @@ export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<Ta
       referenceDate,
     );
 
-    seminarRepo.setAllSeminars(seminars);
+    if (enrichedSeminars.length > 0) {
+      seminarRepo.upsertSeminars(enrichedSeminars);
+    }
 
     if (newlyAdded.length > 0) {
       const newSeminarMessage = newlyAdded

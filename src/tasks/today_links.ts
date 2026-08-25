@@ -8,7 +8,6 @@ import {
   hasSurveyPointExcludedNotice,
   getPointConversionAvailabilityHttp,
   isSurveyPointExcludedSeminarHttp,
-  truncateTelegramMessage,
 } from '../modules/utils';
 import * as storage from '../services/storage';
 import * as seminarRepo from '../services/seminar_repository';
@@ -945,39 +944,18 @@ function formatTodayLinksBroadcast(input: TodayLinksFormatInput): TodayLinksForm
   }
 
   if (storedNewSeminars.length > 0) {
-    const formattedItems: string[] = [];
-    let truncatedCount = 0;
+    const newSeminarList = storedNewSeminars
+      .map((item, index) => {
+        const link = item.seminarId ? `${SEMINAR_DETAIL_PAGE}${item.seminarId}` : item.url;
+        const pointExcludedSuffix = item.isPointExcluded ? ' 🚫[포인트미지급]' : '';
+        const advancedSurveySuffix = item.isAdvancedSurvey ? ' ✨<b>[심화설문]</b>' : '';
+        const dateTimePrefix = item.date || item.time ? `[${item.date}${item.time ? ' ' + item.time : ''}] ` : '';
+        const nameDisplay = item.isPointExcluded ? `<s>${escapeHtml(item.name)}</s>` : escapeHtml(item.name);
+        return `${index + 1}. ${dateTimePrefix}${nameDisplay}${pointExcludedSuffix}${advancedSurveySuffix}\n${link}`;
+      })
+      .join('\n');
 
-    // 출석, 퀴즈, 오늘 세미나, 포인트 전환, 하단 안내 문구 등의 기본 길이 확보
-    const baseNewSeminarHeader = '\n🆕 <b>어제 추가된 신규 세미나</b>\n';
-    const estimatedFooterLength = 700;
-    const maxNewSeminarTextLength = Math.max(500, 3600 - message.length - estimatedFooterLength);
-
-    let currentLength = 0;
-    for (let i = 0; i < storedNewSeminars.length; i++) {
-      const item = storedNewSeminars[i];
-      const link = item.seminarId ? `${SEMINAR_DETAIL_PAGE}${item.seminarId}` : item.url;
-      const pointExcludedSuffix = item.isPointExcluded ? ' 🚫[포인트미지급]' : '';
-      const advancedSurveySuffix = item.isAdvancedSurvey ? ' ✨<b>[심화설문]</b>' : '';
-      const dateTimePrefix = item.date || item.time ? `[${item.date}${item.time ? ' ' + item.time : ''}] ` : '';
-      const nameDisplay = item.isPointExcluded ? `<s>${escapeHtml(item.name)}</s>` : escapeHtml(item.name);
-      const line = `${i + 1}. ${dateTimePrefix}${nameDisplay}${pointExcludedSuffix}${advancedSurveySuffix}\n${link}`;
-
-      if (currentLength + line.length + 100 > maxNewSeminarTextLength && i < storedNewSeminars.length - 1) {
-        truncatedCount = storedNewSeminars.length - i;
-        break;
-      }
-
-      formattedItems.push(line);
-      currentLength += line.length + 1;
-    }
-
-    let newSeminarList = formattedItems.join('\n');
-    if (truncatedCount > 0) {
-      newSeminarList += `\n... 외 ${truncatedCount}개 신규 세미나 생략 (세미나 목록 바로가기 버튼에서 확인)`;
-    }
-
-    message += `${baseNewSeminarHeader}${newSeminarList}\n`;
+    message += `\n🆕 <b>어제 추가된 신규 세미나</b>\n${newSeminarList}\n`;
   }
 
   const pointConversionMessage = formatPointConversionMessage(
@@ -991,9 +969,6 @@ function formatTodayLinksBroadcast(input: TodayLinksFormatInput): TodayLinksForm
   message += `\n<blockquote>🤖 <b>닥터빌 텔레그램방에 전송된 메시지입니다.</b>
 매일 오전 9시 링크모음 발송, 세미나 시작/종료, 퀴즈 정답 알림, 지금 가입하세요!
 https://t.me/+J1UGmvLA9jU4NjQ1</blockquote>\n<blockquote>✨세미나정보변경/포인트지급내역 알림 등 상세 알림을 받으려면 알림봇을 구독해주세요! https://t.me/DV_notice_bot </blockquote>`;
-
-  // 최종 메시지 길이가 텔레그램 한도(4096자)를 초과하지 않도록 HTML 안전 Truncation 적용
-  message = truncateTelegramMessage(message, { parseMode: 'HTML', maxLength: 4000 });
 
   const inlineKeyboard: Array<Array<{ text: string; url: string }>> = [];
 

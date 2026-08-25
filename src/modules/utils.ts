@@ -17,6 +17,8 @@ import {
   truncateMarkdownV2,
   TELEGRAM_SAFE_MESSAGE_LENGTH,
   TELEGRAM_SAFE_CAPTION_LENGTH,
+  TELEGRAM_MAX_MESSAGE_LENGTH,
+  TELEGRAM_MAX_CAPTION_LENGTH,
 } from './telegram_truncator';
 
 const COOKIE_FILE = path.join(process.cwd(), 'cookies.json');
@@ -652,6 +654,10 @@ export {
   truncateHtml,
   truncateMarkdownV2,
   truncatePlainText,
+  TELEGRAM_SAFE_MESSAGE_LENGTH,
+  TELEGRAM_SAFE_CAPTION_LENGTH,
+  TELEGRAM_MAX_MESSAGE_LENGTH,
+  TELEGRAM_MAX_CAPTION_LENGTH,
 };
 
 const analyticsBlockedPages = new WeakSet<Page>();

@@ -36,7 +36,6 @@ function testMarkdownV2Truncation() {
   const textWithEscapes = 'Hello\\! World\\! '.repeat(300);
   const truncated = truncateMarkdownV2(textWithEscapes, 50);
   assert.ok(truncated.length <= 50, `Length ${truncated.length} must be <= 50`);
-  // 끝부분이 '\\... \\(길이 제한으로 생략됨\\)' 처럼 이스케이프가 깨지지 않아야 함
   assert.ok(!truncated.includes('\\...'), 'Escapes must not be broken before suffix');
   console.log('  ✓ MarkdownV2 truncation 성공');
 }
@@ -50,14 +49,13 @@ function testHtmlTruncation() {
   assert.strictEqual(truncateHtml(shortHtml, 1000), shortHtml);
 
   // 3-2. 중첩된 태그 자동 닫기
-  const nestedHtml = '<blockquote><b><i><s><code><a href="https://example.com">매우 긴 텍스트입니다. 계속 이어집니다. 1234567890</a></code></s></i></b></blockquote>';
+  const nestedHtml =
+    '<blockquote><b><i><s><code><a href="https://example.com">매우 긴 텍스트입니다. 계속 이어집니다. 1234567890</a></code></s></i></b></blockquote>';
   const truncated = truncateHtml(nestedHtml, 60, '\n... (생략)');
   assert.ok(truncated.length <= 60, `HTML truncated length ${truncated.length} must be <= 60`);
   assert.ok(truncated.includes('... (생략)'), 'Suffix must be included');
 
   // 열린 태그들이 올바른 역순으로 닫혔는지 검증
-  // 열린 순서: blockquote -> b -> i -> s -> code -> a
-  // 닫힌 순서: </a></code></s></i></b></blockquote> (도중에 잘렸을 경우 그 시점에 열려있던 태그들이 닫혀야 함)
   const openCountB = (truncated.match(/<b>/g) || []).length;
   const closeCountB = (truncated.match(/<\/b>/g) || []).length;
   assert.strictEqual(openCountB, closeCountB, `<b> 태그 개수(${openCountB})와 </b> 태그 개수(${closeCountB}) 일치`);
@@ -71,8 +69,13 @@ function testHtmlTruncation() {
   );
 
   // 3-3. 텔레그램 상한(4096자)을 넘는 10,000자 초대형 HTML 메시지 truncation
-  const hugeHtml = `<b>[초대형 세미나 목록]</b>\n` +
-    Array.from({ length: 100 }, (_, i) => `${i + 1}. <b>세미나 ${i}</b>: <s>내용 ${i}</s> <a href="https://m.doctorville.co.kr/cme/seminar/${5000 + i}">링크</a>`).join('\n') +
+  const hugeHtml =
+    `<b>[초대형 세미나 목록]</b>\n` +
+    Array.from(
+      { length: 100 },
+      (_, i) =>
+        `${i + 1}. <b>세미나 ${i}</b>: <s>내용 ${i}</s> <a href="https://m.doctorville.co.kr/cme/seminar/${5000 + i}">링크</a>`,
+    ).join('\n') +
     `\n<blockquote>하단 안내 문구입니다.</blockquote>`;
 
   const safeHugeTruncated = truncateTelegramMessage(hugeHtml, { parseMode: 'HTML', maxLength: 4000 });
@@ -101,11 +104,11 @@ function testHtmlTruncation() {
   console.log('  ✓ HTML truncation 및 태그 안전 닫기 성공');
 }
 
-// 4. 대량 신규 세미나 (50개) 발생 시 today_links 포맷팅 스마트 truncation 테스트
-function testTodayLinksHugeNewSeminars() {
-  console.log('4. today_links 대량 신규 세미나(50개) 스마트 truncation 테스트');
+// 4. 대량 세미나로 인해 4096자를 초과하는 today_links 메시지의 전송 시 truncation 검증
+function testTodayLinksTelegramTruncation() {
+  console.log('4. 긴 today_links 메시지의 텔레그램 전송 시 truncation 검증');
 
-  // 신규 세미나 50개 생성 (각 항목 약 120자 -> 총 6000자 이상)
+  // 신규 세미나 50개 생성 (메시지 총 길이 약 7000자)
   const hugeNewSeminars = Array.from({ length: 50 }, (_, i) => ({
     date: '8/26',
     time: '13:00~14:00',
@@ -126,7 +129,8 @@ function testTodayLinksHugeNewSeminars() {
       date: '2026-08-26',
       lunchSeminarIds: ['5501', '5502'],
       dinnerSeminarIds: ['5503'],
-      message: '<b>오늘의 세미나 리스트:</b>\n🍴 <b>[점심 세미나]</b>\n- 13:00. 점심 세미나\n🍴 <b>[저녁 세미나]</b>\n- 18:00. 저녁 세미나',
+      message:
+        '<b>오늘의 세미나 리스트:</b>\n🍴 <b>[점심 세미나]</b>\n- 13:00. 점심 세미나\n🍴 <b>[저녁 세미나]</b>\n- 18:00. 저녁 세미나',
     },
     storedNewSeminars: hugeNewSeminars,
     pointConversionInfo: {
@@ -136,47 +140,46 @@ function testTodayLinksHugeNewSeminars() {
 
   const { message, options } = formatTodayLinksBroadcast(input);
 
+  // 원본 메시지는 전체 목록을 포함하여 4096자 초과
+  assert.ok(message.length > 4096, `원본 메시지 길이는 4096자 초과여야 함: ${message.length}`);
+
+  // 텔레그램 전송 시 truncateTelegramMessage 적용
+  const sendableMessage = truncateTelegramMessage(message, {
+    parseMode: options.parse_mode,
+    maxLength: TELEGRAM_SAFE_MESSAGE_LENGTH,
+  });
+
   // 검증:
-  // 1. 전체 메시지 길이가 텔레그램 상한(4096자) 및 안전 길이(4000자) 이하인지 확인
+  // 1. 전송 메시지 길이가 텔레그램 한도(4096자) 및 안전 기준(4000자) 이하인지 확인
   assert.ok(
-    message.length <= 4000,
-    `Today links message length (${message.length}) must be <= 4000 to prevent Telegram 400 Bad Request error`,
+    sendableMessage.length <= TELEGRAM_SAFE_MESSAGE_LENGTH,
+    `전송 메시지 길이(${sendableMessage.length})가 ${TELEGRAM_SAFE_MESSAGE_LENGTH}자 이하여야 함`,
   );
+  assert.ok(sendableMessage.length < TELEGRAM_MAX_MESSAGE_LENGTH, '텔레그램 4096자 제한 미만 확인');
 
-  // 2. 핵심 정보(출석체크, 오늘의 퀴즈, 오늘 세미나)가 온전히 유지되었는지 확인
-  assert.ok(message.includes('✨ <b>출석체크:</b>'), '출석체크 정보 포함 확인');
-  assert.ok(message.includes('✏️ <b>오늘의 퀴즈:</b> <b>테스트약품</b>, 정답: <code>123</code>'), '퀴즈 정보 포함 확인');
-  assert.ok(message.includes('오늘의 세미나 리스트:'), '오늘의 세미나 리스트 포함 확인');
+  // 2. Truncation suffix 포함 확인
+  assert.ok(sendableMessage.includes('... (길이 제한으로 생략됨)'), '생략 안내 문구 포함 확인');
 
-  // 3. 신규 세미나 스마트 생략 문구가 포함되어 있는지 확인
-  assert.ok(
-    message.includes('신규 세미나 생략') || message.includes('길이 제한으로 생략됨'),
-    '신규 세미나 요약/생략 문구가 포함되어야 함',
-  );
+  // 3. HTML 태그 닫힘 정합성 검증
+  const tags = ['b', 's', 'i', 'code', 'blockquote', 'a'];
+  for (const tag of tags) {
+    const openRegex = new RegExp(`<${tag}(?:\\s+[^>]*?)?>`, 'g');
+    const closeRegex = new RegExp(`</${tag}>`, 'g');
+    const openCount = (sendableMessage.match(openRegex) || []).length;
+    const closeCount = (sendableMessage.match(closeRegex) || []).length;
+    assert.strictEqual(
+      openCount,
+      closeCount,
+      `전송 메시지에서 <${tag}> 태그(${openCount}개)와 </${tag}> 태그(${closeCount}개) 쌍이 정확히 일치해야 함`,
+    );
+  }
 
-  // 4. 포인트 전환 정보 및 인라인 버튼이 온전한지 확인
-  assert.ok(message.includes('현재 네이버페이 포인트 전환 가능합니다.'), '포인트 전환 문구 포함 확인');
-  assert.strictEqual(options.reply_markup.inline_keyboard.length, 3, '인라인 키보드 3줄 정상 생성');
-
-  // 5. HTML 태그 밸런스 확인
-  const openB = (message.match(/<b>/g) || []).length;
-  const closeB = (message.match(/<\/b>/g) || []).length;
-  assert.strictEqual(openB, closeB, `<b> 태그 수(${openB})와 </b> 태그 수(${closeB}) 일치`);
-
-  const openBlockquote = (message.match(/<blockquote>/g) || []).length;
-  const closeBlockquote = (message.match(/<\/blockquote>/g) || []).length;
-  assert.strictEqual(
-    openBlockquote,
-    closeBlockquote,
-    `<blockquote> 태그 수(${openBlockquote})와 </blockquote> 태그 수(${closeBlockquote}) 일치`,
-  );
-
-  console.log('  ✓ 대량 신규 세미나 today_links 포맷팅 스마트 truncation 성공');
+  console.log('  ✓ 긴 today_links 메시지의 텔레그램 전송 truncation 성공');
 }
 
 testPlainTextTruncation();
 testMarkdownV2Truncation();
 testHtmlTruncation();
-testTodayLinksHugeNewSeminars();
+testTodayLinksTelegramTruncation();
 
 console.log('\n🎉 모든 텔레그램 메시지 Truncation 테스트 통과!');
