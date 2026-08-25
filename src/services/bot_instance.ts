@@ -60,12 +60,10 @@ function setBot(name: BotName, instance: Telegraf | null): void {
               return;
             }
             const { getTodayLinksCache } = await import('../tasks/today_links');
-            const { truncateTelegramMessage } = await import('../modules/telegram_truncator');
+            const { replyWithSplit } = await import('../modules/utils');
             const cache = getTodayLinksCache();
             if (cache && cache.message) {
-              const parseMode = (cache.options as { parse_mode?: 'HTML' | 'MarkdownV2' } | undefined)?.parse_mode;
-              const safeMessage = truncateTelegramMessage(cache.message, { parseMode, maxLength: 4000 });
-              await ctx.reply(safeMessage, cache.options as Parameters<Context['reply']>[1]);
+              await replyWithSplit(ctx, cache.message, cache.options as Parameters<Context['reply']>[1]);
             } else {
               await ctx.reply(
                 'ℹ️ 오늘의 링크 정보가 아직 생성되지 않았습니다. 매일 오전 9시 채널 공지 이후 조회하실 수 있습니다.',

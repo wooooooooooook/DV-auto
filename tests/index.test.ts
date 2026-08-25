@@ -35,6 +35,7 @@ const testFiles = [
   'http_session_expiry.test.ts',
   'telegram_notification.test.ts',
   'telegram_truncation.test.ts',
+  'telegram_splitting.test.ts',
 ];
 
 let failedCount = 0;

@@ -26,6 +26,13 @@ interface OpenTagInfo {
 const VOID_TAGS = new Set(['img', 'br', 'hr', 'input', 'meta', 'link']);
 const TAG_REGEX = /<(\/)?([a-zA-Z0-9_-]+)(?:\s+[^>]*?)?(\/)?>/g;
 
+function findLastTagIndex(openTags: OpenTagInfo[], tagName: string): number {
+  for (let i = openTags.length - 1; i >= 0; i--) {
+    if (openTags[i].tag === tagName) return i;
+  }
+  return -1;
+}
+
 /**
  * 텍스트 내의 HTML 태그를 분석하여 열린 태그 스택을 업데이트합니다.
  */
@@ -41,7 +48,7 @@ function updateOpenTags(text: string, openTags: OpenTagInfo[]): void {
     if (isSelfClosing) continue;
 
     if (isClosing) {
-      const idx = openTags.findLastIndex((item) => item.tag === tagName);
+      const idx = findLastTagIndex(openTags, tagName);
       if (idx !== -1) {
         openTags.splice(idx, 1);
       }
@@ -130,10 +137,7 @@ export function splitHtml(html: string, maxLength = TELEGRAM_SAFE_MESSAGE_LENGTH
         const currentOpeningTagsStr = getOpeningTagsString(currentOpenTags);
         const currentClosingTagsStr = getClosingTagsString(currentOpenTags);
 
-        const availableLen = Math.max(
-          50,
-          maxLength - currentChunk.length - currentClosingTagsStr.length - 10,
-        );
+        const availableLen = Math.max(50, maxLength - currentChunk.length - currentClosingTagsStr.length - 10);
 
         if (remainingLine.length <= availableLen) {
           currentChunk += remainingLine;
@@ -368,7 +372,7 @@ export function truncateHtml(
 
     if (!isSelfClosing) {
       if (isClosing) {
-        const idx = openTags.findLastIndex((item) => item.tag === tagName);
+        const idx = findLastTagIndex(openTags, tagName);
         if (idx !== -1) {
           openTags.splice(idx, 1);
         }

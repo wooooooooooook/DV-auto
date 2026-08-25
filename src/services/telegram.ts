@@ -12,6 +12,7 @@ import * as taskRegistry from '../core/taskRegistry';
 import { inspect } from '../modules/inspect';
 import {
   sendNotificationToChannel,
+  replyWithSplit,
   truncateTelegramMessage,
   truncatePlainText,
   TELEGRAM_SAFE_MESSAGE_LENGTH,
@@ -269,14 +270,9 @@ const todayLinks = async (ctx: Context) => {
       .then(async (result) => {
         if (result && typeof result === 'object' && (result as { message?: string }).message) {
           const resObj = result as { message: string; options?: Record<string, unknown> };
-          const parseMode = resObj.options?.parse_mode as 'HTML' | 'MarkdownV2' | undefined;
-          const safeMessage = truncateTelegramMessage(resObj.message, {
-            parseMode,
-            maxLength: TELEGRAM_SAFE_MESSAGE_LENGTH,
-          });
-          await ctx.reply(safeMessage, resObj.options as Parameters<Context['reply']>[1]);
+          await replyWithSplit(ctx, resObj.message, resObj.options as Parameters<Context['reply']>[1]);
         } else if (typeof result === 'string') {
-          await ctx.reply(truncatePlainText(result, TELEGRAM_SAFE_MESSAGE_LENGTH));
+          await replyWithSplit(ctx, result);
         } else if (result === true) {
           await ctx.reply('작업이 완료되었습니다.');
         } else {
@@ -1367,12 +1363,7 @@ const noticeTodayLinks = async (ctx: Context) => {
     const { getTodayLinksCache } = await import('../tasks/today_links');
     const cache = getTodayLinksCache();
     if (cache && cache.message) {
-      const parseMode = (cache.options as { parse_mode?: 'HTML' | 'MarkdownV2' } | undefined)?.parse_mode;
-      const safeMessage = truncateTelegramMessage(cache.message, {
-        parseMode,
-        maxLength: TELEGRAM_SAFE_MESSAGE_LENGTH,
-      });
-      await ctx.reply(safeMessage, cache.options as Parameters<Context['reply']>[1]);
+      await replyWithSplit(ctx, cache.message, cache.options as Parameters<Context['reply']>[1]);
     } else {
       await ctx.reply(
         'ℹ️ 오늘의 링크 정보가 아직 생성되지 않았습니다. 매일 오전 9시 채널 공지 이후 조회하실 수 있습니다.',
