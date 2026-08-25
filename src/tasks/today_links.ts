@@ -10,6 +10,7 @@ import {
   isSurveyPointExcludedSeminarHttp,
 } from '../modules/utils';
 import * as storage from '../services/storage';
+import * as seminarRepo from '../services/seminar_repository';
 import {
   loadCheatsheet,
   findMatchingKeywords,
@@ -89,7 +90,6 @@ type TempQuizAnswers = {
   answers: Array<string | number>;
 };
 const TODAY_SEMINAR_KEY = 'today_seminars';
-const SEMINAR_LIST_KEY = 'apply_seminar:seminar_list';
 
 function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -388,19 +388,7 @@ function getTodayDateStrings(customDateInput?: string) {
 }
 
 function getYesterdayAddedSeminars(yesterdayIso: string): StoredNewSeminars['seminars'] {
-  const storedSeminars =
-    storage.get<
-      Array<{
-        name: string;
-        url: string;
-        seminarId: string | null;
-        isPointExcluded?: boolean;
-        isAdvancedSurvey?: boolean;
-        date?: string;
-        time?: string;
-        detectedDate?: string;
-      }>
-    >(SEMINAR_LIST_KEY) || [];
+  const storedSeminars = seminarRepo.getAllSeminars();
 
   return storedSeminars
     .filter((seminar) => seminar.detectedDate === yesterdayIso)
@@ -708,8 +696,7 @@ async function collectTodaySeminarMessage(
 
     const lunchSeminars: string[] = [];
     const dinnerSeminars: string[] = [];
-    const storedSeminars =
-      storage.get<Array<{ url: string; seminarId?: string | null; isPointExcluded?: boolean }>>(SEMINAR_LIST_KEY) || [];
+    const storedSeminars = seminarRepo.getAllSeminars();
     const pointExcludedCache = new Map<string, boolean>();
 
     const isDinnerSeminar = (classAttr: string, time: string): boolean => {
@@ -1036,9 +1023,7 @@ async function run({ page, args }: Partial<PlaywrightRunArgs> = {}, taskOptions?
       let updatedMissingPointFlag = false;
       const pointExcludedCache = new Map<string, boolean>();
 
-      const storedSeminars =
-        storage.get<Array<{ url: string; seminarId?: string | null; isPointExcluded?: boolean }>>(SEMINAR_LIST_KEY) ||
-        [];
+      const storedSeminars = seminarRepo.getAllSeminars();
 
       const uncachedItems: Array<{ link: string; cacheKey: string }> = [];
 
@@ -1077,23 +1062,20 @@ async function run({ page, args }: Partial<PlaywrightRunArgs> = {}, taskOptions?
       });
 
       if (updatedMissingPointFlag) {
-        const currentSeminarsInList =
-          storage.get<Array<{ url: string; seminarId?: string | number | null; isPointExcluded?: boolean }>>(
-            SEMINAR_LIST_KEY,
-          ) || [];
-        const updatedNewSeminarsMap = new Map(storedNewSeminars.map((s) => [String(s.seminarId || s.url), s]));
-        const updatedList = currentSeminarsInList.map((s) => {
-          const key = String(s.seminarId || s.url);
-          const updatedNew = updatedNewSeminarsMap.get(key);
-          if (updatedNew) {
-            return {
-              ...s,
-              isPointExcluded: updatedNew.isPointExcluded,
-            };
+        for (const item of storedNewSeminars) {
+          if (typeof item.isPointExcluded === 'boolean') {
+            const sid = item.seminarId || getSeminarIdFromUrl(item.url);
+            if (sid) {
+              const existing = seminarRepo.getSeminarById(sid);
+              if (existing && existing.isPointExcluded !== item.isPointExcluded) {
+                seminarRepo.upsertSeminar({
+                  ...existing,
+                  isPointExcluded: item.isPointExcluded,
+                });
+              }
+            }
           }
-          return s;
-        });
-        storage.set(SEMINAR_LIST_KEY, updatedList);
+        }
       }
     }
 

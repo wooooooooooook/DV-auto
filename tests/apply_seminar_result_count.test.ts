@@ -1,9 +1,10 @@
 import assert from 'node:assert';
 import { isAppliedSeminar } from '../src/tasks/apply_seminar';
-import { run as runApplySeminar, SEMINAR_LIST_KEY } from '../src/tasks/apply_seminar';
+import { run as runApplySeminar } from '../src/tasks/apply_seminar';
 import * as seminarApiModule from '../src/modules/seminar_api';
 import * as utilsModule from '../src/modules/utils';
 import * as checkSeminarPointModule from '../src/tasks/check_seminar_point';
+import * as seminarRepo from '../src/services/seminar_repository';
 import * as storage from '../src/services/storage';
 import { ProcessState } from '../src/modules/seminar_api';
 
@@ -89,7 +90,7 @@ async function testResultCountAccuracy() {
   try {
     // Case A: 전체 성공 (모든 세미나가 PROCESS_CANCEL = 이미 신청 완료)
     console.log('  Case A: 전체 세미나 신청 완료 상태');
-    storage.set(SEMINAR_LIST_KEY, []);
+    seminarRepo.clearSeminars();
     (seminarApiModule as unknown as { fetchMainFutureSeminars: unknown }).fetchMainFutureSeminars = async () => ({
       success: true,
       items: [
@@ -108,7 +109,7 @@ async function testResultCountAccuracy() {
 
     // Case B: 일부 정원 초과 (5606=EXCESS, 5607=CANCEL, 5608=CANCEL)
     console.log('  Case B: 일부 정원 초과로 신청 불가');
-    storage.set(SEMINAR_LIST_KEY, []);
+    seminarRepo.clearSeminars();
     (seminarApiModule as unknown as { fetchMainFutureSeminars: unknown }).fetchMainFutureSeminars = async () => ({
       success: true,
       items: [
@@ -129,7 +130,7 @@ async function testResultCountAccuracy() {
 
     // Case C: 정원 초과 + 미신청 혼합
     console.log('  Case C: 정원 초과 + 미신청(PREPARING) 혼합');
-    storage.set(SEMINAR_LIST_KEY, []);
+    seminarRepo.clearSeminars();
     (seminarApiModule as unknown as { fetchMainFutureSeminars: unknown }).fetchMainFutureSeminars = async () => ({
       success: true,
       items: [
@@ -150,7 +151,7 @@ async function testResultCountAccuracy() {
 
     // Case D: 실제 사례 재현 - 30개 세미나 중 일부 정원 초과
     console.log('  Case D: 실제 사례 재현 (30개 세미나, 일부 정원 초과)');
-    storage.set(SEMINAR_LIST_KEY, []);
+    seminarRepo.clearSeminars();
     const items: seminarApiModule.FutureSeminarApiItem[] = [];
     // 28개는 PROCESS_CANCEL (신청 완료)
     for (let i = 0; i < 28; i++) {
@@ -177,7 +178,7 @@ async function testResultCountAccuracy() {
 
     // Case E: 모든 세미나가 정원 초과
     console.log('  Case E: 모든 세미나 정원 초과');
-    storage.set(SEMINAR_LIST_KEY, []);
+    seminarRepo.clearSeminars();
     (seminarApiModule as unknown as { fetchMainFutureSeminars: unknown }).fetchMainFutureSeminars = async () => ({
       success: true,
       items: [

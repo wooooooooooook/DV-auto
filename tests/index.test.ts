@@ -13,6 +13,7 @@ console.log('===========================================================\n');
 
 const testFiles = [
   'storage_sqlite.test.ts',
+  'seminar_repository.test.ts',
   'seminar_api.test.ts',
   'seminar_detail.test.ts',
   'monitor_seminars_api.test.ts',
@@ -33,9 +34,12 @@ const testFiles = [
   'login_check.test.ts',
   'http_session_expiry.test.ts',
   'telegram_notification.test.ts',
+  'telegram_truncation.test.ts',
+  'telegram_splitting.test.ts',
 ];
 
 let failedCount = 0;
+const pnpmCmd = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
 
 for (const file of testFiles) {
   const filePath = path.join(__dirname, file);
@@ -43,7 +47,7 @@ for (const file of testFiles) {
 
   console.log(`\n▶ [Executing] ${file}`);
   try {
-    execSync(`pnpm exec ts-node "${filePath}"`, {
+    execSync(`${pnpmCmd} exec ts-node "${filePath}"`, {
       stdio: 'inherit',
       cwd: path.resolve(__dirname, '..'),
       env: {

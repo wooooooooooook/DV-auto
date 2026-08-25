@@ -10,6 +10,21 @@ import { getBot } from '../services/bot_instance';
 import { httpGet, httpGetJson } from './http_client';
 import { parseLoginStatusHtml, hasSurveyPointExcludedNoticeHtml } from './html_parser';
 
+import {
+  splitTelegramMessage,
+  splitHtml,
+  splitPlainText,
+  splitMarkdownV2,
+  truncateTelegramMessage,
+  truncatePlainText,
+  truncateHtml,
+  truncateMarkdownV2,
+  TELEGRAM_SAFE_MESSAGE_LENGTH,
+  TELEGRAM_SAFE_CAPTION_LENGTH,
+  TELEGRAM_MAX_MESSAGE_LENGTH,
+  TELEGRAM_MAX_CAPTION_LENGTH,
+} from './telegram_splitter';
+
 const COOKIE_FILE = path.join(process.cwd(), 'cookies.json');
 const LOCALSTORAGE_FILE = path.join(process.cwd(), 'localstorage.json');
 type SendMessageOptions = Parameters<Telegraf['telegram']['sendMessage']>[2];
@@ -27,6 +42,24 @@ function maskToken(token?: string | null): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function replyWithSplit(
+  ctx: { reply: Telegraf['telegram']['sendMessage'] } | any,
+  text: string,
+  options?: Parameters<Telegraf['telegram']['sendMessage']>[2],
+): Promise<void> {
+  const parseMode = (options as { parse_mode?: 'HTML' | 'MarkdownV2' | 'Markdown' } | undefined)?.parse_mode;
+  const chunks = splitTelegramMessage(text, { maxLength: TELEGRAM_SAFE_MESSAGE_LENGTH, parseMode });
+
+  for (let i = 0; i < chunks.length; i++) {
+    const isLast = i === chunks.length - 1;
+    const chunkOptions = isLast ? options : { ...options, reply_markup: undefined };
+    await ctx.reply(chunks[i], chunkOptions);
+    if (!isLast) {
+      await sleep(100);
+    }
+  }
 }
 
 async function sendTelegram(
@@ -47,19 +80,42 @@ async function sendTelegram(
   }
 
   try {
+    const parseMode = (options as { parse_mode?: 'HTML' | 'MarkdownV2' | 'Markdown' }).parse_mode;
     const validImagePath = imagePath && fs.existsSync(imagePath) ? imagePath : null;
+
     if (validImagePath) {
-      const photoOptions: SendPhotoOptions = { caption: text, ...(options as SendPhotoOptions) };
-      await bot.telegram.sendPhoto(CHAT_ID, { source: validImagePath }, photoOptions);
+      if (text.length <= TELEGRAM_SAFE_CAPTION_LENGTH) {
+        const photoOptions: SendPhotoOptions = { caption: text, ...(options as SendPhotoOptions) };
+        await bot.telegram.sendPhoto(CHAT_ID, { source: validImagePath }, photoOptions);
+      } else {
+        await bot.telegram.sendPhoto(CHAT_ID, { source: validImagePath });
+        const chunks = splitTelegramMessage(text, { maxLength: TELEGRAM_SAFE_MESSAGE_LENGTH, parseMode });
+        for (let i = 0; i < chunks.length; i++) {
+          const isLast = i === chunks.length - 1;
+          const chunkOptions = isLast ? options : { ...options, reply_markup: undefined };
+          await bot.telegram.sendMessage(CHAT_ID, chunks[i], chunkOptions as SendMessageOptions);
+          if (!isLast) await sleep(100);
+        }
+      }
     } else {
-      await bot.telegram.sendMessage(CHAT_ID, text, options as SendMessageOptions);
+      const chunks = splitTelegramMessage(text, { maxLength: TELEGRAM_SAFE_MESSAGE_LENGTH, parseMode });
+      for (let i = 0; i < chunks.length; i++) {
+        const isLast = i === chunks.length - 1;
+        const chunkOptions = isLast ? options : { ...options, reply_markup: undefined };
+        await bot.telegram.sendMessage(CHAT_ID, chunks[i], chunkOptions as SendMessageOptions);
+        if (!isLast) await sleep(100);
+      }
     }
     return true;
   } catch (error) {
     console.error('Failed to send Telegram message:', error);
     try {
       const message = error instanceof Error ? error.message : String(error);
-      await bot.telegram.sendMessage(CHAT_ID, `Failed to send a complex Telegram message. Error: ${message}`);
+      const safeErrorMessage = truncatePlainText(
+        `Failed to send a complex Telegram message. Error: ${message}`,
+        TELEGRAM_SAFE_MESSAGE_LENGTH,
+      );
+      await bot.telegram.sendMessage(CHAT_ID, safeErrorMessage);
     } catch (nestedError) {
       console.error('Failed to send the failure notification as well:', nestedError);
     }
@@ -89,16 +145,40 @@ async function sendNotificationToChannel(
   const messageOptions = isMarkdownV2
     ? ({ ...baseOptions, parse_mode: 'MarkdownV2' } as SendMessageOptions | SendPhotoOptions)
     : baseOptions;
+  const parseMode = (messageOptions as { parse_mode?: 'HTML' | 'MarkdownV2' | 'Markdown' }).parse_mode;
 
   try {
     const validImagePath = imagePath && fs.existsSync(imagePath) ? imagePath : null;
+    let lastMessageId: number | null = null;
+
     if (validImagePath) {
-      const photoOptions: SendPhotoOptions = { ...messageOptions, caption: text } as SendPhotoOptions;
-      const result = await bot.telegram.sendPhoto(CHANNEL_ID, { source: validImagePath }, photoOptions);
-      return result.message_id;
+      if (text.length <= TELEGRAM_SAFE_CAPTION_LENGTH) {
+        const photoOptions: SendPhotoOptions = { ...messageOptions, caption: text } as SendPhotoOptions;
+        const result = await bot.telegram.sendPhoto(CHANNEL_ID, { source: validImagePath }, photoOptions);
+        return result.message_id;
+      } else {
+        const result = await bot.telegram.sendPhoto(CHANNEL_ID, { source: validImagePath });
+        lastMessageId = result.message_id;
+        const chunks = splitTelegramMessage(text, { maxLength: TELEGRAM_SAFE_MESSAGE_LENGTH, parseMode });
+        for (let i = 0; i < chunks.length; i++) {
+          const isLast = i === chunks.length - 1;
+          const chunkOptions = isLast ? messageOptions : { ...messageOptions, reply_markup: undefined };
+          const sendRes = await bot.telegram.sendMessage(CHANNEL_ID, chunks[i], chunkOptions as SendMessageOptions);
+          lastMessageId = sendRes.message_id;
+          if (!isLast) await sleep(100);
+        }
+        return lastMessageId;
+      }
     } else {
-      const result = await bot.telegram.sendMessage(CHANNEL_ID, text, messageOptions as SendMessageOptions);
-      return result.message_id;
+      const chunks = splitTelegramMessage(text, { maxLength: TELEGRAM_SAFE_MESSAGE_LENGTH, parseMode });
+      for (let i = 0; i < chunks.length; i++) {
+        const isLast = i === chunks.length - 1;
+        const chunkOptions = isLast ? messageOptions : { ...messageOptions, reply_markup: undefined };
+        const sendRes = await bot.telegram.sendMessage(CHANNEL_ID, chunks[i], chunkOptions as SendMessageOptions);
+        lastMessageId = sendRes.message_id;
+        if (!isLast) await sleep(100);
+      }
+      return lastMessageId;
     }
   } catch (error) {
     console.error('Failed to send Telegram notification to channel:', error);
@@ -109,12 +189,25 @@ async function sendNotificationToChannel(
 
       const validImagePath = imagePath && fs.existsSync(imagePath) ? imagePath : null;
       if (validImagePath) {
-        const fallbackPhotoOptions: SendPhotoOptions = { ...plainOptions, caption: text } as SendPhotoOptions;
+        const plainCaption = truncatePlainText(text, TELEGRAM_SAFE_CAPTION_LENGTH);
+        const fallbackPhotoOptions: SendPhotoOptions = { ...plainOptions, caption: plainCaption } as SendPhotoOptions;
         const result = await bot.telegram.sendPhoto(CHANNEL_ID, { source: validImagePath }, fallbackPhotoOptions);
         return result.message_id;
       } else {
-        const result = await bot.telegram.sendMessage(CHANNEL_ID, text, plainOptions as SendMessageOptions);
-        return result.message_id;
+        const plainChunks = splitPlainText(text, TELEGRAM_SAFE_MESSAGE_LENGTH);
+        let plainLastId: number | null = null;
+        for (let i = 0; i < plainChunks.length; i++) {
+          const isLast = i === plainChunks.length - 1;
+          const chunkOptions = isLast ? plainOptions : { ...plainOptions, reply_markup: undefined };
+          const sendRes = await bot.telegram.sendMessage(
+            CHANNEL_ID,
+            plainChunks[i],
+            chunkOptions as SendMessageOptions,
+          );
+          plainLastId = sendRes.message_id;
+          if (!isLast) await sleep(100);
+        }
+        return plainLastId;
       }
     } catch (fallbackError) {
       console.error('Failed to send escaped Telegram notification to channel:', fallbackError);
@@ -122,7 +215,11 @@ async function sendNotificationToChannel(
 
     try {
       const message = error instanceof Error ? error.message : String(error);
-      await bot.telegram.sendMessage(CHANNEL_ID, `Failed to send a complex message. Error: ${message}`);
+      const safeErrorMessage = truncatePlainText(
+        `Failed to send a complex message. Error: ${message}`,
+        TELEGRAM_SAFE_MESSAGE_LENGTH,
+      );
+      await bot.telegram.sendMessage(CHANNEL_ID, safeErrorMessage);
     } catch (nestedError) {
       console.error('Failed to send the failure notification as well:', nestedError);
     }
@@ -611,6 +708,19 @@ export {
   ensureSeminarDetailReady,
   isSurveyPointExcludedSeminar,
   isSurveyPointExcludedSeminarHttp,
+  replyWithSplit,
+  splitTelegramMessage,
+  splitHtml,
+  splitPlainText,
+  splitMarkdownV2,
+  truncateTelegramMessage,
+  truncateHtml,
+  truncateMarkdownV2,
+  truncatePlainText,
+  TELEGRAM_SAFE_MESSAGE_LENGTH,
+  TELEGRAM_SAFE_CAPTION_LENGTH,
+  TELEGRAM_MAX_MESSAGE_LENGTH,
+  TELEGRAM_MAX_CAPTION_LENGTH,
 };
 
 const analyticsBlockedPages = new WeakSet<Page>();

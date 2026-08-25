@@ -10,7 +10,13 @@ import * as scheduler from '../core/scheduler';
 import * as runner from '../core/runner';
 import * as taskRegistry from '../core/taskRegistry';
 import { inspect } from '../modules/inspect';
-import { sendNotificationToChannel } from '../modules/utils';
+import {
+  sendNotificationToChannel,
+  replyWithSplit,
+  truncateTelegramMessage,
+  truncatePlainText,
+  TELEGRAM_SAFE_MESSAGE_LENGTH,
+} from '../modules/utils';
 import { extractSeminarIds } from '../tasks/seminar_detail';
 
 const ADMIN_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -26,8 +32,8 @@ type CommandResult = { stdout: string; stderr: string };
 type CommandResultWithExitCode = CommandResult & { exitCode?: number };
 
 function truncateMessage(text: string, maxLength = 3500): string {
-  if (text.length <= maxLength) return text;
-  return `${text.slice(0, maxLength)}... (truncated)`;
+  if (!text) return '';
+  return truncatePlainText(text, maxLength);
 }
 
 function runShellCommand(command: string): Promise<CommandResult> {
@@ -263,12 +269,10 @@ const todayLinks = async (ctx: Context) => {
       .runTask(task, { args: targetDate ? { date: targetDate } : undefined })
       .then(async (result) => {
         if (result && typeof result === 'object' && (result as { message?: string }).message) {
-          await ctx.reply(
-            (result as { message: string }).message,
-            (result as { options?: Record<string, unknown> }).options,
-          );
+          const resObj = result as { message: string; options?: Record<string, unknown> };
+          await replyWithSplit(ctx, resObj.message, resObj.options as Parameters<Context['reply']>[1]);
         } else if (typeof result === 'string') {
-          await ctx.reply(result);
+          await replyWithSplit(ctx, result);
         } else if (result === true) {
           await ctx.reply('작업이 완료되었습니다.');
         } else {
@@ -1359,7 +1363,7 @@ const noticeTodayLinks = async (ctx: Context) => {
     const { getTodayLinksCache } = await import('../tasks/today_links');
     const cache = getTodayLinksCache();
     if (cache && cache.message) {
-      await ctx.reply(cache.message, cache.options as Parameters<Context['reply']>[1]);
+      await replyWithSplit(ctx, cache.message, cache.options as Parameters<Context['reply']>[1]);
     } else {
       await ctx.reply(
         'ℹ️ 오늘의 링크 정보가 아직 생성되지 않았습니다. 매일 오전 9시 채널 공지 이후 조회하실 수 있습니다.',

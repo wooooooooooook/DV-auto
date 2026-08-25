@@ -60,9 +60,10 @@ function setBot(name: BotName, instance: Telegraf | null): void {
               return;
             }
             const { getTodayLinksCache } = await import('../tasks/today_links');
+            const { replyWithSplit } = await import('../modules/utils');
             const cache = getTodayLinksCache();
             if (cache && cache.message) {
-              await ctx.reply(cache.message, cache.options as Parameters<Context['reply']>[1]);
+              await replyWithSplit(ctx, cache.message, cache.options as Parameters<Context['reply']>[1]);
             } else {
               await ctx.reply(
                 'ℹ️ 오늘의 링크 정보가 아직 생성되지 않았습니다. 매일 오전 9시 채널 공지 이후 조회하실 수 있습니다.',

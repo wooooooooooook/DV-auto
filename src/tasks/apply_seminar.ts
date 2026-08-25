@@ -25,6 +25,7 @@ import {
 import { searchSeminarPoints } from './check_seminar_point';
 import * as storage from '../services/storage';
 import * as logger from '../services/logger';
+import * as seminarRepo from '../services/seminar_repository';
 import { sendSeminarChangesToSubscribers } from '../services/seminar_subscribers';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
@@ -35,32 +36,10 @@ const LEGACY_NEW_SEMINAR_KEY = 'apply_seminar:new_seminars';
 const LEGACY_HISTORY_KEY = 'apply_seminar:new_seminars_history';
 const SEMINAR_RETENTION_DAYS = 60;
 
-type SeminarPointStatus = {
-  pointPaid?: boolean;
-  point?: number;
-  pointText?: string;
-  pointDate?: string;
-  pointContent?: string;
-  pointCheckedAt?: string;
-};
+export type { SeminarListItem, SeminarPointStatus } from '../services/seminar_repository';
+import type { SeminarListItem } from '../services/seminar_repository';
 
-export type SeminarListItem = {
-  seminarId: string | null;
-  name: string;
-  url: string;
-  date?: string;
-  time: string;
-  currentCount: string;
-  totalCount: string;
-  nightTime: boolean;
-  isPointExcluded?: boolean;
-  isAdvancedSurvey: boolean;
-  processState?: number;
-  cancelProcessState?: number;
-  seminarCompleted?: number;
-  detectedDate?: string;
-  detectedAt?: string;
-} & SeminarPointStatus;
+export const mergeSeminar = seminarRepo.mergeSeminarRecord;
 
 export type SeminarFieldChange = {
   field: string;
@@ -258,80 +237,38 @@ function seminarKey(seminar: Pick<SeminarListItem, 'url' | 'seminarId'>): string
   return seminar.seminarId || seminar.url;
 }
 
-export function mergeSeminar(existing: SeminarListItem | undefined, incoming: SeminarListItem): SeminarListItem {
-  if (!existing) return incoming;
-  return {
-    ...existing,
-    ...incoming,
-    name: incoming.name || existing.name || '',
-    url:
-      incoming.url ||
-      existing.url ||
-      `https://m.doctorville.co.kr/cme/seminar/${incoming.seminarId || existing.seminarId || ''}`,
-    date: incoming.date || existing.date || '',
-    time: incoming.time || existing.time || '',
-    currentCount: incoming.currentCount || existing.currentCount || '',
-    totalCount: incoming.totalCount || existing.totalCount || '',
-    nightTime: incoming.nightTime ?? existing.nightTime ?? false,
-    isAdvancedSurvey: incoming.isAdvancedSurvey ?? existing.isAdvancedSurvey ?? false,
-    isPointExcluded: incoming.isPointExcluded ?? existing.isPointExcluded,
-    processState: incoming.processState ?? existing.processState,
-    cancelProcessState: incoming.cancelProcessState ?? existing.cancelProcessState,
-    seminarCompleted: incoming.seminarCompleted ?? existing.seminarCompleted,
-    pointPaid: existing.pointPaid === true ? true : (incoming.pointPaid ?? existing.pointPaid),
-    point: existing.pointPaid === true ? existing.point : (incoming.point ?? existing.point),
-    pointText: existing.pointPaid === true ? existing.pointText : (incoming.pointText ?? existing.pointText),
-    pointDate: existing.pointPaid === true ? existing.pointDate : (incoming.pointDate ?? existing.pointDate),
-    pointContent:
-      existing.pointPaid === true ? existing.pointContent : (incoming.pointContent ?? existing.pointContent),
-    pointCheckedAt: existing.pointCheckedAt || incoming.pointCheckedAt,
-    detectedDate: incoming.detectedDate || existing.detectedDate,
-    detectedAt: incoming.detectedAt || existing.detectedAt,
-  };
-}
-
 function migrateLegacySeminarStorage(referenceDate: string): SeminarListItem[] {
-  const current = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
-  const merged = new Map<string, SeminarListItem>();
-  for (const seminar of current) merged.set(seminarKey(seminar), seminar);
-
   const legacyHistory = storage.get<LegacyHistoryEntry[]>(LEGACY_HISTORY_KEY, []) || [];
-  for (const entry of legacyHistory) {
-    if (!entry.seminar) continue;
-    const seminar = {
-      ...entry.seminar,
-      detectedDate: entry.seminar.detectedDate ?? entry.detectedDate,
-      detectedAt: entry.seminar.detectedAt ?? entry.detectedAt,
-    };
-    const key = seminarKey(seminar);
-    merged.set(key, mergeSeminar(merged.get(key), seminar));
-  }
-
   const legacyNew = storage.get<LegacyNewSeminars>(LEGACY_NEW_SEMINAR_KEY);
-  for (const seminar of legacyNew?.seminars || []) {
-    const key = seminarKey(seminar);
-    merged.set(
-      key,
-      mergeSeminar(merged.get(key), {
+
+  if (legacyHistory.length > 0 || legacyNew?.seminars?.length) {
+    const toUpsert: SeminarListItem[] = [];
+
+    for (const entry of legacyHistory) {
+      if (!entry.seminar) continue;
+      toUpsert.push({
+        ...entry.seminar,
+        detectedDate: entry.seminar.detectedDate ?? entry.detectedDate,
+        detectedAt: entry.seminar.detectedAt ?? entry.detectedAt,
+      });
+    }
+
+    for (const seminar of legacyNew?.seminars || []) {
+      toUpsert.push({
         ...seminar,
         detectedDate: seminar.detectedDate ?? legacyNew?.date,
-      }),
-    );
+      });
+    }
+
+    if (toUpsert.length > 0) {
+      seminarRepo.upsertSeminars(toUpsert);
+    }
+    storage.deleteKey(LEGACY_NEW_SEMINAR_KEY);
+    storage.deleteKey(LEGACY_HISTORY_KEY);
   }
 
-  const todayMs = Date.parse(`${referenceDate}T00:00:00+09:00`);
-  const retentionMs = SEMINAR_RETENTION_DAYS * 24 * 60 * 60 * 1000;
-  const retained = [...merged.values()].filter((seminar) => {
-    const reference = normalizeSeminarDate(seminar.date, seminar.detectedDate || referenceDate) || seminar.detectedDate;
-    if (!reference) return true;
-    const dateMs = Date.parse(`${reference}T00:00:00+09:00`);
-    return Number.isNaN(dateMs) || Number.isNaN(todayMs) || todayMs - dateMs <= retentionMs;
-  });
-
-  storage.set(SEMINAR_LIST_KEY, retained);
-  storage.deleteKey(LEGACY_NEW_SEMINAR_KEY);
-  storage.deleteKey(LEGACY_HISTORY_KEY);
-  return retained;
+  seminarRepo.deleteExpiredSeminars(referenceDate, SEMINAR_RETENTION_DAYS);
+  return seminarRepo.getAllSeminars();
 }
 
 export function refreshStoredSeminarList(
@@ -527,10 +464,13 @@ export async function refreshSeminarPointStatus(
   const checkedAt = new Date().toISOString();
   const pointChanges: SeminarPointChange[] = [];
 
+  const changedSeminars: SeminarListItem[] = [];
+
   const updatedSeminars: SeminarListItem[] = [];
   for (const seminar of seminars) {
     const id = seminar.seminarId || getSeminarIdFromUrl(seminar.url);
     let currentItem = { ...seminar };
+    let hasChanged = false;
 
     // 만약 기존 세미나 메타데이터(이름 또는 일자)가 비어 있는 경우, detail API로 정보 채우기
     if (id && (!currentItem.name || !currentItem.date)) {
@@ -550,9 +490,13 @@ export async function refreshSeminarPointStatus(
         seminarCompleted: extra.seminarCompleted ?? currentItem.seminarCompleted,
         detectedDate: extra.detectedDate || currentItem.detectedDate || '',
       };
+      hasChanged = true;
     }
 
     if (currentItem.pointPaid === true) {
+      if (hasChanged) {
+        changedSeminars.push(currentItem);
+      }
       updatedSeminars.push(currentItem);
       continue;
     }
@@ -569,7 +513,7 @@ export async function refreshSeminarPointStatus(
           pointContent: pointResult.content,
         });
 
-        updatedSeminars.push({
+        const updatedItem: SeminarListItem = {
           ...currentItem,
           pointPaid: true,
           point: pointResult.point,
@@ -577,16 +521,20 @@ export async function refreshSeminarPointStatus(
           pointText: pointResult.pointText,
           pointContent: pointResult.content,
           pointCheckedAt: checkedAt,
-        });
+        };
+        changedSeminars.push(updatedItem);
+        updatedSeminars.push(updatedItem);
         continue;
       }
     }
 
-    updatedSeminars.push({
+    const updatedItem: SeminarListItem = {
       ...currentItem,
       pointPaid: false,
       pointCheckedAt: checkedAt,
-    });
+    };
+    changedSeminars.push(updatedItem);
+    updatedSeminars.push(updatedItem);
   }
 
   for (const [id, pointResult] of parsedPoints) {
@@ -620,6 +568,7 @@ export async function refreshSeminarPointStatus(
         detectedDate: detailInfo.detectedDate || '',
         detectedAt: checkedAt,
       };
+      changedSeminars.push(newItem);
       updatedSeminars.push(newItem);
 
       pointChanges.push({
@@ -633,7 +582,9 @@ export async function refreshSeminarPointStatus(
     }
   }
 
-  storage.set(SEMINAR_LIST_KEY, updatedSeminars);
+  if (changedSeminars.length > 0) {
+    seminarRepo.upsertSeminars(changedSeminars);
+  }
   return { seminars: updatedSeminars, pointChanges };
 }
 
@@ -702,11 +653,11 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
     referenceDate,
   );
 
-  if (newlyAdded.length === 0) {
-    storage.set(SEMINAR_LIST_KEY, seminars);
-  } else {
-    storage.set(SEMINAR_LIST_KEY, seminars);
+  if (enrichedSeminars.length > 0) {
+    seminarRepo.upsertSeminars(enrichedSeminars);
+  }
 
+  if (newlyAdded.length > 0) {
     const newSeminarMessage = newlyAdded
       .map((item) => {
         const pointExcludedSuffix = item.isPointExcluded ? ' [포인트미지급]' : '';
@@ -721,7 +672,7 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
     if (notifyNewSeminarsToChannel) await sendNotificationToChannel(noticeMessage);
   }
 
-  const finalSeminars = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
+  const finalSeminars = seminarRepo.getAllSeminars();
   const pointStatusResult = await refreshSeminarPointStatus(ctx.context, finalSeminars);
   const pointChanges = pointStatusResult.pointChanges;
 
@@ -1007,11 +958,11 @@ export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<Ta
       referenceDate,
     );
 
-    if (newlyAdded.length === 0) {
-      storage.set(SEMINAR_LIST_KEY, seminars);
-    } else {
-      storage.set(SEMINAR_LIST_KEY, seminars);
+    if (enrichedSeminars.length > 0) {
+      seminarRepo.upsertSeminars(enrichedSeminars);
+    }
 
+    if (newlyAdded.length > 0) {
       const newSeminarMessage = newlyAdded
         .map((item) => {
           const pointExcludedSuffix = item.isPointExcluded ? ' [포인트미지급]' : '';
@@ -1026,7 +977,7 @@ export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<Ta
       if (notifyNewSeminarsToChannel) await sendNotificationToChannel(noticeMessage);
     }
 
-    const finalSeminars = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
+    const finalSeminars = seminarRepo.getAllSeminars();
     const pointStatusResult = await refreshSeminarPointStatus(undefined, finalSeminars);
     const pointChanges = pointStatusResult.pointChanges;
 

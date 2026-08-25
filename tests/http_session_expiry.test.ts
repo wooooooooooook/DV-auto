@@ -7,6 +7,7 @@ import * as httpClientModule from '../src/modules/http_client';
 import * as utilsModule from '../src/modules/utils';
 import * as checkSeminarPointModule from '../src/tasks/check_seminar_point';
 import { applySeminarExtraTask } from '../src/tasks/apply_seminar';
+import * as seminarRepo from '../src/services/seminar_repository';
 import * as storage from '../src/services/storage';
 
 const COOKIE_FILE = path.join(process.cwd(), 'cookies.json');
@@ -77,16 +78,21 @@ async function runTests() {
 
     // 6. 실제 작업 중 세션 만료(중간 만료) 시나리오 검증
     // Prepare initial storage data
-    const initialStorageData = [
+    const initialStorageData: seminarRepo.SeminarListItem[] = [
       {
         name: '기존 세미나 1',
         url: 'https://www.doctorville.co.kr/cme/seminar/100',
         seminarId: '100',
         isPointExcluded: false,
+        isAdvancedSurvey: false,
+        nightTime: false,
+        time: '13:00~14:00',
+        currentCount: '10',
+        totalCount: '100',
         date: '2026-08-25',
       },
     ];
-    storage.set('apply_seminar:seminar_list', initialStorageData);
+    seminarRepo.setAllSeminars(initialStorageData);
 
     // Track state
     let ensureLoggedInCalledCount = 0;
@@ -183,12 +189,15 @@ async function runTests() {
     assert.ok(httpGetCallCount >= 2, 'AUTH_EXPIRED 감지 즉시 이후 세미나 조회를 중단해야 함');
 
     // 5) Existing storage was preserved and not corrupted
-    const storedAfter = storage.get('apply_seminar:seminar_list');
-    assert.deepStrictEqual(
-      storedAfter,
-      initialStorageData,
+    const storedAfter = seminarRepo.getAllSeminars();
+    assert.strictEqual(
+      storedAfter?.length,
+      1,
       '중간 세션 만료 발생 시 기존 storage 데이터가 잘못된 값으로 덮어씌워지지 않아야 함',
     );
+    assert.strictEqual(storedAfter?.[0].seminarId, '100');
+    assert.strictEqual(storedAfter?.[0].name, '기존 세미나 1');
+    assert.strictEqual(storedAfter?.[0].date, '2026-08-25');
 
     console.log(
       '  ✓ 작업 중간 AUTH_EXPIRED 발생 시 ensureLoggedIn 재호출 없음, Playwright 미실행, 추가 조회 즉시 중단, storage 보존 성공적 검증 완료',
@@ -200,7 +209,7 @@ async function runTests() {
     (utilsModule as unknown as { ensureLoggedIn: unknown }).ensureLoggedIn = originalEnsureLoggedIn;
 
     // 7. 신규 세미나 정상 추가 및 상세 조회/포인트 제외 판정 성공 시 seminar_list 정상 업데이트 검증
-    storage.set('apply_seminar:seminar_list', initialStorageData);
+    seminarRepo.setAllSeminars(initialStorageData);
 
     const mockDetailSuccessHtml = '<html><body><div>세미나 상세 내용 (포인트 지급 세미나)</div></body></html>';
 
@@ -235,7 +244,7 @@ async function runTests() {
     const successTaskResult = await applySeminarExtraTask.run({}, { notifyNewSeminarsToTelegram: false });
     assert.strictEqual(successTaskResult.success, true);
 
-    const storedAfterSuccess = storage.get<unknown[]>('apply_seminar:seminar_list') as Array<Record<string, unknown>>;
+    const storedAfterSuccess = seminarRepo.getAllSeminars();
     assert.ok(Array.isArray(storedAfterSuccess));
     assert.strictEqual(storedAfterSuccess.length, 3, '기존 1건 + 신규 2건 = 총 3건이 storage에 저장되어야 함');
     const newSeminar101 = storedAfterSuccess.find((item) => (item.url as string).includes('/101'));

@@ -1,6 +1,7 @@
 import assert from 'node:assert';
 import * as storage from '../src/services/storage';
-import { SEMINAR_LIST_KEY, type SeminarListItem } from '../src/tasks/apply_seminar';
+import * as seminarRepo from '../src/services/seminar_repository';
+import type { SeminarListItem } from '../src/tasks/apply_seminar';
 import { isSeminarExpired, updateStoredSeminarFromDetail, type SeminarDetail } from '../src/tasks/seminar_detail';
 import { checkNoticeCooldown, clearNoticeCooldowns, setBot } from '../src/services/bot_instance';
 import type { Telegraf } from 'telegraf';
@@ -8,7 +9,7 @@ import type { Telegraf } from 'telegraf';
 async function runTests(): Promise<void> {
   console.log('=== [Test] 공지봇 어뷰징 방지 및 세미나 60일 보존 테스트 시작 ===\n');
 
-  const originalSeminarList = storage.get(SEMINAR_LIST_KEY);
+  const originalSeminarList = seminarRepo.getAllSeminars();
 
   try {
     // 1. checkNoticeCooldown 테스트
@@ -69,7 +70,7 @@ async function runTests(): Promise<void> {
     console.log('  ✓ [Pass] isSeminarExpired 날짜별 만료 판정 검증 완료');
 
     // 3-2. updateStoredSeminarFromDetail 로 60일 초과 세미나 저장 방지 검증
-    storage.set(SEMINAR_LIST_KEY, []);
+    seminarRepo.clearSeminars();
 
     // 60일 초과된 오래된 세미나 (2026-05-01)
     const oldSeminarDetail: SeminarDetail = {
@@ -132,7 +133,7 @@ async function runTests(): Promise<void> {
     };
 
     updateStoredSeminarFromDetail(oldSeminarDetail);
-    const listAfterOld = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY) || [];
+    const listAfterOld = seminarRepo.getAllSeminars();
     assert.strictEqual(listAfterOld.length, 0, '60일 초과된 오래된 세미나는 seminar_list에 저장되지 않아야 함');
 
     // 최근 세미나 (2026-08-20)
@@ -145,7 +146,7 @@ async function runTests(): Promise<void> {
     };
 
     updateStoredSeminarFromDetail(recentSeminarDetail);
-    const listAfterRecent = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY) || [];
+    const listAfterRecent = seminarRepo.getAllSeminars();
     assert.strictEqual(listAfterRecent.length, 1, '최근 세미나는 seminar_list에 저장되어야 함');
     assert.strictEqual(listAfterRecent[0].seminarId, '2002');
     console.log('  ✓ [Pass] updateStoredSeminarFromDetail 60일 초과 세미나 저장 방지 및 최근 세미나 저장 검증 완료');
@@ -154,7 +155,7 @@ async function runTests(): Promise<void> {
   } finally {
     clearNoticeCooldowns();
     if (originalSeminarList !== undefined) {
-      storage.set(SEMINAR_LIST_KEY, originalSeminarList);
+      seminarRepo.setAllSeminars(originalSeminarList);
     }
   }
 }

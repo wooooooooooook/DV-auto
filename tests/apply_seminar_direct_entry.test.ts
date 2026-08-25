@@ -1,9 +1,10 @@
 import assert from 'node:assert';
 import { chromium } from 'playwright';
-import { run as runApplySeminar, SEMINAR_LIST_KEY } from '../src/tasks/apply_seminar';
+import { run as runApplySeminar } from '../src/tasks/apply_seminar';
 import * as seminarApiModule from '../src/modules/seminar_api';
 import * as utilsModule from '../src/modules/utils';
 import * as checkSeminarPointModule from '../src/tasks/check_seminar_point';
+import * as seminarRepo from '../src/services/seminar_repository';
 import * as storage from '../src/services/storage';
 import { ProcessState } from '../src/modules/seminar_api';
 import fs from 'fs';
@@ -106,7 +107,7 @@ async function runAllTests() {
     // ① API 결과에 신청 대상이 없으면 Playwright 호출이 발생하지 않음
     // ======================================================================
     console.log('--- [Test ①] 신청 대상 없으면 Playwright 미호출 ---');
-    storage.set(SEMINAR_LIST_KEY, []);
+    seminarRepo.clearSeminars();
     browserLaunchCount = 0;
     safeGotoUrls.length = 0;
 
@@ -131,7 +132,7 @@ async function runAllTests() {
     // ② 신청 대상 1개면 API 실패 시 Playwright 폴백으로 해당 상세 URL로 직접 진입함
     // ======================================================================
     console.log('--- [Test ②] 신청 대상 1개 → API 실패 시 Playwright 폴백으로 해당 상세 URL 진입 ---');
-    storage.set(SEMINAR_LIST_KEY, []);
+    seminarRepo.clearSeminars();
     browserLaunchCount = 0;
     safeGotoUrls.length = 0;
 
@@ -187,7 +188,7 @@ async function runAllTests() {
     // ③ 신청 대상 여러 개면 각 상세 URL로 직접 진입함
     // ======================================================================
     console.log('--- [Test ③] 신청 대상 여러 개 → API 실패 시 각 상세 URL로 폴백 진입 ---');
-    storage.set(SEMINAR_LIST_KEY, []);
+    seminarRepo.clearSeminars();
     browserLaunchCount = 0;
     safeGotoUrls.length = 0;
 
@@ -245,7 +246,7 @@ async function runAllTests() {
     // ④ 신청 완료된 processState 세미나는 Playwright 대상에서 제외됨
     // ======================================================================
     console.log('--- [Test ④] 신청 완료 processState는 Playwright 대상 제외 ---');
-    storage.set(SEMINAR_LIST_KEY, []);
+    seminarRepo.clearSeminars();
     browserLaunchCount = 0;
     safeGotoUrls.length = 0;
 
@@ -313,7 +314,7 @@ async function runAllTests() {
     // ⑥ seminarId 추출 실패 시 정상 종료가 아닌 명확한 오류(success: false) 반환
     // ======================================================================
     console.log('--- [Test ⑥] seminarId 추출 실패 시 명확한 오류 반환 ---');
-    storage.set(SEMINAR_LIST_KEY, []);
+    seminarRepo.clearSeminars();
     browserLaunchCount = 0;
     safeGotoUrls.length = 0;
     sentMessages.length = 0;

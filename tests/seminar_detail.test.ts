@@ -15,7 +15,8 @@ import {
 } from '../src/tasks/seminar_detail';
 import { ProcessState, SurveyState } from '../src/modules/seminar_api';
 import * as storage from '../src/services/storage';
-import { SEMINAR_LIST_KEY, type SeminarListItem } from '../src/tasks/apply_seminar';
+import * as seminarRepo from '../src/services/seminar_repository';
+import type { SeminarListItem } from '../src/tasks/apply_seminar';
 import * as httpClient from '../src/modules/http_client';
 import { createSeminarDetailHandler } from '../src/services/telegram';
 import type { Context } from 'telegraf';
@@ -364,9 +365,9 @@ export async function runTests() {
 
   // Case 7: updateStoredSeminarFromDetail 신규 세미나 추가 검증
   console.log('\n--- Case 7: updateStoredSeminarFromDetail 신규 세미나 추가 검증 ---');
-  const backupList = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
+  const backupList = seminarRepo.getAllSeminars();
   try {
-    storage.set(SEMINAR_LIST_KEY, []); // 초기화
+    seminarRepo.clearSeminars(); // 초기화
     const updated1 = updateStoredSeminarFromDetail(mock5574Detail, mock5574Raw);
     assert(updated1.length === 1, '리스트에 1개 추가됨');
     assert(updated1[0].seminarId === '5574', '추가된 세미나 ID 5574');
@@ -374,13 +375,16 @@ export async function runTests() {
 
     const updated2 = updateStoredSeminarFromDetail(mock5572Detail, mock5572Raw);
     assert(updated2.length === 2, '리스트에 2개 추가됨');
-    assert(updated2[1].seminarId === '5572', '추가된 세미나 ID 5572');
+    assert(
+      updated2.some((s) => s.seminarId === '5572'),
+      '추가된 세미나 ID 5572',
+    );
     console.log('  ✓ [Pass] updateStoredSeminarFromDetail 신규 세미나 추가 검증 성공');
 
     // Case 8: updateStoredSeminarFromDetail 기존 세미나 정보 갱신 및 포인트 상태 보존 검증
     console.log('\n--- Case 8: updateStoredSeminarFromDetail 기존 세미나 merge 검증 ---');
     // 세미나 5574에 이미 포인트 지급 완료 정보가 있는 상태로 설정
-    storage.set(SEMINAR_LIST_KEY, [
+    seminarRepo.setAllSeminars([
       {
         seminarId: '5574',
         name: '구 세미나명',
@@ -415,7 +419,7 @@ export async function runTests() {
 
     // Case 9: run() 실행 시 리스트 자동 업데이트 통합 검증
     console.log('\n--- Case 9: run() 실행 시 리스트 자동 업데이트 통합 검증 ---');
-    storage.set(SEMINAR_LIST_KEY, []);
+    seminarRepo.clearSeminars();
     const originalHttpGetJson = httpClient.httpGetJson;
     (httpClient as any).httpGetJson = async (url: string) => {
       if (url.includes('5574')) {
@@ -427,7 +431,7 @@ export async function runTests() {
     try {
       const runResult = await run({ args: { seminarId: '5574' } });
       assert(runResult.success === true, 'run() 실행 성공');
-      const listAfterRun = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
+      const listAfterRun = seminarRepo.getAllSeminars();
       assert(listAfterRun.length === 1, 'run() 실행 후 리스트에 1개 항목 등록됨');
       assert(listAfterRun[0].seminarId === '5574', '등록된 항목 ID가 5574여야 함');
       console.log('  ✓ [Pass] run() 실행 시 리스트 자동 업데이트 통합 검증 성공');
@@ -453,7 +457,7 @@ export async function runTests() {
 
     // Case 11: 복수 세미나 ID 조회 시 run() 실행 및 다중 세미나 리스트 업데이트 통합 검증
     console.log('\n--- Case 11: 복수 세미나 ID 조회 시 run() 통합 검증 ---');
-    storage.set(SEMINAR_LIST_KEY, []);
+    seminarRepo.clearSeminars();
     (httpClient as any).httpGetJson = async (url: string) => {
       if (url.includes('5574')) return mock5574Raw;
       if (url.includes('5572')) return mock5572Raw;
@@ -468,7 +472,7 @@ export async function runTests() {
       assert(multiRunResult.results?.[0]?.seminarId === '5574', '첫번째 결과 5574');
       assert(multiRunResult.results?.[1]?.seminarId === '5572', '두번째 결과 5572');
 
-      const listAfterMultiRun = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
+      const listAfterMultiRun = seminarRepo.getAllSeminars();
       assert(listAfterMultiRun.length === 2, '복수 조회 후 리스트에 2개 항목 모두 등록됨');
       const idsInStorage = listAfterMultiRun.map((s) => s.seminarId).sort();
       assert(idsInStorage.join(',') === '5572,5574', '저장된 세미나 ID 목록 일치');
@@ -495,7 +499,7 @@ export async function runTests() {
       point: 3000,
       pointText: '3,000P',
     };
-    storage.set(SEMINAR_LIST_KEY, [mockStoredItem]);
+    seminarRepo.setAllSeminars([mockStoredItem]);
 
     let apiCalled = false;
     (httpClient as any).httpGetJson = async () => {
@@ -648,7 +652,7 @@ export async function runTests() {
       nightTime: false,
       isAdvancedSurvey: false,
     };
-    storage.set(SEMINAR_LIST_KEY, [mockAdminStoredItem, mockNoticeStoredItem]);
+    seminarRepo.setAllSeminars([mockAdminStoredItem, mockNoticeStoredItem]);
 
     const adminApiState = { called: false };
     (httpClient as any).httpGetJson = async (url: string) => {
@@ -722,7 +726,7 @@ export async function runTests() {
       (httpClient as any).httpGetJson = originalHttpGetJson;
     }
   } finally {
-    storage.set(SEMINAR_LIST_KEY, backupList);
+    seminarRepo.setAllSeminars(backupList);
   }
 
   console.log('\n🎉 모든 seminar_detail 단위 테스트 성공!\n');

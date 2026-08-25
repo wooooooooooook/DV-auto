@@ -20,6 +20,7 @@ import {
   type FutureSeminarApiItem,
 } from '../modules/seminar_api';
 import { processSeminarQuiz } from './seminar_quiz';
+import * as seminarRepo from '../services/seminar_repository';
 import * as storage from '../services/storage';
 import { SEMINAR_LIST_KEY, type SeminarListItem } from './apply_seminar';
 
@@ -118,7 +119,7 @@ export async function getTodaysSeminarsFromApi(
     };
   }
 
-  const storedList = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
+  const storedList = seminarRepo.getAllSeminars();
   const storedPointExcludedMap = new Map<string, boolean>();
   for (const s of storedList) {
     const sid = s.seminarId ? String(s.seminarId).trim() : '';

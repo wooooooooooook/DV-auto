@@ -8,6 +8,7 @@ import {
   SurveyState,
 } from '../modules/seminar_api';
 import { SEMINAR_LIST_KEY, mergeSeminar, type SeminarListItem } from './apply_seminar';
+import * as seminarRepo from '../services/seminar_repository';
 import * as storage from '../services/storage';
 import { getSeminarIdFromUrl } from '../modules/utils';
 
@@ -247,7 +248,6 @@ export function isSeminarExpired(
 }
 
 export function updateStoredSeminarFromDetail(data: SeminarDetail, raw?: SeminarDetailResponse): SeminarListItem[] {
-  const currentList = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
   const sid = String(data.seminarId);
   const incoming = convertDetailToSeminarListItem(data, raw);
   const referenceDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
@@ -255,41 +255,15 @@ export function updateStoredSeminarFromDetail(data: SeminarDetail, raw?: Seminar
   // 60일 이상 지난 과거 세미나는 새로 추가하지 않음
   const isIncomingExpired = isSeminarExpired(incoming.date || data.startDt, referenceDate);
 
-  let found = false;
-  const updatedList: SeminarListItem[] = [];
-
-  for (const item of currentList) {
-    const itemId = item.seminarId || getSeminarIdFromUrl(item.url);
-    if (itemId && itemId === sid) {
-      found = true;
-      if (!isIncomingExpired) {
-        updatedList.push(
-          mergeSeminar(item, {
-            ...incoming,
-            detectedDate: item.detectedDate || incoming.detectedDate,
-            detectedAt: item.detectedAt || incoming.detectedAt,
-          }),
-        );
-      }
-    } else {
-      // 기존 목록에서도 60일 지난 세미나 정리
-      if (!isSeminarExpired(item.date, referenceDate)) {
-        updatedList.push(item);
-      }
-    }
-  }
-
-  if (!found && !isIncomingExpired) {
-    updatedList.push(incoming);
-  }
-
-  storage.set(SEMINAR_LIST_KEY, updatedList);
-  if (isIncomingExpired) {
-    logger.info(`세미나 ${sid}는 60일 이상 지난 세미나이므로 seminar_list에 저장하지 않았습니다.`);
-  } else {
+  if (!isIncomingExpired) {
+    seminarRepo.upsertSeminar(incoming);
     logger.info(`Updated seminar_list with seminar ${sid} from detail inquiry`);
+  } else {
+    logger.info(`세미나 ${sid}는 60일 이상 지난 세미나이므로 seminar_list에 저장하지 않았습니다.`);
   }
-  return updatedList;
+
+  seminarRepo.deleteExpiredSeminars(referenceDate);
+  return seminarRepo.getAllSeminars();
 }
 
 export async function fetchSeminarDetail(
@@ -529,11 +503,7 @@ export interface SeminarDetailRunResult {
 }
 
 export function getStoredSeminar(seminarId: string): SeminarListItem | null {
-  const currentList = storage.get<SeminarListItem[]>(SEMINAR_LIST_KEY, []) || [];
-  const found = currentList.find((item) => {
-    const sid = item.seminarId || getSeminarIdFromUrl(item.url);
-    return sid === seminarId;
-  });
+  const found = seminarRepo.getSeminarById(seminarId);
   if (found && found.name) {
     return found;
   }
