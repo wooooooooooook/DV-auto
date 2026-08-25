@@ -9,6 +9,7 @@ import {
 import * as seminarApiModule from '../src/modules/seminar_api';
 import * as utilsModule from '../src/modules/utils';
 import * as monitorSeminarsModule from '../src/tasks/monitor_seminars';
+import * as seminarQuizModule from '../src/tasks/seminar_quiz';
 
 async function runTests() {
   console.log('===========================================================');
@@ -678,17 +679,17 @@ async function runTests() {
   // 신청 실패 세미나는 status !== '입장하기' 이므로 자동입장(checkAndPerformAutoEnter) 시도가 생략되어야 함
   assert.strictEqual(test7AutoEnterCalled, false, '신청 실패 세미나는 자동입장 시도를 하지 않아야 함');
 
-  // 종료 공지가 설문/퀴즈 처리(PLAYWRIGHT:NEW_PAGE)보다 먼저 발송되었는지 순서 검증
+  // 설문/퀴즈 처리(PLAYWRIGHT:NEW_PAGE)가 종료 공지보다 먼저 실행되었는지 순서 검증
   const channelEndIndex = test7Events.findIndex((e) => e.includes('CHANNEL:🔴세미나종료'));
   const playwrightSurveyIndex = test7Events.findIndex((e) => e === 'PLAYWRIGHT:NEW_PAGE');
   assert(channelEndIndex >= 0, '🔴세미나종료 이벤트가 존재해야 함');
   assert(playwrightSurveyIndex >= 0, '설문 처리 브라우저 생성이 존재해야 함');
   assert(
-    channelEndIndex < playwrightSurveyIndex,
-    `🔴세미나종료 공지(${channelEndIndex})가 설문 처리 브라우저 실행(${playwrightSurveyIndex})보다 먼저여야 함`,
+    playwrightSurveyIndex < channelEndIndex,
+    `설문 처리 브라우저 실행(${playwrightSurveyIndex})이 🔴세미나종료 공지(${channelEndIndex})보다 먼저여야 함`,
   );
 
-  console.log('  ✓ 신청 실패 세미나 공지 발송 및 종료 공지 선발송 순서 검증 완료!\n');
+  console.log('  ✓ 신청 실패 세미나 공지 발송 및 설문/퀴즈 후 종료 공지 발송 순서 검증 완료!\n');
 
   // ── Test 8: 감시 중 API 목록에서 사라진 세미나 정리 검증 ──────────────
   console.log('--- [Test 8] 감시 중 API 목록에서 사라진 세미나 정리 검증 ---');
@@ -764,7 +765,94 @@ async function runTests() {
 
   console.log('  ✓ 감시 중 API 목록에서 사라진 세미나 정리 검증 완료!\n');
 
+  // ── Test 9: 세미나 종료 알림에 퀴즈 정답(quizResultMessage) 포함 검증 ──
+  console.log('--- [Test 9] 세미나 종료 알림에 퀴즈 정답(quizResultMessage) 포함 검증 ---');
+
+  const test9ChannelMessages: string[] = [];
+  (utilsModule as unknown as { sendNotificationToChannel: unknown }).sendNotificationToChannel = async (
+    msg: string,
+  ) => {
+    test9ChannelMessages.push(msg);
+    return true;
+  };
+
+  const originalProcessSeminarQuiz = seminarQuizModule.processSeminarQuiz;
+  (seminarQuizModule as unknown as { processSeminarQuiz: unknown }).processSeminarQuiz = async () => ({
+    success: true,
+    hasQuizResult: true,
+    message: 'Q1. 당뇨병 치료제는? 1번\nQ2. 적정 혈당 수치는? 2번',
+  });
+
+  let test9Step = 0;
+  (seminarApiModule as unknown as { fetchMainFutureSeminars: unknown }).fetchMainFutureSeminars = async () => {
+    test9Step++;
+    const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+    const currentH = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' })).getHours();
+
+    return {
+      success: true,
+      items: [
+        {
+          seminarId: 9905,
+          seminarNm: '퀴즈 정답 포함 테스트 세미나',
+          startDt: `${todayStr} ${String(currentH).padStart(2, '0')}:00:00`,
+          endDt: `${todayStr} ${String(currentH + 1).padStart(2, '0')}:00:00`,
+          useSurvey: 'Y',
+          useDepthSurvey: 'N',
+          survey: { point: 1000 },
+          processState: 1, // 입장 가능
+        },
+      ],
+      rawResponse: {},
+    };
+  };
+
+  (seminarApiModule as unknown as { fetchSeminarDetail: unknown }).fetchSeminarDetail = async (id: number | string) => {
+    const sid = String(id);
+    if (sid === '9905') {
+      if (test9Step < 2) {
+        return {
+          success: true,
+          seminarId: sid,
+          survey: { point: 1000 },
+          surveyState: 5,
+          isPointExcluded: false,
+          rawResponse: { surveyState: 5, seminarDetail: { processState: 1 } },
+        };
+      } else {
+        // 종료 및 설문 오픈
+        return {
+          success: true,
+          seminarId: sid,
+          survey: { point: 1000 },
+          surveyState: 1,
+          isPointExcluded: false,
+          rawResponse: { surveyState: 1, seminarDetail: { processState: 7 } },
+        };
+      }
+    }
+    return { success: false, seminarId: sid, isAuthExpired: false, errorMessage: 'not found' };
+  };
+
+  const test9Success = await monitorSeminars('테스트퀴즈정답', currentHour, currentHour + 2, {
+    pollIntervalMs: 10,
+    context: test7MockContext,
+  });
+
+  assert.strictEqual(test9Success, true);
+  const endNotificationWithQuiz = test9ChannelMessages.find(
+    (m) => m.includes('🔴세미나종료') && m.includes('퀴즈 정답 포함 테스트 세미나'),
+  );
+  assert(endNotificationWithQuiz, '🔴세미나종료 공지가 발송되어야 함');
+  assert(
+    endNotificationWithQuiz.includes('Q1. 당뇨병 치료제는? 1번\nQ2. 적정 혈당 수치는? 2번'),
+    '🔴세미나종료 공지에 퀴즈 결과 메시지가 포함되어야 함',
+  );
+
+  console.log('  ✓ 세미나 종료 알림에 퀴즈 정답 포함 검증 완료!\n');
+
   // Clean up mocks
+  (seminarQuizModule as unknown as { processSeminarQuiz: unknown }).processSeminarQuiz = originalProcessSeminarQuiz;
   (seminarApiModule as unknown as { fetchMainFutureSeminars: unknown }).fetchMainFutureSeminars =
     originalFetchMainFuture;
   (seminarApiModule as unknown as { fetchSeminarDetail: unknown }).fetchSeminarDetail = originalFetchSeminarDetail;

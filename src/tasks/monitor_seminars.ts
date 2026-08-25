@@ -828,17 +828,12 @@ async function monitorSeminars(
                 await sendNotificationToChannel(startMsg);
               }
 
-              // 🔴 종료 공지 먼저 발송
-              if (monitoredInfo.hasSurvey !== false || endCheck.isSurveyOpen) {
-                const advancedSurveySuffix = monitoredInfo.isAdvancedSurvey ? ' [심화설문]' : '';
-                const endMsg = `🔴세미나종료\n**${name}**${advancedSurveySuffix}\n${targetUrl}`;
-                await sendNotificationToChannel(endMsg);
-              }
-
-              // 그 후 설문/퀴즈 처리 (포인트 미지급이 아닌 경우)
+              // 1. 먼저 설문 및 퀴즈 처리 (포인트 미지급이 아닌 경우)
+              let quizResultMessage: string | null = null;
+              let foundSurveyButton = false;
               if (!monitoredInfo.isSurveyPointExcluded && !endCheck.isPointExcluded) {
                 await withBrowserContext(providedContext, async (ctx) => {
-                  await handleSeminarEndAndQuiz(
+                  const res = await handleSeminarEndAndQuiz(
                     ctx,
                     {
                       name,
@@ -847,7 +842,17 @@ async function monitorSeminars(
                     },
                     url,
                   );
+                  quizResultMessage = res.message;
+                  foundSurveyButton = res.foundSurveyButton;
                 });
+              }
+
+              // 2. 설문/퀴즈 완료 후 🔴 종료 공지 발송 (퀴즈 정답 포함)
+              if (monitoredInfo.hasSurvey !== false || foundSurveyButton || endCheck.isSurveyOpen) {
+                const quizSuffix = quizResultMessage ? `\n\n${quizResultMessage}` : '';
+                const advancedSurveySuffix = monitoredInfo.isAdvancedSurvey ? ' [심화설문]' : '';
+                const endMsg = `🔴세미나종료\n**${name}**${advancedSurveySuffix}\n${targetUrl}${quizSuffix}`;
+                await sendNotificationToChannel(endMsg);
               }
             } else {
               console.log(
@@ -881,20 +886,12 @@ async function monitorSeminars(
               `[${periodName}] 세미나 종료 감지됨: ${name} (${seminarId}), isSurveyOpen=${endCheck.isSurveyOpen}`,
             );
 
-            // 1) 🔴 세미나 종료 공지를 먼저 채널로 즉시 발송
-            if (mergedSeminarInfo.hasSurvey !== false || endCheck.isSurveyOpen) {
-              const advancedSurveySuffix = mergedSeminarInfo.isAdvancedSurvey ? ' [심화설문]' : '';
-              const message = `🔴세미나종료\n**${mergedSeminarInfo.name}**${advancedSurveySuffix}\n${targetUrl}`;
-              await sendNotificationToChannel(message);
-            } else {
-              console.log(
-                `[monitor_seminars] Skipping end notification for ${mergedSeminarInfo.name} because it has no survey.`,
-              );
-            }
+            // 1) Playwright 온디맨드로 설문 및 퀴즈 처리
+            let quizResultMessage: string | null = null;
+            let foundSurveyButton = false;
 
-            // 2) 그 후 Playwright 온디맨드로 설문 및 퀴즈 처리
             await withBrowserContext(providedContext, async (ctx) => {
-              await handleSeminarEndAndQuiz(
+              const res = await handleSeminarEndAndQuiz(
                 ctx,
                 {
                   name: mergedSeminarInfo.name,
@@ -903,7 +900,21 @@ async function monitorSeminars(
                 },
                 url,
               );
+              quizResultMessage = res.message;
+              foundSurveyButton = res.foundSurveyButton;
             });
+
+            // 2) 설문/퀴즈 완료 후 🔴 세미나 종료 공지 발송 (퀴즈 정답 포함)
+            if (mergedSeminarInfo.hasSurvey !== false || foundSurveyButton || endCheck.isSurveyOpen) {
+              const quizSuffix = quizResultMessage ? `\n\n${quizResultMessage}` : '';
+              const advancedSurveySuffix = mergedSeminarInfo.isAdvancedSurvey ? ' [심화설문]' : '';
+              const message = `🔴세미나종료\n**${mergedSeminarInfo.name}**${advancedSurveySuffix}\n${targetUrl}${quizSuffix}`;
+              await sendNotificationToChannel(message);
+            } else {
+              console.log(
+                `[monitor_seminars] Skipping end notification for ${mergedSeminarInfo.name} because it has no survey.`,
+              );
+            }
 
             delete monitoringList[url];
             continue;
