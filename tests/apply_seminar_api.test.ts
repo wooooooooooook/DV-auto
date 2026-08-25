@@ -1,12 +1,10 @@
 import assert from 'node:assert';
-import * as seminarApiModule from '../src/modules/seminar_api';
 import * as httpClientModule from '../src/modules/http_client';
 import {
   getRequiredTermsOptionIds,
   submitSeminarTermsAgree,
   applySeminarApi,
   applySeminarWithTerms,
-  isAppliedSeminar,
   ProcessState,
   type TermsInfo,
 } from '../src/modules/seminar_api';

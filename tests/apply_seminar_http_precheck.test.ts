@@ -47,6 +47,24 @@ async function testApplySeminarHttpPrecheck() {
     points: new Map(),
   });
 
+  (seminarApiModule as unknown as { fetchSeminarDetail: unknown }).fetchSeminarDetail = async (
+    id: number | string,
+  ) => ({
+    success: true,
+    isPointExcluded: false,
+    rawResponse: {
+      seminarDetail: {
+        seminarId: Number(id),
+        seminarNm: `세미나 ${id}`,
+        intro: '',
+        applyCnt: 10,
+        maxPeopleCnt: 100,
+        useDepthSurvey: false,
+        processState: 2,
+      },
+    },
+  });
+
   let safeGotoCallCount = 0;
   let browserLaunchCount = 0;
   const safeGotoUrls: string[] = [];

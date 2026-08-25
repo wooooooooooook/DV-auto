@@ -23,7 +23,6 @@ import {
   fetchSeminarDetail,
   parseSeminarDateTime,
   checkIsAdvancedSurvey,
-  checkIsPointExcluded,
 } from '../modules/seminar_api';
 
 const QUIZ_LIST_URLS = [
@@ -212,7 +211,7 @@ function cleanBrackets(text: string): string {
 /**
  * 문제 텍스트를 검색용으로 정규화합니다.
  */
-function normalizeQuestionText(text: string): string {
+function _normalizeQuestionText(text: string): string {
   return cleanBrackets(text)
     .replace(/[^가-힣a-zA-Z0-9]/g, '')
     .trim();
@@ -741,7 +740,9 @@ async function collectTodaySeminarMessage(
             pointExcludedCache.set(pointExcludedKey, detailRes.isPointExcluded);
             continue;
           }
-        } catch (_e) {}
+        } catch (_e) {
+          // ignore
+        }
         const httpLink = 'https://www.doctorville.co.kr/seminar/seminarDetail?seminarId=' + item.seminarId;
         uncachedSeminarItems.push({ link: httpLink, cacheKey: pointExcludedKey });
       } else {
@@ -1076,10 +1077,13 @@ async function run({ page, args }: Partial<PlaywrightRunArgs> = {}, taskOptions?
       });
 
       if (updatedMissingPointFlag) {
-        const currentSeminarsInList = storage.get<any[]>(SEMINAR_LIST_KEY) || [];
-        const updatedNewSeminarsMap = new Map(storedNewSeminars.map((s) => [s.seminarId || s.url, s]));
+        const currentSeminarsInList =
+          storage.get<Array<{ url: string; seminarId?: string | number | null; isPointExcluded?: boolean }>>(
+            SEMINAR_LIST_KEY,
+          ) || [];
+        const updatedNewSeminarsMap = new Map(storedNewSeminars.map((s) => [String(s.seminarId || s.url), s]));
         const updatedList = currentSeminarsInList.map((s) => {
-          const key = s.seminarId || s.url;
+          const key = String(s.seminarId || s.url);
           const updatedNew = updatedNewSeminarsMap.get(key);
           if (updatedNew) {
             return {

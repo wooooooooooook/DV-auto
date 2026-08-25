@@ -1,6 +1,6 @@
 import { sendTelegram } from '../modules/utils';
 import type { TaskContext, TaskResult } from '../types';
-import { httpGetJson, httpPostForm, sendDoctorVilleRequest } from '../modules/http_client';
+import { httpPostForm, sendDoctorVilleRequest } from '../modules/http_client';
 import { parseRecentSeminarPointRowsHtml } from '../modules/html_parser';
 import * as logger from '../services/logger';
 

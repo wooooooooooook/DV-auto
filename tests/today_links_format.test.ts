@@ -1,5 +1,11 @@
 import assert from 'node:assert';
-import { formatTodayLinksBroadcast, type TodayLinksFormatInput } from '../src/tasks/today_links';
+import {
+  formatTodayLinksBroadcast,
+  getTodayDateStrings,
+  getYesterdayAddedSeminars,
+  type TodayLinksFormatInput,
+} from '../src/tasks/today_links';
+import * as storage from '../src/services/storage';
 
 /**
  * 사용자가 제공한 예시 문구를 바탕으로 구성한 테스트 케이스
@@ -161,8 +167,6 @@ function testTodayLinksFormatWithUserExample() {
 function testDateParsingAndCustomDateFormat() {
   console.log('--- [Test] 날짜 파싱 및 지정 날짜 포맷팅 테스트 시작 ---\n');
 
-  const { getTodayDateStrings } = require('../src/tasks/today_links');
-
   // 1. 기본 오늘
   const todayResult = getTodayDateStrings();
   assert.strictEqual(todayResult.isCustomDate, false);
@@ -222,10 +226,7 @@ function testDateParsingAndCustomDateFormat() {
  * - legacy new_seminars 키 없이도 정상 동작
  */
 function testYesterdayAddedSeminarsFilter() {
-  console.log('--- [Test] 신규 세미나 필터링: detectedDate 기준 전날만 포함 ---\\n');
-
-  const { getYesterdayAddedSeminars } = require('../src/tasks/today_links');
-  const storage = require('../src/services/storage');
+  console.log('--- [Test] 신규 세미나 필터링: detectedDate 기준 전날만 포함 ---\n');
 
   // 테스트용 목 데이터 저장
   const todayIso = '2026-08-18';

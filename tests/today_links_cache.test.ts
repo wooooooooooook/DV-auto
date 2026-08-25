@@ -8,7 +8,7 @@ import {
   formatTodayLinksBroadcast,
 } from '../src/tasks/today_links';
 import { setBot } from '../src/services/bot_instance';
-import type { Telegraf, Context } from 'telegraf';
+import type { Telegraf } from 'telegraf';
 
 async function runTests(): Promise<void> {
   console.log('=== [Test] today_links 캐시 및 공지봇 전용 핸들러 테스트 시작 ===\n');

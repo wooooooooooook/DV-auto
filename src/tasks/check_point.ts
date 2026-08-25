@@ -1,5 +1,5 @@
 import type { TaskContext, TaskResult } from '../types';
-import { httpGetJson, sendDoctorVilleRequest } from '../modules/http_client';
+import { sendDoctorVilleRequest } from '../modules/http_client';
 import { sendTelegram } from '../modules/utils';
 import * as logger from '../services/logger';
 

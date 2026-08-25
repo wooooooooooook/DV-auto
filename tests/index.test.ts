@@ -2,11 +2,17 @@ import { execSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 
+process.env.NODE_ENV = 'test';
+const testDbPath = path.join(__dirname, '..', 'data', 'test_runner.db');
+process.env.SQLITE_DB_PATH = testDbPath;
+
 console.log('===========================================================');
 console.log('  전체 단위/통합 테스트 실행 시작');
+console.log(`  (테스트 DB 경로: ${testDbPath})`);
 console.log('===========================================================\n');
 
 const testFiles = [
+  'storage_sqlite.test.ts',
   'seminar_api.test.ts',
   'seminar_detail.test.ts',
   'monitor_seminars_api.test.ts',
@@ -40,6 +46,11 @@ for (const file of testFiles) {
     execSync(`pnpm exec ts-node "${filePath}"`, {
       stdio: 'inherit',
       cwd: path.resolve(__dirname, '..'),
+      env: {
+        ...process.env,
+        NODE_ENV: 'test',
+        SQLITE_DB_PATH: testDbPath,
+      },
     });
   } catch (_e) {
     console.error(`❌ [Failed] ${file}`);
