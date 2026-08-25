@@ -1,6 +1,11 @@
 import assert from 'node:assert';
 import type { BrowserContext, Page } from 'playwright';
-import { getTodaysSeminarsFromApi, checkSeminarEndStatusFromApi, monitorSeminars } from '../src/tasks/monitor_seminars';
+import {
+  getTodaysSeminarsFromApi,
+  checkSeminarEndStatusFromApi,
+  monitorSeminars,
+  isSeminarStartedByTime,
+} from '../src/tasks/monitor_seminars';
 import * as seminarApiModule from '../src/modules/seminar_api';
 import * as utilsModule from '../src/modules/utils';
 import * as monitorSeminarsModule from '../src/tasks/monitor_seminars';
@@ -80,16 +85,31 @@ async function runTests() {
   assert.strictEqual(sem5566.isAdvancedSurvey, false);
   assert.strictEqual(sem5566.isSurveyPointExcluded, false);
 
-  // 저녁 시간대 (17시 ~ 22시) 조회
+  // 저녁 시간대 (17시 ~ 22시) 조회 (저장소에 없는 경우 기본 false)
   const dinnerRes = await getTodaysSeminarsFromApi(17, 22, '2026-08-24');
   assert.strictEqual(dinnerRes.success, true);
   const dinnerKeys = Object.keys(dinnerRes.seminars);
   assert.strictEqual(dinnerKeys.length, 1, '2026-08-24 저녁 세미나는 1건이어야 함 (5538)');
   const sem5538 = Object.values(dinnerRes.seminars)[0];
   assert.strictEqual(sem5538.seminarId, '5538');
-  assert.strictEqual(sem5538.isSurveyPointExcluded, false, '메인 목록 API 아이템은 상세 조회 전까지 기본 false');
+  assert.strictEqual(sem5538.isSurveyPointExcluded, false, '저장소에 없는 메인 목록 API 아이템은 기본 false');
 
-  console.log('  ✓ getTodaysSeminarsFromApi: 날짜/시간대 필터링 및 상태/플래그 판정 검증 완료\n');
+  // 저장소(SEMINAR_LIST_KEY)에 isPointExcluded: true로 기저장된 경우 우선 참조 검증
+  const storageModule = await import('../src/services/storage');
+  const { SEMINAR_LIST_KEY } = await import('../src/tasks/apply_seminar');
+  storageModule.set(SEMINAR_LIST_KEY, [
+    { seminarId: '5538', name: '저녁 포인트 미지급 세미나', url: '', isPointExcluded: true, isAdvancedSurvey: false },
+  ]);
+  const dinnerResWithStorage = await getTodaysSeminarsFromApi(17, 22, '2026-08-24');
+  const sem5538Stored = Object.values(dinnerResWithStorage.seminars)[0];
+  assert.strictEqual(
+    sem5538Stored.isSurveyPointExcluded,
+    true,
+    '저장소에 저장된 isPointExcluded=true 값을 우선 반영해야 함',
+  );
+  storageModule.deleteKey(SEMINAR_LIST_KEY);
+
+  console.log('  ✓ getTodaysSeminarsFromApi: 날짜/시간대 필터링 및 저장소 기반 isPointExcluded 판정 검증 완료\n');
 
   // ── Test 2: checkSeminarEndStatusFromApi 종료 및 설문 상태 판정 ─────
   console.log('--- [Test 2] checkSeminarEndStatusFromApi 종료 및 설문 상태 판정 검증 ---');
@@ -514,6 +534,235 @@ async function runTests() {
   assert.strictEqual(emptyChannelMessages.length, 0, '세미나가 없을 때 채널 알림을 전송하지 않아야 함');
 
   console.log('  ✓ 예정된 세미나가 없는 경우 알림 없이 종료 검증 완료!\n');
+
+  // ── Test 6: isSeminarStartedByTime 시간 판정 단위 검증 ────────────────
+  console.log('--- [Test 6] isSeminarStartedByTime 시간 판정 검증 ---');
+  const pastTime = '2026-08-24 12:00:00';
+  const futureTime = '2026-08-24 14:00:00';
+  const testNowMs = new Date('2026-08-24T13:00:00+09:00').getTime();
+
+  assert.strictEqual(isSeminarStartedByTime(pastTime, testNowMs), true, '과거 시간은 true');
+  assert.strictEqual(isSeminarStartedByTime(futureTime, testNowMs), false, '미래 시간은 false');
+  assert.strictEqual(isSeminarStartedByTime(undefined, testNowMs), false, 'undefined는 false');
+  console.log('  ✓ isSeminarStartedByTime 시간 판정 단위 검증 완료!\n');
+
+  // ── Test 7: 신청 실패(PROCESS_APPLY) 세미나 시작/종료 공지 발송 및 종료 공지 선발송 순서 검증 ──
+  console.log('--- [Test 7] 신청 실패 세미나 공지 발송 및 종료 공지 선발송 검증 ---');
+
+  const test7Events: string[] = [];
+  const test7ChannelMessages: string[] = [];
+  let test7AutoEnterCalled = false;
+
+  (utilsModule as unknown as { sendNotificationToChannel: unknown }).sendNotificationToChannel = async (
+    msg: string,
+  ) => {
+    test7Events.push(`CHANNEL:${msg.split('\n')[0]}`);
+    test7ChannelMessages.push(msg);
+    return true;
+  };
+
+  const test7MockPage = {
+    locator: (selector: string) => ({
+      first: () => ({
+        isVisible: async () => {
+          if (selector.includes('입장하기')) {
+            test7AutoEnterCalled = true;
+            return false;
+          }
+          return selector.includes('설문참여');
+        },
+        click: async () => {
+          test7Events.push('PLAYWRIGHT:CLICK_SURVEY');
+        },
+        isEnabled: async () => true,
+        count: async () => 1,
+        waitFor: async () => {},
+      }),
+      count: async () => 1,
+      waitFor: async () => {},
+    }),
+    getByRole: () => ({
+      first: () => ({
+        isVisible: async () => true,
+        click: async () => {},
+        waitFor: async () => {},
+      }),
+    }),
+    evaluate: async () => [],
+    on: () => {},
+    waitForEvent: async () => null,
+    waitForTimeout: async () => {},
+    waitForLoadState: async () => {},
+    screenshot: async () => {},
+    frames: () => [{ url: () => 'https://video.ibm.com/socialstream/123' }],
+    url: () => 'https://m.doctorville.co.kr/cme/seminar/attend?seminarId=9903',
+    close: async () => {},
+  } as unknown as Page;
+
+  const test7MockContext = {
+    newPage: async () => {
+      test7Events.push('PLAYWRIGHT:NEW_PAGE');
+      return test7MockPage;
+    },
+    waitForEvent: async () => null,
+    close: async () => {},
+  } as unknown as BrowserContext;
+
+  let test7Step = 0;
+  (seminarApiModule as unknown as { fetchMainFutureSeminars: unknown }).fetchMainFutureSeminars = async () => {
+    test7Step++;
+    const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+    const currentH = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' })).getHours();
+
+    return {
+      success: true,
+      items: [
+        {
+          seminarId: 9903,
+          seminarNm: '신청 실패 테스트 세미나',
+          startDt: `${todayStr} ${String(currentH).padStart(2, '0')}:00:00`,
+          endDt: `${todayStr} ${String(currentH + 1).padStart(2, '0')}:00:00`,
+          useSurvey: 'Y',
+          useDepthSurvey: 'N',
+          survey: { point: 1000 },
+          processState: 2, // 신청 실패/미신청 상태 (PROCESS_APPLY)
+        },
+      ],
+      rawResponse: {},
+    };
+  };
+
+  (seminarApiModule as unknown as { fetchSeminarDetail: unknown }).fetchSeminarDetail = async (id: number | string) => {
+    const sid = String(id);
+    if (sid === '9903') {
+      if (test7Step < 2) {
+        return {
+          success: true,
+          seminarId: sid,
+          survey: { point: 1000 },
+          surveyState: 5,
+          isPointExcluded: false,
+          rawResponse: { surveyState: 5, seminarDetail: { processState: 2 } },
+        };
+      } else {
+        // 종료
+        return {
+          success: true,
+          seminarId: sid,
+          survey: { point: 1000 },
+          surveyState: 1,
+          isPointExcluded: false,
+          rawResponse: { surveyState: 1, seminarDetail: { processState: 7 } },
+        };
+      }
+    }
+    return { success: false, seminarId: sid, isAuthExpired: false, errorMessage: 'not found' };
+  };
+
+  const test7Success = await monitorSeminars('테스트신청실패', currentHour, currentHour + 2, {
+    pollIntervalMs: 10,
+    context: test7MockContext,
+  });
+
+  assert.strictEqual(test7Success, true);
+  // 시작 공지 전송 확인
+  assert(
+    test7ChannelMessages.some((m) => m.includes('🟢세미나시작') && m.includes('신청 실패 테스트 세미나')),
+    '신청 실패 세미나도 🟢세미나시작 공지가 전송되어야 함',
+  );
+  // 종료 공지 전송 확인
+  assert(
+    test7ChannelMessages.some((m) => m.includes('🔴세미나종료') && m.includes('신청 실패 테스트 세미나')),
+    '신청 실패 세미나도 🔴세미나종료 공지가 전송되어야 함',
+  );
+  // 신청 실패 세미나는 status !== '입장하기' 이므로 자동입장(checkAndPerformAutoEnter) 시도가 생략되어야 함
+  assert.strictEqual(test7AutoEnterCalled, false, '신청 실패 세미나는 자동입장 시도를 하지 않아야 함');
+
+  // 종료 공지가 설문/퀴즈 처리(PLAYWRIGHT:NEW_PAGE)보다 먼저 발송되었는지 순서 검증
+  const channelEndIndex = test7Events.findIndex((e) => e.includes('CHANNEL:🔴세미나종료'));
+  const playwrightSurveyIndex = test7Events.findIndex((e) => e === 'PLAYWRIGHT:NEW_PAGE');
+  assert(channelEndIndex >= 0, '🔴세미나종료 이벤트가 존재해야 함');
+  assert(playwrightSurveyIndex >= 0, '설문 처리 브라우저 생성이 존재해야 함');
+  assert(
+    channelEndIndex < playwrightSurveyIndex,
+    `🔴세미나종료 공지(${channelEndIndex})가 설문 처리 브라우저 실행(${playwrightSurveyIndex})보다 먼저여야 함`,
+  );
+
+  console.log('  ✓ 신청 실패 세미나 공지 발송 및 종료 공지 선발송 순서 검증 완료!\n');
+
+  // ── Test 8: 감시 중 API 목록에서 사라진 세미나 정리 검증 ──────────────
+  console.log('--- [Test 8] 감시 중 API 목록에서 사라진 세미나 정리 검증 ---');
+
+  const test8ChannelMessages: string[] = [];
+  (utilsModule as unknown as { sendNotificationToChannel: unknown }).sendNotificationToChannel = async (
+    msg: string,
+  ) => {
+    test8ChannelMessages.push(msg);
+    return true;
+  };
+
+  let test8Step = 0;
+  (seminarApiModule as unknown as { fetchMainFutureSeminars: unknown }).fetchMainFutureSeminars = async () => {
+    test8Step++;
+    const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+    const currentH = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' })).getHours();
+
+    if (test8Step === 1) {
+      // Step 1: 세미나 9904가 목록에 존재 (미래 시간)
+      return {
+        success: true,
+        items: [
+          {
+            seminarId: 9904,
+            seminarNm: '사라진 세미나 테스트',
+            startDt: `${todayStr} ${String(currentH).padStart(2, '0')}:00:00`,
+            endDt: `${todayStr} ${String(currentH + 1).padStart(2, '0')}:00:00`,
+            useSurvey: 'Y',
+            useDepthSurvey: 'N',
+            survey: { point: 1000 },
+            processState: 2,
+          },
+        ],
+        rawResponse: {},
+      };
+    } else {
+      // Step 2: 세미나 9904가 목록에서 완전히 사라짐
+      return {
+        success: true,
+        items: [],
+        rawResponse: {},
+      };
+    }
+  };
+
+  (seminarApiModule as unknown as { fetchSeminarDetail: unknown }).fetchSeminarDetail = async (id: number | string) => {
+    const sid = String(id);
+    if (sid === '9904') {
+      // 상세 조회 시 세미나가 종료(processState: 7)된 상태로 확인됨
+      return {
+        success: true,
+        seminarId: sid,
+        survey: { point: 1000 },
+        surveyState: 1,
+        isPointExcluded: false,
+        rawResponse: { surveyState: 1, seminarDetail: { processState: 7 } },
+      };
+    }
+    return { success: false, seminarId: sid, isAuthExpired: false, errorMessage: 'not found' };
+  };
+
+  const test8Success = await monitorSeminars('테스트사라진세미나', currentHour, currentHour + 2, {
+    pollIntervalMs: 10,
+    context: test7MockContext,
+  });
+
+  assert.strictEqual(test8Success, true);
+  assert(
+    test8ChannelMessages.some((m) => m.includes('🔴세미나종료') && m.includes('사라진 세미나 테스트')),
+    '목록에서 사라진 세미나도 종료 감지되어 🔴세미나종료 공지가 전송되고 리스트에서 정상 정리되어야 함',
+  );
+
+  console.log('  ✓ 감시 중 API 목록에서 사라진 세미나 정리 검증 완료!\n');
 
   // Clean up mocks
   (seminarApiModule as unknown as { fetchMainFutureSeminars: unknown }).fetchMainFutureSeminars =
