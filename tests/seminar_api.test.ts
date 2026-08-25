@@ -25,6 +25,7 @@ async function testSeminarApiConversion() {
     seminarNm: '눈에서 시작하는 심혈관 위험 평가와 AI의 미래',
     startDt: '2026-08-24 13:00:00',
     endDt: '2026-08-24 14:00:00',
+    intro: '세미나 소개 문구',
     tutorNm: '홍길동',
     categoryCdNm: '내과',
     diseaseCategoryNm: '순환기',
@@ -58,21 +59,26 @@ async function testSeminarApiConversion() {
   assert.strictEqual(converted1.totalCount, '5000');
   assert.strictEqual(converted1.nightTime, false);
   assert.strictEqual(converted1.isAdvancedSurvey, true);
+  assert.strictEqual(converted1.isPointExcluded, false);
   assert.strictEqual(converted1.processState, 2);
   assert.strictEqual(converted1.cancelProcessState, -1);
   assert.strictEqual(converted1.seminarCompleted, 0);
 
   const raw1 = convertApiItemToRawSeminar(item1);
   assert.strictEqual(raw1.hasIcoApply, true);
+  assert.strictEqual(raw1.isPointExcluded, false);
   assert.strictEqual(raw1.processState, 2);
-  console.log('  ✓ [Pass] Case 1: 점심 세미나 변환 (심화설문, processState=2 -> hasIcoApply=true)');
+  console.log(
+    '  ✓ [Pass] Case 1: 점심 세미나 변환 (심화설문, processState=2 -> hasIcoApply=true, isPointExcluded=false)',
+  );
 
-  // Case 2: 미래 세미나(survey: null, useSurvey: 'Y')는 기본적으로 포인트 지급 세미나(false)로 판정
+  // Case 2: 미래 세미나 (intro 미지급 문구 없음) -> 포인트 지급 세미나(false)로 판정
   const item2: FutureSeminarApiItem = {
     seminarId: 5608,
     seminarNm: 'BEYOND Web Symposium',
     startDt: '2026-08-27 13:00:00',
     endDt: '2026-08-27 14:00:00',
+    intro: '많은 참여 부탁드립니다.',
     maxPeopleCnt: 3000,
     applyCnt: 2900,
     useSurvey: 'Y',
@@ -85,36 +91,36 @@ async function testSeminarApiConversion() {
   assert.strictEqual(dt2.time, '13:00~14:00');
   assert.strictEqual(dt2.nightTime, false);
   assert.strictEqual(checkIsAdvancedSurvey(item2.useDepthSurvey), false);
-  // survey가 null이어도 useSurvey가 'Y'이고 intro에 미지급 문구가 없으면 false (지급 대상)
-  assert.strictEqual(checkIsPointExcluded(item2.survey, undefined, item2.useSurvey), false);
+  assert.strictEqual(checkIsPointExcluded(item2.intro), false);
 
   const converted2 = convertApiItemToSeminarListItem(item2, '2026-08-27');
   assert.strictEqual(converted2.seminarId, '5608');
   assert.strictEqual(converted2.nightTime, false);
   assert.strictEqual(converted2.isAdvancedSurvey, false);
-  console.log('  ✓ [Pass] Case 2: 신규 미래 세미나 변환 (survey: null -> isPointExcluded: false)');
+  assert.strictEqual(converted2.isPointExcluded, false);
+  console.log('  ✓ [Pass] Case 2: 신규 미래 세미나 변환 (intro 미지급 문구 없음 -> isPointExcluded: false)');
 
-  // Case 3: 실제 포인트 미지급 세미나 (point: 0 또는 intro 공지 또는 useSurvey: 'N')
-  // 3-1. survey.point가 0인 경우
+  // Case 3: intro에 포인트 미지급 문구가 포함된 경우 -> isPointExcluded: true
   const item3: FutureSeminarApiItem = {
     seminarId: 5597,
     seminarNm: '[대한심장학회] 심장성쇼크연구회 2026 In-depth Webinar',
     startDt: '2026-08-24 19:00:00',
+    intro: '<u>해당 라이브세미나는 설문 포인트가 지급되지 않는 세미나 입니다</u>',
     useSurvey: 'Y',
     useDepthSurvey: false,
-    survey: {
-      point: 0,
-    },
+    survey: null,
   };
-  assert.strictEqual(checkIsPointExcluded(item3.survey, undefined, item3.useSurvey), true);
+  assert.strictEqual(checkIsPointExcluded(item3.intro), true);
 
-  // 3-2. intro에 포인트 미지급 문구가 포함된 경우
-  const introWithExcluded = '<u>해당 라이브세미나는 설문 포인트가 지급되지 않는 세미나 입니다</u>';
-  assert.strictEqual(checkIsPointExcluded(null, introWithExcluded, 'Y'), true);
+  const converted3 = convertApiItemToSeminarListItem(item3, '2026-08-24');
+  assert.strictEqual(converted3.isPointExcluded, true);
 
-  // 3-3. useSurvey가 'N'인 경우
-  assert.strictEqual(checkIsPointExcluded(null, undefined, 'N'), true);
-  console.log('  ✓ [Pass] Case 3: point: 0, intro 문구, useSurvey: N 시 포인트 미지급 판별');
+  const raw3 = convertApiItemToRawSeminar(item3);
+  assert.strictEqual(raw3.isPointExcluded, true);
+
+  // intro가 undefined인 경우 -> false
+  assert.strictEqual(checkIsPointExcluded(undefined), false);
+  console.log('  ✓ [Pass] Case 3: intro 본문 문구 기반 포인트 미지급(isPointExcluded) 판별');
 
   // Case 4: ISO T 포맷 및 boolean useDepthSurvey
   const item4: FutureSeminarApiItem = {
@@ -264,9 +270,7 @@ async function testSeminarApiConversion() {
   assert.strictEqual(detail5576.success, true);
   assert.strictEqual(detail5576.isPointExcluded, true);
   assert.strictEqual(detail5576.surveyState, 5);
-  console.log(
-    '  ✓ [Pass] Case 8-1: fetchSeminarDetail - intro 미지급 문구 및 useSurvey: N -> isPointExcluded: true 판정',
-  );
+  console.log('  ✓ [Pass] Case 8-1: fetchSeminarDetail - intro 미지급 문구 -> isPointExcluded: true 판정');
 
   const detail5608 = await fetchSeminarDetail(5608);
   assert.strictEqual(detail5608.success, true);

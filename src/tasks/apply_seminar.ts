@@ -106,6 +106,7 @@ export type RawSeminarData = {
   totalCount: string;
   nightTime: boolean;
   isAdvancedSurvey: boolean;
+  isPointExcluded?: boolean;
   hasIcoApply?: boolean;
   processState?: number;
   cancelProcessState?: number;
@@ -249,6 +250,7 @@ export function normalizeParsedSeminars(raw: RawSeminarData[], referenceDate: st
       totalCount: item.totalCount,
       nightTime: item.nightTime,
       isAdvancedSurvey: item.isAdvancedSurvey,
+      isPointExcluded: item.isPointExcluded,
     };
   });
 }
@@ -394,7 +396,7 @@ async function fetchAndPopulateSeminarInfo(
     const endDt = typeof d.endDt === 'string' ? d.endDt : undefined;
     const { date, time, nightTime } = parseSeminarDateTime(startDt, endDt);
     const isAdvancedSurvey = checkIsAdvancedSurvey(d.useDepthSurvey);
-    const isPointExcluded = detailRes.isPointExcluded ?? checkIsPointExcluded(d.survey, d.intro, d.useSurvey);
+    const isPointExcluded = detailRes.isPointExcluded ?? checkIsPointExcluded(d.intro);
     const processStateNum = d.processState !== undefined ? Number(d.processState) : undefined;
     const cancelProcessStateNum = d.cancelProcessState !== undefined ? Number(d.cancelProcessState) : undefined;
     const seminarCompletedNum =
@@ -432,6 +434,82 @@ async function fetchAndPopulateSeminarInfo(
     logger.warn(`Failed to fetch seminar detail for ID ${seminarId}:`, err);
     return {};
   }
+}
+
+/**
+ * 모든 세미나의 상세(detail) API를 병렬 조회하여 isPointExcluded 및 최신 메타데이터 갱신
+ */
+export async function enrichSeminarsWithDetail(
+  seminars: SeminarListItem[],
+): Promise<{ seminars: SeminarListItem[]; isAuthExpired: boolean }> {
+  let isAuthExpired = false;
+
+  const enriched = await Promise.all(
+    seminars.map(async (item) => {
+      if (isAuthExpired) return item;
+      const seminarId = item.seminarId || getSeminarIdFromUrl(item.url);
+      if (!seminarId) return item;
+
+      try {
+        const detailRes = await fetchSeminarDetail(seminarId);
+        if (detailRes.isAuthExpired) {
+          isAuthExpired = true;
+          return item;
+        }
+
+        if (detailRes.success && detailRes.rawResponse?.seminarDetail) {
+          const d = detailRes.rawResponse.seminarDetail;
+          const isPointExcluded = detailRes.isPointExcluded ?? checkIsPointExcluded(d.intro);
+          const isAdvancedSurvey = checkIsAdvancedSurvey(d.useDepthSurvey);
+          const processStateNum = d.processState !== undefined ? Number(d.processState) : item.processState;
+          const cancelProcessStateNum =
+            d.cancelProcessState !== undefined ? Number(d.cancelProcessState) : item.cancelProcessState;
+          const seminarCompletedNum =
+            d.seminarCompleted !== undefined
+              ? typeof d.seminarCompleted === 'boolean'
+                ? d.seminarCompleted
+                  ? 1
+                  : 0
+                : Number(d.seminarCompleted)
+              : item.seminarCompleted;
+
+          return {
+            ...item,
+            name: typeof d.seminarNm === 'string' && d.seminarNm ? d.seminarNm : item.name,
+            currentCount: d.applyCnt !== undefined && d.applyCnt !== null ? String(d.applyCnt) : item.currentCount,
+            totalCount:
+              d.maxPeopleCnt !== undefined && d.maxPeopleCnt !== null ? String(d.maxPeopleCnt) : item.totalCount,
+            isAdvancedSurvey,
+            isPointExcluded,
+            processState: processStateNum,
+            cancelProcessState: cancelProcessStateNum,
+            seminarCompleted: seminarCompletedNum,
+          };
+        }
+
+        // detail API 실패 시 HTML fallback
+        if (typeof item.isPointExcluded !== 'boolean') {
+          const link = `${SEMINAR_DETAIL_SSR_PAGE}${seminarId}`;
+          const pointExRes = await isSurveyPointExcludedSeminarHttp(link);
+          if (pointExRes.status === 'auth_expired') {
+            isAuthExpired = true;
+            return item;
+          }
+          if (pointExRes.status === 'success') {
+            return {
+              ...item,
+              isPointExcluded: pointExRes.excluded,
+            };
+          }
+        }
+      } catch (err) {
+        logger.warn(`enrichSeminarsWithDetail: ID ${seminarId} 상세 조회 실패`, err);
+      }
+      return item;
+    }),
+  );
+
+  return { seminars: enriched, isAuthExpired };
 }
 
 export async function refreshSeminarPointStatus(
@@ -610,8 +688,17 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
 
   const storedSeminars = migrateLegacySeminarStorage(referenceDate);
 
+  // 모든 세미나의 상세(detail) API를 조회하여 isPointExcluded 및 최신 메타데이터 갱신
+  const { seminars: enrichedSeminars, isAuthExpired: detailAuthExpired } =
+    await enrichSeminarsWithDetail(normalizedCurrentSeminars);
+  if (detailAuthExpired) {
+    const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
+    await sendTelegram(msg).catch(() => {});
+    return { success: false, message: msg };
+  }
+
   const { seminars, newlyAdded, infoChanges } = refreshStoredSeminarList(
-    normalizedCurrentSeminars,
+    enrichedSeminars,
     storedSeminars,
     referenceDate,
   );
@@ -619,47 +706,9 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
   if (newlyAdded.length === 0) {
     storage.set(SEMINAR_LIST_KEY, seminars);
   } else {
-    const newlyAddedWithFlags: SeminarListItem[] = [];
-    for (const item of newlyAdded) {
-      const seminarId = getSeminarIdFromUrl(item.url);
-      let isPointExcluded = item.isPointExcluded;
+    storage.set(SEMINAR_LIST_KEY, seminars);
 
-      // isPointExcluded 가 미정인 경우 detail API 우선 조회
-      if (typeof isPointExcluded !== 'boolean') {
-        if (seminarId) {
-          const detailRes = await fetchSeminarDetail(seminarId);
-          if (detailRes.isAuthExpired) {
-            const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
-            await sendTelegram(msg).catch(() => {});
-            return { success: false, message: msg };
-          }
-          if (detailRes.success) {
-            isPointExcluded = detailRes.isPointExcluded;
-          }
-        }
-
-        // detail API 실패 시 HTML fallback
-        if (typeof isPointExcluded !== 'boolean') {
-          const link = seminarId ? `${SEMINAR_DETAIL_SSR_PAGE}${seminarId}` : item.url;
-          const pointExRes = await isSurveyPointExcludedSeminarHttp(link);
-          if (pointExRes.status === 'auth_expired') {
-            const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
-            await sendTelegram(msg).catch(() => {});
-            return { success: false, message: msg };
-          }
-          isPointExcluded = pointExRes.status === 'success' ? pointExRes.excluded : undefined;
-        }
-      }
-      newlyAddedWithFlags.push({ ...item, seminarId, isPointExcluded });
-    }
-
-    const flaggedByKey = new Map(newlyAddedWithFlags.map((item) => [seminarKey(item), item]));
-    const updatedSeminars = seminars.map((seminar) =>
-      flaggedByKey.has(seminarKey(seminar)) ? mergeSeminar(seminar, flaggedByKey.get(seminarKey(seminar))!) : seminar,
-    );
-    storage.set(SEMINAR_LIST_KEY, updatedSeminars);
-
-    const newSeminarMessage = newlyAddedWithFlags
+    const newSeminarMessage = newlyAdded
       .map((item) => {
         const pointExcludedSuffix = item.isPointExcluded ? ' [포인트미지급]' : '';
         const advancedSurveySuffix = item.isAdvancedSurvey ? ' [심화설문]' : '';
@@ -668,7 +717,7 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
         return `${dateTimePrefix}${pointExcludedSuffix}${advancedSurveySuffix}${item.name}${capacityInfo}\n${item.url}`;
       })
       .join('\n\n');
-    const noticeMessage = `🆕 새로 추가된 세미나 ${newlyAddedWithFlags.length}건 발견\n\n${newSeminarMessage}`;
+    const noticeMessage = `🆕 새로 추가된 세미나 ${newlyAdded.length}건 발견\n\n${newSeminarMessage}`;
     if (notifyNewSeminarsToTelegram) await sendTelegram(noticeMessage);
     if (notifyNewSeminarsToChannel) await sendNotificationToChannel(noticeMessage);
   }
@@ -940,8 +989,17 @@ export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<Ta
 
     const storedSeminars = migrateLegacySeminarStorage(referenceDate);
 
+    // 모든 세미나의 상세(detail) API를 조회하여 isPointExcluded 및 최신 메타데이터 갱신
+    const { seminars: enrichedSeminars, isAuthExpired: detailAuthExpired } =
+      await enrichSeminarsWithDetail(normalizedCurrentSeminars);
+    if (detailAuthExpired) {
+      const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
+      await sendTelegram(msg).catch(() => {});
+      return { success: false, message: msg };
+    }
+
     const { seminars, newlyAdded, infoChanges } = refreshStoredSeminarList(
-      normalizedCurrentSeminars,
+      enrichedSeminars,
       storedSeminars,
       referenceDate,
     );
@@ -949,45 +1007,9 @@ export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<Ta
     if (newlyAdded.length === 0) {
       storage.set(SEMINAR_LIST_KEY, seminars);
     } else {
-      const newlyAddedWithFlags: SeminarListItem[] = [];
-      for (const item of newlyAdded) {
-        const seminarId = getSeminarIdFromUrl(item.url);
-        let isPointExcluded = item.isPointExcluded;
+      storage.set(SEMINAR_LIST_KEY, seminars);
 
-        if (typeof isPointExcluded !== 'boolean') {
-          if (seminarId) {
-            const detailRes = await fetchSeminarDetail(seminarId);
-            if (detailRes.isAuthExpired) {
-              const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
-              await sendTelegram(msg).catch(() => {});
-              return { success: false, message: msg };
-            }
-            if (detailRes.success) {
-              isPointExcluded = detailRes.isPointExcluded;
-            }
-          }
-
-          if (typeof isPointExcluded !== 'boolean') {
-            const link = seminarId ? `${SEMINAR_DETAIL_SSR_PAGE}${seminarId}` : item.url;
-            const pointExRes = await isSurveyPointExcludedSeminarHttp(link);
-            if (pointExRes.status === 'auth_expired') {
-              const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
-              await sendTelegram(msg).catch(() => {});
-              return { success: false, message: msg };
-            }
-            isPointExcluded = pointExRes.status === 'success' ? pointExRes.excluded : undefined;
-          }
-        }
-        newlyAddedWithFlags.push({ ...item, seminarId, isPointExcluded });
-      }
-
-      const flaggedByKey = new Map(newlyAddedWithFlags.map((item) => [seminarKey(item), item]));
-      const updatedSeminars = seminars.map((seminar) =>
-        flaggedByKey.has(seminarKey(seminar)) ? mergeSeminar(seminar, flaggedByKey.get(seminarKey(seminar))!) : seminar,
-      );
-      storage.set(SEMINAR_LIST_KEY, updatedSeminars);
-
-      const newSeminarMessage = newlyAddedWithFlags
+      const newSeminarMessage = newlyAdded
         .map((item) => {
           const pointExcludedSuffix = item.isPointExcluded ? ' [포인트미지급]' : '';
           const advancedSurveySuffix = item.isAdvancedSurvey ? ' [심화설문]' : '';
@@ -996,7 +1018,7 @@ export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<Ta
           return `${dateTimePrefix}${pointExcludedSuffix}${advancedSurveySuffix}${item.name}${capacityInfo}\n${item.url}`;
         })
         .join('\n\n');
-      const noticeMessage = `🆕 새로 추가된 세미나 ${newlyAddedWithFlags.length}건 발견\n\n${newSeminarMessage}`;
+      const noticeMessage = `🆕 새로 추가된 세미나 ${newlyAdded.length}건 발견\n\n${newSeminarMessage}`;
       if (notifyNewSeminarsToTelegram) await sendTelegram(noticeMessage);
       if (notifyNewSeminarsToChannel) await sendNotificationToChannel(noticeMessage);
     }

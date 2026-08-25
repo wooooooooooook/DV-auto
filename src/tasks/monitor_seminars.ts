@@ -122,7 +122,7 @@ export async function getTodaysSeminarsFromApi(
           : undefined;
 
       const isAdvancedSurvey = checkIsAdvancedSurvey(item.useDepthSurvey);
-      const isPointExcluded = false; // 메인 API 응답에는 survey.point가 없으므로 기본 false로 시작하고 상세 조회 시 갱신
+      const isPointExcluded = checkIsPointExcluded(item.intro);
       const hasSurvey = item.useSurvey !== false && item.useSurvey !== 'N' && item.useSurvey !== 0;
 
       let statusText = '대기중';

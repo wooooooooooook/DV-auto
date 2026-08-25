@@ -186,7 +186,7 @@ export async function runTests() {
     startDt: '2026-09-01 13:00:00.0',
     endDt: '2026-09-01 13:40:00.0',
     maxPeopleCnt: 4000,
-    intro: '소개',
+    intro: '해당 라이브세미나는 설문 포인트가 지급되지 않는 세미나 입니다.',
     tutorId: 0,
     tutorNm: '강사명',
     surveyId: null,

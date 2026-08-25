@@ -179,7 +179,7 @@ export interface SeminarAggreeInfo {
 export function convertDetailToSeminarListItem(data: SeminarDetail, _raw?: SeminarDetailResponse): SeminarListItem {
   const { date, time, nightTime } = parseSeminarDateTime(data.startDt, data.endDt);
   const isAdvancedSurvey = checkIsAdvancedSurvey(data.useDepthSurvey);
-  const isPointExcluded = checkIsPointExcluded(data.survey, data.intro, data.useSurvey);
+  const isPointExcluded = checkIsPointExcluded(data.intro);
   const processStateNum = data.processState !== undefined ? Number(data.processState) : undefined;
   const cancelProcessStateNum = data.cancelProcessState !== undefined ? Number(data.cancelProcessState) : undefined;
   const seminarCompletedNum =
@@ -432,7 +432,7 @@ export function formatSeminarDetail(data: SeminarDetail, raw?: SeminarDetailResp
   const myParticipation = formatMyParticipation(data.seminarMember);
   const participantInfo = `${data.applyCnt} / ${data.maxPeopleCnt}`;
   const seminarUrl = buildSeminarUrl(data.seminarId);
-  const isPointExcluded = checkIsPointExcluded(data.survey, data.intro, data.useSurvey);
+  const isPointExcluded = checkIsPointExcluded(data.intro);
 
   return [
     `*세미나 상세* (ID: ${data.seminarId})`,

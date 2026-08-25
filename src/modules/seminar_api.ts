@@ -42,6 +42,7 @@ export interface FutureSeminarApiItem {
   seminarNm: string;
   startDt: string; // e.g. "2026-08-24 13:00:00"
   endDt?: string; // e.g. "2026-08-24 14:00:00"
+  intro?: string | null;
   tutorNm?: string;
   categoryCdNm?: string;
   diseaseCategoryNm?: string;
@@ -192,33 +193,18 @@ export function checkIsAdvancedSurvey(useDepthSurvey?: boolean | string | number
 
 /**
  * 포인트 미지급 세미나 여부 판별
- * 1) intro 본문에 '포인트가 지급되지 않는' 문구가 명시된 경우 -> true (포인트 미지급)
- * 2) useSurvey가 'N' 또는 false인 경우 -> true (포인트 미지급)
- * 3) survey 객체가 존재하고 point 값이 0 이하인 경우 -> true (포인트 미지급)
- * 4) survey가 null인 신규/미래 세미나 등은 기본적으로 포인트 지급 세미나(false)로 판정
+ * intro 본문에 '포인트가 지급되지 않는' 문구가 명시된 경우 -> true (포인트 미지급)
+ * 문구가 없거나 기타의 경우 -> false (포인트 지급 대상)
  */
-export function checkIsPointExcluded(
-  survey?: { point?: number | string | null } | null,
-  intro?: string | null,
-  useSurvey?: string | boolean | number | null,
-): boolean {
-  if (typeof intro === 'string' && /포인트가\s*지급되지\s*않는/.test(intro)) {
-    return true;
+export function checkIsPointExcluded(introOrSurvey?: unknown, intro?: string | null, _useSurvey?: unknown): boolean {
+  let targetIntro: string | null | undefined;
+  if (typeof introOrSurvey === 'string') {
+    targetIntro = introOrSurvey;
+  } else if (typeof intro === 'string') {
+    targetIntro = intro;
   }
-
-  if (useSurvey === 'N' || useSurvey === false || useSurvey === 0 || useSurvey === '0') {
-    return true;
-  }
-
-  if (survey && survey.point !== undefined && survey.point !== null) {
-    const pointNum = Number(survey.point);
-    if (Number.isNaN(pointNum) || pointNum <= 0) {
-      return true;
-    }
-    return false;
-  }
-
-  return false;
+  if (!targetIntro) return false;
+  return /포인트가\s*지급되지\s*않는/.test(targetIntro);
 }
 
 /**
@@ -293,6 +279,7 @@ export function convertApiItemToRawSeminar(item: FutureSeminarApiItem): RawSemin
   const seminarId = String(item.seminarId ?? '');
   const url = `https://m.doctorville.co.kr/cme/seminar/${seminarId}`;
   const isAdvancedSurvey = checkIsAdvancedSurvey(item.useDepthSurvey);
+  const isPointExcluded = typeof item.intro === 'string' ? checkIsPointExcluded(item.intro) : undefined;
   const processStateNum = item.processState !== undefined ? Number(item.processState) : undefined;
   const cancelProcessStateNum = item.cancelProcessState !== undefined ? Number(item.cancelProcessState) : undefined;
   const seminarCompletedNum =
@@ -315,6 +302,7 @@ export function convertApiItemToRawSeminar(item: FutureSeminarApiItem): RawSemin
     totalCount: item.maxPeopleCnt !== undefined && item.maxPeopleCnt !== null ? String(item.maxPeopleCnt) : '',
     nightTime,
     isAdvancedSurvey,
+    isPointExcluded,
     hasIcoApply,
     processState: processStateNum,
     cancelProcessState: cancelProcessStateNum,
@@ -330,6 +318,7 @@ export function convertApiItemToSeminarListItem(item: FutureSeminarApiItem, refe
   const seminarId = String(item.seminarId ?? '');
   const url = `https://m.doctorville.co.kr/cme/seminar/${seminarId}`;
   const isAdvancedSurvey = checkIsAdvancedSurvey(item.useDepthSurvey);
+  const isPointExcluded = typeof item.intro === 'string' ? checkIsPointExcluded(item.intro) : undefined;
   const nowIso = referenceDate || new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
   const processStateNum = item.processState !== undefined ? Number(item.processState) : undefined;
   const cancelProcessStateNum = item.cancelProcessState !== undefined ? Number(item.cancelProcessState) : undefined;
@@ -352,6 +341,7 @@ export function convertApiItemToSeminarListItem(item: FutureSeminarApiItem, refe
     totalCount: item.maxPeopleCnt !== undefined && item.maxPeopleCnt !== null ? String(item.maxPeopleCnt) : '',
     nightTime,
     isAdvancedSurvey,
+    isPointExcluded,
     processState: processStateNum,
     cancelProcessState: cancelProcessStateNum,
     seminarCompleted: seminarCompletedNum,
@@ -495,8 +485,7 @@ export async function fetchSeminarDetail(
     const detail = parsed.seminarDetail;
     const survey = detail?.survey ?? parsed.survey ?? null;
     const intro = detail?.intro;
-    const useSurvey = detail?.useSurvey ?? parsed.useSurvey;
-    const isPointExcluded = checkIsPointExcluded(survey, intro, useSurvey);
+    const isPointExcluded = checkIsPointExcluded(intro);
     const hasEntryHistory = checkHasEntryHistory(parsed.seminarDetail, parsed.seminarMember);
     const surveyState =
       parsed.surveyState !== undefined
