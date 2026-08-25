@@ -107,6 +107,7 @@ export interface SeminarDetailApiResponse {
   seminarDetail?: {
     seminarId?: number | string;
     seminarNm?: string;
+    intro?: string | null;
     survey?: SeminarSurveyInfo | null;
     seminarMember?: SeminarMemberInfo | null;
     payPoint?: number | string | null;
@@ -119,6 +120,7 @@ export interface SeminarDetailApiResponse {
   };
   seminarMember?: SeminarMemberInfo | null;
   survey?: SeminarSurveyInfo | null;
+  useSurvey?: string | boolean;
   surveyState?: number | string;
   termsInfo?: TermsInfo | null;
   isExistVod?: boolean;
@@ -190,20 +192,30 @@ export function checkIsAdvancedSurvey(useDepthSurvey?: boolean | string | number
 
 /**
  * 포인트 미지급 세미나 여부 판별
- * survey 객체가 없거나, point 값이 없거나 0 이하인 경우 true (포인트 미지급)
- *
- * 방어적 판정: survey 객체가 있어도 point가 undefined/null이면
- * API 스키마 변경 등으로 인한 누락 가능성이 있으므로 미지급으로 간주
+ * 1) intro 본문에 '포인트가 지급되지 않는' 문구가 명시된 경우 -> true (포인트 미지급)
+ * 2) useSurvey가 'N' 또는 false인 경우 -> true (포인트 미지급)
+ * 3) survey 객체가 존재하고 point 값이 0 이하인 경우 -> true (포인트 미지급)
+ * 4) survey가 null인 신규/미래 세미나 등은 기본적으로 포인트 지급 세미나(false)로 판정
  */
-export function checkIsPointExcluded(survey?: SeminarSurveyInfo | null): boolean {
-  if (!survey) return true;
-  if (survey.point === undefined || survey.point === null) {
+export function checkIsPointExcluded(
+  survey?: { point?: number | string | null } | null,
+  intro?: string | null,
+  useSurvey?: string | boolean | number | null,
+): boolean {
+  if (typeof intro === 'string' && /포인트가\s*지급되지\s*않는/.test(intro)) {
     return true;
   }
 
-  const pointNum = Number(survey.point);
-  if (Number.isNaN(pointNum) || pointNum <= 0) {
+  if (useSurvey === 'N' || useSurvey === false || useSurvey === 0 || useSurvey === '0') {
     return true;
+  }
+
+  if (survey && survey.point !== undefined && survey.point !== null) {
+    const pointNum = Number(survey.point);
+    if (Number.isNaN(pointNum) || pointNum <= 0) {
+      return true;
+    }
+    return false;
   }
 
   return false;
@@ -480,8 +492,11 @@ export async function fetchSeminarDetail(
     }
 
     // seminarDetail?.survey 또는 survey 객체 추출
-    const survey = parsed.seminarDetail?.survey ?? parsed.survey ?? null;
-    const isPointExcluded = checkIsPointExcluded(survey);
+    const detail = parsed.seminarDetail;
+    const survey = detail?.survey ?? parsed.survey ?? null;
+    const intro = detail?.intro;
+    const useSurvey = detail?.useSurvey ?? parsed.useSurvey;
+    const isPointExcluded = checkIsPointExcluded(survey, intro, useSurvey);
     const hasEntryHistory = checkHasEntryHistory(parsed.seminarDetail, parsed.seminarMember);
     const surveyState =
       parsed.surveyState !== undefined

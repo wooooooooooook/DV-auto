@@ -394,7 +394,7 @@ async function fetchAndPopulateSeminarInfo(
     const endDt = typeof d.endDt === 'string' ? d.endDt : undefined;
     const { date, time, nightTime } = parseSeminarDateTime(startDt, endDt);
     const isAdvancedSurvey = checkIsAdvancedSurvey(d.useDepthSurvey);
-    const isPointExcluded = detailRes.isPointExcluded ?? checkIsPointExcluded(d.survey);
+    const isPointExcluded = detailRes.isPointExcluded ?? checkIsPointExcluded(d.survey, d.intro, d.useSurvey);
     const processStateNum = d.processState !== undefined ? Number(d.processState) : undefined;
     const cancelProcessStateNum = d.cancelProcessState !== undefined ? Number(d.cancelProcessState) : undefined;
     const seminarCompletedNum =
@@ -775,6 +775,9 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
       console.log(
         `[apply_seminar] ${fallbackTargets.length}개 세미나에 대해 Playwright 폴백 실행: ${fallbackTargets.join(', ')}`,
       );
+      await sendTelegram(
+        `⚠️ [세미나 신청] API 신청 미완료(${fallbackTargets.length}건)로 인해 Playwright 브라우저 폴백을 실행합니다.\n대상 세미나 ID: ${fallbackTargets.join(', ')}`,
+      ).catch(() => {});
       try {
         if (!page) {
           const { chromium } = await import('playwright');

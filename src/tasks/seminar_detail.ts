@@ -1,6 +1,12 @@
 import { httpGetJson } from '../modules/http_client';
 import * as logger from '../services/logger';
-import { parseSeminarDateTime, checkIsAdvancedSurvey, ProcessState, SurveyState } from '../modules/seminar_api';
+import {
+  parseSeminarDateTime,
+  checkIsAdvancedSurvey,
+  checkIsPointExcluded,
+  ProcessState,
+  SurveyState,
+} from '../modules/seminar_api';
 import { SEMINAR_LIST_KEY, mergeSeminar, type SeminarListItem } from './apply_seminar';
 import * as storage from '../services/storage';
 import { getSeminarIdFromUrl } from '../modules/utils';
@@ -173,7 +179,7 @@ export interface SeminarAggreeInfo {
 export function convertDetailToSeminarListItem(data: SeminarDetail, _raw?: SeminarDetailResponse): SeminarListItem {
   const { date, time, nightTime } = parseSeminarDateTime(data.startDt, data.endDt);
   const isAdvancedSurvey = checkIsAdvancedSurvey(data.useDepthSurvey);
-  const isPointExcluded = !data.survey || data.survey.point === undefined || Number(data.survey.point) <= 0;
+  const isPointExcluded = checkIsPointExcluded(data.survey, data.intro, data.useSurvey);
   const processStateNum = data.processState !== undefined ? Number(data.processState) : undefined;
   const cancelProcessStateNum = data.cancelProcessState !== undefined ? Number(data.cancelProcessState) : undefined;
   const seminarCompletedNum =
@@ -426,7 +432,7 @@ export function formatSeminarDetail(data: SeminarDetail, raw?: SeminarDetailResp
   const myParticipation = formatMyParticipation(data.seminarMember);
   const participantInfo = `${data.applyCnt} / ${data.maxPeopleCnt}`;
   const seminarUrl = buildSeminarUrl(data.seminarId);
-  const isPointExcluded = !data.survey || data.survey.point === undefined || Number(data.survey.point) <= 0;
+  const isPointExcluded = checkIsPointExcluded(data.survey, data.intro, data.useSurvey);
 
   return [
     `*세미나 상세* (ID: ${data.seminarId})`,
@@ -439,7 +445,7 @@ export function formatSeminarDetail(data: SeminarDetail, raw?: SeminarDetailResp
     `*상태:* ${status}`,
     `*내 참여:* ${myParticipation}`,
     `*설문:* ${surveyStatus}${data.useDepthSurvey === 'Y' ? ' [심화설문]' : ''}`,
-    `*포인트:* ${isPointExcluded ? '미지급' : `${Number(data.survey?.point).toLocaleString()}P 지급`}`,
+    `*포인트:* ${isPointExcluded ? '미지급' : data.survey?.point ? `${Number(data.survey.point).toLocaleString()}P 지급` : '지급 대상'}`,
     `*VOD:* ${data.useVod === 'Y' ? '제공' : '미제공'}`,
     `*URL:* ${seminarUrl}`,
   ].join('\n');

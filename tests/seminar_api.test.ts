@@ -67,12 +67,12 @@ async function testSeminarApiConversion() {
   assert.strictEqual(raw1.processState, 2);
   console.log('  ✓ [Pass] Case 1: 점심 세미나 변환 (심화설문, processState=2 -> hasIcoApply=true)');
 
-  // Case 2: 저녁 세미나(17:00), 포인트 미지급(survey: null), 일반설문
+  // Case 2: 미래 세미나(survey: null, useSurvey: 'Y')는 기본적으로 포인트 지급 세미나(false)로 판정
   const item2: FutureSeminarApiItem = {
-    seminarId: 5538,
-    seminarNm: '입시를 몰라도 자녀와 대화가 통하게 되는 50분',
-    startDt: '2026-08-24 17:00:00',
-    endDt: '2026-08-24 17:50:00',
+    seminarId: 5608,
+    seminarNm: 'BEYOND Web Symposium',
+    startDt: '2026-08-27 13:00:00',
+    endDt: '2026-08-27 14:00:00',
     maxPeopleCnt: 3000,
     applyCnt: 2900,
     useSurvey: 'Y',
@@ -81,30 +81,40 @@ async function testSeminarApiConversion() {
   };
 
   const dt2 = parseSeminarDateTime(item2.startDt, item2.endDt);
-  assert.strictEqual(dt2.date, '2026-08-24');
-  assert.strictEqual(dt2.time, '17:00~17:50');
-  assert.strictEqual(dt2.nightTime, true);
+  assert.strictEqual(dt2.date, '2026-08-27');
+  assert.strictEqual(dt2.time, '13:00~14:00');
+  assert.strictEqual(dt2.nightTime, false);
   assert.strictEqual(checkIsAdvancedSurvey(item2.useDepthSurvey), false);
-  assert.strictEqual(checkIsPointExcluded(item2.survey), true);
+  // survey가 null이어도 useSurvey가 'Y'이고 intro에 미지급 문구가 없으면 false (지급 대상)
+  assert.strictEqual(checkIsPointExcluded(item2.survey, undefined, item2.useSurvey), false);
 
-  const converted2 = convertApiItemToSeminarListItem(item2, '2026-08-24');
-  assert.strictEqual(converted2.seminarId, '5538');
-  assert.strictEqual(converted2.nightTime, true);
+  const converted2 = convertApiItemToSeminarListItem(item2, '2026-08-27');
+  assert.strictEqual(converted2.seminarId, '5608');
+  assert.strictEqual(converted2.nightTime, false);
   assert.strictEqual(converted2.isAdvancedSurvey, false);
-  console.log('  ✓ [Pass] Case 2: 저녁 세미나 변환 (일반설문)');
+  console.log('  ✓ [Pass] Case 2: 신규 미래 세미나 변환 (survey: null -> isPointExcluded: false)');
 
-  // Case 3: survey.point가 0인 경우 포인트 미지급 판별
+  // Case 3: 실제 포인트 미지급 세미나 (point: 0 또는 intro 공지 또는 useSurvey: 'N')
+  // 3-1. survey.point가 0인 경우
   const item3: FutureSeminarApiItem = {
-    seminarId: 5539,
-    seminarNm: '포인트 0원 세미나',
+    seminarId: 5597,
+    seminarNm: '[대한심장학회] 심장성쇼크연구회 2026 In-depth Webinar',
     startDt: '2026-08-24 19:00:00',
+    useSurvey: 'Y',
     useDepthSurvey: false,
     survey: {
       point: 0,
     },
   };
-  assert.strictEqual(checkIsPointExcluded(item3.survey), true);
-  console.log('  ✓ [Pass] Case 3: point: 0 일 때 포인트 미지급 판별');
+  assert.strictEqual(checkIsPointExcluded(item3.survey, undefined, item3.useSurvey), true);
+
+  // 3-2. intro에 포인트 미지급 문구가 포함된 경우
+  const introWithExcluded = '<u>해당 라이브세미나는 설문 포인트가 지급되지 않는 세미나 입니다</u>';
+  assert.strictEqual(checkIsPointExcluded(null, introWithExcluded, 'Y'), true);
+
+  // 3-3. useSurvey가 'N'인 경우
+  assert.strictEqual(checkIsPointExcluded(null, undefined, 'N'), true);
+  console.log('  ✓ [Pass] Case 3: point: 0, intro 문구, useSurvey: N 시 포인트 미지급 판별');
 
   // Case 4: ISO T 포맷 및 boolean useDepthSurvey
   const item4: FutureSeminarApiItem = {
@@ -203,6 +213,27 @@ async function testSeminarApiConversion() {
           seminarDetail: {
             seminarId: 5576,
             seminarNm: '오피스요가',
+            intro: '해당 라이브세미나는 설문 포인트가 지급되지 않는 세미나 입니다',
+            useSurvey: 'N',
+            survey: null,
+          },
+        }),
+        url,
+        redirected: false,
+        resultType: 'SUCCESS' as const,
+      };
+    } else if (url.includes('/5608')) {
+      return {
+        status: 200,
+        statusText: '200',
+        headers: {},
+        body: JSON.stringify({
+          surveyState: 5,
+          seminarDetail: {
+            seminarId: 5608,
+            seminarNm: 'BEYOND Web Symposium',
+            intro: '일반 세미나 소개글입니다.',
+            useSurvey: 'Y',
             survey: null,
           },
         }),
@@ -233,7 +264,16 @@ async function testSeminarApiConversion() {
   assert.strictEqual(detail5576.success, true);
   assert.strictEqual(detail5576.isPointExcluded, true);
   assert.strictEqual(detail5576.surveyState, 5);
-  console.log('  ✓ [Pass] Case 8: fetchSeminarDetail - survey: null 및 surveyState=5 판정');
+  console.log(
+    '  ✓ [Pass] Case 8-1: fetchSeminarDetail - intro 미지급 문구 및 useSurvey: N -> isPointExcluded: true 판정',
+  );
+
+  const detail5608 = await fetchSeminarDetail(5608);
+  assert.strictEqual(detail5608.success, true);
+  assert.strictEqual(detail5608.isPointExcluded, false);
+  console.log(
+    '  ✓ [Pass] Case 8-2: fetchSeminarDetail - 신규 미래 세미나(survey: null, useSurvey: Y) -> isPointExcluded: false 판정',
+  );
 
   // Case 9: checkHasEntryHistory 및 fetchSeminarDetail 입장이력 판별 테스트
   const memberWithJoinDt = { joinDt: '2026-08-24 13:05:00.0', applyTy: 0 };

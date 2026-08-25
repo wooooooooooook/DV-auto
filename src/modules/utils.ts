@@ -538,6 +538,11 @@ async function isSurveyPointExcludedSeminar(context: BrowserContext, url: string
   }
 
   // 2. HTTP 오류 시 Playwright fallback
+  const errorDetail = httpResult.status === 'error' ? httpResult.error : httpResult.status;
+  await sendTelegram(
+    `⚠️ [포인트미지급 확인] HTTP 조회 실패(${errorDetail})로 Playwright 브라우저 폴백을 실행합니다.\nURL: ${url}`,
+  ).catch(() => {});
+
   const page = await context.newPage();
   try {
     await ensureLoggedIn({ page, context });

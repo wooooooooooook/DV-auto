@@ -554,6 +554,73 @@ export async function runTests() {
     } finally {
       (httpClient as any).httpGetJson = originalHttpGetJson;
     }
+    // Case 15: 신규 미래 세미나 (survey: null, useSurvey: 'Y', intro: 정상 소개) 포맷팅 및 변환 검증
+    console.log('\n--- Case 15: 신규 미래 세미나 (survey: null, useSurvey: Y) 검증 ---');
+    const mock5608Detail: SeminarDetail = {
+      seminarId: 5608,
+      seminarTy: 1,
+      seminarNm: 'BEYOND Web Symposium',
+      regUsn: 0,
+      startDt: '2026-08-27 13:00:00.0',
+      endDt: '2026-08-27 14:00:00.0',
+      maxPeopleCnt: 3000,
+      intro: 'BEYOND 심포지엄에 초대합니다.',
+      tutorId: 0,
+      tutorNm: '강사명',
+      surveyId: null,
+      categoryCd: 1,
+      createDt: '2026-08-25 10:00:00.0',
+      updateDt: null,
+      introImg: '',
+      attachFileOrigin: '',
+      viewCnt: 0,
+      applyCnt: 100,
+      scrapId: null,
+      userTy: 4,
+      memberCreateDt: null,
+      broadcastUrl: '',
+      broadcastUrl2: '',
+      broadcastTy: 10,
+      broadcastTy2: 10,
+      diseaseCategoryNm: '내과',
+      diseaseCategoryCd: 'IM000',
+      hiddenYn: 'N',
+      allowUsn: null,
+      chattingRoom: '23999999',
+      payPoint: null,
+      seminarVod: null,
+      seminarVodReplay: null,
+      seminarTutor: null,
+      regUser: null,
+      survey: null,
+      seminarMember: null,
+      tag: null,
+      regChk: 0,
+      showFg: null,
+      vodMarkerList: null,
+      seminarCompleted: 0,
+      useSurvey: 'Y',
+      useDepthSurvey: 'N',
+      useVod: 'N',
+      useVodNotify: 'N',
+      keyMessage: '',
+      encIntroImg: '',
+      encAttachFilePath: '',
+      categoryCdNm: '의료학술',
+      processState: 2,
+      cancelProcessState: -1,
+      startMonthAndDay: '8/27',
+      startDayOfWeek: 'Thu',
+      endTime: '14:00',
+      startTime: '13:00',
+    };
+
+    const listItem5608 = convertDetailToSeminarListItem(mock5608Detail);
+    assert(listItem5608.isPointExcluded === false, '미래 세미나는 isPointExcluded가 false여야 함');
+
+    const formatted5608 = formatSeminarDetail(mock5608Detail);
+    assert(formatted5608.includes('*포인트:* 지급 대상'), 'survey.point가 없을 때 지급 대상으로 포맷팅');
+    console.log('  ✓ [Pass] 신규 미래 세미나 isPointExcluded=false 및 포맷팅 검증 성공');
   } finally {
     storage.set(SEMINAR_LIST_KEY, backupList);
   }

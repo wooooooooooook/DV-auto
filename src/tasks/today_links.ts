@@ -3,6 +3,7 @@ import quizMapping from '../../data/quiz.json';
 import type { PlaywrightRunArgs } from '../types';
 import {
   safeGoto,
+  sendTelegram,
   getSeminarIdFromUrl,
   hasSurveyPointExcludedNotice,
   getPointConversionAvailabilityHttp,
@@ -113,6 +114,10 @@ async function checkPointExcludedFast(url: string, context?: BrowserContext): Pr
   }
 
   if (!context) return false;
+
+  await sendTelegram(
+    `⚠️ [today_links] 포인트미지급 HTTP 조회 실패로 Playwright DOM 폴백을 실행합니다.\nURL: ${url}`,
+  ).catch(() => {});
 
   const page = await context.newPage();
   try {
@@ -675,6 +680,9 @@ async function collectTodaySeminarMessage(
       }
     } else if (page) {
       console.warn('[today_links] fetchMainFutureSeminars 실패, DOM fallback 시도:', apiRes.errorMessage);
+      await sendTelegram(
+        `⚠️ [today_links] 세미나 목록 API 조회 실패(${apiRes.errorMessage})로 Playwright DOM 폴백을 실행합니다.`,
+      ).catch(() => {});
       await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'domcontentloaded', timeout: 30000 }, 1);
 
       parsedSeminars = await page.locator('.list_cont').evaluateAll(parseSeminarsFromNodes, {
@@ -810,6 +818,9 @@ async function collectPointConversionInfo(page?: PlaywrightRunArgs['page']): Pro
     }
 
     if (page) {
+      await sendTelegram(
+        '⚠️ [today_links] 포인트 전환 정보 API 직접 조회 실패로 Playwright 브라우저 폴백을 실행합니다.',
+      ).catch(() => {});
       const currentUrl = page.url();
       if (!currentUrl.includes('doctorville.co.kr')) {
         await safeGoto(page, BASE_URL, { waitUntil: 'domcontentloaded', timeout: 15000 }, 1);
