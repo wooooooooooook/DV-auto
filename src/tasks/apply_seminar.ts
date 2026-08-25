@@ -647,7 +647,7 @@ export type ApplySeminarOptions = {
 };
 
 async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Promise<TaskResult> {
-  const { notifyNewSeminarsToChannel = false, notifyNewSeminarsToTelegram = true } = options;
+  const { notifyNewSeminarsToChannel = true, notifyNewSeminarsToTelegram = true } = options;
 
   let currentSeminars: RawSeminarData[] = [];
   let normalizedCurrentSeminars: SeminarListItem[] = [];
@@ -943,10 +943,16 @@ export const applySeminarExtraTask = {
   name: 'apply_seminar_extra',
   description: '세미나 목록 갱신 및 심화 세미나 포인트 확인',
   schedule: '*/10 6-23 * * *',
-  options: { notifyNewSeminarsToTelegram: false, silentIfNoNew: true, checkAdvancedPointStatus: true },
+  options: {
+    notifyNewSeminarsToTelegram: false,
+    notifyNewSeminarsToChannel: true,
+    silentIfNoNew: true,
+    checkAdvancedPointStatus: true,
+  },
   run: (_args: unknown, options?: ApplySeminarOptions) =>
     runHttpOnly({
       notifyNewSeminarsToTelegram: false,
+      notifyNewSeminarsToChannel: true,
       silentIfNoNew: true,
       checkAdvancedPointStatus: true,
       ...options,
@@ -954,7 +960,7 @@ export const applySeminarExtraTask = {
 };
 
 export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<TaskResult> {
-  const { notifyNewSeminarsToChannel = false, notifyNewSeminarsToTelegram = true, silentIfNoNew = true } = options;
+  const { notifyNewSeminarsToChannel = true, notifyNewSeminarsToTelegram = true, silentIfNoNew = true } = options;
 
   try {
     let currentSeminars: RawSeminarData[] = [];

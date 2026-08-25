@@ -254,10 +254,10 @@ taskRegistry.registerTask(pointConversionCheckTask);
 scheduler.scheduleTaskCron(pointConversionCheckTask);
 const applySeminarTaskStandalone: Task = {
   name: 'apply_seminar',
-  options: { notifyNewSeminarsToChannel: false, notifyNewSeminarsToTelegram: true },
+  options: { notifyNewSeminarsToChannel: true, notifyNewSeminarsToTelegram: true },
   run: async (ctx, options) => {
     return await applySeminarTask.run(ctx, {
-      notifyNewSeminarsToChannel: false,
+      notifyNewSeminarsToChannel: true,
       notifyNewSeminarsToTelegram: true,
       ...options,
     });
