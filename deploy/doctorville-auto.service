@@ -6,8 +6,8 @@ After=network.target
 Type=simple
 # WorkingDirectory should be the absolute path to your project directory
 WorkingDirectory=/root/doctorville-auto
-# Use /usr/bin/env to find node in PATH
-ExecStart=/usr/bin/env node dist/core/main.js
+# Node binary path in NVM
+ExecStart=/root/.nvm/versions/node/v24.19.0/bin/node dist/core/main.js
 Restart=always
 RestartSec=5
 TimeoutStopSec=15
