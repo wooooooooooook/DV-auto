@@ -17,6 +17,8 @@ import { ProcessState, SurveyState } from '../src/modules/seminar_api';
 import * as storage from '../src/services/storage';
 import { SEMINAR_LIST_KEY, type SeminarListItem } from '../src/tasks/apply_seminar';
 import * as httpClient from '../src/modules/http_client';
+import { createSeminarDetailHandler } from '../src/services/telegram';
+import type { Context } from 'telegraf';
 
 function assert(condition: boolean, msg: string) {
   if (!condition) {
@@ -621,6 +623,104 @@ export async function runTests() {
     const formatted5608 = formatSeminarDetail(mock5608Detail);
     assert(formatted5608.includes('*포인트:* 지급 대상'), 'survey.point가 없을 때 지급 대상으로 포맷팅');
     console.log('  ✓ [Pass] 신규 미래 세미나 isPointExcluded=false 및 포맷팅 검증 성공');
+
+    // Case 16: 텔레그램 핸들러 - 관리자봇(alwaysRefresh=true)은 항상 실시간 API 호출, 공지봇(alwaysRefresh=false)은 캐시 우선 검증
+    console.log('\n--- Case 16: 관리자봇 항상 실시간 조회 및 공지봇 캐시 우선 검증 ---');
+    const mockAdminStoredItem: SeminarListItem = {
+      seminarId: '8888',
+      name: '저장소에 있던 구 세미나명 8888',
+      url: 'https://m.doctorville.co.kr/cme/seminar/8888',
+      date: '2026-08-25',
+      time: '13:00~14:00',
+      currentCount: '100',
+      totalCount: '500',
+      nightTime: false,
+      isAdvancedSurvey: false,
+    };
+    const mockNoticeStoredItem: SeminarListItem = {
+      seminarId: '9999',
+      name: '공지봇 캐시 세미나 9999',
+      url: 'https://m.doctorville.co.kr/cme/seminar/9999',
+      date: '2026-08-26',
+      time: '14:00~15:00',
+      currentCount: '200',
+      totalCount: '500',
+      nightTime: false,
+      isAdvancedSurvey: false,
+    };
+    storage.set(SEMINAR_LIST_KEY, [mockAdminStoredItem, mockNoticeStoredItem]);
+
+    const adminApiState = { called: false };
+    (httpClient as any).httpGetJson = async (url: string) => {
+      if (url.includes('8888')) {
+        adminApiState.called = true;
+        return {
+          ...mock5574Raw,
+          seminarDetail: {
+            ...mock5574Detail,
+            seminarId: 8888,
+            seminarNm: '관리자 실시간 최신 세미나 정보 8888',
+          },
+        };
+      }
+      throw new Error('Not found');
+    };
+
+    try {
+      // 16-1. 관리자봇 핸들러 실행 (저장소에 항목이 있어도 force 없이 항상 실시간 API 조회)
+      const adminReplies: string[] = [];
+      const adminCtx = {
+        message: { text: '/seminar_detail 8888' },
+        reply: async (msg: string) => {
+          adminReplies.push(msg);
+        },
+      } as unknown as Context;
+
+      const adminHandler = createSeminarDetailHandler({ alwaysRefresh: true, showRawMessages: true });
+      await adminHandler(adminCtx);
+
+      assert(adminApiState.called, '관리자봇은 force 키워드 없이도 항상 실시간 API를 호출해야 함');
+      assert(
+        adminReplies.some((msg) => msg.includes('관리자 실시간 최신 세미나 정보 8888')),
+        '관리자봇 응답에 실시간 최신 데이터가 반영되어야 함',
+      );
+      assert(
+        adminReplies.some((msg) => msg.includes('Raw API Response')),
+        '관리자봇은 rawMessages(실시간 API 응답)를 수신해야 함',
+      );
+      console.log('  ✓ [Pass] 관리자봇 항상 새로 응답 및 Raw Response 전달 검증 성공');
+
+      // 16-2. 공지봇 핸들러 실행 (저장된 데이터 우선 반환, API 미호출, Raw Response 미전송)
+      const noticeApiState = { called: false };
+      (httpClient as any).httpGetJson = async () => {
+        noticeApiState.called = true;
+        throw new Error('공지봇은 저장된 목록이 있을 때 API를 호출하면 안 됨');
+      };
+
+      const noticeReplies: string[] = [];
+      const noticeCtx = {
+        message: { text: '/seminar_detail 9999' },
+        reply: async (msg: string) => {
+          noticeReplies.push(msg);
+        },
+      } as unknown as Context;
+
+      const noticeHandler = createSeminarDetailHandler({ alwaysRefresh: false, showRawMessages: false });
+      await noticeHandler(noticeCtx);
+
+      assert(!noticeApiState.called, '공지봇은 저장된 목록이 있을 때 API를 호출하지 않아야 함');
+      assert(
+        noticeReplies.some((msg) => msg.includes('공지봇 캐시 세미나 9999')),
+        '공지봇은 저장소의 세미나 데이터를 반환해야 함',
+      );
+      assert(
+        !noticeReplies.some((msg) => msg.includes('Raw API Response')),
+        '공지봇은 Raw Response를 전달하지 않아야 함',
+      );
+      console.log('  ✓ [Pass] 공지봇 캐시 우선 반환 및 Raw Response 제외 검증 성공');
+    } finally {
+      (httpClient as any).httpGetJson = originalHttpGetJson;
+    }
   } finally {
     storage.set(SEMINAR_LIST_KEY, backupList);
   }

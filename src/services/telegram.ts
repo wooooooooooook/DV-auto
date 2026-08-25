@@ -285,16 +285,24 @@ const todayLinks = async (ctx: Context) => {
   }
 };
 
-const createSeminarDetailHandler = (allowForce: boolean) => async (ctx: Context) => {
-  logger.info('User requested seminar detail', { from: ctx.from?.username, allowForce });
+export interface SeminarDetailHandlerOptions {
+  alwaysRefresh?: boolean;
+  showRawMessages?: boolean;
+}
+
+export const createSeminarDetailHandler = (options: SeminarDetailHandlerOptions | boolean) => async (ctx: Context) => {
+  const opts: SeminarDetailHandlerOptions =
+    typeof options === 'boolean' ? { alwaysRefresh: options, showRawMessages: options } : options;
+  const alwaysRefresh = opts.alwaysRefresh ?? false;
+  const showRawMessages = opts.showRawMessages ?? false;
+
+  logger.info('User requested seminar detail', { from: ctx.from?.username, alwaysRefresh, showRawMessages });
   try {
     const messageText = ctx.message && 'text' in ctx.message ? ctx.message.text : '';
     const seminarIds = extractSeminarIds(messageText);
     if (seminarIds.length === 0) {
       return ctx.reply(
-        allowForce
-          ? '사용법: /seminar_detail <세미나번호> [force]\n예: /seminar_detail 5566 (목록 저장값 우선)\n   /seminar_detail 5566 force (실시간 API 강제 조회)\n   또는 /seminar_detail 5566 5567'
-          : '사용법: /seminar_detail <세미나번호> [세미나번호...]\n예: /seminar_detail 5566\n   또는 /seminar_detail 5566 5567',
+        '사용법: /seminar_detail <세미나번호> [세미나번호...]\n예: /seminar_detail 5566\n   또는 /seminar_detail 5566 5567',
       );
     }
 
@@ -303,8 +311,8 @@ const createSeminarDetailHandler = (allowForce: boolean) => async (ctx: Context)
       return ctx.reply('⚠️ 세미나 번호는 한 번에 최대 10개까지만 조회할 수 있습니다.');
     }
 
-    const { run: runSeminarDetail, isForceRefresh } = await import('../tasks/seminar_detail');
-    const force = allowForce && isForceRefresh(messageText);
+    const { run: runSeminarDetail } = await import('../tasks/seminar_detail');
+    const force = alwaysRefresh;
     const result = await runSeminarDetail({
       args: {
         seminarIds,
@@ -332,8 +340,10 @@ const createSeminarDetailHandler = (allowForce: boolean) => async (ctx: Context)
         await ctx.reply(r.message);
       }
 
-      for (const rawMsg of r.rawMessages ?? []) {
-        await ctx.reply(rawMsg, { parse_mode: 'Markdown' });
+      if (showRawMessages) {
+        for (const rawMsg of r.rawMessages ?? []) {
+          await ctx.reply(rawMsg, { parse_mode: 'Markdown' });
+        }
       }
     }
   } catch (e) {
@@ -992,7 +1002,7 @@ if (adminBot) {
   });
 
   // 세미나 상세 정보 조회
-  adminBot.command('seminar_detail', createSeminarDetailHandler(true));
+  adminBot.command('seminar_detail', createSeminarDetailHandler({ alwaysRefresh: true, showRawMessages: true }));
 
   adminBot.command('naverpay_point_exchange', async (ctx) => {
     logger.info('User requested to run naverpay_point_exchange now', { from: ctx.from?.username });
@@ -1323,7 +1333,7 @@ if (adminBot) {
 - /delete_seminar_quiz <키워드>: 족보 삭제
 - /list_quiz: quiz.json 등록 제품 목록
 - /delete_quiz <제품명>: quiz.json 항목 삭제
-- /seminar_detail <세미나번호> [force]: 세미나 상세 정보 조회 (force: 실시간 API 강제 조회)
+- /seminar_detail <세미나번호>: 세미나 상세 정보 실시간 조회 (예: /seminar_detail 5566 또는 /seminar_detail 5566 5567)
 
 💰 포인트 & 교환:
 - /check_point: 현재 포인트를 확인합니다.
@@ -1364,7 +1374,7 @@ const noticeTodayLinks = async (ctx: Context) => {
 // --- Notice Bot Commands ---
 if (noticeBot) {
   noticeBot.command('today_links', noticeTodayLinks);
-  noticeBot.command('seminar_detail', createSeminarDetailHandler(false));
+  noticeBot.command('seminar_detail', createSeminarDetailHandler({ alwaysRefresh: false, showRawMessages: false }));
 
   noticeBot.command('help', (ctx) => {
     const message = `사용 가능한 명령어:
@@ -1394,7 +1404,7 @@ const adminCommands = [
   { command: 'delete_seminar_quiz', description: '족보 삭제' },
   { command: 'list_quiz', description: 'quiz.json 등록 제품 목록' },
   { command: 'delete_quiz', description: 'quiz.json 항목 삭제' },
-  { command: 'seminar_detail', description: '세미나 번호로 상세 정보 조회 [force: 실시간 API 조회]' },
+  { command: 'seminar_detail', description: '세미나 번호로 상세 정보 실시간 조회' },
   // 3. 포인트 & 교환
   { command: 'check_point', description: '현재 포인트 확인' },
   { command: 'check_seminar_point', description: '세미나 번호로 포인트 지급 확인' },
