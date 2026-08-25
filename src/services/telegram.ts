@@ -13,9 +13,8 @@ import { inspect } from '../modules/inspect';
 import {
   sendNotificationToChannel,
   replyWithSplit,
-  truncateTelegramMessage,
-  truncatePlainText,
   TELEGRAM_SAFE_MESSAGE_LENGTH,
+  TELEGRAM_SAFE_CAPTION_LENGTH,
 } from '../modules/utils';
 import { extractSeminarIds } from '../tasks/seminar_detail';
 
@@ -30,11 +29,6 @@ type SeminarQuizCheatsheet = Record<string, string>;
 type QuizMapping = Record<string, Array<string | number>>;
 type CommandResult = { stdout: string; stderr: string };
 type CommandResultWithExitCode = CommandResult & { exitCode?: number };
-
-function truncateMessage(text: string, maxLength = 3500): string {
-  if (!text) return '';
-  return truncatePlainText(text, maxLength);
-}
 
 function runShellCommand(command: string): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
@@ -93,7 +87,7 @@ async function commitAndPushIfChanged(
   let notice = '✅ Git 커밋/푸시 완료';
   if (pushStdout.trim() || pushStderr.trim()) {
     const output = `${pushStdout}${pushStderr}`.trim();
-    notice = `${notice}\n${truncateMessage(output)}`;
+    notice = `${notice}\n${output}`;
   }
   return { performed: true, notice };
 }
@@ -223,9 +217,9 @@ if (adminBot) {
   setBot('admin', adminBot);
   adminBot.catch((err, ctx) => {
     logger.error(`Admin Bot Error for ${ctx.updateType}`, err);
-    ctx.reply('오류가 발생했습니다. 로그를 확인해주세요.').catch(() => {});
+    replyWithSplit(ctx, '오류가 발생했습니다. 로그를 확인해주세요.').catch(() => {});
   });
-  adminBot.start((ctx) => ctx.reply('Welcome, Admin!'));
+  adminBot.start((ctx) => replyWithSplit(ctx, 'Welcome, Admin!'));
 }
 
 if (noticeBot) {
@@ -237,13 +231,13 @@ if (noticeBot) {
   noticeBot.use(async (ctx, next) => {
     const userId = ctx.from?.id;
     if (userId && !checkNoticeCooldown(userId)) {
-      await ctx.reply('⏳ 요청이 너무 빠릅니다. 2초 후 다시 시도해주세요.').catch(() => {});
+      await replyWithSplit(ctx, '⏳ 요청이 너무 빠릅니다. 2초 후 다시 시도해주세요.').catch(() => {});
       return;
     }
     return next();
   });
 
-  noticeBot.start((ctx) => ctx.reply('Welcome!'));
+  noticeBot.start((ctx) => replyWithSplit(ctx, 'Welcome!'));
 }
 
 // --- Shared Handlers ---
@@ -252,7 +246,7 @@ const todayLinks = async (ctx: Context) => {
   const task = taskRegistry.getByName('today_links');
   if (!task) {
     logger.error('today_links task not found, cannot run');
-    return ctx.reply('today_links task not found!');
+    return replyWithSplit(ctx, 'today_links task not found!');
   }
 
   let targetDate: string | undefined;
@@ -274,18 +268,18 @@ const todayLinks = async (ctx: Context) => {
         } else if (typeof result === 'string') {
           await replyWithSplit(ctx, result);
         } else if (result === true) {
-          await ctx.reply('작업이 완료되었습니다.');
+          await replyWithSplit(ctx, '작업이 완료되었습니다.');
         } else {
-          await ctx.reply('작업이 완료되었습니다.');
+          await replyWithSplit(ctx, '작업이 완료되었습니다.');
         }
       })
       .catch((e) => {
         const message = e instanceof Error ? e.message : String(e);
-        ctx.reply(`링크 수집 중 오류 발생: ${message}`);
+        replyWithSplit(ctx, `링크 수집 중 오류 발생: ${message}`);
       });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    ctx.reply(`Failed to start 링크 수집: ${message}`);
+    replyWithSplit(ctx, `Failed to start 링크 수집: ${message}`);
   }
 };
 
@@ -305,14 +299,15 @@ export const createSeminarDetailHandler = (options: SeminarDetailHandlerOptions 
     const messageText = ctx.message && 'text' in ctx.message ? ctx.message.text : '';
     const seminarIds = extractSeminarIds(messageText);
     if (seminarIds.length === 0) {
-      return ctx.reply(
+      return replyWithSplit(
+        ctx,
         '사용법: /seminar_detail <세미나번호> [세미나번호...]\n예: /seminar_detail 5566\n   또는 /seminar_detail 5566 5567',
       );
     }
 
     const MAX_SEMINAR_IDS_PER_REQUEST = 10;
     if (seminarIds.length > MAX_SEMINAR_IDS_PER_REQUEST) {
-      return ctx.reply('⚠️ 세미나 번호는 한 번에 최대 10개까지만 조회할 수 있습니다.');
+      return replyWithSplit(ctx, '⚠️ 세미나 번호는 한 번에 최대 10개까지만 조회할 수 있습니다.');
     }
 
     const { run: runSeminarDetail } = await import('../tasks/seminar_detail');
@@ -336,23 +331,23 @@ export const createSeminarDetailHandler = (options: SeminarDetailHandlerOptions 
 
       if (r.messages && r.messages.length > 1) {
         for (const msg of r.messages) {
-          await ctx.reply(msg, { parse_mode: 'Markdown' });
+          await replyWithSplit(ctx, msg, { parse_mode: 'Markdown' });
         }
       } else if (r.success !== false && r.message) {
-        await ctx.reply(r.message, { parse_mode: 'Markdown' });
+        await replyWithSplit(ctx, r.message, { parse_mode: 'Markdown' });
       } else if (!r.success && r.message) {
-        await ctx.reply(r.message);
+        await replyWithSplit(ctx, r.message);
       }
 
       if (showRawMessages) {
         for (const rawMsg of r.rawMessages ?? []) {
-          await ctx.reply(rawMsg, { parse_mode: 'Markdown' });
+          await replyWithSplit(ctx, rawMsg, { parse_mode: 'Markdown' });
         }
       }
     }
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    ctx.reply(`세미나 상세 조회 실패: ${message}`);
+    replyWithSplit(ctx, `세미나 상세 조회 실패: ${message}`);
   }
 };
 
@@ -367,7 +362,7 @@ if (adminBot) {
     const task = taskRegistry.getByName('daily_routine');
     if (!task) {
       logger.error('daily_routine task not found, cannot run');
-      return ctx.reply('daily_routine task not found!');
+      return replyWithSplit(ctx, 'daily_routine task not found!');
     }
 
     try {
@@ -375,9 +370,10 @@ if (adminBot) {
         .runTask(task)
         .then(async (result) => {
           if (result && typeof result === 'object' && (result as { message?: string }).message) {
-            await ctx.reply(
+            await replyWithSplit(
+              ctx,
               (result as { message: string }).message,
-              (result as { options?: Record<string, unknown> }).options,
+              (result as { options?: Record<string, unknown> }).options as Parameters<Context['reply']>[1],
             );
             if (
               (result as { imagePath?: string }).imagePath &&
@@ -387,20 +383,20 @@ if (adminBot) {
               await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
             }
           } else if (typeof result === 'string') {
-            await ctx.reply(result);
+            await replyWithSplit(ctx, result);
           } else if (result === true) {
-            await ctx.reply('daily_routine finished successfully.');
+            await replyWithSplit(ctx, 'daily_routine finished successfully.');
           } else {
-            await ctx.reply('daily_routine finished successfully.');
+            await replyWithSplit(ctx, 'daily_routine finished successfully.');
           }
         })
         .catch((e) => {
           const message = e instanceof Error ? e.message : String(e);
-          ctx.reply(`daily_routine failed: ${message}`);
+          replyWithSplit(ctx, `daily_routine failed: ${message}`);
         });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Failed to start daily_routine: ${message}`);
+      replyWithSplit(ctx, `Failed to start daily_routine: ${message}`);
     }
   });
 
@@ -411,11 +407,11 @@ if (adminBot) {
     const task = taskRegistry.getByName('today_links');
     if (!task) {
       logger.error('today_links task not found, cannot run broadcast');
-      return ctx.reply('today_links task not found!');
+      return replyWithSplit(ctx, 'today_links task not found!');
     }
 
     try {
-      await ctx.reply('Running today_links and broadcasting to channel... (백그라운드 실행)');
+      await replyWithSplit(ctx, 'Running today_links and broadcasting to channel... (백그라운드 실행)');
       runner
         .runTask(task)
         .then(async (result) => {
@@ -425,18 +421,18 @@ if (adminBot) {
               null,
               (result as { options?: Record<string, unknown> }).options,
             );
-            await ctx.reply('Broadcast successful.');
+            await replyWithSplit(ctx, 'Broadcast successful.');
           } else {
-            await ctx.reply('Task ran, but no message was produced to broadcast.');
+            await replyWithSplit(ctx, 'Task ran, but no message was produced to broadcast.');
           }
         })
         .catch((e) => {
           const message = e instanceof Error ? e.message : String(e);
-          ctx.reply(`Broadcast failed: ${message}`);
+          replyWithSplit(ctx, `Broadcast failed: ${message}`);
         });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Failed to start broadcast: ${message}`);
+      replyWithSplit(ctx, `Failed to start broadcast: ${message}`);
     }
   });
 
@@ -445,7 +441,7 @@ if (adminBot) {
     const task = taskRegistry.getByName('apply_seminar');
     if (!task) {
       logger.error('apply_seminar task not found, cannot run');
-      return ctx.reply('apply_seminar task not found!');
+      return replyWithSplit(ctx, 'apply_seminar task not found!');
     }
 
     try {
@@ -453,9 +449,10 @@ if (adminBot) {
         .runTask(task)
         .then(async (result) => {
           if (result && typeof result === 'object' && (result as { message?: string }).message) {
-            await ctx.reply(
+            await replyWithSplit(
+              ctx,
               (result as { message: string }).message,
-              (result as { options?: Record<string, unknown> }).options,
+              (result as { options?: Record<string, unknown> }).options as Parameters<Context['reply']>[1],
             );
             if (
               (result as { imagePath?: string }).imagePath &&
@@ -465,20 +462,20 @@ if (adminBot) {
               await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
             }
           } else if (typeof result === 'string') {
-            await ctx.reply(result);
+            await replyWithSplit(ctx, result);
           } else if (result === true) {
-            await ctx.reply('apply_seminar finished successfully.');
+            await replyWithSplit(ctx, 'apply_seminar finished successfully.');
           } else {
-            await ctx.reply('apply_seminar finished successfully.');
+            await replyWithSplit(ctx, 'apply_seminar finished successfully.');
           }
         })
         .catch((e) => {
           const message = e instanceof Error ? e.message : String(e);
-          ctx.reply(`apply_seminar failed: ${message}`);
+          replyWithSplit(ctx, `apply_seminar failed: ${message}`);
         });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Failed to start apply_seminar: ${message}`);
+      replyWithSplit(ctx, `Failed to start apply_seminar: ${message}`);
     }
   });
 
@@ -487,7 +484,7 @@ if (adminBot) {
     const task = taskRegistry.getByName('today_quiz');
     if (!task) {
       logger.error('today_quiz task not found, cannot run');
-      return ctx.reply('today_quiz task not found!');
+      return replyWithSplit(ctx, 'today_quiz task not found!');
     }
 
     try {
@@ -495,9 +492,10 @@ if (adminBot) {
         .runTask(task)
         .then(async (result) => {
           if (result && typeof result === 'object' && (result as { message?: string }).message) {
-            await ctx.reply(
+            await replyWithSplit(
+              ctx,
               (result as { message: string }).message,
-              (result as { options?: Record<string, unknown> }).options,
+              (result as { options?: Record<string, unknown> }).options as Parameters<Context['reply']>[1],
             );
             if (
               (result as { imagePath?: string }).imagePath &&
@@ -507,20 +505,20 @@ if (adminBot) {
               await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
             }
           } else if (typeof result === 'string') {
-            await ctx.reply(result);
+            await replyWithSplit(ctx, result);
           } else if (result === true) {
-            await ctx.reply('today_quiz finished successfully.');
+            await replyWithSplit(ctx, 'today_quiz finished successfully.');
           } else {
-            await ctx.reply('today_quiz finished successfully.');
+            await replyWithSplit(ctx, 'today_quiz finished successfully.');
           }
         })
         .catch((e) => {
           const message = e instanceof Error ? e.message : String(e);
-          ctx.reply(`today_quiz failed: ${message}`);
+          replyWithSplit(ctx, `today_quiz failed: ${message}`);
         });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Failed to start today_quiz: ${message}`);
+      replyWithSplit(ctx, `Failed to start today_quiz: ${message}`);
     }
   });
 
@@ -529,7 +527,7 @@ if (adminBot) {
     const task = taskRegistry.getByName('monitor_lunch_seminars');
     if (!task) {
       logger.error('monitor_lunch_seminars task not found, cannot run');
-      return ctx.reply('monitor_lunch_seminars task not found!');
+      return replyWithSplit(ctx, 'monitor_lunch_seminars task not found!');
     }
 
     try {
@@ -537,9 +535,10 @@ if (adminBot) {
         .runTask(task)
         .then(async (result) => {
           if (result && typeof result === 'object' && (result as { message?: string }).message) {
-            await ctx.reply(
+            await replyWithSplit(
+              ctx,
               (result as { message: string }).message,
-              (result as { options?: Record<string, unknown> }).options,
+              (result as { options?: Record<string, unknown> }).options as Parameters<Context['reply']>[1],
             );
             if (
               (result as { imagePath?: string }).imagePath &&
@@ -549,16 +548,16 @@ if (adminBot) {
               await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
             }
           } else if (typeof result === 'string') {
-            await ctx.reply(result);
+            await replyWithSplit(ctx, result);
           }
         })
         .catch((e) => {
           const message = e instanceof Error ? e.message : String(e);
-          ctx.reply(`monitor_lunch_seminars failed: ${message}`);
+          replyWithSplit(ctx, `monitor_lunch_seminars failed: ${message}`);
         });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Failed to start monitor_lunch_seminars: ${message}`);
+      replyWithSplit(ctx, `Failed to start monitor_lunch_seminars: ${message}`);
     }
   });
 
@@ -567,7 +566,7 @@ if (adminBot) {
     const task = taskRegistry.getByName('monitor_dinner_seminars');
     if (!task) {
       logger.error('monitor_dinner_seminars task not found, cannot run');
-      return ctx.reply('monitor_dinner_seminars task not found!');
+      return replyWithSplit(ctx, 'monitor_dinner_seminars task not found!');
     }
 
     try {
@@ -575,9 +574,10 @@ if (adminBot) {
         .runTask(task)
         .then(async (result) => {
           if (result && typeof result === 'object' && (result as { message?: string }).message) {
-            await ctx.reply(
+            await replyWithSplit(
+              ctx,
               (result as { message: string }).message,
-              (result as { options?: Record<string, unknown> }).options,
+              (result as { options?: Record<string, unknown> }).options as Parameters<Context['reply']>[1],
             );
             if (
               (result as { imagePath?: string }).imagePath &&
@@ -587,16 +587,16 @@ if (adminBot) {
               await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
             }
           } else if (typeof result === 'string') {
-            await ctx.reply(result);
+            await replyWithSplit(ctx, result);
           }
         })
         .catch((e) => {
           const message = e instanceof Error ? e.message : String(e);
-          ctx.reply(`monitor_dinner_seminars failed: ${message}`);
+          replyWithSplit(ctx, `monitor_dinner_seminars failed: ${message}`);
         });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Failed to start monitor_dinner_seminars: ${message}`);
+      replyWithSplit(ctx, `Failed to start monitor_dinner_seminars: ${message}`);
     }
   });
 
@@ -613,7 +613,8 @@ if (adminBot) {
     const isAdvancedSurvey = parts[1]?.toLowerCase() === 'advanced' || parts[1]?.toLowerCase() === '심화';
 
     if (!seminarId) {
-      return ctx.reply(
+      return replyWithSplit(
+        ctx,
         '사용법: /run_seminar_quiz <seminarId> [advanced]\n예) /run_seminar_quiz 12345\n     /run_seminar_quiz 12345 advanced',
       );
     }
@@ -621,11 +622,12 @@ if (adminBot) {
     const task = taskRegistry.getByName('run_seminar_quiz');
     if (!task) {
       logger.error('run_seminar_quiz task not found, cannot run');
-      return ctx.reply('run_seminar_quiz task not found!');
+      return replyWithSplit(ctx, 'run_seminar_quiz task not found!');
     }
 
     try {
-      await ctx.reply(
+      await replyWithSplit(
+        ctx,
         `Starting run_seminar_quiz (seminarId=${seminarId}${isAdvancedSurvey ? ', 심화설문' : ''})... (백그라운드 실행)`,
       );
       const args: Record<string, string> = { seminarId };
@@ -634,9 +636,10 @@ if (adminBot) {
         .runTask(task, { args })
         .then(async (result) => {
           if (result && typeof result === 'object' && (result as { message?: string }).message) {
-            await ctx.reply(
+            await replyWithSplit(
+              ctx,
               (result as { message: string }).message,
-              (result as { options?: Record<string, unknown> }).options,
+              (result as { options?: Record<string, unknown> }).options as Parameters<Context['reply']>[1],
             );
             if (
               (result as { imagePath?: string }).imagePath &&
@@ -654,20 +657,20 @@ if (adminBot) {
               }
             }
           } else if (typeof result === 'string') {
-            await ctx.reply(result);
+            await replyWithSplit(ctx, result);
           } else if (result === true) {
-            await ctx.reply('run_seminar_quiz finished successfully.');
+            await replyWithSplit(ctx, 'run_seminar_quiz finished successfully.');
           } else {
-            await ctx.reply('run_seminar_quiz finished.');
+            await replyWithSplit(ctx, 'run_seminar_quiz finished.');
           }
         })
         .catch((e) => {
           const message = e instanceof Error ? e.message : String(e);
-          ctx.reply(`run_seminar_quiz failed: ${message}`);
+          replyWithSplit(ctx, `run_seminar_quiz failed: ${message}`);
         });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Failed to start run_seminar_quiz: ${message}`);
+      replyWithSplit(ctx, `Failed to start run_seminar_quiz: ${message}`);
     }
   });
 
@@ -677,7 +680,7 @@ if (adminBot) {
     const content = messageText.replace(/^\/add_seminar_answer_batch\s*/, '').trim();
 
     if (!content) {
-      return ctx.reply('사용법: /add_seminar_answer_batch <퀴즈 알림 내용 + 마지막 줄에 정답번호>');
+      return replyWithSplit(ctx, '사용법: /add_seminar_answer_batch <퀴즈 알림 내용 + 마지막 줄에 정답번호>');
     }
 
     const lines = content.split('\n').map((l) => l.trim());
@@ -692,26 +695,32 @@ if (adminBot) {
     }
 
     if (answers.length === 0) {
-      return ctx.reply('❌ 마지막 줄에 숫자 형식의 정답(예: 3313 또는 3 3 1 3)이 포함되어야 합니다.');
+      return replyWithSplit(ctx, '❌ 마지막 줄에 숫자 형식의 정답(예: 3313 또는 3 3 1 3)이 포함되어야 합니다.');
     }
 
     const questions = parseQuizQuestionsFromText(content);
 
     if (questions.length === 0) {
-      return ctx.reply('❌ 퀴즈 내용을 파싱하지 못했습니다. 형식을 확인해주세요.');
+      return replyWithSplit(ctx, '❌ 퀴즈 내용을 파싱하지 못했습니다. 형식을 확인해주세요.');
     }
 
     if (questions.length !== answers.length) {
-      return ctx.reply(`❌ 퀴즈 개수(${questions.length})와 정답 개수(${answers.length})가 일치하지 않습니다.`);
+      return replyWithSplit(
+        ctx,
+        `❌ 퀴즈 개수(${questions.length})와 정답 개수(${answers.length})가 일치하지 않습니다.`,
+      );
     }
 
     try {
       const { registered, gitNotice } = await registerQuizAnswersToCheatsheet(questions, answers);
-      await ctx.reply(`✅ 세미나 퀴즈 ${registered.length}개 일괄 등록 완료\n\n${registered.join('\n')}${gitNotice}`);
+      await replyWithSplit(
+        ctx,
+        `✅ 세미나 퀴즈 ${registered.length}개 일괄 등록 완료\n\n${registered.join('\n')}${gitNotice}`,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.error('세미나 퀴즈 족보 일괄 등록 실패', error);
-      await ctx.reply(`❌ 일괄 등록 실패: ${message}`);
+      await replyWithSplit(ctx, `❌ 일괄 등록 실패: ${message}`);
     }
   });
 
@@ -761,7 +770,8 @@ if (adminBot) {
     }
 
     if (questions.length !== answers.length) {
-      return ctx.reply(
+      return replyWithSplit(
+        ctx,
         `❌ 퀴즈 개수(${questions.length}개)와 전송한 정답 개수(${answers.length}개)가 일치하지 않습니다.\n확인 후 다시 답장을 보내주세요.`,
       );
     }
@@ -773,13 +783,14 @@ if (adminBot) {
         answers,
       });
       const { registered, gitNotice } = await registerQuizAnswersToCheatsheet(questions, answers);
-      await ctx.reply(
+      await replyWithSplit(
+        ctx,
         `✅ 세미나/오늘의 퀴즈 ${registered.length}개 족보 등록 완료 (답장 등록)\n\n${registered.join('\n')}${gitNotice}\n\n재실행: /run_quiz_now`,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.error('답장을 통한 퀴즈 족보 등록 실패', error);
-      await ctx.reply(`❌ 족보 등록 실패: ${message}`);
+      await replyWithSplit(ctx, `❌ 족보 등록 실패: ${message}`);
     }
   });
 
@@ -799,9 +810,9 @@ if (adminBot) {
 
       if (entries.length === 0) {
         if (searchKeyword) {
-          return ctx.reply(`📋 "${searchKeyword}" 검색 결과가 없습니다.`);
+          return replyWithSplit(ctx, `📋 "${searchKeyword}" 검색 결과가 없습니다.`);
         } else {
-          return ctx.reply('📋 등록된 세미나 퀴즈 족보가 없습니다.');
+          return replyWithSplit(ctx, '📋 등록된 세미나 퀴즈 족보가 없습니다.');
         }
       }
 
@@ -813,10 +824,10 @@ if (adminBot) {
         message += `• ${keyword} → ${answer}\n`;
       }
 
-      await ctx.reply(truncateMessage(message));
+      await replyWithSplit(ctx, message);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      await ctx.reply(`❌ 족보 조회 실패: ${message}`);
+      await replyWithSplit(ctx, `❌ 족보 조회 실패: ${message}`);
     }
   });
 
@@ -826,13 +837,16 @@ if (adminBot) {
     const keyword = messageText.replace(/^\/delete_seminar_quiz\s*/, '').trim();
 
     if (!keyword) {
-      return ctx.reply('사용법: /delete_seminar_quiz <문제 키워드>\n예) /delete_seminar_quiz 펙수클루의 적응증이 아닌');
+      return replyWithSplit(
+        ctx,
+        '사용법: /delete_seminar_quiz <문제 키워드>\n예) /delete_seminar_quiz 펙수클루의 적응증이 아닌',
+      );
     }
 
     try {
       const data = await loadSeminarQuizCheatsheet();
       if (!(keyword in data)) {
-        return ctx.reply(`❌ 해당 키워드가 족보에 없습니다: ${keyword}`);
+        return replyWithSplit(ctx, `❌ 해당 키워드가 족보에 없습니다: ${keyword}`);
       }
 
       const deletedAnswer = data[keyword];
@@ -848,11 +862,14 @@ if (adminBot) {
         gitNotice = `\n\n⚠️ Git 커밋/푸시 실패: ${message}`;
       }
 
-      await ctx.reply(`🗑️ 세미나 퀴즈 족보 삭제 완료\n\n키워드: ${keyword}\n정답: ${deletedAnswer}${gitNotice}`);
+      await replyWithSplit(
+        ctx,
+        `🗑️ 세미나 퀴즈 족보 삭제 완료\n\n키워드: ${keyword}\n정답: ${deletedAnswer}${gitNotice}`,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.error('세미나 퀴즈 족보 삭제 실패', error);
-      await ctx.reply(`❌ 족보 삭제 실패: ${message}`);
+      await replyWithSplit(ctx, `❌ 족보 삭제 실패: ${message}`);
     }
   });
 
@@ -873,9 +890,9 @@ if (adminBot) {
 
       if (entries.length === 0) {
         if (searchKeyword) {
-          return ctx.reply(`📋 quiz.json "${searchKeyword}" 검색 결과가 없습니다.`);
+          return replyWithSplit(ctx, `📋 quiz.json "${searchKeyword}" 검색 결과가 없습니다.`);
         } else {
-          return ctx.reply('📋 quiz.json에 등록된 항목이 없습니다.');
+          return replyWithSplit(ctx, '📋 quiz.json에 등록된 항목이 없습니다.');
         }
       }
 
@@ -887,10 +904,10 @@ if (adminBot) {
         message += `• ${product} → [${answers.join(', ')}]\n`;
       }
 
-      await ctx.reply(truncateMessage(message));
+      await replyWithSplit(ctx, message);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      await ctx.reply(`❌ quiz.json 목록 조회 실패: ${message}`);
+      await replyWithSplit(ctx, `❌ quiz.json 목록 조회 실패: ${message}`);
     }
   });
 
@@ -900,14 +917,14 @@ if (adminBot) {
     const target = messageText.replace(/^\/delete_quiz\s*/, '').trim();
 
     if (!target) {
-      return ctx.reply('사용법: /delete_quiz <제품명>\n예) /delete_quiz 글리아타민');
+      return replyWithSplit(ctx, '사용법: /delete_quiz <제품명>\n예) /delete_quiz 글리아타민');
     }
 
     try {
       const data = await loadQuizMapping();
 
       if (!(target in data)) {
-        return ctx.reply(`❌ "${target}" 제품이 quiz.json에 없습니다.`);
+        return replyWithSplit(ctx, `❌ "${target}" 제품이 quiz.json에 없습니다.`);
       }
 
       const deletedAnswer = data[target];
@@ -923,13 +940,14 @@ if (adminBot) {
         gitNotice = `\n\n⚠️ Git 커밋/푸시 실패: ${message}`;
       }
 
-      await ctx.reply(
+      await replyWithSplit(
+        ctx,
         `🗑️ quiz.json 항목 삭제 완료\n\n제품: ${target}\n정답: ${JSON.stringify(deletedAnswer)}${gitNotice}`,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.error('quiz.json 삭제 실패', error);
-      await ctx.reply(`❌ quiz.json 삭제 실패: ${message}`);
+      await replyWithSplit(ctx, `❌ quiz.json 삭제 실패: ${message}`);
     }
   });
 
@@ -942,7 +960,7 @@ if (adminBot) {
     const task = taskRegistry.getByName('check_point');
     if (!task) {
       logger.error('check_point task not found, cannot run');
-      return ctx.reply('check_point task not found!');
+      return replyWithSplit(ctx, 'check_point task not found!');
     }
 
     try {
@@ -953,24 +971,29 @@ if (adminBot) {
             const msg = (result as { message: string }).message;
             const imagePath = (result as { imagePath?: string }).imagePath;
             if (imagePath && fsSync.existsSync(imagePath)) {
-              await ctx.replyWithPhoto({ source: imagePath }, { caption: msg });
+              if (msg.length <= TELEGRAM_SAFE_CAPTION_LENGTH) {
+                await ctx.replyWithPhoto({ source: imagePath }, { caption: msg });
+              } else {
+                await ctx.replyWithPhoto({ source: imagePath });
+                await replyWithSplit(ctx, msg);
+              }
               await fs.unlink(imagePath).catch(() => {});
             } else {
-              await ctx.reply(msg);
+              await replyWithSplit(ctx, msg);
             }
           } else if (typeof result === 'string') {
-            await ctx.reply(result);
+            await replyWithSplit(ctx, result);
           } else {
-            await ctx.reply('포인트 확인 완료 (메시지 없음)');
+            await replyWithSplit(ctx, '포인트 확인 완료 (메시지 없음)');
           }
         })
         .catch((e) => {
           const message = e instanceof Error ? e.message : String(e);
-          ctx.reply(`포인트 확인 실패: ${message}`);
+          replyWithSplit(ctx, `포인트 확인 실패: ${message}`);
         });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Failed to start check_point: ${message}`);
+      replyWithSplit(ctx, `Failed to start check_point: ${message}`);
     }
   });
 
@@ -980,7 +1003,7 @@ if (adminBot) {
     const task = taskRegistry.getByName('check_seminar_point');
     if (!task) {
       logger.error('check_seminar_point task not found, cannot run');
-      return ctx.reply('check_seminar_point task not found!');
+      return replyWithSplit(ctx, 'check_seminar_point task not found!');
     }
 
     try {
@@ -988,7 +1011,8 @@ if (adminBot) {
       const text = ctx.message?.text || '';
       const seminarIds = (text.match(/\b\d{4,5}\b/g) || []) as string[];
       if (seminarIds.length === 0) {
-        return ctx.reply(
+        return replyWithSplit(
+          ctx,
           '사용법: /check_seminar_point <세미나번호> [세미나번호...]\n예: /check_seminar_point 5517\n   또는 여러 줄 입력:\n8/12 5525\n8/13 5526\n8/14 5542 5543 5544 5565',
         );
       }
@@ -997,11 +1021,11 @@ if (adminBot) {
 
       if (result && typeof result === 'object') {
         const r = result as { message?: string };
-        if (r.message) await ctx.reply(r.message);
+        if (r.message) await replyWithSplit(ctx, r.message);
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Failed to start check_seminar_point: ${message}`);
+      replyWithSplit(ctx, `Failed to start check_seminar_point: ${message}`);
     }
   });
 
@@ -1013,7 +1037,7 @@ if (adminBot) {
     const task = taskRegistry.getByName('네이버페이포인트교환');
     if (!task) {
       logger.error('네이버페이포인트교환 task not found, cannot run');
-      return ctx.reply('네이버페이포인트교환 task not found!');
+      return replyWithSplit(ctx, '네이버페이포인트교환 task not found!');
     }
 
     const messageText = ctx.message?.text || '';
@@ -1027,14 +1051,15 @@ if (adminBot) {
     }
 
     try {
-      await ctx.reply(`네이버페이포인트교환 작업을 시작합니다... (${attempts}회 시도, 백그라운드 실행)`);
+      await replyWithSplit(ctx, `네이버페이포인트교환 작업을 시작합니다... (${attempts}회 시도, 백그라운드 실행)`);
       runner
         .runTask(task, { maxIterations: attempts })
         .then(async (result) => {
           if (result && typeof result === 'object' && (result as { message?: string }).message) {
-            await ctx.reply(
+            await replyWithSplit(
+              ctx,
               (result as { message: string }).message,
-              (result as { options?: Record<string, unknown> }).options,
+              (result as { options?: Record<string, unknown> }).options as Parameters<Context['reply']>[1],
             );
             if (
               (result as { imagePath?: string }).imagePath &&
@@ -1044,20 +1069,20 @@ if (adminBot) {
               await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
             }
           } else if (typeof result === 'string') {
-            await ctx.reply(result);
+            await replyWithSplit(ctx, result);
           } else if (result === true) {
-            await ctx.reply('네이버페이포인트교환 작업이 완료되었습니다.');
+            await replyWithSplit(ctx, '네이버페이포인트교환 작업이 완료되었습니다.');
           } else {
-            await ctx.reply('네이버페이포인트교환 작업이 완료되었습니다.');
+            await replyWithSplit(ctx, '네이버페이포인트교환 작업이 완료되었습니다.');
           }
         })
         .catch((e) => {
           const message = e instanceof Error ? e.message : String(e);
-          ctx.reply(`네이버페이포인트교환 실패: ${message}`);
+          replyWithSplit(ctx, `네이버페이포인트교환 실패: ${message}`);
         });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Failed to start 네이버페이포인트교환: ${message}`);
+      replyWithSplit(ctx, `Failed to start 네이버페이포인트교환: ${message}`);
     }
   });
 
@@ -1066,7 +1091,7 @@ if (adminBot) {
     const task = taskRegistry.getByName('배민포인트교환');
     if (!task) {
       logger.error('배민포인트교환 task not found, cannot run');
-      return ctx.reply('배민포인트교환 task not found!');
+      return replyWithSplit(ctx, '배민포인트교환 task not found!');
     }
 
     const messageText = ctx.message?.text || '';
@@ -1080,14 +1105,15 @@ if (adminBot) {
     }
 
     try {
-      await ctx.reply(`배민포인트교환 작업을 시작합니다... (${attempts}회 시도, 백그라운드 실행)`);
+      await replyWithSplit(ctx, `배민포인트교환 작업을 시작합니다... (${attempts}회 시도, 백그라운드 실행)`);
       runner
         .runTask(task, { maxIterations: attempts })
         .then(async (result) => {
           if (result && typeof result === 'object' && (result as { message?: string }).message) {
-            await ctx.reply(
+            await replyWithSplit(
+              ctx,
               (result as { message: string }).message,
-              (result as { options?: Record<string, unknown> }).options,
+              (result as { options?: Record<string, unknown> }).options as Parameters<Context['reply']>[1],
             );
             if (
               (result as { imagePath?: string }).imagePath &&
@@ -1097,20 +1123,20 @@ if (adminBot) {
               await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
             }
           } else if (typeof result === 'string') {
-            await ctx.reply(result);
+            await replyWithSplit(ctx, result);
           } else if (result === true) {
-            await ctx.reply('배민포인트교환 작업이 완료되었습니다.');
+            await replyWithSplit(ctx, '배민포인트교환 작업이 완료되었습니다.');
           } else {
-            await ctx.reply('배민포인트교환 작업이 완료되었습니다.');
+            await replyWithSplit(ctx, '배민포인트교환 작업이 완료되었습니다.');
           }
         })
         .catch((e) => {
           const message = e instanceof Error ? e.message : String(e);
-          ctx.reply(`배민포인트교환 실패: ${message}`);
+          replyWithSplit(ctx, `배민포인트교환 실패: ${message}`);
         });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Failed to start 배민포인트교환: ${message}`);
+      replyWithSplit(ctx, `Failed to start 배민포인트교환: ${message}`);
     }
   });
 
@@ -1121,7 +1147,7 @@ if (adminBot) {
   adminBot.command('schedules', (ctx) => {
     const tasks = scheduler.getScheduledTasks();
     if (tasks.length === 0) {
-      return ctx.reply('No scheduled tasks.');
+      return replyWithSplit(ctx, 'No scheduled tasks.');
     }
 
     let message = 'Scheduled Tasks:\n\n';
@@ -1131,7 +1157,7 @@ if (adminBot) {
       message += `Timezone: ${task.timezone}\n\n`;
     });
 
-    ctx.reply(message);
+    replyWithSplit(ctx, message);
   });
 
   adminBot.command('log', async (ctx) => {
@@ -1149,7 +1175,7 @@ if (adminBot) {
     logger.info(`User requested to fetch recent ${lineCount} logs`, { from: ctx.from?.username });
 
     try {
-      await ctx.reply(`최근 ${lineCount}개 로그를 불러옵니다... (최대 5초)`);
+      await replyWithSplit(ctx, `최근 ${lineCount}개 로그를 불러옵니다... (최대 5초)`);
 
       const cmd = `journalctl --no-pager -u doctorville-auto.service -n ${lineCount}`;
       const { stdout, stderr, exitCode } = await runShellCommandWithAllowedExitCodes(`timeout 5s ${cmd}`, [124, 143]);
@@ -1174,18 +1200,19 @@ if (adminBot) {
       if (!stdout.trim() && !stderr.trim()) {
         message += '\n\n출력된 로그가 없습니다.';
       }
-      await ctx.reply(truncateMessage(message));
+      await replyWithSplit(ctx, message);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       logger.error('log fetch failed', e);
-      await ctx.reply(`로그 가져오기 실패: ${message}`);
+      await replyWithSplit(ctx, `로그 가져오기 실패: ${message}`);
     }
   });
 
   adminBot.command('update_app', async (ctx) => {
     logger.info('User requested to run update_app', { from: ctx.from?.username });
     try {
-      await ctx.reply(
+      await replyWithSplit(
+        ctx,
         '🔄 앱 업데이트 및 빌드를 시작합니다...\n' +
           '1. Git Pull & 의존성 설치\n' +
           '2. TypeScript 빌드\n' +
@@ -1200,13 +1227,13 @@ if (adminBot) {
         .then(async ({ stdout, stderr }) => {
           let message = '✅ 앱 업데이트 및 빌드 성공!';
           if (stdout.trim()) {
-            message += `\n\nstdout:\n${truncateMessage(stdout.trim())}`;
+            message += `\n\nstdout:\n${stdout.trim()}`;
           }
           if (stderr.trim()) {
-            message += `\n\nstderr:\n${truncateMessage(stderr.trim())}`;
+            message += `\n\nstderr:\n${stderr.trim()}`;
           }
           message += '\n\n🚀 서비스를 재시작합니다...';
-          await ctx.reply(message);
+          await replyWithSplit(ctx, message);
 
           // 2. 서비스 재시작을 독립(detached) 프로세스로 실행하여 데드락 및 타임아웃 방지
           const restartProcess = spawn('systemctl', ['restart', 'doctorville-auto.service'], {
@@ -1222,16 +1249,16 @@ if (adminBot) {
           logger.error('update_app failed', error);
           let reply = `❌ 업데이트 실패:\n${message}`;
           if (stdout.trim()) {
-            reply += `\n\nstdout:\n${truncateMessage(stdout.trim())}`;
+            reply += `\n\nstdout:\n${stdout.trim()}`;
           }
           if (stderr.trim()) {
-            reply += `\n\nstderr:\n${truncateMessage(stderr.trim())}`;
+            reply += `\n\nstderr:\n${stderr.trim()}`;
           }
-          await ctx.reply(reply);
+          await replyWithSplit(ctx, reply);
         });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      ctx.reply(`Failed to start update_app: ${message}`);
+      replyWithSplit(ctx, `Failed to start update_app: ${message}`);
     }
   });
 
@@ -1241,7 +1268,7 @@ if (adminBot) {
     const args = messageText.split(' ').slice(1);
 
     if (args.length < 2) {
-      return ctx.reply('Usage: /inspect <url> <selector> [waitUntil]');
+      return replyWithSplit(ctx, 'Usage: /inspect <url> <selector> [waitUntil]');
     }
 
     const url = args[0];
@@ -1265,7 +1292,7 @@ if (adminBot) {
     let screenshotPath: string | null = null;
 
     try {
-      ctx.reply(`Inspecting ${url} with selector "${selector}"... (waitUntil: ${waitUntil || 'load'})`);
+      replyWithSplit(ctx, `Inspecting ${url} with selector "${selector}"... (waitUntil: ${waitUntil || 'load'})`);
       const result = await inspect(url, selector, { waitUntil });
       screenshotPath = result.screenshotPath;
       let message = `Found ${result.count} elements matching selector "${selector}".\n\n`;
@@ -1296,7 +1323,7 @@ if (adminBot) {
           message += '\n';
         });
       }
-      await ctx.reply(message);
+      await replyWithSplit(ctx, message);
 
       if (screenshotPath) {
         await ctx.replyWithPhoto({ source: screenshotPath });
@@ -1308,7 +1335,7 @@ if (adminBot) {
       } else if (e instanceof Error) {
         errorMessage += `\nDetails: ${e.message}`;
       }
-      ctx.reply(errorMessage);
+      replyWithSplit(ctx, errorMessage);
     } finally {
       if (screenshotPath) {
         await fs
@@ -1353,7 +1380,7 @@ if (adminBot) {
 - /inspect <url> <selector> [waitUntil]: 지정한 URL에서 셀렉터에 해당하는 요소를 검사하고 스크린샷을 전송합니다.
 
 명령어 사용 예: /inspect https://example.com "div.article" networkidle`;
-    ctx.reply(message);
+    replyWithSplit(ctx, message);
   });
 }
 
@@ -1365,13 +1392,14 @@ const noticeTodayLinks = async (ctx: Context) => {
     if (cache && cache.message) {
       await replyWithSplit(ctx, cache.message, cache.options as Parameters<Context['reply']>[1]);
     } else {
-      await ctx.reply(
+      await replyWithSplit(
+        ctx,
         'ℹ️ 오늘의 링크 정보가 아직 생성되지 않았습니다. 매일 오전 9시 채널 공지 이후 조회하실 수 있습니다.',
       );
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    await ctx.reply(`오늘의 링크 조회 실패: ${message}`);
+    await replyWithSplit(ctx, `오늘의 링크 조회 실패: ${message}`);
   }
 };
 
@@ -1388,7 +1416,7 @@ if (noticeBot) {
 - /check_advanced_seminars: 최근 2주 심화 세미나 포인트 지급 현황 (방장 계정 기준)
 - /subscribe_seminar_changes: 세미나 정보 변경 알림 구독
 - /unsubscribe_seminar_changes: 세미나 정보 변경 알림 구독 해제`;
-    ctx.reply(message);
+    replyWithSplit(ctx, message);
   });
 }
 

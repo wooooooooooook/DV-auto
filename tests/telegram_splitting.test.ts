@@ -223,12 +223,133 @@ async function testReplyWithSplitMock() {
   console.log('  ✓ replyWithSplit Mock 전송 검증 성공');
 }
 
+// 6. sendTelegram 및 sendNotificationToChannel 무손실 청킹 전송 테스트
+async function testSendTelegramAndChannelChunking() {
+  console.log('6. sendTelegram 및 sendNotificationToChannel 무손실 청킹 전송 테스트');
+
+  const sentMessages: Array<{ type: 'text' | 'photo'; text?: string; photo?: string }> = [];
+
+  const mockBot = {
+    command: () => {},
+    telegram: {
+      sendMessage: async (_chatId: string, text: string) => {
+        sentMessages.push({ type: 'text', text });
+        return { message_id: 100 + sentMessages.length };
+      },
+      sendPhoto: async (_chatId: string, source: { source: string }, options?: { caption?: string }) => {
+        sentMessages.push({ type: 'photo', photo: source.source, text: options?.caption });
+        return { message_id: 200 + sentMessages.length };
+      },
+    },
+  };
+
+  const { setBot } = await import('../src/services/bot_instance');
+  const { sendTelegram, sendNotificationToChannel } = await import('../src/modules/utils');
+  const fs = await import('fs');
+  const path = await import('path');
+
+  setBot('admin', mockBot as any);
+  setBot('notice', mockBot as any);
+  process.env.TELEGRAM_CHAT_ID = '12345';
+  process.env.NOTICE_CHANNEL_ID = '67890';
+
+  const dummyImgPath = path.join(process.cwd(), 'tests', 'test_chunk_dummy.png');
+  fs.writeFileSync(dummyImgPath, 'dummy data');
+
+  try {
+    // 6-1. 1000자 초과 텍스트 + 이미지 전달 시: 사진 단독 전송 후 텍스트 전체 청킹 전송 (트렁케이션 금지)
+    sentMessages.length = 0;
+    const longText = Array.from({ length: 80 }, (_, i) => `${i + 1}. 이것은 매우 긴 설명문 라인입니다 (${i})`).join(
+      '\n',
+    );
+    assert.ok(longText.length > 2000, '텍스트 길이가 2000자 초과');
+
+    const result = await sendTelegram(longText, dummyImgPath);
+    assert.strictEqual(result, true, 'sendTelegram 성공 반환');
+    assert.strictEqual(sentMessages[0].type, 'photo', '첫 전송은 사진 단독이어야 함');
+    assert.strictEqual(sentMessages[0].text, undefined, '사진 캡션은 비어있어야 함 (길이 초과 시)');
+
+    const textChunks = sentMessages.slice(1);
+    assert.ok(textChunks.length >= 1, '텍스트 청크가 전송되어야 함');
+    const reconstructed = textChunks.map((m) => m.text).join('\n');
+    assert.strictEqual(reconstructed, longText, '분할된 텍스트 청크들을 합쳤을 때 원본 텍스트와 완벽히 일치해야 함');
+
+    // 6-2. sendNotificationToChannel 동일 검증
+    sentMessages.length = 0;
+    const channelResult = await sendNotificationToChannel(longText, dummyImgPath);
+    assert.ok(channelResult !== null, 'sendNotificationToChannel 성공 messageId 반환');
+    assert.strictEqual(sentMessages[0].type, 'photo', '첫 전송은 사진 단독');
+    const channelTextChunks = sentMessages.slice(1);
+    const channelReconstructed = channelTextChunks.map((m) => m.text).join('\n');
+    assert.strictEqual(channelReconstructed, longText, '채널 전송 텍스트도 원본과 완벽히 일치');
+  } finally {
+    if (fs.existsSync(dummyImgPath)) {
+      fs.unlinkSync(dummyImgPath);
+    }
+  }
+
+  console.log('  ✓ sendTelegram 및 sendNotificationToChannel 무손실 청킹 전송 검증 성공');
+}
+
+// 7. sendSeminarChangesToSubscribers 청킹 분할 전송 테스트
+async function testSeminarSubscribersChunking() {
+  console.log('7. sendSeminarChangesToSubscribers 청킹 분할 전송 테스트');
+
+  const subscriberMessages: Array<{ chatId: number; text: string }> = [];
+  const mockNoticeBot = {
+    command: () => {},
+    telegram: {
+      sendMessage: async (chatId: number, text: string) => {
+        subscriberMessages.push({ chatId, text });
+        return { message_id: 300 + subscriberMessages.length };
+      },
+    },
+  };
+
+  const { setBot } = await import('../src/services/bot_instance');
+  const { addSeminarChangeSubscriber, removeSeminarChangeSubscriber, sendSeminarChangesToSubscribers } =
+    await import('../src/services/seminar_subscribers');
+
+  setBot('notice', mockNoticeBot as any);
+  addSeminarChangeSubscriber(1111);
+  addSeminarChangeSubscriber(2222);
+
+  try {
+    const longChangeMessage = Array.from(
+      { length: 100 },
+      (_, i) => `🔔 [세미나 변경 #${i + 1}] 일시: 2026-08-26, 내용: 세미나 상세 정보가 갱신되었습니다.`,
+    ).join('\n');
+    assert.ok(longChangeMessage.length > 5000, '변경 메시지 길이가 5000자 초과');
+
+    const res = await sendSeminarChangesToSubscribers(longChangeMessage);
+    assert.strictEqual(res.successCount, 2, '2명의 구독자 모두 성공');
+    assert.strictEqual(res.failCount, 0, '실패 0건');
+
+    // 각 구독자별로 메시지가 청킹 분할되어 전송되었는지 확인
+    const user1Messages = subscriberMessages.filter((m) => m.chatId === 1111);
+    const user2Messages = subscriberMessages.filter((m) => m.chatId === 2222);
+
+    assert.ok(user1Messages.length >= 2, `유저 1에게 ${user1Messages.length}개 청크로 분할 전송됨`);
+    assert.ok(user2Messages.length >= 2, `유저 2에게 ${user2Messages.length}개 청크로 분할 전송됨`);
+
+    const user1Reconstructed = user1Messages.map((m) => m.text).join('\n');
+    assert.strictEqual(user1Reconstructed, longChangeMessage, '유저 1 수신 메시지가 원본과 완벽히 일치');
+  } finally {
+    removeSeminarChangeSubscriber(1111);
+    removeSeminarChangeSubscriber(2222);
+  }
+
+  console.log('  ✓ sendSeminarChangesToSubscribers 청킹 분할 전송 검증 성공');
+}
+
 async function runAllTests() {
   testPlainTextSplitting();
   testMarkdownV2Splitting();
   testHtmlSplitting();
   testTodayLinksFullMessageSplitting();
   await testReplyWithSplitMock();
+  await testSendTelegramAndChannelChunking();
+  await testSeminarSubscribersChunking();
 
   console.log('\n🎉 모든 텔레그램 메시지 분할 전송 테스트 통과!');
 }

@@ -111,11 +111,12 @@ async function sendTelegram(
     console.error('Failed to send Telegram message:', error);
     try {
       const message = error instanceof Error ? error.message : String(error);
-      const safeErrorMessage = truncatePlainText(
-        `Failed to send a complex Telegram message. Error: ${message}`,
-        TELEGRAM_SAFE_MESSAGE_LENGTH,
-      );
-      await bot.telegram.sendMessage(CHAT_ID, safeErrorMessage);
+      const errorText = `Failed to send a complex Telegram message. Error: ${message}`;
+      const errorChunks = splitPlainText(errorText, TELEGRAM_SAFE_MESSAGE_LENGTH);
+      for (let i = 0; i < errorChunks.length; i++) {
+        await bot.telegram.sendMessage(CHAT_ID, errorChunks[i]);
+        if (i < errorChunks.length - 1) await sleep(100);
+      }
     } catch (nestedError) {
       console.error('Failed to send the failure notification as well:', nestedError);
     }
@@ -189,10 +190,27 @@ async function sendNotificationToChannel(
 
       const validImagePath = imagePath && fs.existsSync(imagePath) ? imagePath : null;
       if (validImagePath) {
-        const plainCaption = truncatePlainText(text, TELEGRAM_SAFE_CAPTION_LENGTH);
-        const fallbackPhotoOptions: SendPhotoOptions = { ...plainOptions, caption: plainCaption } as SendPhotoOptions;
-        const result = await bot.telegram.sendPhoto(CHANNEL_ID, { source: validImagePath }, fallbackPhotoOptions);
-        return result.message_id;
+        if (text.length <= TELEGRAM_SAFE_CAPTION_LENGTH) {
+          const fallbackPhotoOptions: SendPhotoOptions = { ...plainOptions, caption: text } as SendPhotoOptions;
+          const result = await bot.telegram.sendPhoto(CHANNEL_ID, { source: validImagePath }, fallbackPhotoOptions);
+          return result.message_id;
+        } else {
+          const result = await bot.telegram.sendPhoto(CHANNEL_ID, { source: validImagePath });
+          let plainLastId: number | null = result.message_id;
+          const plainChunks = splitPlainText(text, TELEGRAM_SAFE_MESSAGE_LENGTH);
+          for (let i = 0; i < plainChunks.length; i++) {
+            const isLast = i === plainChunks.length - 1;
+            const chunkOptions = isLast ? plainOptions : { ...plainOptions, reply_markup: undefined };
+            const sendRes = await bot.telegram.sendMessage(
+              CHANNEL_ID,
+              plainChunks[i],
+              chunkOptions as SendMessageOptions,
+            );
+            plainLastId = sendRes.message_id;
+            if (!isLast) await sleep(100);
+          }
+          return plainLastId;
+        }
       } else {
         const plainChunks = splitPlainText(text, TELEGRAM_SAFE_MESSAGE_LENGTH);
         let plainLastId: number | null = null;
@@ -215,11 +233,12 @@ async function sendNotificationToChannel(
 
     try {
       const message = error instanceof Error ? error.message : String(error);
-      const safeErrorMessage = truncatePlainText(
-        `Failed to send a complex message. Error: ${message}`,
-        TELEGRAM_SAFE_MESSAGE_LENGTH,
-      );
-      await bot.telegram.sendMessage(CHANNEL_ID, safeErrorMessage);
+      const errorText = `Failed to send a complex message. Error: ${message}`;
+      const errorChunks = splitPlainText(errorText, TELEGRAM_SAFE_MESSAGE_LENGTH);
+      for (let i = 0; i < errorChunks.length; i++) {
+        await bot.telegram.sendMessage(CHANNEL_ID, errorChunks[i]);
+        if (i < errorChunks.length - 1) await sleep(100);
+      }
     } catch (nestedError) {
       console.error('Failed to send the failure notification as well:', nestedError);
     }

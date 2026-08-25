@@ -1,5 +1,7 @@
 import { getBot } from './bot_instance';
 import * as storage from './storage';
+import { splitTelegramMessage, TELEGRAM_SAFE_MESSAGE_LENGTH } from '../modules/telegram_splitter';
+import { sleep } from '../modules/utils';
 
 export const SEMINAR_CHANGE_SUBSCRIBERS_KEY = 'seminar_change_subscribers';
 
@@ -66,7 +68,13 @@ export async function sendSeminarChangesToSubscribers(
 
   for (const chatId of subscribers) {
     try {
-      await bot.telegram.sendMessage(chatId, message);
+      const chunks = splitTelegramMessage(message, { maxLength: TELEGRAM_SAFE_MESSAGE_LENGTH });
+      for (let i = 0; i < chunks.length; i++) {
+        await bot.telegram.sendMessage(chatId, chunks[i]);
+        if (i < chunks.length - 1) {
+          await sleep(100);
+        }
+      }
       successCount++;
     } catch (error) {
       failCount++;
