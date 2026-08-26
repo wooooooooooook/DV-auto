@@ -52,8 +52,6 @@ async function runTests(): Promise<void> {
     setBot('notice', mockNoticeBot);
 
     assert(typeof registeredCommands['today_links'] === 'function', 'noticeBot에 today_links 커맨드가 등록되어야 함');
-    assert(typeof registeredCommands['오늘의링크'] === 'function', 'noticeBot에 오늘의링크 커맨드가 등록되어야 함');
-    assert(typeof registeredCommands['링크'] === 'function', 'noticeBot에 링크 커맨드가 등록되어야 함');
 
     // 2-1. 캐시가 없을 때 공지봇 /today_links 호출
     clearTodayLinksCache();

@@ -73,8 +73,6 @@ async function runTests(): Promise<void> {
       typeof registeredCommands['unsubscribe_seminar_changes'] === 'function',
       'unsubscribe_seminar_changes 커맨드 등록 확인',
     );
-    assert(typeof registeredCommands['세미나변경알림구독'] === 'function', '한글 세미나변경알림구독 커맨드 등록 확인');
-    assert(typeof registeredCommands['구독해제'] === 'function', '한글 구독해제 커맨드 등록 확인');
 
     // 2-1. 커맨드를 통한 구독 테스트
     let replyMsg = '';

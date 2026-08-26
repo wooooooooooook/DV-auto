@@ -38,6 +38,7 @@ const testFiles = [
   'telegram_splitting.test.ts',
   'channel_messages.test.ts',
   'broadcast_today_links.test.ts',
+  'intermd_quiz.test.ts',
 ];
 
 let failedCount = 0;
@@ -59,7 +60,7 @@ for (const file of testFiles) {
       },
     });
   } catch (_e) {
-    console.error(`❌ [Failed] ${file}`);
+    console.error(`❌ [Failed] ${file}:`, _e);
     failedCount++;
   }
 }

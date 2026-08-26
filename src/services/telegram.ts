@@ -538,6 +538,42 @@ if (adminBot) {
     }
   });
 
+  adminBot.command('run_intermd_quiz_now', async (ctx) => {
+    logger.info('User requested to run intermd_quiz now', { from: ctx.from?.username });
+    const task = taskRegistry.getByName('intermd_quiz');
+    if (!task) {
+      logger.error('intermd_quiz task not found, cannot run');
+      return replyWithSplit(ctx, 'intermd_quiz task not found!');
+    }
+
+    try {
+      runner
+        .runTask(task)
+        .then(async (result) => {
+          if (result && typeof result === 'object' && (result as { message?: string }).message) {
+            await replyWithSplit(
+              ctx,
+              (result as { message: string }).message,
+              (result as { options?: Record<string, unknown> }).options as Parameters<Context['reply']>[1],
+            );
+          } else if (typeof result === 'string') {
+            await replyWithSplit(ctx, result);
+          } else if (result === true) {
+            await replyWithSplit(ctx, '인터엠디 퀴즈 작업이 성공적으로 완료되었습니다.');
+          } else {
+            await replyWithSplit(ctx, '인터엠디 퀴즈 작업이 완료되었습니다.');
+          }
+        })
+        .catch((e) => {
+          const message = e instanceof Error ? e.message : String(e);
+          replyWithSplit(ctx, `intermd_quiz failed: ${message}`);
+        });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      replyWithSplit(ctx, `Failed to start intermd_quiz: ${message}`);
+    }
+  });
+
   adminBot.command('monitor_lunch_seminar_now', async (ctx) => {
     logger.info('User requested to run monitor_lunch_seminars now', { from: ctx.from?.username });
     const task = taskRegistry.getByName('monitor_lunch_seminars');
@@ -1486,6 +1522,7 @@ if (adminBot) {
 - /broadcast_today_links: 즉시 오늘의 링크를 채널에 공지합니다.
 - /apply_seminar_now: 즉시 세미나 신청 작업(apply_seminar)을 실행합니다.
 - /run_quiz_now: 즉시 오늘의 퀴즈 작업(today_quiz)을 실행합니다.
+- /run_intermd_quiz_now: 즉시 인터엠디 오늘의 퀴즈 작업(intermd_quiz)을 실행합니다.
 - /monitor_lunch_seminar_now: 즉시 점심 세미나 모니터링을 시작합니다.
 - /monitor_dinner_seminar_now: 즉시 저녁 세미나 모니터링을 시작합니다.
 
@@ -1550,10 +1587,13 @@ if (noticeBot) {
     const message = `사용 가능한 명령어:
 
 - /today_links: 오늘의 세미나/퀴즈/출석 링크 모음
+- /intermd_quiz: 인터엠디 오늘의 퀴즈 정답 확인
 - /seminar_detail <세미나번호>: 세미나 상세 정보 조회 (예: /seminar_detail 5566)
 - /check_advanced_seminars: 최근 2주 심화 세미나 포인트 지급 현황 (방장 계정 기준)
 - /subscribe_seminar_changes: 세미나 정보 변경 알림 구독
-- /unsubscribe_seminar_changes: 세미나 정보 변경 알림 구독 해제`;
+- /unsubscribe_seminar_changes: 세미나 정보 변경 알림 구독 해제
+- /subscribe_intermd_quiz: 인터엠디 퀴즈 알림 구독
+- /unsubscribe_intermd_quiz: 인터엠디 퀴즈 알림 구독 해제`;
     replyWithSplit(ctx, message);
   });
 }
@@ -1565,6 +1605,7 @@ const adminCommands = [
   { command: 'broadcast_today_links', description: '오늘의 링크 채널 공지' },
   { command: 'apply_seminar_now', description: '즉시 세미나 신청(apply_seminar) 실행' },
   { command: 'run_quiz_now', description: '즉시 오늘의 퀴즈(today_quiz) 실행' },
+  { command: 'run_intermd_quiz_now', description: '즉시 인터엠디 오늘의 퀴즈(intermd_quiz) 실행' },
   { command: 'monitor_lunch_seminar_now', description: '즉시 점심 세미나 모니터링 시작' },
   { command: 'monitor_dinner_seminar_now', description: '즉시 저녁 세미나 모니터링 시작' },
   // 2. 세미나 & 퀴즈 족보
@@ -1596,10 +1637,13 @@ const adminCommands = [
 
 const noticeCommands = [
   { command: 'today_links', description: '오늘의 세미나/퀴즈/출석 링크 모음' },
+  { command: 'intermd_quiz', description: '인터엠디 오늘의 퀴즈 정답 확인' },
   { command: 'seminar_detail', description: '세미나 번호로 상세 정보 조회' },
   { command: 'check_advanced_seminars', description: '최근 2주 심화 세미나 포인트 확인 (방장 계정 기준)' },
   { command: 'subscribe_seminar_changes', description: '세미나 정보 변경 알림 구독' },
   { command: 'unsubscribe_seminar_changes', description: '세미나 정보 변경 알림 구독 해제' },
+  { command: 'subscribe_intermd_quiz', description: '인터엠디 퀴즈 알림 구독' },
+  { command: 'unsubscribe_intermd_quiz', description: '인터엠디 퀴즈 알림 구독 해제' },
   { command: 'help', description: '도움말' },
 ];
 

@@ -53,7 +53,7 @@ function setBot(name: BotName, instance: Telegraf | null): void {
       });
 
       if (name === 'notice') {
-        instance.command(['today_links', '오늘의링크', '링크'], async (ctx: Context) => {
+        instance.command('today_links', async (ctx: Context) => {
           try {
             if (ctx.from?.id && !checkNoticeCooldown(ctx.from.id)) {
               await ctx.reply('⏳ 요청이 너무 빠릅니다. 2초 후 다시 시도해주세요.');
@@ -74,13 +74,32 @@ function setBot(name: BotName, instance: Telegraf | null): void {
             await ctx.reply(`오늘의 링크 조회 실패: ${message}`);
           }
         });
-      }
 
-      instance.command(
-        ['subscribe_seminar_changes', 'subscribe_seminar', 'subscribe', '세미나변경알림구독', '구독'],
-        async (ctx: Context) => {
+        instance.command('intermd_quiz', async (ctx: Context) => {
           try {
-            if (name === 'notice' && ctx.from?.id && !checkNoticeCooldown(ctx.from.id)) {
+            if (ctx.from?.id && !checkNoticeCooldown(ctx.from.id)) {
+              await ctx.reply('⏳ 요청이 너무 빠릅니다. 2초 후 다시 시도해주세요.');
+              return;
+            }
+            const { getInterMDQuizCache } = await import('../tasks/intermd_quiz');
+            const { replyWithSplit } = await import('../modules/utils');
+            const cache = getInterMDQuizCache();
+            if (cache && cache.formattedMessage) {
+              await replyWithSplit(ctx, cache.formattedMessage);
+            } else {
+              await ctx.reply(
+                'ℹ️ 오늘의 인터엠디 퀴즈 정보가 아직 등록되지 않았거나 오늘 출제된 퀴즈가 없습니다. 매일 오전 8시 1분 퀴즈 진행 후 확인하실 수 있습니다.',
+              );
+            }
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            await ctx.reply(`인터엠디 퀴즈 조회 실패: ${message}`);
+          }
+        });
+
+        instance.command('subscribe_intermd_quiz', async (ctx: Context) => {
+          try {
+            if (ctx.from?.id && !checkNoticeCooldown(ctx.from.id)) {
               await ctx.reply('⏳ 요청이 너무 빠릅니다. 2초 후 다시 시도해주세요.');
               return;
             }
@@ -89,27 +108,24 @@ function setBot(name: BotName, instance: Telegraf | null): void {
               await ctx.reply('⚠️ 유효하지 않은 채팅방 ID입니다.');
               return;
             }
-            const { addSeminarChangeSubscriber } = await import('./seminar_subscribers');
-            const isAdded = addSeminarChangeSubscriber(chatId);
+            const { addInterMDQuizSubscriber } = await import('./intermd_quiz_subscribers');
+            const isAdded = addInterMDQuizSubscriber(chatId);
             if (isAdded) {
               await ctx.reply(
-                '🔔 세미나 정보 변경 알림 구독이 완료되었습니다.\n세미나 일시/상태 변경 및 심화 세미나 포인트 지급 감지 시 알림이 전송됩니다.',
+                '🔔 인터엠디 오늘의 퀴즈 알림 구독이 완료되었습니다.\n매일 오전 8시 1분 퀴즈 정답 및 상세 정보가 발송됩니다. (퀴즈가 없는 날은 발송되지 않습니다)',
               );
             } else {
-              await ctx.reply('ℹ️ 이미 세미나 정보 변경 알림을 구독 중입니다.');
+              await ctx.reply('ℹ️ 이미 인터엠디 퀴즈 알림을 구독 중입니다.');
             }
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             await ctx.reply(`구독 처리 실패: ${message}`);
           }
-        },
-      );
+        });
 
-      instance.command(
-        ['unsubscribe_seminar_changes', 'unsubscribe_seminar', 'unsubscribe', '구독해제', '세미나변경알림구독해제'],
-        async (ctx: Context) => {
+        instance.command('unsubscribe_intermd_quiz', async (ctx: Context) => {
           try {
-            if (name === 'notice' && ctx.from?.id && !checkNoticeCooldown(ctx.from.id)) {
+            if (ctx.from?.id && !checkNoticeCooldown(ctx.from.id)) {
               await ctx.reply('⏳ 요청이 너무 빠릅니다. 2초 후 다시 시도해주세요.');
               return;
             }
@@ -118,19 +134,69 @@ function setBot(name: BotName, instance: Telegraf | null): void {
               await ctx.reply('⚠️ 유효하지 않은 채팅방 ID입니다.');
               return;
             }
-            const { removeSeminarChangeSubscriber } = await import('./seminar_subscribers');
-            const isRemoved = removeSeminarChangeSubscriber(chatId);
+            const { removeInterMDQuizSubscriber } = await import('./intermd_quiz_subscribers');
+            const isRemoved = removeInterMDQuizSubscriber(chatId);
             if (isRemoved) {
-              await ctx.reply('🔕 세미나 정보 변경 알림 구독이 해제되었습니다.');
+              await ctx.reply('🔕 인터엠디 퀴즈 알림 구독이 해제되었습니다.');
             } else {
-              await ctx.reply('ℹ️ 세미나 정보 변경 알림을 구독하고 있지 않습니다.');
+              await ctx.reply('ℹ️ 인터엠디 퀴즈 알림을 구독하고 있지 않습니다.');
             }
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             await ctx.reply(`구독 해제 실패: ${message}`);
           }
-        },
-      );
+        });
+      }
+
+      instance.command('subscribe_seminar_changes', async (ctx: Context) => {
+        try {
+          if (name === 'notice' && ctx.from?.id && !checkNoticeCooldown(ctx.from.id)) {
+            await ctx.reply('⏳ 요청이 너무 빠릅니다. 2초 후 다시 시도해주세요.');
+            return;
+          }
+          const chatId = ctx.chat?.id;
+          if (!chatId) {
+            await ctx.reply('⚠️ 유효하지 않은 채팅방 ID입니다.');
+            return;
+          }
+          const { addSeminarChangeSubscriber } = await import('./seminar_subscribers');
+          const isAdded = addSeminarChangeSubscriber(chatId);
+          if (isAdded) {
+            await ctx.reply(
+              '🔔 세미나 정보 변경 알림 구독이 완료되었습니다.\n세미나 일시/상태 변경 및 심화 세미나 포인트 지급 감지 시 알림이 전송됩니다.',
+            );
+          } else {
+            await ctx.reply('ℹ️ 이미 세미나 정보 변경 알림을 구독 중입니다.');
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          await ctx.reply(`구독 처리 실패: ${message}`);
+        }
+      });
+
+      instance.command('unsubscribe_seminar_changes', async (ctx: Context) => {
+        try {
+          if (name === 'notice' && ctx.from?.id && !checkNoticeCooldown(ctx.from.id)) {
+            await ctx.reply('⏳ 요청이 너무 빠릅니다. 2초 후 다시 시도해주세요.');
+            return;
+          }
+          const chatId = ctx.chat?.id;
+          if (!chatId) {
+            await ctx.reply('⚠️ 유효하지 않은 채팅방 ID입니다.');
+            return;
+          }
+          const { removeSeminarChangeSubscriber } = await import('./seminar_subscribers');
+          const isRemoved = removeSeminarChangeSubscriber(chatId);
+          if (isRemoved) {
+            await ctx.reply('🔕 세미나 정보 변경 알림 구독이 해제되었습니다.');
+          } else {
+            await ctx.reply('ℹ️ 세미나 정보 변경 알림을 구독하고 있지 않습니다.');
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          await ctx.reply(`구독 해제 실패: ${message}`);
+        }
+      });
     }
   }
 }

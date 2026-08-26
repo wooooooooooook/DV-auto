@@ -21,6 +21,7 @@ import * as checkSeminarPointTaskModule from '../tasks/check_seminar_point';
 import * as checkAdvancedSeminarsTaskModule from '../tasks/check_advanced_seminars';
 import * as runSeminarQuizTaskModule from '../tasks/run_seminar_quiz';
 import * as seminarDetailTaskModule from '../tasks/seminar_detail';
+import * as intermdQuizTaskModule from '../tasks/intermd_quiz';
 import { sendOrUpdateTodayLinksNotification } from '../services/broadcast_today_links';
 import type { Task } from '../types';
 
@@ -29,6 +30,7 @@ dotenv.config();
 const HEADLESS = (process.env.HEADLESS || 'true').toLowerCase() === 'true';
 const TIMEZONE = process.env.SCHEDULE_TZ || 'Asia/Seoul';
 const DAILY_ROUTINE_CRON = process.env.DAILY_CRON || '1 0 * * *';
+const INTERMD_QUIZ_CRON = process.env.INTERMD_QUIZ_CRON || '1 8 * * *';
 const BROADCAST_TODAY_LINKS_CRON = '0 9 * * *';
 const APPLY_SEMINAR_EXTRA_CRON = '*/10 6-23 * * *';
 const LUNCH_MONITOR_CRON = '0 11 * * *';
@@ -442,6 +444,18 @@ const broadcastTodayLinksTask: Task = {
 };
 scheduler.scheduleTaskCron(broadcastTodayLinksTask);
 taskRegistry.registerTask(broadcastTodayLinksTask);
+
+const intermdQuizTask: Task = {
+  name: 'intermd_quiz',
+  schedule: INTERMD_QUIZ_CRON,
+  timezone: TIMEZONE,
+  run: async (ctx, options) => {
+    return await intermdQuizTaskModule.run(ctx, options);
+  },
+};
+taskRegistry.registerTask(intermdQuizTask);
+scheduler.scheduleTaskCron(intermdQuizTask);
+
 process.stdin.resume();
 function checkAndResumeTasks(): void {
   const now = new Date(new Date().toLocaleString('en-US', { timeZone: TIMEZONE }));
