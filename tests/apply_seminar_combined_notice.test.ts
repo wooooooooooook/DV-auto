@@ -64,7 +64,7 @@ describe('신규 세미나 모음 통합 공지 (삭제/재발송) 단위 테스
     const { text, options } = buildNewSeminarsNoticeMessage(seminars, ['102'], comments);
 
     // 1. 헤더 검증
-    assert.ok(text.startsWith('🆕 오늘 추가된 세미나 모음 (2건)\n\n'), '헤더가 정확해야 함');
+    assert.ok(text.startsWith('🆕 오늘 추가된 세미나 모음 (누적 2건)\n\n'), '헤더가 정확해야 함');
 
     // 2. 101번 세미나 포맷 (일반, 구분자 없음)
     assert.ok(text.includes('[2026-08-27 13:00] 기존에 감지되었던 일반 세미나 (15/100)'));
@@ -73,10 +73,10 @@ describe('신규 세미나 모음 통합 공지 (삭제/재발송) 단위 테스
     // 3. 102번 세미나 포맷 (20자 트렁케이션 + 태그 + 구분자 강조)
     assert.ok(
       text.includes(
-        '━━━━━━━━━━━━━━━━━━\n[2026-08-28 19:00] [포인트미지급] [심화설문] 이번에새롭게추가된매우긴제목의심화설문세... (5/50)',
+        '━ ✨ 방금 추가됨 ━━━━━\n[2026-08-28 19:00] [포인트미지급] [심화설문] 이번에새롭게추가된매우긴제목의심화설문세... (5/50)',
       ),
     );
-    assert.ok(text.includes('https://m.doctorville.co.kr/cme/seminar/102\n━━━━━━━━━━━━━━━━━━'));
+    assert.ok(text.includes('https://m.doctorville.co.kr/cme/seminar/102\n━━━━━━━━━━━━━━━━━━━━━'));
 
     // 4. 이전 댓글 섹션 검증
     assert.ok(text.includes('💬 [이전 댓글]'));
@@ -85,6 +85,75 @@ describe('신규 세미나 모음 통합 공지 (삭제/재발송) 단위 테스
 
     // 5. 옵션 검증 (링크 미리보기 비활성화)
     assert.deepStrictEqual(options.link_preview_options, { is_disabled: true });
+  });
+
+  it('buildNewSeminarsNoticeMessage: 정원 10명 미만 세미나 제외 검증', () => {
+    const list: SeminarListItem[] = [
+      {
+        seminarId: '901',
+        name: '정원 5명 소규모 세미나',
+        url: 'https://m.doctorville.co.kr/cme/seminar/901',
+        time: '13:00',
+        nightTime: false,
+        isAdvancedSurvey: false,
+        totalCount: '5',
+        currentCount: '1',
+      },
+      {
+        seminarId: '902',
+        name: '정원 10명 일반 세미나',
+        url: 'https://m.doctorville.co.kr/cme/seminar/902',
+        time: '13:00',
+        nightTime: false,
+        isAdvancedSurvey: false,
+        totalCount: '10',
+        currentCount: '2',
+      },
+      {
+        seminarId: '903',
+        name: '정원 100명 대규모 세미나',
+        url: 'https://m.doctorville.co.kr/cme/seminar/903',
+        time: '13:00',
+        nightTime: false,
+        isAdvancedSurvey: false,
+        totalCount: '100',
+        currentCount: '10',
+      },
+      {
+        seminarId: '904',
+        name: '정원 9명 세미나',
+        url: 'https://m.doctorville.co.kr/cme/seminar/904',
+        time: '13:00',
+        nightTime: false,
+        isAdvancedSurvey: false,
+        totalCount: '9',
+        currentCount: '0',
+      },
+      {
+        seminarId: '905',
+        name: '정원 미정 세미나',
+        url: 'https://m.doctorville.co.kr/cme/seminar/905',
+        time: '13:00',
+        nightTime: false,
+        isAdvancedSurvey: false,
+        totalCount: '',
+        currentCount: '0',
+      },
+    ];
+
+    const { text } = buildNewSeminarsNoticeMessage(list);
+
+    // 1. 헤더 카운트: 5명, 9명 제외되어 총 3건 (10명, 100명, 미정)
+    assert.ok(text.startsWith('🆕 오늘 추가된 세미나 모음 (누적 3건)\n\n'));
+
+    // 2. 5명, 9명 세미나는 미포함
+    assert.ok(!text.includes('정원 5명 소규모 세미나'));
+    assert.ok(!text.includes('정원 9명 세미나'));
+
+    // 3. 10명, 100명, 미정 세미나는 포함
+    assert.ok(text.includes('정원 10명 일반 세미나'));
+    assert.ok(text.includes('정원 100명 대규모 세미나'));
+    assert.ok(text.includes('정원 미정 세미나'));
   });
 
   it('publishNewSeminarsNotice: 새 메시지 발송 및 이전 메시지 삭제 동작 검증', async () => {
@@ -245,7 +314,7 @@ describe('신규 세미나 모음 통합 공지 (삭제/재발송) 단위 테스
     );
     assert.strictEqual(firstMsgId, 1001);
     assert.strictEqual(sentHistory.length, 1);
-    assert.ok(sentHistory[0].text.includes('🆕 오늘 추가된 세미나 모음 (2건)'));
+    assert.ok(sentHistory[0].text.includes('🆕 오늘 추가된 세미나 모음 (누적 2건)'));
     assert.strictEqual(deletedIds.length, 0);
 
     // [2차 실행] 세미나 103 추가 감지
@@ -273,10 +342,10 @@ describe('신규 세미나 모음 통합 공지 (삭제/재발송) 단위 테스
 
     assert.strictEqual(secondMsgId, 1002);
     assert.strictEqual(sentHistory.length, 2);
-    assert.ok(sentHistory[1].text.includes('🆕 오늘 추가된 세미나 모음 (3건)'));
+    assert.ok(sentHistory[1].text.includes('🆕 오늘 추가된 세미나 모음 (누적 3건)'));
     // 103번에만 구분자가 적용되었는지 검증
     assert.ok(
-      sentHistory[1].text.includes('━━━━━━━━━━━━━━━━━━\n[2026-08-29 13:00] [심화설문] 103번 신규 세미나 (5/50)'),
+      sentHistory[1].text.includes('━ ✨ 방금 추가됨 ━━━━━\n[2026-08-29 13:00] [심화설문] 103번 신규 세미나 (5/50)'),
     );
     // 이전 메시지 ID 1001이 삭제되었는지 검증
     assert.strictEqual(deletedIds.length, 1);

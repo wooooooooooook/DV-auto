@@ -336,9 +336,10 @@ export function truncateSeminarName(name: string, maxLen = 20): string {
 
 /**
  * 신규 세미나 모음 채널 공지 메시지 빌더
- * - 헤더: 🆕 오늘 추가된 세미나 모음 (${count}건)
+ * - 헤더: 🆕 오늘 추가된 세미나 모음 (누적 ${count}건)
+ * - 정원 10명 미만 세미나는 표시에서 제외
  * - 세미나명: 20글자 초과 시 truncation
- * - 이번 회차 신규 세미나(newlyAddedIds)는 위아래 구분선(━━━━━━━━━━━━━━━━━━)으로 감싸 강조
+ * - 이번 회차 신규 세미나(newlyAddedIds)는 '✨ 방금 추가됨' 구분선(━ ✨ 방금 추가됨 ━━━━━)으로 감싸 강조
  * - 토론방 이전 댓글 섹션(최대 5개) 첨부
  * - link_preview_options: { is_disabled: true }
  */
@@ -347,7 +348,14 @@ export function buildNewSeminarsNoticeMessage(
   newlyAddedIds?: string[] | Set<string>,
   comments: Array<{ userName: string; text: string }> = [],
 ): { text: string; options: Record<string, unknown> } {
-  let text = `🆕 오늘 추가된 세미나 모음 (${seminars.length}건)\n\n`;
+  // 정원 10명 미만인 세미나는 공지 목록에서 제외
+  const visibleSeminars = seminars.filter((item) => {
+    if (!item.totalCount || item.totalCount.trim() === '') return true;
+    const parsed = parseInt(item.totalCount.replace(/[^0-9]/g, ''), 10);
+    return isNaN(parsed) || parsed >= 10;
+  });
+
+  let text = `🆕 오늘 추가된 세미나 모음 (누적 ${visibleSeminars.length}건)\n\n`;
 
   const newIdSet =
     newlyAddedIds instanceof Set
@@ -356,8 +364,8 @@ export function buildNewSeminarsNoticeMessage(
 
   const formattedItems: string[] = [];
 
-  for (let i = 0; i < seminars.length; i++) {
-    const item = seminars[i];
+  for (let i = 0; i < visibleSeminars.length; i++) {
+    const item = visibleSeminars[i];
     const sid = item.seminarId || getSeminarIdFromUrl(item.url) || '';
     const isHighlighted = newIdSet.has(sid);
 
@@ -379,7 +387,7 @@ export function buildNewSeminarsNoticeMessage(
     const itemText = `${prefix}${truncatedName}${capacityInfo}\n${item.url}`;
 
     if (isHighlighted) {
-      formattedItems.push(`━━━━━━━━━━━━━━━━━━\n${itemText}\n━━━━━━━━━━━━━━━━━━`);
+      formattedItems.push(`━ ✨ 방금 추가됨 ━━━━━\n${itemText}\n━━━━━━━━━━━━━━━━━━━━━`);
     } else {
       formattedItems.push(itemText);
     }
@@ -416,10 +424,16 @@ export async function publishNewSeminarsNotice(
   comments?: Array<{ userName: string; text: string }>,
   date?: string,
 ): Promise<number | null> {
-  if (seminars.length === 0) return prevMessageId;
+  const visibleSeminars = seminars.filter((item) => {
+    if (!item.totalCount || item.totalCount.trim() === '') return true;
+    const parsed = parseInt(item.totalCount.replace(/[^0-9]/g, ''), 10);
+    return isNaN(parsed) || parsed >= 10;
+  });
+
+  if (visibleSeminars.length === 0) return prevMessageId;
 
   const currentComments = comments || getChannelCommentsByDate(date);
-  const { text, options } = buildNewSeminarsNoticeMessage(seminars, newlyAddedIds, currentComments);
+  const { text, options } = buildNewSeminarsNoticeMessage(visibleSeminars, newlyAddedIds, currentComments);
 
   // 1. 새 메시지 발송
   const newMessageId = await sendNotificationToChannel(text, null, options as any);

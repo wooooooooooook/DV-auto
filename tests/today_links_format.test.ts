@@ -305,6 +305,20 @@ function testYesterdayAddedSeminarsFilter() {
       date: '2026-08-18',
       time: '13:00~14:00',
     },
+    {
+      name: '어제 세미나 (정원 5명 미만으로 제외됨)',
+      url: 'https://m.doctorville.co.kr/cme/seminar/5575',
+      seminarId: '5575',
+      isPointExcluded: false,
+      isAdvancedSurvey: false,
+      nightTime: false,
+      currentCount: '1',
+      totalCount: '5',
+      date: '2026-08-18',
+      time: '13:00~14:00',
+      detectedDate: yesterdayIso,
+      detectedAt: '2026-08-17T11:00:00.000Z',
+    },
   ];
 
   seminarRepo.setAllSeminars(testSeminars);
@@ -312,12 +326,13 @@ function testYesterdayAddedSeminarsFilter() {
   // 실행
   const result = getYesterdayAddedSeminars(yesterdayIso);
 
-  // 검증: 전날(detectedDate === yesterdayIso)인 것만 1건 포함
-  assert.strictEqual(result.length, 2, '전날 detectedDate 세미나 2개 포함되어야 함');
+  // 검증: 전날(detectedDate === yesterdayIso)이며 정원 10명 이상인 것만 2건 포함
+  assert.strictEqual(result.length, 2, '전날 detectedDate 세미나 중 정원 10명 이상 2개만 포함되어야 함');
   assert.strictEqual(result[0].seminarId, '5570', 'seminarId 순으로 오름차순 정렬되어야 함');
   assert.strictEqual(result[0].currentCount, '0', 'currentCount가 정상 유지되어야 함');
   assert.strictEqual(result[0].totalCount, '100', 'totalCount가 정상 유지되어야 함');
   assert.strictEqual(result[1].seminarId, '5580', 'seminarId 순으로 오름차순 정렬되어야 함');
+  assert.ok(!result.some((s) => s.seminarId === '5575'), '정원 5명인 5575번은 제외되어야 함');
 
   // legacy key가 없어도 에러 없이 동작하는지 확인 (new_seminars 키 사용 안 함)
   const NEW_SEMINAR_KEY = 'apply_seminar:new_seminars';

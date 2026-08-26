@@ -393,6 +393,11 @@ function getYesterdayAddedSeminars(yesterdayIso: string): StoredNewSeminars['sem
   const storedSeminars = seminarRepo.getSeminarsByDetectedDate(yesterdayIso);
 
   return storedSeminars
+    .filter((seminar) => {
+      if (!seminar.totalCount || seminar.totalCount.trim() === '') return true;
+      const parsed = parseInt(seminar.totalCount.replace(/[^0-9]/g, ''), 10);
+      return isNaN(parsed) || parsed >= 10;
+    })
     .map((seminar) => ({
       name: seminar.name,
       url: seminar.url,
@@ -946,8 +951,14 @@ function formatTodayLinksBroadcast(input: TodayLinksFormatInput): TodayLinksForm
     message += `\n📖 ${seminarMessage.message}\n`;
   }
 
-  if (storedNewSeminars.length > 0) {
-    const newSeminarList = storedNewSeminars
+  const visibleNewSeminars = (storedNewSeminars || []).filter((item) => {
+    if (!item.totalCount || item.totalCount.trim() === '') return true;
+    const parsed = parseInt(item.totalCount.replace(/[^0-9]/g, ''), 10);
+    return isNaN(parsed) || parsed >= 10;
+  });
+
+  if (visibleNewSeminars.length > 0) {
+    const newSeminarList = visibleNewSeminars
       .map((item, index) => {
         const link = item.seminarId ? `${SEMINAR_DETAIL_PAGE}${item.seminarId}` : item.url;
         const pointExcludedSuffix = item.isPointExcluded ? ' 🚫[포인트미지급]' : '';
