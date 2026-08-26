@@ -6,6 +6,7 @@ import * as storage from '../src/services/storage';
 import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
+import { describe, it, vi } from 'vitest';
 import {
   getTodayDateStrings,
   isDateMatching,
@@ -595,15 +596,11 @@ async function testPointSyncRequirements() {
     ],
   ]);
 
-  const originalSearchSeminarPoints = checkSeminarPointModule.searchSeminarPoints;
-  const originalFetchSeminarDetail = seminarApiModule.fetchSeminarDetail;
-  (checkSeminarPointModule as unknown as { searchSeminarPoints: unknown }).searchSeminarPoints = async () => ({
+  vi.spyOn(checkSeminarPointModule, 'searchSeminarPoints').mockResolvedValue({
     success: true,
     points: mockParsedPoints,
   });
-  (seminarApiModule as unknown as { fetchSeminarDetail: unknown }).fetchSeminarDetail = async (
-    seminarId: string | number,
-  ) => {
+  vi.spyOn(seminarApiModule, 'fetchSeminarDetail').mockImplementation(async (seminarId: string | number) => {
     if (String(seminarId) === '5580') {
       return {
         success: true,
@@ -621,7 +618,7 @@ async function testPointSyncRequirements() {
       };
     }
     return { success: false, seminarId: String(seminarId), errorMessage: 'Not found' };
-  };
+  });
 
   try {
     const mockContext = {} as unknown as PlaywrightRunArgs['context'];
@@ -733,33 +730,43 @@ async function testPointSyncRequirements() {
     assert.strictEqual(storage.get('apply_seminar:new_seminars_history'), null);
     console.log('  ✓ [Req 10] 레거시 new_seminars, new_seminars_history 키 사용 안 함');
   } finally {
-    (checkSeminarPointModule as unknown as { searchSeminarPoints: unknown }).searchSeminarPoints =
-      originalSearchSeminarPoints;
-    (seminarApiModule as unknown as { fetchSeminarDetail: unknown }).fetchSeminarDetail = originalFetchSeminarDetail;
+    vi.restoreAllMocks();
   }
 }
 
-async function runAllFixtureTests() {
-  console.log('===========================================================');
-  console.log('  닥터빌 세미나 메인 페이지 (/seminar/main) 기능 통합 테스트');
-  console.log('===========================================================\n');
-
+describe('닥터빌 세미나 메인 페이지 (/seminar/main) 기능 통합 테스트', () => {
   const html = fs.readFileSync(FIXTURE_PATH, 'utf-8');
   const nodes = parseFixtureHtml(html);
 
-  testTodayLinksSeminarCollection(nodes);
-  testDateMatchingFlexibility();
-  testPointExcludedFormatting();
-  testApplySeminarParsing(nodes);
-  testMonitorSeminarsTimeWindow(nodes);
-  testNormalizeParsedSeminars(nodes);
-  testPointFieldsPreservation();
-  await testPointSyncRequirements();
+  it('testTodayLinksSeminarCollection', () => {
+    testTodayLinksSeminarCollection(nodes);
+  });
 
-  console.log('🎉 모든 세미나 메인 페이지 (/seminar/main) 기능 테스트를 100% 성공적으로 통과했습니다!\n');
-}
+  it('testDateMatchingFlexibility', () => {
+    testDateMatchingFlexibility();
+  });
 
-runAllFixtureTests().catch((err) => {
-  console.error(err);
-  process.exit(1);
+  it('testPointExcludedFormatting', () => {
+    testPointExcludedFormatting();
+  });
+
+  it('testApplySeminarParsing', () => {
+    testApplySeminarParsing(nodes);
+  });
+
+  it('testMonitorSeminarsTimeWindow', () => {
+    testMonitorSeminarsTimeWindow(nodes);
+  });
+
+  it('testNormalizeParsedSeminars', () => {
+    testNormalizeParsedSeminars(nodes);
+  });
+
+  it('testPointFieldsPreservation', () => {
+    testPointFieldsPreservation();
+  });
+
+  it('testPointSyncRequirements', async () => {
+    await testPointSyncRequirements();
+  });
 });

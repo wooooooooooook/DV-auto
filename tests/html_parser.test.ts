@@ -8,22 +8,27 @@ import {
   parseCurrentPointHtml,
 } from '../src/modules/html_parser';
 import { isSurveyPointExcludedSeminarHttp } from '../src/modules/utils';
+import { describe, it } from 'vitest';
 
-async function testHtmlParser() {
-  console.log('Testing HTML Parser and isSurveyPointExcludedStatus...');
+describe('HTML Parser and SSR Detail HTML Parsing', () => {
+  it('기본 HTML 파서 및 상태 판정 검증', async () => {
+    console.log('Testing HTML Parser and isSurveyPointExcludedStatus...');
 
-  // 1. login status
-  const loggedInHtml = '<div><button>회원정보수정</button></div>';
-  assert.strictEqual(parseLoginStatusHtml(loggedInHtml), 'LOGGED_IN');
+    // 1. login status
+    const loggedInHtml = '<div><button>회원정보수정</button></div>';
+    assert.strictEqual(parseLoginStatusHtml(loggedInHtml), 'LOGGED_IN');
 
-  const loggedOutHtml = '<div><script>location.href="/member/login";</script></div>';
-  assert.strictEqual(parseLoginStatusHtml(loggedOutHtml, 'https://m.doctorville.co.kr/member/login'), 'NOT_LOGGED_IN');
+    const loggedOutHtml = '<div><script>location.href="/member/login";</script></div>';
+    assert.strictEqual(
+      parseLoginStatusHtml(loggedOutHtml, 'https://m.doctorville.co.kr/member/login'),
+      'NOT_LOGGED_IN',
+    );
 
-  const plainTextHtml = '<p>회원정보수정 안내 문구입니다</p>';
-  assert.strictEqual(parseLoginStatusHtml(plainTextHtml), 'UNKNOWN');
+    const plainTextHtml = '<p>회원정보수정 안내 문구입니다</p>';
+    assert.strictEqual(parseLoginStatusHtml(plainTextHtml), 'UNKNOWN');
 
-  // 2. seminar main parsing
-  const seminarMainHtml = `
+    // 2. seminar main parsing
+    const seminarMainHtml = `
     <div class="list_cont">
       <div class="seminar_day"><span class="date">2025.05.20</span></div>
       <a class="list_detail" href="/seminar/seminarDetail?seminarId=9999">
@@ -37,29 +42,29 @@ async function testHtmlParser() {
       <span class="ico_completion"></span>
     </a>
   `;
-  const parsedSeminars = parseSeminarListHtml(seminarMainHtml);
-  assert.strictEqual(parsedSeminars.length, 1);
-  assert.strictEqual(parsedSeminars[0].name, '테스트 세미나 1');
-  assert.strictEqual(parsedSeminars[0].nightTime, true);
-  assert.strictEqual(parsedSeminars[0].isAdvancedSurvey, true);
-  assert.strictEqual(parsedSeminars[0].currentCount, '10');
-  assert.strictEqual(parsedSeminars[0].totalCount, '100');
+    const parsedSeminars = parseSeminarListHtml(seminarMainHtml);
+    assert.strictEqual(parsedSeminars.length, 1);
+    assert.strictEqual(parsedSeminars[0].name, '테스트 세미나 1');
+    assert.strictEqual(parsedSeminars[0].nightTime, true);
+    assert.strictEqual(parsedSeminars[0].isAdvancedSurvey, true);
+    assert.strictEqual(parsedSeminars[0].currentCount, '10');
+    assert.strictEqual(parsedSeminars[0].totalCount, '100');
 
-  // 3. completion count parsing
-  assert.strictEqual(parseCompletionCountHtml(seminarMainHtml), 1);
+    // 3. completion count parsing
+    assert.strictEqual(parseCompletionCountHtml(seminarMainHtml), 1);
 
-  // 4. seminar detail point excluded notice parsing
-  const excludedHtml = '<div>이 세미나는 설문 포인트가 지급되지 않는 세미나입니다.</div>';
-  const normalDetailHtml = '<div>즐거운 세미나 되세요.</div>';
-  assert.strictEqual(hasSurveyPointExcludedNoticeHtml(excludedHtml), true);
-  assert.strictEqual(hasSurveyPointExcludedNoticeHtml(normalDetailHtml), false);
+    // 4. seminar detail point excluded notice parsing
+    const excludedHtml = '<div>이 세미나는 설문 포인트가 지급되지 않는 세미나입니다.</div>';
+    const normalDetailHtml = '<div>즐거운 세미나 되세요.</div>';
+    assert.strictEqual(hasSurveyPointExcludedNoticeHtml(excludedHtml), true);
+    assert.strictEqual(hasSurveyPointExcludedNoticeHtml(normalDetailHtml), false);
 
-  // 5. isSurveyPointExcludedSeminarHttp error statuses (invalid URL / non-200)
-  const invalidUrlRes = await isSurveyPointExcludedSeminarHttp('http://localhost:99999/not_exist');
-  assert.strictEqual(invalidUrlRes.status, 'error');
+    // 5. isSurveyPointExcludedSeminarHttp error statuses (invalid URL / non-200)
+    const invalidUrlRes = await isSurveyPointExcludedSeminarHttp('http://localhost:99999/not_exist');
+    assert.strictEqual(invalidUrlRes.status, 'error');
 
-  // 6. point history parsing
-  const pointHistoryHtml = `
+    // 6. point history parsing
+    const pointHistoryHtml = `
     <div id="useList">
       <table>
         <tbody>
@@ -75,30 +80,25 @@ async function testHtmlParser() {
       </table>
     </div>
   `;
-  const pointsMap = parseRecentSeminarPointRowsHtml(pointHistoryHtml);
-  assert.strictEqual(pointsMap.size, 1);
-  const p = pointsMap.get('9999');
-  assert.ok(p);
-  assert.strictEqual(p?.found, true);
-  assert.strictEqual(p?.point, 1000);
-  assert.strictEqual(p?.type, '적립');
+    const pointsMap = parseRecentSeminarPointRowsHtml(pointHistoryHtml);
+    assert.strictEqual(pointsMap.size, 1);
+    const p = pointsMap.get('9999');
+    assert.ok(p);
+    assert.strictEqual(p?.found, true);
+    assert.strictEqual(p?.point, 1000);
+    assert.strictEqual(p?.type, '적립');
 
-  // 7. current point parsing
-  const mainPointHtml = '<div class="member_point">12,500P</div>';
-  assert.strictEqual(parseCurrentPointHtml(mainPointHtml), '12,500P');
+    // 7. current point parsing
+    const mainPointHtml = '<div class="member_point">12,500P</div>';
+    assert.strictEqual(parseCurrentPointHtml(mainPointHtml), '12,500P');
 
-  console.log('✅ HTML Parser & isSurveyPointExcludedStatus tests passed!');
-}
+    console.log('✅ HTML Parser & isSurveyPointExcludedStatus tests passed!');
+  });
 
-testHtmlParser().catch((err) => {
-  console.error('❌ HTML Parser tests failed:', err);
-  process.exit(1);
-});
+  it('SSR Seminar Detail HTML Parsing', async () => {
+    console.log('Testing SSR Seminar Detail HTML Parsing...');
 
-async function testSsrDetailHtmlParsing() {
-  console.log('Testing SSR Seminar Detail HTML Parsing...');
-
-  const ssrExcludedHtml = `
+    const ssrExcludedHtml = `
     <!DOCTYPE html>
     <html>
       <head><title>세미나 상세</title></head>
@@ -113,7 +113,7 @@ async function testSsrDetailHtmlParsing() {
     </html>
   `;
 
-  const ssrNormalHtml = `
+    const ssrNormalHtml = `
     <!DOCTYPE html>
     <html>
       <head><title>세미나 상세</title></head>
@@ -128,21 +128,17 @@ async function testSsrDetailHtmlParsing() {
     </html>
   `;
 
-  assert.strictEqual(
-    hasSurveyPointExcludedNoticeHtml(ssrExcludedHtml),
-    true,
-    'SSR Excluded notice should be detected as true',
-  );
-  assert.strictEqual(
-    hasSurveyPointExcludedNoticeHtml(ssrNormalHtml),
-    false,
-    'SSR Normal notice should be detected as false',
-  );
+    assert.strictEqual(
+      hasSurveyPointExcludedNoticeHtml(ssrExcludedHtml),
+      true,
+      'SSR Excluded notice should be detected as true',
+    );
+    assert.strictEqual(
+      hasSurveyPointExcludedNoticeHtml(ssrNormalHtml),
+      false,
+      'SSR Normal notice should be detected as false',
+    );
 
-  console.log('✅ SSR Seminar Detail HTML Parsing test passed!');
-}
-
-testSsrDetailHtmlParsing().catch((err) => {
-  console.error('❌ SSR Seminar Detail HTML Parsing test failed:', err);
-  process.exit(1);
+    console.log('✅ SSR Seminar Detail HTML Parsing test passed!');
+  });
 });

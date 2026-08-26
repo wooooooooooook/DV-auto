@@ -7,6 +7,7 @@ import {
 } from '../src/tasks/today_links';
 import * as storage from '../src/services/storage';
 import * as seminarRepo from '../src/services/seminar_repository';
+import { describe, it } from 'vitest';
 
 /**
  * 사용자가 제공한 예시 문구를 바탕으로 구성한 테스트 케이스
@@ -526,11 +527,28 @@ function testSeminarNameTruncationAndCapacityFormat() {
   console.log('✅ [Pass] 신규 세미나 제목 20자 Truncation 및 신청자수 포맷팅 테스트 통과!\n');
 }
 
-testTodayLinksFormatWithUserExample();
-testDateParsingAndCustomDateFormat();
-testPointConversionButtonConditions();
-testSeminarNameTruncationAndCapacityFormat();
-testTodayQuizCacheIntegration().catch((e) => {
-  console.error('testTodayQuizCacheIntegration failed:', e);
-  process.exit(1);
+describe('today_links_format 단위 테스트', () => {
+  it('testTodayLinksFormatWithUserExample', () => {
+    testTodayLinksFormatWithUserExample();
+  });
+
+  it('testDateParsingAndCustomDateFormat', () => {
+    testDateParsingAndCustomDateFormat();
+  });
+
+  it('testYesterdayAddedSeminarsFilter', () => {
+    testYesterdayAddedSeminarsFilter();
+  });
+
+  it('testPointConversionButtonConditions', () => {
+    testPointConversionButtonConditions();
+  });
+
+  it('testSeminarNameTruncationAndCapacityFormat', () => {
+    testSeminarNameTruncationAndCapacityFormat();
+  });
+
+  it('testTodayQuizCacheIntegration', async () => {
+    await testTodayQuizCacheIntegration();
+  });
 });

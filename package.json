@@ -4,7 +4,8 @@
   "description": "",
   "main": "dist/core/main.js",
   "scripts": {
-    "test": "ts-node tests/index.test.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "build": "tsc",
     "start": "node dist/core/main.js",
     "dev": "ts-node src/core/main.ts",
@@ -46,6 +47,7 @@
     "prettier": "^3.7.3",
     "ts-node": "^10.9.2",
     "typescript": "^5.6.3",
-    "typescript-eslint": "^8.15.0"
+    "typescript-eslint": "^8.15.0",
+    "vitest": "^4.1.11"
   }
 }

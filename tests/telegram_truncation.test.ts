@@ -10,8 +10,7 @@ import {
   TELEGRAM_SAFE_CAPTION_LENGTH,
 } from '../src/modules/telegram_truncator';
 import { formatTodayLinksBroadcast, type TodayLinksFormatInput } from '../src/tasks/today_links';
-
-console.log('=== [Test] 텔레그램 메시지 Truncation 및 길이 제한 방어 테스트 시작 ===\n');
+import { describe, it } from 'vitest';
 
 // 1. Plain text truncation 테스트
 function testPlainTextTruncation() {
@@ -177,9 +176,20 @@ function testTodayLinksTelegramTruncation() {
   console.log('  ✓ 긴 today_links 메시지의 텔레그램 전송 truncation 성공');
 }
 
-testPlainTextTruncation();
-testMarkdownV2Truncation();
-testHtmlTruncation();
-testTodayLinksTelegramTruncation();
+describe('텔레그램 메시지 Truncation 및 길이 제한 방어 테스트', () => {
+  it('Plain text truncation 테스트', () => {
+    testPlainTextTruncation();
+  });
 
-console.log('\n🎉 모든 텔레그램 메시지 Truncation 테스트 통과!');
+  it('MarkdownV2 truncation 테스트', () => {
+    testMarkdownV2Truncation();
+  });
+
+  it('Html truncation 테스트', () => {
+    testHtmlTruncation();
+  });
+
+  it('긴 today_links 메시지의 텔레그램 전송 truncation 테스트', () => {
+    testTodayLinksTelegramTruncation();
+  });
+});

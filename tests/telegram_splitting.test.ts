@@ -9,8 +9,7 @@ import {
 } from '../src/modules/telegram_splitter';
 import { replyWithSplit } from '../src/modules/utils';
 import { formatTodayLinksBroadcast, type TodayLinksFormatInput } from '../src/tasks/today_links';
-
-console.log('=== [Test] 텔레그램 메시지 분할 전송(Message Splitting) 테스트 시작 ===\n');
+import { describe, it } from 'vitest';
 
 // 1. Plain text 분할 테스트
 function testPlainTextSplitting() {
@@ -342,19 +341,32 @@ async function testSeminarSubscribersChunking() {
   console.log('  ✓ sendSeminarChangesToSubscribers 청킹 분할 전송 검증 성공');
 }
 
-async function runAllTests() {
-  testPlainTextSplitting();
-  testMarkdownV2Splitting();
-  testHtmlSplitting();
-  testTodayLinksFullMessageSplitting();
-  await testReplyWithSplitMock();
-  await testSendTelegramAndChannelChunking();
-  await testSeminarSubscribersChunking();
+describe('텔레그램 메시지 분할 전송(Message Splitting) 테스트', () => {
+  it('testPlainTextSplitting', () => {
+    testPlainTextSplitting();
+  });
 
-  console.log('\n🎉 모든 텔레그램 메시지 분할 전송 테스트 통과!');
-}
+  it('testMarkdownV2Splitting', () => {
+    testMarkdownV2Splitting();
+  });
 
-runAllTests().catch((e) => {
-  console.error('테스트 실패:', e);
-  process.exit(1);
+  it('testHtmlSplitting', () => {
+    testHtmlSplitting();
+  });
+
+  it('testTodayLinksFullMessageSplitting', () => {
+    testTodayLinksFullMessageSplitting();
+  });
+
+  it('testReplyWithSplitMock', async () => {
+    await testReplyWithSplitMock();
+  });
+
+  it('testSendTelegramAndChannelChunking', async () => {
+    await testSendTelegramAndChannelChunking();
+  });
+
+  it('testSeminarSubscribersChunking', async () => {
+    await testSeminarSubscribersChunking();
+  });
 });

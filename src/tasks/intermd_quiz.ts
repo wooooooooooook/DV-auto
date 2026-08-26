@@ -147,9 +147,6 @@ export async function run(
     if (!authOk) {
       const errMsg = '❗ [인터엠디 오늘의 퀴즈] 로그인/인증에 실패했습니다. 계정 정보를 확인해주세요.';
       logger.error('intermd_quiz auth failed');
-      if (explicitNotify !== false) {
-        await sendTelegram(errMsg).catch(() => {});
-      }
       return { success: false, message: errMsg };
     }
 
@@ -158,9 +155,6 @@ export async function run(
       const noQuizMsg = 'ℹ️ [인터엠디 오늘의 퀴즈] 오늘 출제된 퀴즈가 없습니다.';
       logger.info('intermd_quiz no quiz found today');
       // 퀴즈가 없는 날은 스케줄 실행 결과 silent: true (관리자봇 및 공지봇 모두 silent)
-      if (explicitNotify === true) {
-        await sendTelegram(noQuizMsg).catch(() => {});
-      }
       return { success: true, silent: true, message: noQuizMsg };
     }
 
@@ -203,14 +197,7 @@ export async function run(
     };
     setInterMDQuizCache(cacheData);
 
-    // 1. 관리자 봇으로 알림 전송
-    if (explicitNotify !== false) {
-      await sendTelegram(message).catch((err) => {
-        logger.error('Failed to send Telegram message for intermd_quiz:', err);
-      });
-    }
-
-    // 2. 공지봇 구독자들에게 캐싱한 정보 함께 발송
+    // 공지봇 구독자들에게 캐싱한 정보 함께 발송
     if (explicitNotify !== false) {
       await sendInterMDQuizToSubscribers(message).catch((err) => {
         logger.error('Failed to send InterMD quiz to subscribers:', err);
@@ -225,9 +212,6 @@ export async function run(
     const message = error instanceof Error ? error.message : String(error);
     logger.error('intermd_quiz task error:', error);
     const errMsg = `❗ [인터엠디 오늘의 퀴즈] 작업 중 오류가 발생했습니다: ${message}`;
-    if (explicitNotify !== false) {
-      await sendTelegram(errMsg).catch(() => {});
-    }
     return {
       success: false,
       message: errMsg,
