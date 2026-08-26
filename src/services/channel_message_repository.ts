@@ -218,6 +218,133 @@ export function getTodayLinksChannelMessage(date?: string, channelId?: string): 
 }
 
 /**
+ * 특정 일자에 공지 채널로 전송된 '세미나 현황' 메시지 레코드를 조회합니다.
+ */
+export function getSeminarStatusChannelMessage(
+  periodName: string,
+  date?: string,
+  channelId?: string,
+): ChannelMessageRecord | null {
+  const targetDate = date || getSeoulDateString();
+  const targetChannelId = channelId || process.env.NOTICE_CHANNEL_ID;
+  const messages = getChannelMessagesByDate(targetDate, targetChannelId).filter((m) => m.status !== 'deleted');
+
+  // 가장 최근에 전송된 해당 periodName의 세미나 현황 메시지 검색 (뒤에서부터)
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.text && (m.text.includes(`${periodName}세미나`) || m.text.includes(`${periodName} 세미나`))) {
+      return m;
+    }
+  }
+  return null;
+}
+
+export interface ChannelCommentRecord {
+  id?: number;
+  channelId: string;
+  messageId: number;
+  date: string;
+  userId?: string | null;
+  userName: string;
+  text: string;
+  createdAt: number;
+}
+
+export interface RawChannelCommentRow {
+  id: number;
+  channel_id: string;
+  message_id: number;
+  date: string;
+  user_id: string | null;
+  user_name: string;
+  text: string;
+  created_at: number;
+}
+
+/**
+ * 1일 초과된 과거 댓글 레코드를 정리합니다 (1일 TTL).
+ */
+export function cleanOldChannelComments(currentDate?: string): number {
+  try {
+    const db = getDatabase();
+    const targetDate = currentDate || getSeoulDateString();
+    // 당일(targetDate) 이전 날짜의 댓글 삭제
+    const result = db.prepare('DELETE FROM channel_comments WHERE date < ?').run(targetDate);
+    return result.changes;
+  } catch (err) {
+    logger.error('과거 댓글 정리 실패:', err);
+    return 0;
+  }
+}
+
+/**
+ * 토론 그룹에서 수신된 댓글을 기록합니다.
+ */
+export function recordChannelComment(params: {
+  channelId?: string;
+  messageId: number;
+  date?: string;
+  userId?: string | null;
+  userName: string;
+  text: string;
+  createdAt?: number;
+}): ChannelCommentRecord {
+  const db = getDatabase();
+  const now = Date.now();
+  const date = params.date || getSeoulDateString();
+  const channelId = params.channelId || process.env.NOTICE_CHANNEL_ID || '';
+  const userId = params.userId || null;
+  const createdAt = params.createdAt || now;
+
+  // 1일 TTL 지난 과거 댓글 정리
+  cleanOldChannelComments(date);
+
+  const stmt = db.prepare(`
+    INSERT INTO channel_comments (channel_id, message_id, date, user_id, user_name, text, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const result = stmt.run(channelId, params.messageId, date, userId, params.userName, params.text, createdAt);
+
+  return {
+    id: Number(result.lastInsertRowid),
+    channelId,
+    messageId: params.messageId,
+    date,
+    userId,
+    userName: params.userName,
+    text: params.text,
+    createdAt,
+  };
+}
+
+/**
+ * 특정 일자의 댓글 목록을 조회합니다 (최신 순 또는 오래된 순).
+ */
+export function getChannelCommentsByDate(date?: string, limit = 10): ChannelCommentRecord[] {
+  const db = getDatabase();
+  const targetDate = date || getSeoulDateString();
+
+  // 과거 댓글 정리
+  cleanOldChannelComments(targetDate);
+
+  const rows = db
+    .prepare('SELECT * FROM channel_comments WHERE date = ? ORDER BY created_at ASC LIMIT ?')
+    .all(targetDate, limit) as RawChannelCommentRow[];
+
+  return rows.map((r) => ({
+    id: r.id,
+    channelId: r.channel_id,
+    messageId: r.message_id,
+    date: r.date,
+    userId: r.user_id,
+    userName: r.user_name,
+    text: r.text,
+    createdAt: r.created_at,
+  }));
+}
+
+/**
  * 텔레그램 공지봇을 통해 공지방 메시지를 수정하고 DB를 갱신합니다.
  */
 export async function editChannelMessage(

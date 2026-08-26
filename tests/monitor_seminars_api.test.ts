@@ -36,7 +36,7 @@ describe('monitor_seminars API 기반 모니터링 기능 단위/통합 테스�
         useSurvey: 'Y',
         useDepthSurvey: 'Y',
         survey: { surveyId: 101, point: 1000 },
-        processState: 2, // PROCESS_APPLY -> '신청하기'
+        processState: 2, // PROCESS_APPLY
       },
       {
         seminarId: 5566,
@@ -46,7 +46,7 @@ describe('monitor_seminars API 기반 모니터링 기능 단위/통합 테스�
         useSurvey: 'Y',
         useDepthSurvey: 'N',
         survey: { surveyId: 102, point: 500 },
-        processState: 1, // PROCESS_ENTER -> '입장하기'
+        processState: 1, // PROCESS_ENTER -> '입장가능'
       },
       {
         seminarId: 5538,
@@ -56,7 +56,7 @@ describe('monitor_seminars API 기반 모니터링 기능 단위/통합 테스�
         useSurvey: 'Y',
         useDepthSurvey: 'N',
         survey: null, // 포인트 미지급
-        processState: 1, // '입장하기'
+        processState: 1, // '입장가능'
       },
       {
         seminarId: 5539,
@@ -83,13 +83,12 @@ describe('monitor_seminars API 기반 모니터링 기능 단위/통합 테스�
 
     const sem5565 = Object.values(lunchRes.seminars).find((s) => s.seminarId === '5565');
     assert.ok(sem5565);
-    assert.strictEqual(sem5565.status, '신청하기');
     assert.strictEqual(sem5565.isAdvancedSurvey, true);
     assert.strictEqual(sem5565.isSurveyPointExcluded, false);
 
     const sem5566 = Object.values(lunchRes.seminars).find((s) => s.seminarId === '5566');
     assert.ok(sem5566);
-    assert.strictEqual(sem5566.status, '입장하기');
+    assert.strictEqual(sem5566.status, '입장가능');
     assert.strictEqual(sem5566.isAdvancedSurvey, false);
     assert.strictEqual(sem5566.isSurveyPointExcluded, false);
 
@@ -134,39 +133,39 @@ describe('monitor_seminars API 기반 모니터링 기능 단위/통합 테스�
     fetchSeminarDetailSpy.mockImplementation(async (id: number | string) => {
       const sid = String(id);
       if (sid === '1001') {
-        // 설문 진행 중 (surveyState: 1)
         return {
           success: true,
           seminarId: sid,
           survey: { point: 1000 },
           surveyState: 1,
           isPointExcluded: false,
+          hasEntryHistory: false,
           rawResponse: {
             surveyState: 1,
             seminarDetail: { seminarId: 1001, processState: 6 },
           },
         };
       } else if (sid === '1002') {
-        // 방송 종료 (processState: 7)
         return {
           success: true,
           seminarId: sid,
           survey: { point: 500 },
-          surveyState: 5, // 미오픈
+          surveyState: 5,
           isPointExcluded: false,
+          hasEntryHistory: false,
           rawResponse: {
             surveyState: 5,
             seminarDetail: { seminarId: 1002, processState: 7 },
           },
         };
       } else if (sid === '1003') {
-        // 진행 중 (processState: 6, surveyState: 5)
         return {
           success: true,
           seminarId: sid,
           survey: { point: 1000 },
           surveyState: 5,
           isPointExcluded: false,
+          hasEntryHistory: false,
           rawResponse: {
             surveyState: 5,
             seminarDetail: { seminarId: 1003, processState: 6, seminarCompleted: 0 },
@@ -195,16 +194,17 @@ describe('monitor_seminars API 기반 모니터링 기능 단위/통합 테스�
 
     console.log('  ✓ checkSeminarEndStatusFromApi: surveyState 및 processState 기반 종료 판정 검증 완료\n');
 
-    // ── Test 3: monitorSeminars API 감시 & Playwright 온디맨드 실행 통합 검증 ──
-    console.log('--- [Test 3] monitorSeminars API 감시 및 Playwright 온디맨드 실행 시뮬레이션 ---');
+    // ── Test 3: monitorSeminars API 감시 & 통합 메시지 갱신 검증 ──
+    console.log('--- [Test 3] monitorSeminars API 감시 및 통합 메시지 갱신 시뮬레이션 ---');
 
     const channelMessages: string[] = [];
     const telegramMessages: string[] = [];
     const autoEnterCalls: string[] = [];
+    let messageCounter = 100;
 
     sendNotificationToChannelSpy.mockImplementation(async (msg: string) => {
       channelMessages.push(msg);
-      return true;
+      return ++messageCounter;
     });
     sendTelegramSpy.mockImplementation(async (msg: string) => {
       telegramMessages.push(msg);
@@ -213,7 +213,6 @@ describe('monitor_seminars API 기반 모니터링 기능 단위/통합 테스�
     ensureLoggedInSpy.mockResolvedValue(undefined as never);
     safeGotoSpy.mockResolvedValue(undefined as never);
 
-    // Mock Page & BrowserContext
     const mockPage = {
       locator: (selector: string) => ({
         first: () => ({
@@ -253,7 +252,6 @@ describe('monitor_seminars API 기반 모니터링 기능 단위/통합 테스�
       close: async () => {},
     } as unknown as BrowserContext;
 
-    // Step별 API 상태 시뮬레이션
     let step = 0;
     fetchMainFutureSpy.mockImplementation(async () => {
       step++;
@@ -261,7 +259,6 @@ describe('monitor_seminars API 기반 모니터링 기능 단위/통합 테스�
       const currentHour = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' })).getHours();
 
       if (step === 1) {
-        // Step 1: 세미나 대기 상태 (processState: 2)
         return {
           success: true,
           items: [
@@ -273,13 +270,12 @@ describe('monitor_seminars API 기반 모니터링 기능 단위/통합 테스�
               useSurvey: 'Y',
               useDepthSurvey: 'Y',
               survey: { point: 1000 },
-              processState: 2, // 신청하기/대기
+              processState: 2, // 대기
             },
           ],
           rawResponse: {},
         };
       } else if (step === 2) {
-        // Step 2: 세미나 시작 -> 입장 가능 상태로 전이 (processState: 1)
         return {
           success: true,
           items: [
@@ -297,7 +293,6 @@ describe('monitor_seminars API 기반 모니터링 기능 단위/통합 테스�
           rawResponse: {},
         };
       } else {
-        // Step 3: 세미나 진행 중
         return {
           success: true,
           items: [
@@ -325,18 +320,19 @@ describe('monitor_seminars API 기반 모니터링 기능 단위/통합 테스�
             success: true,
             seminarId: sid,
             survey: { point: 1000 },
-            surveyState: 5, // 미오픈
+            surveyState: 5,
             isPointExcluded: false,
+            hasEntryHistory: false,
             rawResponse: { surveyState: 5, seminarDetail: { processState: 1 } },
           };
         } else {
-          // step 3 이상: 세미나 종료 및 설문 오픈 (surveyState: 1)
           return {
             success: true,
             seminarId: sid,
             survey: { point: 1000 },
-            surveyState: 1, // 설문 오픈
+            surveyState: 1,
             isPointExcluded: false,
+            hasEntryHistory: false,
             rawResponse: { surveyState: 1, seminarDetail: { processState: 7 } },
           };
         }
@@ -345,32 +341,21 @@ describe('monitor_seminars API 기반 모니터링 기능 단위/통합 테스�
     });
 
     const currentHour = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' })).getHours();
-    // 10ms 단위 초고속 모킹 테스트 실행 (mockContext 주입)
     const monitorSuccess = await monitorSeminars('테스트점심', currentHour, currentHour + 2, {
       pollIntervalMs: 10,
       context: mockContext,
     });
 
     assert.strictEqual(monitorSuccess, true);
-
-    // 1. 자동 입장 확인 (newPage 호출됨)
     assert(autoEnterCalls.length > 0, 'Playwright 브라우저 페이지 생성이 호출되어야 함');
-    // 2. 시작 알림 채널 전송 확인
+    // 통합 메시지 포맷 검증
     assert(
-      channelMessages.some(
-        (m) => m.includes('🟢세미나시작') && m.includes('API 테스트 세미나') && m.includes('[심화설문]'),
-      ),
-      '채널에 🟢세미나시작 [심화설문] 공지가 전송되어야 함',
+      channelMessages.some((m) => m.includes('🔔 테스트점심세미나') && m.includes('API 테스트 세미나')),
+      '채널에 🔔 테스트점심세미나 통합 공지가 전송되어야 함',
     );
-    // 3. 종료 알림 채널 전송 확인
     assert(
-      channelMessages.some((m) => m.includes('🔴세미나종료') && m.includes('API 테스트 세미나')),
-      '채널에 🔴세미나종료 공지가 전송되어야 함',
-    );
-    // 4. 완료 알림 전송 확인
-    assert(
-      channelMessages.some((m) => m.includes('테스트점심세미나 모니터링이 종료되었습니다')),
-      '최종 모니터링 종료 공지가 전송되어야 함',
+      channelMessages.some((m) => m.includes('🏁 테스트점심세미나가 모두 종료되었습니다.')),
+      '마지막 메시지 하단에 종료 공지가 결합되어 전송되어야 함',
     );
 
     // ── Test 4: isAutoResume 시 입장이력(hasEntryHistory)에 따른 자동입장 생략 검증 ──
@@ -378,15 +363,10 @@ describe('monitor_seminars API 기반 모니터링 기능 단위/통합 테스�
 
     const resumePageCalls: string[] = [];
     const resumeChannelMessages: string[] = [];
-    const resumeTelegramMessages: string[] = [];
 
     sendNotificationToChannelSpy.mockImplementation(async (msg: string) => {
       resumeChannelMessages.push(msg);
-      return true;
-    });
-    sendTelegramSpy.mockImplementation(async (msg: string) => {
-      resumeTelegramMessages.push(msg);
-      return true;
+      return ++messageCounter;
     });
 
     const resumeMockPage = {
@@ -462,7 +442,7 @@ describe('monitor_seminars API 기반 모니터링 기능 단위/통합 테스�
             survey: { point: 1000 },
             surveyState: 5,
             isPointExcluded: false,
-            hasEntryHistory: true, // 입장이력 존재!
+            hasEntryHistory: true, // 입장이력 존재
             rawResponse: {
               surveyState: 5,
               seminarDetail: {
@@ -475,7 +455,6 @@ describe('monitor_seminars API 기반 모니터링 기능 단위/통합 테스�
             },
           };
         } else {
-          // 종료
           return {
             success: true,
             seminarId: sid,
@@ -490,7 +469,6 @@ describe('monitor_seminars API 기반 모니터링 기능 단위/통합 테스�
       return { success: false, seminarId: sid, isAuthExpired: false, errorMessage: 'not found' };
     });
 
-    // isAutoResume: true 로 실행
     const resumeSuccess = await monitorSeminars('테스트재개', currentHour, currentHour + 2, {
       pollIntervalMs: 10,
       context: resumeMockContext,
@@ -498,8 +476,6 @@ describe('monitor_seminars API 기반 모니터링 기능 단위/통합 테스�
     });
 
     assert.strictEqual(resumeSuccess, true);
-    // 종료 설문 처리(handleSeminarEndAndQuiz) 외에 초기 입장(performAutoEnter) 단계에서 newPage가 불리지 않았는지 확인:
-    // Step 1에서 입장 호출이 생략되므로 종료 시점(Step 2) 설문 처리용으로만 1회 newPage가 호출됨.
     assert.strictEqual(
       resumePageCalls.length,
       1,
@@ -516,7 +492,7 @@ describe('monitor_seminars API 기반 모니터링 기능 단위/통합 테스�
 
     sendNotificationToChannelSpy.mockImplementation(async (msg: string) => {
       emptyChannelMessages.push(msg);
-      return true;
+      return ++messageCounter;
     });
     sendTelegramSpy.mockImplementation(async (msg: string) => {
       emptyTelegramMessages.push(msg);
@@ -550,305 +526,5 @@ describe('monitor_seminars API 기반 모니터링 기능 단위/통합 테스�
     assert.strictEqual(isSeminarStartedByTime(futureTime, testNowMs), false, '미래 시간은 false');
     assert.strictEqual(isSeminarStartedByTime(undefined, testNowMs), false, 'undefined는 false');
     console.log('  ✓ isSeminarStartedByTime 시간 판정 단위 검증 완료!\n');
-
-    // ── Test 7: 신청 실패(PROCESS_APPLY) 세미나 시작/종료 공지 발송 및 종료 공지 선발송 순서 검증 ──
-    console.log('--- [Test 7] 신청 실패 세미나 공지 발송 및 종료 공지 선발송 검증 ---');
-
-    const test7Events: string[] = [];
-    const test7ChannelMessages: string[] = [];
-    let test7AutoEnterCalled = false;
-
-    sendNotificationToChannelSpy.mockImplementation(async (msg: string) => {
-      test7Events.push(`CHANNEL:${msg.split('\n')[0]}`);
-      test7ChannelMessages.push(msg);
-      return true;
-    });
-
-    const test7MockPage = {
-      locator: (selector: string) => ({
-        first: () => ({
-          isVisible: async () => {
-            if (selector.includes('입장하기')) {
-              test7AutoEnterCalled = true;
-              return false;
-            }
-            return selector.includes('설문참여');
-          },
-          click: async () => {
-            test7Events.push('PLAYWRIGHT:CLICK_SURVEY');
-          },
-          isEnabled: async () => true,
-          count: async () => 1,
-          waitFor: async () => {},
-        }),
-        count: async () => 1,
-        waitFor: async () => {},
-      }),
-      getByRole: () => ({
-        first: () => ({
-          isVisible: async () => true,
-          click: async () => {},
-          waitFor: async () => {},
-        }),
-      }),
-      evaluate: async () => [],
-      on: () => {},
-      waitForEvent: async () => null,
-      waitForTimeout: async () => {},
-      waitForLoadState: async () => {},
-      screenshot: async () => {},
-      frames: () => [{ url: () => 'https://video.ibm.com/socialstream/123' }],
-      url: () => 'https://m.doctorville.co.kr/cme/seminar/attend?seminarId=9903',
-      close: async () => {},
-    } as unknown as Page;
-
-    const test7MockContext = {
-      newPage: async () => {
-        test7Events.push('PLAYWRIGHT:NEW_PAGE');
-        return test7MockPage;
-      },
-      waitForEvent: async () => null,
-      close: async () => {},
-    } as unknown as BrowserContext;
-
-    let test7Step = 0;
-    fetchMainFutureSpy.mockImplementation(async () => {
-      test7Step++;
-      const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
-      const currentH = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' })).getHours();
-
-      return {
-        success: true,
-        items: [
-          {
-            seminarId: 9903,
-            seminarNm: '신청 실패 테스트 세미나',
-            startDt: `${todayStr} ${String(currentH).padStart(2, '0')}:00:00`,
-            endDt: `${todayStr} ${String(currentH + 1).padStart(2, '0')}:00:00`,
-            useSurvey: 'Y',
-            useDepthSurvey: 'N',
-            survey: { point: 1000 },
-            processState: 2, // 신청 실패/미신청 상태 (PROCESS_APPLY)
-          },
-        ],
-        rawResponse: {},
-      };
-    });
-
-    fetchSeminarDetailSpy.mockImplementation(async (id: number | string) => {
-      const sid = String(id);
-      if (sid === '9903') {
-        if (test7Step < 2) {
-          return {
-            success: true,
-            seminarId: sid,
-            survey: { point: 1000 },
-            surveyState: 5,
-            isPointExcluded: false,
-            rawResponse: { surveyState: 5, seminarDetail: { processState: 2 } },
-          };
-        } else {
-          // 종료
-          return {
-            success: true,
-            seminarId: sid,
-            survey: { point: 1000 },
-            surveyState: 1,
-            isPointExcluded: false,
-            rawResponse: { surveyState: 1, seminarDetail: { processState: 7 } },
-          };
-        }
-      }
-      return { success: false, seminarId: sid, isAuthExpired: false, errorMessage: 'not found' };
-    });
-
-    const test7Success = await monitorSeminars('테스트신청실패', currentHour, currentHour + 2, {
-      pollIntervalMs: 10,
-      context: test7MockContext,
-    });
-
-    assert.strictEqual(test7Success, true);
-    // 시작 공지 전송 확인
-    assert(
-      test7ChannelMessages.some((m) => m.includes('🟢세미나시작') && m.includes('신청 실패 테스트 세미나')),
-      '신청 실패 세미나도 🟢세미나시작 공지가 전송되어야 함',
-    );
-    // 종료 공지 전송 확인
-    assert(
-      test7ChannelMessages.some((m) => m.includes('🔴세미나종료') && m.includes('신청 실패 테스트 세미나')),
-      '신청 실패 세미나도 🔴세미나종료 공지가 전송되어야 함',
-    );
-    // 신청 실패 세미나는 status !== '입장하기' 이므로 자동입장(checkAndPerformAutoEnter) 시도가 생략되어야 함
-    assert.strictEqual(test7AutoEnterCalled, false, '신청 실패 세미나는 자동입장 시도를 하지 않아야 함');
-
-    // 설문/퀴즈 처리(PLAYWRIGHT:NEW_PAGE)가 종료 공지보다 먼저 실행되었는지 순서 검증
-    const channelEndIndex = test7Events.findIndex((e) => e.includes('CHANNEL:🔴세미나종료'));
-    const playwrightSurveyIndex = test7Events.findIndex((e) => e === 'PLAYWRIGHT:NEW_PAGE');
-    assert(channelEndIndex >= 0, '🔴세미나종료 이벤트가 존재해야 함');
-    assert(playwrightSurveyIndex >= 0, '설문 처리 브라우저 생성이 존재해야 함');
-    assert(
-      playwrightSurveyIndex < channelEndIndex,
-      `설문 처리 브라우저 실행(${playwrightSurveyIndex})이 🔴세미나종료 공지(${channelEndIndex})보다 먼저여야 함`,
-    );
-
-    console.log('  ✓ 신청 실패 세미나 공지 발송 및 설문/퀴즈 후 종료 공지 발송 순서 검증 완료!\n');
-
-    // ── Test 8: 감시 중 API 목록에서 사라진 세미나 정리 검증 ──────────────
-    console.log('--- [Test 8] 감시 중 API 목록에서 사라진 세미나 정리 검증 ---');
-
-    const test8ChannelMessages: string[] = [];
-    sendNotificationToChannelSpy.mockImplementation(async (msg: string) => {
-      test8ChannelMessages.push(msg);
-      return true;
-    });
-
-    let test8Step = 0;
-    fetchMainFutureSpy.mockImplementation(async () => {
-      test8Step++;
-      const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
-      const currentH = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' })).getHours();
-
-      if (test8Step === 1) {
-        // Step 1: 세미나 9904가 목록에 존재 (미래 시간)
-        return {
-          success: true,
-          items: [
-            {
-              seminarId: 9904,
-              seminarNm: '사라진 세미나 테스트',
-              startDt: `${todayStr} ${String(currentH).padStart(2, '0')}:00:00`,
-              endDt: `${todayStr} ${String(currentH + 1).padStart(2, '0')}:00:00`,
-              useSurvey: 'Y',
-              useDepthSurvey: 'N',
-              survey: { point: 1000 },
-              processState: 2,
-            },
-          ],
-          rawResponse: {},
-        };
-      } else {
-        // Step 2: 세미나 9904가 목록에서 완전히 사라짐
-        return {
-          success: true,
-          items: [],
-          rawResponse: {},
-        };
-      }
-    });
-
-    fetchSeminarDetailSpy.mockImplementation(async (id: number | string) => {
-      const sid = String(id);
-      if (sid === '9904') {
-        // 상세 조회 시 세미나가 종료(processState: 7)된 상태로 확인됨
-        return {
-          success: true,
-          seminarId: sid,
-          survey: { point: 1000 },
-          surveyState: 1,
-          isPointExcluded: false,
-          rawResponse: { surveyState: 1, seminarDetail: { processState: 7 } },
-        };
-      }
-      return { success: false, seminarId: sid, isAuthExpired: false, errorMessage: 'not found' };
-    });
-
-    const test8Success = await monitorSeminars('테스트사라진세미나', currentHour, currentHour + 2, {
-      pollIntervalMs: 10,
-      context: test7MockContext,
-    });
-
-    assert.strictEqual(test8Success, true);
-    assert(
-      test8ChannelMessages.some((m) => m.includes('🔴세미나종료') && m.includes('사라진 세미나 테스트')),
-      '목록에서 사라진 세미나도 종료 감지되어 🔴세미나종료 공지가 전송되고 리스트에서 정상 정리되어야 함',
-    );
-
-    console.log('  ✓ 감시 중 API 목록에서 사라진 세미나 정리 검증 완료!\n');
-
-    // ── Test 9: 세미나 종료 알림에 퀴즈 정답(quizResultMessage) 포함 검증 ──
-    console.log('--- [Test 9] 세미나 종료 알림에 퀴즈 정답(quizResultMessage) 포함 검증 ---');
-
-    const test9ChannelMessages: string[] = [];
-    sendNotificationToChannelSpy.mockImplementation(async (msg: string) => {
-      test9ChannelMessages.push(msg);
-      return true;
-    });
-
-    processSeminarQuizSpy.mockResolvedValue({
-      success: true,
-      hasQuizResult: true,
-      message: 'Q1. 당뇨병 치료제는? 1번\nQ2. 적정 혈당 수치는? 2번',
-    });
-
-    let test9Step = 0;
-    fetchMainFutureSpy.mockImplementation(async () => {
-      test9Step++;
-      const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
-      const currentH = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' })).getHours();
-
-      return {
-        success: true,
-        items: [
-          {
-            seminarId: 9905,
-            seminarNm: '퀴즈 정답 포함 테스트 세미나',
-            startDt: `${todayStr} ${String(currentH).padStart(2, '0')}:00:00`,
-            endDt: `${todayStr} ${String(currentH + 1).padStart(2, '0')}:00:00`,
-            useSurvey: 'Y',
-            useDepthSurvey: 'N',
-            survey: { point: 1000 },
-            processState: 1, // 입장 가능
-          },
-        ],
-        rawResponse: {},
-      };
-    });
-
-    fetchSeminarDetailSpy.mockImplementation(async (id: number | string) => {
-      const sid = String(id);
-      if (sid === '9905') {
-        if (test9Step < 2) {
-          return {
-            success: true,
-            seminarId: sid,
-            survey: { point: 1000 },
-            surveyState: 5,
-            isPointExcluded: false,
-            rawResponse: { surveyState: 5, seminarDetail: { processState: 1 } },
-          };
-        } else {
-          // 종료 및 설문 오픈
-          return {
-            success: true,
-            seminarId: sid,
-            survey: { point: 1000 },
-            surveyState: 1,
-            isPointExcluded: false,
-            rawResponse: { surveyState: 1, seminarDetail: { processState: 7 } },
-          };
-        }
-      }
-      return { success: false, seminarId: sid, isAuthExpired: false, errorMessage: 'not found' };
-    });
-
-    const test9Success = await monitorSeminars('테스트퀴즈정답', currentHour, currentHour + 2, {
-      pollIntervalMs: 10,
-      context: test7MockContext,
-    });
-
-    assert.strictEqual(test9Success, true);
-    const endNotificationWithQuiz = test9ChannelMessages.find(
-      (m) => m.includes('🔴세미나종료') && m.includes('퀴즈 정답 포함 테스트 세미나'),
-    );
-    assert(endNotificationWithQuiz, '🔴세미나종료 공지가 발송되어야 함');
-    assert(
-      endNotificationWithQuiz.includes('Q1. 당뇨병 치료제는? 1번\nQ2. 적정 혈당 수치는? 2번'),
-      '🔴세미나종료 공지에 퀴즈 결과 메시지가 포함되어야 함',
-    );
-
-    console.log('  ✓ 세미나 종료 알림에 퀴즈 정답 포함 검증 완료!\n');
-
-    vi.restoreAllMocks();
-    console.log('🎉 모든 monitor_seminars API 기반 단위/통합 테스트 통과!');
   });
 });

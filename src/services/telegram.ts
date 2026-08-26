@@ -23,9 +23,11 @@ import {
   deleteChannelMessage,
   deleteChannelMessagesByDate,
   getSeoulDateString,
+  recordChannelComment,
 } from './channel_message_repository';
 import { sendOrUpdateTodayLinksNotification } from './broadcast_today_links';
 import { extractSeminarIds } from '../tasks/seminar_detail';
+import { syncChannelSeminarStatusOnQuizRegister } from '../tasks/monitor_seminars';
 
 const ADMIN_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const NOTICE_BOT_TOKEN = process.env.NOTICE_BOT_TOKEN;
@@ -238,6 +240,35 @@ if (noticeBot) {
   });
 
   noticeBot.use(async (ctx, next) => {
+    // 토론 그룹(Group/Supergroup)에서 수신된 일반 댓글 감지 및 1일 TTL 저장
+    if (
+      ctx.chat &&
+      (ctx.chat.type === 'group' || ctx.chat.type === 'supergroup') &&
+      ctx.message &&
+      'text' in ctx.message
+    ) {
+      const text = ctx.message.text.trim();
+      const isCommand = text.startsWith('/');
+      if (!isCommand && !ctx.from?.is_bot) {
+        const userName = ctx.from?.first_name || ctx.from?.username || '익명';
+        const userId = ctx.from?.id ? String(ctx.from.id) : undefined;
+        const messageId = ctx.message.message_id;
+        const channelId = String(ctx.chat.id);
+
+        try {
+          recordChannelComment({
+            channelId,
+            messageId,
+            userId,
+            userName,
+            text,
+          });
+        } catch (err) {
+          logger.error('댓글 저장 중 오류 발생:', err);
+        }
+      }
+    }
+
     const userId = ctx.from?.id;
     if (userId && !checkNoticeCooldown(userId)) {
       await replyWithSplit(ctx, '⏳ 요청이 너무 빠릅니다. 2초 후 다시 시도해주세요.').catch(() => {});
@@ -765,9 +796,21 @@ if (adminBot) {
 
     try {
       const { registered, gitNotice } = await registerQuizAnswersToCheatsheet(questions, answers);
+
+      // 공지 채널에 전송된 세미나 현황 메시지가 있다면 정답 내용 자동 수정 (Edit)
+      let syncNotice = '';
+      try {
+        const syncRes = await syncChannelSeminarStatusOnQuizRegister(questions.map((q) => q.keyword));
+        if (syncRes.modified) {
+          syncNotice = '\n\n📢 공지 채널의 세미나 현황 메시지 정답이 자동으로 수정되었습니다.';
+        }
+      } catch (syncErr) {
+        logger.error('공지 채널 세미나 메시지 동기화 실패:', syncErr);
+      }
+
       await replyWithSplit(
         ctx,
-        `✅ 세미나 퀴즈 ${registered.length}개 일괄 등록 완료\n\n${registered.join('\n')}${gitNotice}`,
+        `✅ 세미나 퀴즈 ${registered.length}개 일괄 등록 완료\n\n${registered.join('\n')}${gitNotice}${syncNotice}`,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -835,9 +878,21 @@ if (adminBot) {
         answers,
       });
       const { registered, gitNotice } = await registerQuizAnswersToCheatsheet(questions, answers);
+
+      // 공지 채널에 전송된 세미나 현황 메시지가 있다면 정답 내용 자동 수정 (Edit)
+      let syncNotice = '';
+      try {
+        const syncRes = await syncChannelSeminarStatusOnQuizRegister(questions.map((q) => q.keyword));
+        if (syncRes.modified) {
+          syncNotice = '\n\n📢 공지 채널의 세미나 현황 메시지 정답이 자동으로 수정되었습니다.';
+        }
+      } catch (syncErr) {
+        logger.error('공지 채널 세미나 메시지 동기화 실패:', syncErr);
+      }
+
       await replyWithSplit(
         ctx,
-        `✅ 세미나/오늘의 퀴즈 ${registered.length}개 족보 등록 완료 (답장 등록)\n\n${registered.join('\n')}${gitNotice}\n\n재실행: /run_quiz_now`,
+        `✅ 세미나/오늘의 퀴즈 ${registered.length}개 족보 등록 완료 (답장 등록)\n\n${registered.join('\n')}${gitNotice}${syncNotice}\n\n재실행: /run_quiz_now`,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

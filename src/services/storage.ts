@@ -76,6 +76,20 @@ function initDatabase(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_channel_messages_date ON channel_messages(date);
     CREATE INDEX IF NOT EXISTS idx_channel_messages_msg ON channel_messages(channel_id, message_id);
 
+    CREATE TABLE IF NOT EXISTS channel_comments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      channel_id TEXT NOT NULL,
+      message_id INTEGER NOT NULL,
+      date TEXT NOT NULL,
+      user_id TEXT,
+      user_name TEXT NOT NULL,
+      text TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_channel_comments_date ON channel_comments(date);
+    CREATE INDEX IF NOT EXISTS idx_channel_comments_msg ON channel_comments(channel_id, message_id);
+
     CREATE TABLE IF NOT EXISTS _migration_meta (
       name TEXT PRIMARY KEY,
       migrated_at INTEGER NOT NULL
