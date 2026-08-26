@@ -72,8 +72,6 @@ export function buildSeminarStatusMessage(
 ): { text: string; options: Record<string, unknown> } {
   let text = `🔔 ${periodName}세미나\n\n`;
 
-  const inlineKeyboard: Array<Array<{ text: string; url: string }>> = [];
-
   for (let i = 0; i < seminars.length; i++) {
     const s = seminars[i];
     let statusIcon = '⏳';
@@ -97,14 +95,6 @@ export function buildSeminarStatusMessage(
     if (i < seminars.length - 1) {
       text += '\n';
     }
-
-    const shortName = s.name.length > 20 ? s.name.slice(0, 19) + '…' : s.name;
-    inlineKeyboard.push([
-      {
-        text: `${statusIcon} ${i + 1}. ${shortName}`,
-        url: s.url,
-      },
-    ]);
   }
 
   // 이전 댓글 섹션 첨부 (최근 최대 5개)
@@ -124,9 +114,6 @@ export function buildSeminarStatusMessage(
   const options: Record<string, unknown> = {
     link_preview_options: {
       is_disabled: true,
-    },
-    reply_markup: {
-      inline_keyboard: inlineKeyboard,
     },
   };
 

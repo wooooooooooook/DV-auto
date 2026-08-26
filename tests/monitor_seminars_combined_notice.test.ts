@@ -41,14 +41,9 @@ describe('세미나 모니터링 통합 메시지 (삭제/재발송) 단위 테�
     assert.ok(text.includes('⏳ 대기 | **2번 점심 세미나**'));
     assert.ok(text.includes('https://m.doctorville.co.kr/cme/seminar/102'));
 
-    // 3. 인라인 키보드 검증
-    const replyMarkup = options.reply_markup as { inline_keyboard: Array<Array<{ text: string; url: string }>> };
-    assert.ok(replyMarkup);
-    assert.strictEqual(replyMarkup.inline_keyboard.length, 2);
-    assert.strictEqual(replyMarkup.inline_keyboard[0][0].text, '🟢 1. 1번 점심 세미나');
-    assert.strictEqual(replyMarkup.inline_keyboard[0][0].url, 'https://m.doctorville.co.kr/cme/seminar/101');
-    assert.strictEqual(replyMarkup.inline_keyboard[1][0].text, '⏳ 2. 2번 점심 세미나');
-    assert.strictEqual(replyMarkup.inline_keyboard[1][0].url, 'https://m.doctorville.co.kr/cme/seminar/102');
+    // 3. 옵션 검증 (인라인 키보드 미부착, 링크 미리보기 비활성화)
+    assert.strictEqual(options.reply_markup, undefined);
+    assert.deepStrictEqual(options.link_preview_options, { is_disabled: true });
 
     // 4. 아직 미완료이므로 종료 문구 없음
     assert.ok(!text.includes('점심세미나가 모두 종료되었습니다'));
@@ -71,16 +66,12 @@ describe('세미나 모니터링 통합 메시지 (삭제/재발송) 단위 테�
       },
     ];
 
-    const { text, options } = buildSeminarStatusMessage('점심', seminars, false);
+    const { text } = buildSeminarStatusMessage('점심', seminars, false);
 
     assert.ok(text.includes('🔴 종료 | **1번 점심 세미나**'));
     assert.ok(text.includes('퀴즈 정답 123'));
     assert.ok(text.includes('✅ Q1: 정답1 (1번)'));
     assert.ok(text.includes('🟢 입장가능 | **2번 점심 세미나**'));
-
-    const replyMarkup = options.reply_markup as { inline_keyboard: Array<Array<{ text: string; url: string }>> };
-    assert.strictEqual(replyMarkup.inline_keyboard[0][0].text, '🔴 1. 1번 점심 세미나');
-    assert.strictEqual(replyMarkup.inline_keyboard[1][0].text, '🟢 2. 2번 점심 세미나');
   });
 
   it('buildSeminarStatusMessage: 모든 세미나 종료 시 하단 종료 안내 문구 결합 검증', () => {
