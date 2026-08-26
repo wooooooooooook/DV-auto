@@ -202,6 +202,22 @@ export function updateChannelMessageStatus(
 }
 
 /**
+ * 특정 일자에 공지 채널로 전송된 '오늘의 링크' 메시지 레코드를 조회합니다.
+ */
+export function getTodayLinksChannelMessage(date?: string, channelId?: string): ChannelMessageRecord | null {
+  const targetDate = date || getSeoulDateString();
+  const targetChannelId = channelId || process.env.NOTICE_CHANNEL_ID;
+  const messages = getChannelMessagesByDate(targetDate, targetChannelId).filter((m) => m.status !== 'deleted');
+
+  const found = messages.find(
+    (m) =>
+      m.text &&
+      (m.text.includes('mypage/attendance') || (m.text.includes('출석체크') && m.text.includes('오늘의 퀴즈'))),
+  );
+  return found || null;
+}
+
+/**
  * 텔레그램 공지봇을 통해 공지방 메시지를 수정하고 DB를 갱신합니다.
  */
 export async function editChannelMessage(
@@ -243,6 +259,10 @@ export async function editChannelMessage(
     return { success: true, message: `메시지(ID: ${messageId}) 수정 완료` };
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
+    if (errMsg.includes('message is not modified')) {
+      updateChannelMessageStatus(messageId, 'edited', newText, targetChannelId);
+      return { success: true, message: `메시지(ID: ${messageId}) 내용 동일 (수정 불필요)` };
+    }
     logger.error(`공지방 메시지(ID: ${messageId}) 수정 실패:`, error);
     return { success: false, message: `메시지 수정 실패: ${errMsg}` };
   }

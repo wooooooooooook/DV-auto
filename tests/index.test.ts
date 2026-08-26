@@ -37,6 +37,7 @@ const testFiles = [
   'telegram_truncation.test.ts',
   'telegram_splitting.test.ts',
   'channel_messages.test.ts',
+  'broadcast_today_links.test.ts',
 ];
 
 let failedCount = 0;

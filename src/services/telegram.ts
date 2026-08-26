@@ -24,6 +24,7 @@ import {
   deleteChannelMessagesByDate,
   getSeoulDateString,
 } from './channel_message_repository';
+import { sendOrUpdateTodayLinksNotification } from './broadcast_today_links';
 import { extractSeminarIds } from '../tasks/seminar_detail';
 
 const ADMIN_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -424,12 +425,19 @@ if (adminBot) {
         .runTask(task)
         .then(async (result) => {
           if (result && (result as { message?: string }).message) {
-            await sendNotificationToChannel(
+            const broadcastRes = await sendOrUpdateTodayLinksNotification(
               (result as { message: string }).message,
-              null,
-              (result as { options?: Record<string, unknown> }).options,
+              (result as { options?: Record<string, unknown> }).options ?? {},
             );
-            await replyWithSplit(ctx, 'Broadcast successful.');
+            if (broadcastRes.success) {
+              const replyText =
+                broadcastRes.action === 'edited'
+                  ? `✅ 기존 오늘의 링크 공지 메시지(ID: ${broadcastRes.messageId})를 성공적으로 수정했습니다.`
+                  : `✅ 오늘의 링크를 채널에 새로 공지했습니다. (ID: ${broadcastRes.messageId})`;
+              await replyWithSplit(ctx, replyText);
+            } else {
+              await replyWithSplit(ctx, `❌ 공지 전송/수정 실패: ${broadcastRes.message}`);
+            }
           } else {
             await replyWithSplit(ctx, 'Task ran, but no message was produced to broadcast.');
           }

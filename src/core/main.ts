@@ -21,6 +21,7 @@ import * as checkSeminarPointTaskModule from '../tasks/check_seminar_point';
 import * as checkAdvancedSeminarsTaskModule from '../tasks/check_advanced_seminars';
 import * as runSeminarQuizTaskModule from '../tasks/run_seminar_quiz';
 import * as seminarDetailTaskModule from '../tasks/seminar_detail';
+import { sendOrUpdateTodayLinksNotification } from '../services/broadcast_today_links';
 import type { Task } from '../types';
 
 dns.setDefaultResultOrder('ipv4first');
@@ -416,12 +417,17 @@ const broadcastTodayLinksTask: Task = {
         (linksResult as { success?: boolean }).success !== false &&
         (linksResult as { message?: string }).message
       ) {
-        await utils.sendNotificationToChannel(
+        const broadcastRes = await sendOrUpdateTodayLinksNotification(
           (linksResult as { message: string }).message,
-          null,
           (linksResult as { options?: Record<string, unknown> }).options ?? {},
         );
-        return { success: true, message: 'Broadcast successful.' };
+        if (broadcastRes.success) {
+          return {
+            success: true,
+            message: `Broadcast successful (${broadcastRes.action}, ID: ${broadcastRes.messageId}).`,
+          };
+        }
+        return { success: false, message: `Broadcast failed: ${broadcastRes.message}` };
       }
       return { success: false, message: 'No message to broadcast.' };
     } catch (e) {
