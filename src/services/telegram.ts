@@ -24,6 +24,9 @@ import {
   deleteChannelMessagesByDate,
   getSeoulDateString,
   recordChannelComment,
+  recordDiscussionThread,
+  getChannelMessageIdByThreadId,
+  getChannelCommentByMessageId,
 } from './channel_message_repository';
 import { sendOrUpdateTodayLinksNotification } from './broadcast_today_links';
 import { extractSeminarIds } from '../tasks/seminar_detail';
@@ -268,6 +271,85 @@ if (adminBot) {
   adminBot.start((ctx) => replyWithSplit(ctx, 'Welcome, Admin!'));
 }
 
+/**
+ * Telegraf Context로부터 토론 댓글의 원본 공지 채널 포스트 ID(parentMessageId) 및 채널 ID를 추출합니다.
+ */
+export function extractParentMessageId(ctx: Context): {
+  parentMessageId: number | null;
+  channelId?: string;
+} {
+  const msg = ctx.message;
+  if (!msg) return { parentMessageId: null };
+
+  const targetNoticeChannelId = process.env.NOTICE_CHANNEL_ID;
+
+  // 1. reply_to_message 검사
+  const replyTo = 'reply_to_message' in msg ? msg.reply_to_message : undefined;
+  if (replyTo) {
+    const replyToAny = replyTo as any;
+    // 1-1. replyTo가 자동 포워드된 채널 원본 포스트인 경우 (구 Bot API forward_from_message_id)
+    if (typeof replyToAny.forward_from_message_id === 'number') {
+      const fwdChatId = replyToAny.forward_from_chat?.id ? String(replyToAny.forward_from_chat.id) : undefined;
+      return {
+        parentMessageId: replyToAny.forward_from_message_id,
+        channelId: fwdChatId || targetNoticeChannelId,
+      };
+    }
+
+    // 1-2. Bot API 7.0+ forward_origin 확인
+    const origin = replyToAny.forward_origin;
+    if (origin && origin.type === 'channel' && typeof origin.message_id === 'number') {
+      const origChatId = origin.chat?.id ? String(origin.chat.id) : undefined;
+      return {
+        parentMessageId: origin.message_id,
+        channelId: origChatId || targetNoticeChannelId,
+      };
+    }
+
+    // 1-3. replyTo가 채널 자체에서 보낸 메시지인 경우 (sender_chat이 channel)
+    if (replyToAny.sender_chat && replyToAny.sender_chat.type === 'channel') {
+      if (typeof replyToAny.forward_from_message_id === 'number') {
+        return {
+          parentMessageId: replyToAny.forward_from_message_id,
+          channelId: String(replyToAny.sender_chat.id),
+        };
+      }
+    }
+
+    // 1-4. replyTo가 다른 사람의 댓글인 경우 -> 해당 부모 댓글의 parent_message_id 상속
+    const existingComment = getChannelCommentByMessageId(replyTo.message_id);
+    if (existingComment && existingComment.parentMessageId) {
+      return {
+        parentMessageId: existingComment.parentMessageId,
+        channelId: existingComment.channelId || targetNoticeChannelId,
+      };
+    }
+
+    // 1-5. replyTo가 DB에 등록된 채널 공지 메시지 자체인 경우
+    const channelMsg = getChannelMessageById(replyTo.message_id);
+    if (channelMsg) {
+      return {
+        parentMessageId: channelMsg.messageId,
+        channelId: channelMsg.channelId || targetNoticeChannelId,
+      };
+    }
+  }
+
+  // 2. message_thread_id 검사 (토론방 스레드 ID로 매핑 테이블 조회)
+  const threadId = 'message_thread_id' in msg ? msg.message_thread_id : undefined;
+  if (threadId) {
+    const mappedChannelMsgId = getChannelMessageIdByThreadId(threadId);
+    if (mappedChannelMsgId) {
+      return {
+        parentMessageId: mappedChannelMsgId,
+        channelId: targetNoticeChannelId,
+      };
+    }
+  }
+
+  return { parentMessageId: null };
+}
+
 if (noticeBot) {
   setBot('notice', noticeBot);
   noticeBot.catch((err, ctx) => {
@@ -275,7 +357,28 @@ if (noticeBot) {
   });
 
   noticeBot.use(async (ctx, next) => {
-    // 토론 그룹(Group/Supergroup)에서 수신된 일반 댓글 감지 및 1일 TTL 저장
+    // 1. 토론 그룹으로 자동 포워딩된 채널 포스트 스레드 매핑 저장
+    if (ctx.chat && (ctx.chat.type === 'group' || ctx.chat.type === 'supergroup') && ctx.message) {
+      const msg = ctx.message as any;
+      const isAutoForward = msg.is_automatic_forward === true;
+      const forwardMsgId =
+        msg.forward_from_message_id ||
+        (msg.forward_origin?.type === 'channel' ? msg.forward_origin.message_id : undefined);
+      const forwardChatId =
+        msg.forward_from_chat?.id ||
+        (msg.forward_origin?.type === 'channel' ? msg.forward_origin.chat?.id : undefined) ||
+        process.env.NOTICE_CHANNEL_ID;
+
+      if (isAutoForward && forwardMsgId) {
+        try {
+          recordDiscussionThread(msg.message_id, String(forwardChatId), forwardMsgId);
+        } catch (err) {
+          logger.error('토론 스레드 매핑 저장 실패:', err);
+        }
+      }
+    }
+
+    // 2. 토론 그룹(Group/Supergroup)에서 수신된 일반 댓글 감지 및 parent_message_id 매핑 저장
     if (
       ctx.chat &&
       (ctx.chat.type === 'group' || ctx.chat.type === 'supergroup') &&
@@ -288,18 +391,23 @@ if (noticeBot) {
         const userName = ctx.from?.first_name || ctx.from?.username || '익명';
         const userId = ctx.from?.id ? String(ctx.from.id) : undefined;
         const messageId = ctx.message.message_id;
-        const channelId = String(ctx.chat.id);
 
-        try {
-          recordChannelComment({
-            channelId,
-            messageId,
-            userId,
-            userName,
-            text,
-          });
-        } catch (err) {
-          logger.error('댓글 저장 중 오류 발생:', err);
+        const { parentMessageId, channelId: extractedChannelId } = extractParentMessageId(ctx);
+
+        if (parentMessageId) {
+          const channelId = extractedChannelId || process.env.NOTICE_CHANNEL_ID || String(ctx.chat.id);
+          try {
+            recordChannelComment({
+              channelId,
+              messageId,
+              parentMessageId,
+              userId,
+              userName,
+              text,
+            });
+          } catch (err) {
+            logger.error('댓글 저장 중 오류 발생:', err);
+          }
         }
       }
     }

@@ -263,10 +263,48 @@ export function getNewSeminarsChannelMessage(date?: string, channelId?: string):
   return null;
 }
 
+export interface DiscussionThreadRecord {
+  threadId: number;
+  channelId: string;
+  channelMessageId: number;
+  createdAt: number;
+}
+
+/**
+ * 토론 그룹 스레드(자동 포워딩 메시지)와 채널 공지 메시지 ID 간의 매핑을 기록합니다.
+ */
+export function recordDiscussionThread(threadId: number, channelId: string, channelMessageId: number): void {
+  const db = getDatabase();
+  const now = Date.now();
+  db.prepare(
+    `
+    INSERT OR REPLACE INTO channel_discussion_threads (thread_id, channel_id, channel_message_id, created_at)
+    VALUES (?, ?, ?, ?)
+  `,
+  ).run(threadId, channelId, channelMessageId, now);
+}
+
+/**
+ * 토론 그룹 스레드 ID로부터 채널 공지 메시지 ID를 조회합니다.
+ */
+export function getChannelMessageIdByThreadId(threadId: number, channelId?: string): number | null {
+  const db = getDatabase();
+  let query = 'SELECT channel_message_id FROM channel_discussion_threads WHERE thread_id = ?';
+  const params: unknown[] = [threadId];
+  if (channelId) {
+    query += ' AND channel_id = ?';
+    params.push(channelId);
+  }
+  const row = db.prepare(query).get(...params) as { channel_message_id: number } | undefined;
+  return row ? row.channel_message_id : null;
+}
+
 export interface ChannelCommentRecord {
   id?: number;
   channelId: string;
   messageId: number;
+  parentMessageId: number;
+  attachedToMessageId?: number | null;
   date: string;
   userId?: string | null;
   userName: string;
@@ -278,6 +316,8 @@ export interface RawChannelCommentRow {
   id: number;
   channel_id: string;
   message_id: number;
+  parent_message_id: number | null;
+  attached_to_message_id: number | null;
   date: string;
   user_id: string | null;
   user_name: string;
@@ -307,6 +347,8 @@ export function cleanOldChannelComments(currentDate?: string): number {
 export function recordChannelComment(params: {
   channelId?: string;
   messageId: number;
+  parentMessageId: number;
+  attachedToMessageId?: number | null;
   date?: string;
   userId?: string | null;
   userName: string;
@@ -318,22 +360,38 @@ export function recordChannelComment(params: {
   const date = params.date || getSeoulDateString();
   const channelId = params.channelId || process.env.NOTICE_CHANNEL_ID || '';
   const userId = params.userId || null;
+  const attachedToMessageId = params.attachedToMessageId ?? null;
   const createdAt = params.createdAt || now;
 
   // 1일 TTL 지난 과거 댓글 정리
   cleanOldChannelComments(date);
 
   const stmt = db.prepare(`
-    INSERT INTO channel_comments (channel_id, message_id, date, user_id, user_name, text, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO channel_comments (
+      channel_id, message_id, parent_message_id, attached_to_message_id,
+      date, user_id, user_name, text, created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  const result = stmt.run(channelId, params.messageId, date, userId, params.userName, params.text, createdAt);
+  const result = stmt.run(
+    channelId,
+    params.messageId,
+    params.parentMessageId,
+    attachedToMessageId,
+    date,
+    userId,
+    params.userName,
+    params.text,
+    createdAt,
+  );
 
   return {
     id: Number(result.lastInsertRowid),
     channelId,
     messageId: params.messageId,
+    parentMessageId: params.parentMessageId,
+    attachedToMessageId,
     date,
     userId,
     userName: params.userName,
@@ -343,7 +401,98 @@ export function recordChannelComment(params: {
 }
 
 /**
- * 특정 일자의 댓글 목록을 조회합니다 (최신 순 또는 오래된 순).
+ * 특정 message_id의 댓글 레코드를 조회합니다 (대댓글 원본 역추적용).
+ */
+export function getChannelCommentByMessageId(messageId: number, channelId?: string): ChannelCommentRecord | null {
+  const db = getDatabase();
+  let query = 'SELECT * FROM channel_comments WHERE message_id = ?';
+  const params: unknown[] = [messageId];
+  if (channelId) {
+    query += ' AND channel_id = ?';
+    params.push(channelId);
+  }
+  query += ' ORDER BY id DESC LIMIT 1';
+  const row = db.prepare(query).get(...params) as RawChannelCommentRow | undefined;
+  if (!row) return null;
+  return {
+    id: row.id,
+    channelId: row.channel_id,
+    messageId: row.message_id,
+    parentMessageId: row.parent_message_id ?? 0,
+    attachedToMessageId: row.attached_to_message_id,
+    date: row.date,
+    userId: row.user_id,
+    userName: row.user_name,
+    text: row.text,
+    createdAt: row.created_at,
+  };
+}
+
+/**
+ * 특정 원본 공지 메시지(parentMessageId)에 달렸거나 이관된 댓글 목록을 조회합니다.
+ */
+export function getChannelCommentsByParentMessageId(
+  parentMessageId: number,
+  channelId?: string,
+  limit = 10,
+): ChannelCommentRecord[] {
+  const db = getDatabase();
+  const targetDate = getSeoulDateString();
+
+  // 과거 댓글 정리
+  cleanOldChannelComments(targetDate);
+
+  let query = `
+    SELECT * FROM channel_comments
+    WHERE (parent_message_id = ? OR attached_to_message_id = ?)
+  `;
+  const params: unknown[] = [parentMessageId, parentMessageId];
+
+  if (channelId) {
+    query += ' AND channel_id = ?';
+    params.push(channelId);
+  }
+
+  query += ' ORDER BY created_at ASC, id ASC LIMIT ?';
+  params.push(limit);
+
+  const rows = db.prepare(query).all(...params) as RawChannelCommentRow[];
+
+  return rows.map((r) => ({
+    id: r.id,
+    channelId: r.channel_id,
+    messageId: r.message_id,
+    parentMessageId: r.parent_message_id ?? 0,
+    attachedToMessageId: r.attached_to_message_id,
+    date: r.date,
+    userId: r.user_id,
+    userName: r.user_name,
+    text: r.text,
+    createdAt: r.created_at,
+  }));
+}
+
+/**
+ * 이전 공지 메시지의 댓글들을 새 공지 메시지에 연결(attached_to_message_id 갱신)합니다.
+ */
+export function linkCommentsToNewMessage(prevMessageId: number, newMessageId: number, channelId?: string): number {
+  const db = getDatabase();
+  let query = `
+    UPDATE channel_comments
+    SET attached_to_message_id = ?
+    WHERE (parent_message_id = ? OR attached_to_message_id = ?)
+  `;
+  const params: unknown[] = [newMessageId, prevMessageId, prevMessageId];
+  if (channelId) {
+    query += ' AND channel_id = ?';
+    params.push(channelId);
+  }
+  const result = db.prepare(query).run(...params);
+  return result.changes;
+}
+
+/**
+ * 특정 일자의 댓글 목록을 조회합니다 (하위 호환용).
  */
 export function getChannelCommentsByDate(date?: string, limit = 10): ChannelCommentRecord[] {
   const db = getDatabase();
@@ -360,6 +509,8 @@ export function getChannelCommentsByDate(date?: string, limit = 10): ChannelComm
     id: r.id,
     channelId: r.channel_id,
     messageId: r.message_id,
+    parentMessageId: r.parent_message_id ?? 0,
+    attachedToMessageId: r.attached_to_message_id,
     date: r.date,
     userId: r.user_id,
     userName: r.user_name,
@@ -367,6 +518,8 @@ export function getChannelCommentsByDate(date?: string, limit = 10): ChannelComm
     createdAt: r.created_at,
   }));
 }
+
+export { publishAndReplaceChannelNotice, type PublishAndReplaceOptions } from './channel_notice_service';
 
 /**
  * 텔레그램 공지봇을 통해 공지방 메시지를 수정하고 DB를 갱신합니다.
