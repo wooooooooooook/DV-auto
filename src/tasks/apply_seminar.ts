@@ -56,12 +56,14 @@ export type SeminarFieldChange = {
 export type SeminarInfoChange = {
   seminarId: string;
   name: string;
+  url?: string;
   changes: SeminarFieldChange[];
 };
 
 export type SeminarPointChange = {
   seminarId: string;
   name: string;
+  url?: string;
   point?: number;
   pointText?: string;
   pointDate?: string;
@@ -100,7 +102,6 @@ const MEANINGFUL_FIELDS: Array<{
   key: keyof SeminarListItem;
   label: string;
 }> = [
-  { key: 'name', label: '세미나명' },
   { key: 'date', label: '날짜' },
   { key: 'time', label: '시간' },
   { key: 'totalCount', label: '총원' },
@@ -170,6 +171,10 @@ export function formatSeminarChangeNotification(
       if (p.pointDate) {
         lines.push(`지급일: ${p.pointDate}`);
       }
+      const targetUrl = p.url || (p.seminarId ? `https://m.doctorville.co.kr/cme/seminar/${p.seminarId}` : '');
+      if (targetUrl) {
+        lines.push(targetUrl);
+      }
       sections.push(lines.join('\n'));
     }
   }
@@ -183,6 +188,10 @@ export function formatSeminarChangeNotification(
       lines.push(`seminarId: ${info.seminarId}`);
       for (const ch of info.changes) {
         lines.push(`${ch.label}: ${ch.oldValue} → ${ch.newValue}`);
+      }
+      const targetUrl = info.url || (info.seminarId ? `https://m.doctorville.co.kr/cme/seminar/${info.seminarId}` : '');
+      if (targetUrl) {
+        lines.push(targetUrl);
       }
       sections.push(lines.join('\n'));
     }
@@ -296,6 +305,10 @@ export function refreshStoredSeminarList(
         infoChanges.push({
           seminarId: existing.seminarId || seminar.seminarId || '',
           name: seminar.name || existing.name || '',
+          url:
+            seminar.url ||
+            existing.url ||
+            (seminar.seminarId ? `https://m.doctorville.co.kr/cme/seminar/${seminar.seminarId}` : ''),
           changes: fieldChanges,
         });
       }
@@ -634,6 +647,7 @@ export async function refreshSeminarPointStatus(
         pointChanges.push({
           seminarId: id,
           name: currentItem.name,
+          url: id ? `https://m.doctorville.co.kr/cme/seminar/${id}` : currentItem.url,
           point: pointResult.point,
           pointText: pointResult.pointText,
           pointDate: pointResult.date,
@@ -701,6 +715,7 @@ export async function refreshSeminarPointStatus(
       pointChanges.push({
         seminarId: id,
         name: newItem.name,
+        url: newItem.url || `https://m.doctorville.co.kr/cme/seminar/${id}`,
         point: pointResult.point,
         pointText: pointResult.pointText,
         pointDate: pointResult.date,

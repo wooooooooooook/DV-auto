@@ -76,6 +76,14 @@ describe('apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스�
       assert.strictEqual(changesCount.length, 0, 'currentCount 변경은 무시되어야 함');
       console.log('  ✓ [Pass] currentCount 만 변경 시 변경 알림 없음\n');
 
+      // 2-1. name (제목) 만 변경 시 변경 감지 없음
+      console.log('--- Case 2-1: name(제목) 만 변경 시 변경 감지 없음 ---');
+      const nameA: SeminarListItem = { ...sameA, name: '기존 세미나 제목' };
+      const nameB: SeminarListItem = { ...sameB, name: '수정된 새로운 세미나 제목' };
+      const changesName = getSeminarInfoChanges(nameA, nameB);
+      assert.strictEqual(changesName.length, 0, '세미나 제목(name)만 변경된 경우 변경 알림 대상에서 제외되어야 함');
+      console.log('  ✓ [Pass] 세미나 제목만 변경 시 변경 알림 없음\n');
+
       // 3. 시간 변경 시 변경 감지
       console.log('--- Case 3: 시간 변경 시 변경 감지 ---');
       const timeA: SeminarListItem = { ...sameA, time: '20:00' };
@@ -141,13 +149,24 @@ describe('apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스�
       });
 
       const initSeminars: SeminarListItem[] = [
-        { ...sameA, seminarId: '200', pointPaid: false },
-        { ...sameA, seminarId: '300', pointPaid: true, point: 1000 },
+        { ...sameA, seminarId: '200', url: 'https://m.doctorville.co.kr/cme/seminar/200', pointPaid: false },
+        {
+          ...sameA,
+          seminarId: '300',
+          url: 'https://m.doctorville.co.kr/cme/seminar/300',
+          pointPaid: true,
+          point: 1000,
+        },
       ];
       const pointResult = await refreshSeminarPointStatus({} as PlaywrightRunArgs['context'], initSeminars);
       assert.strictEqual(pointResult.pointChanges.length, 1, 'pointPaid false -> true 만 감지되어야 함');
       assert.strictEqual(pointResult.pointChanges[0].seminarId, '200');
       assert.strictEqual(pointResult.pointChanges[0].point, 3000);
+      assert.strictEqual(
+        pointResult.pointChanges[0].url,
+        'https://m.doctorville.co.kr/cme/seminar/200',
+        '포인트 변경에 세미나 url이 포함되어야 함',
+      );
       console.log('  ✓ [Pass] 포인트 false -> true 신규 지급 감지 (pointPaid=true인 300번 세미나는 재감지 안함)\n');
 
       // 9. 여러 변경이 한 번 실행에서 발생 시 단일 adminbot 메시지로 묶임
@@ -156,6 +175,7 @@ describe('apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스�
         {
           seminarId: '12346',
           name: '정보 변경 세미나',
+          url: 'https://m.doctorville.co.kr/cme/seminar/12346',
           changes: [
             { field: 'time', label: '시간', oldValue: '20:00', newValue: '21:00' },
             { field: 'totalCount', label: '총원', oldValue: '100', newValue: '120' },
@@ -166,6 +186,7 @@ describe('apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스�
         {
           seminarId: '12345',
           name: '포인트 지급 세미나',
+          url: 'https://m.doctorville.co.kr/cme/seminar/12345',
           point: 3000,
           pointText: '3,000P',
           pointDate: '2026-08-23',
@@ -177,11 +198,19 @@ describe('apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스�
       assert(formattedMessage.includes('[포인트 지급]'));
       assert(formattedMessage.includes('seminarId: 12345'));
       assert(formattedMessage.includes('포인트: 3,000P'));
+      assert(
+        formattedMessage.includes('https://m.doctorville.co.kr/cme/seminar/12345'),
+        '포인트 지급 알림에 세미나 url 포함',
+      );
       assert(formattedMessage.includes('[정보 변경]'));
       assert(formattedMessage.includes('seminarId: 12346'));
       assert(formattedMessage.includes('시간: 20:00 → 21:00'));
       assert(formattedMessage.includes('총원: 100 → 120'));
-      console.log('  ✓ [Pass] 여러 변경사항 단일 메시지 포맷팅 성공\n');
+      assert(
+        formattedMessage.includes('https://m.doctorville.co.kr/cme/seminar/12346'),
+        '정보 변경 알림에 세미나 url 포함',
+      );
+      console.log('  ✓ [Pass] 여러 변경사항 단일 메시지 포맷팅 및 url 포함 성공\n');
 
       // 10 & 11. apply_seminar_extra 실행 시 변경 알림은 adminbot으로만 전송되고 notice channel에는 전송되지 않는지 모킹 E2E 검증
       console.log('--- Case 10 & 11: apply_seminar 실행 및 apply_seminar_extra 알림 분리 테스트 ---');

@@ -179,10 +179,10 @@ describe('seminar_api 단위 테스트: 데이터 변환 및 플래그 판별', 
     assert.strictEqual(newlyAdded.length, 2);
     assert.strictEqual(infoChanges.length, 1);
     assert.strictEqual(infoChanges[0].seminarId, '5565');
-    // name 변경 및 isAdvancedSurvey 변경 감지
+    // name 변경은 알림 제외, isAdvancedSurvey 변경만 감지
     const nameChange = infoChanges[0].changes.find((c) => c.field === 'name');
     const advChange = infoChanges[0].changes.find((c) => c.field === 'isAdvancedSurvey');
-    assert.ok(nameChange);
+    assert.strictEqual(nameChange, undefined, '세미나 제목(name) 변경은 알림 대상에서 제외되어야 함');
     assert.ok(advChange);
     console.log('  ✓ [Pass] Case 6: API 기반 SeminarListItem 목록과 refreshStoredSeminarList 연동 검증');
 

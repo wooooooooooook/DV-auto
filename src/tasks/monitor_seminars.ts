@@ -45,6 +45,7 @@ export interface MonitoredSeminarItem {
   name: string;
   startDt?: string;
   endDt?: string;
+  time?: string;
   status: SeminarStatus;
   hasSurvey?: boolean;
   isSurveyPointExcluded?: boolean;
@@ -62,7 +63,42 @@ export interface MonitoredSeminarItem {
 export type SeminarInfo = MonitoredSeminarItem;
 
 /**
+ * 세미나 상태 표시 이모지 및 상태 텍스트 반환
+ */
+export function getSeminarStatusDisplay(info: Pick<SeminarInfo, 'processState' | 'status' | 'seminarCompleted'>): {
+  emoji: string;
+  text: string;
+} {
+  const ps = info.processState;
+  const isCompleted =
+    info.seminarCompleted === 1 ||
+    info.status === '종료' ||
+    ps === ProcessState.PROCESS_END ||
+    ps === ProcessState.PROCESS_COMPLETED;
+
+  if (isCompleted) {
+    return { emoji: '🔴', text: '종료' };
+  }
+
+  const isEnterReady =
+    ps === ProcessState.PROCESS_ENTER ||
+    ps === ProcessState.PROCESS_STARTED ||
+    info.status === '입장가능' ||
+    info.status === '입장하기' ||
+    info.status === '진행중';
+
+  if (isEnterReady) {
+    return { emoji: '🟢', text: '입장가능' };
+  }
+
+  return { emoji: '⏳', text: '대기' };
+}
+
+/**
  * 세미나 현황 통합 메시지 및 인라인 키보드 생성 (댓글 섹션 포함)
+ * - 제목의 **(볼드) 제거
+ * - 시작종료시각을 제목 앞에 표시
+ * - 제목은 20글자로 트렁케이션
  */
 export function buildSeminarStatusMessage(
   periodName: string,
@@ -70,30 +106,35 @@ export function buildSeminarStatusMessage(
   isAllCompleted = false,
   comments: Array<{ userName: string; text: string }> = [],
 ): { text: string; options: Record<string, unknown> } {
+  if (seminars.length === 0) {
+    return {
+      text: `🔔 ${periodName}세미나\n\n예정된 세미나가 없습니다.`,
+      options: { link_preview_options: { is_disabled: true } },
+    };
+  }
+
   let text = `🔔 ${periodName}세미나\n\n`;
 
   for (let i = 0; i < seminars.length; i++) {
     const s = seminars[i];
-    let statusIcon = '⏳';
-    if (s.status === '입장가능') {
-      statusIcon = '🟢';
-    } else if (s.status === '종료') {
-      statusIcon = '🔴';
-    }
+    const statusDisplay = getSeminarStatusDisplay(s);
 
+    const timeStr = s.time ? `${s.time} ` : '';
+    const truncatedName = s.name.length > 20 ? s.name.slice(0, 20) : s.name;
     const advancedSuffix = s.isAdvancedSurvey ? ' [심화설문]' : '';
-    text += `${statusIcon} ${s.status} | **${s.name}**${advancedSuffix}\n${s.url}\n`;
+    const targetUrl = s.url || (s.seminarId ? `${SEMINAR_DETAIL_PAGE}${s.seminarId}` : '');
+    text += `${statusDisplay.emoji} ${statusDisplay.text} | ${timeStr}${truncatedName}${advancedSuffix}\n${targetUrl}`;
 
-    if (s.status === '종료') {
+    if (s.status === '종료' || statusDisplay.text === '종료') {
       if (s.quizResultMessage) {
-        text += `${s.quizResultMessage.trim()}\n`;
+        text += `\n${s.quizResultMessage.trim()}`;
       } else if (s.hasSurvey === false) {
-        text += `(설문이 없는 세미나)\n`;
+        text += `\n(설문이 없는 세미나)`;
       }
     }
 
     if (i < seminars.length - 1) {
-      text += '\n';
+      text += '\n\n';
     }
   }
 
@@ -118,6 +159,17 @@ export function buildSeminarStatusMessage(
   };
 
   return { text, options };
+}
+
+/**
+ * 세미나 모니터 현황 메시지 빌더 (문자열 반환)
+ */
+export function buildSeminarMonitorStatusMessage(
+  periodName: string,
+  seminars: SeminarInfo[] | Record<string, SeminarInfo>,
+): string {
+  const list = Array.isArray(seminars) ? seminars : Object.values(seminars);
+  return buildSeminarStatusMessage(periodName, list).text;
 }
 
 /**
@@ -282,7 +334,7 @@ export async function getTodaysSeminarsFromApi(
   const items = apiRes.items || [];
 
   for (const item of items) {
-    const { date, startHour: itemStartHour } = parseSeminarDateTime(item.startDt, item.endDt);
+    const { date, startHour: itemStartHour, time } = parseSeminarDateTime(item.startDt, item.endDt);
 
     // 날짜가 오늘(targetDate)이고 모니터링 시간대(startHour <= h < endHour)인지 확인
     if (
@@ -336,6 +388,7 @@ export async function getTodaysSeminarsFromApi(
         url: fullUrl,
         startDt: item.startDt,
         endDt: item.endDt,
+        time,
         hasSurvey,
         isSurveyPointExcluded: isPointExcluded,
         isAdvancedSurvey,
@@ -568,7 +621,7 @@ export async function performAutoEnter(
       try {
         await page.screenshot({ path: notFoundScreenshotPath, fullPage: false });
         await sendTelegram(
-          `⚠️ '입장하기' 버튼을 찾지 못했습니다 (재시도 예정)\n**${seminarName}**\n${targetUrl}`,
+          `⚠️ '입장하기' 버튼을 찾지 못했습니다 (재시도 예정)\n${seminarName}\n${targetUrl}`,
           notFoundScreenshotPath,
         );
       } catch (ssErr) {
@@ -722,7 +775,7 @@ export async function checkAndPerformAutoEnter(
 
   // 첫 성공 시에만 관리자 알림 전송 (중복 방지)
   if (didEnter) {
-    const entryMessage = `🟢세미나 입장 완료\n**${name}**\n${targetUrl}`;
+    const entryMessage = `🟢세미나 입장 완료\n${name}\n${targetUrl}`;
     const screenshotPath = path.join(process.cwd(), `seminar_entry_${screenshotKey}.png`);
     try {
       const page = await context.newPage();
@@ -934,7 +987,7 @@ async function monitorSeminars(
       if (currentTime.getHours() >= endHour) {
         const remainingSeminars = Array.from(monitoredSeminarsMap.values())
           .filter((s) => s.status !== '종료')
-          .map((s) => `**${s.name}** (${s.url})`);
+          .map((s) => `${s.name} (${s.url})`);
         if (remainingSeminars.length > 0) {
           const message = ` ${periodName} 모니터링 시간이 종료되었지만, 마치지 않은 세미나가 있습니다:\n${remainingSeminars.join('\n')}`;
           await sendNotificationToChannel(message);
