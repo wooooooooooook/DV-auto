@@ -70,9 +70,10 @@ export function getSeminarStatusDisplay(info: Pick<SeminarInfo, 'processState' |
   text: string;
 } {
   const ps = info.processState;
+  const statusStr: string = info.status || '';
   const isCompleted =
     info.seminarCompleted === 1 ||
-    info.status === '종료' ||
+    statusStr === '종료' ||
     ps === ProcessState.PROCESS_END ||
     ps === ProcessState.PROCESS_COMPLETED;
 
@@ -83,9 +84,9 @@ export function getSeminarStatusDisplay(info: Pick<SeminarInfo, 'processState' |
   const isEnterReady =
     ps === ProcessState.PROCESS_ENTER ||
     ps === ProcessState.PROCESS_STARTED ||
-    info.status === '입장가능' ||
-    info.status === '입장하기' ||
-    info.status === '진행중';
+    statusStr === '입장가능' ||
+    statusStr === '입장하기' ||
+    statusStr === '진행중';
 
   if (isEnterReady) {
     return { emoji: '🟢', text: '입장가능' };
