@@ -93,6 +93,17 @@ export function formatInterMDQuizMessage(quiz: InterMDTodayQuiz, submitResult?: 
   parts.push(`📋 [인터엠디 오늘의 퀴즈]`);
   parts.push(`📌 ${quiz.quiz_title} (${quiz.date})`);
 
+  const answerTexts: string[] = [];
+  for (const q of quiz.questions) {
+    const found = q.items.find((it) => it.is_answer_hint);
+    if (found) {
+      answerTexts.push(`${found.order}. ${found.title}`);
+    }
+  }
+  if (answerTexts.length > 0) {
+    parts.push(`정답: ${answerTexts.join(', ')}`);
+  }
+
   if (quiz.hint && quiz.hint.trim()) {
     parts.push(`💡 힌트: ${quiz.hint.trim()}`);
   }
@@ -171,7 +182,11 @@ export async function run(
       submitResult = await client.submitTodayQuiz(quiz);
     }
 
-    const message = formatInterMDQuizMessage(quiz, submitResult);
+    // 순수 퀴즈 정보 메시지 (공지봇 및 캐시용: 상태정보 제외)
+    const quizInfoMessage = formatInterMDQuizMessage(quiz);
+
+    // 관리자용 메시지 (상태정보 포함)
+    const adminMessage = formatInterMDQuizMessage(quiz, submitResult);
 
     // 정답 항목 탐색
     let answerItem: { order: number; title: string } | undefined = undefined;
@@ -183,7 +198,7 @@ export async function run(
       }
     }
 
-    // 퀴즈 및 정답 정보 캐싱 (TTL 1일)
+    // 퀴즈 및 정답 정보 캐싱 (TTL 1일 - 공지봇 조회용 formattedMessage는 상태정보 없는 순수 퀴즈 정보)
     const cacheData: InterMDQuizCache = {
       date: getSeoulDateString(),
       timestamp: Date.now(),
@@ -193,20 +208,21 @@ export async function run(
       guide: quiz.guide || undefined,
       questions: quiz.questions,
       answerItem,
-      formattedMessage: message,
+      formattedMessage: quizInfoMessage,
     };
     setInterMDQuizCache(cacheData);
 
-    // 공지봇 구독자들에게 캐싱한 정보 함께 발송
+    // 공지봇 구독자들에게는 순수 퀴즈 정보만 발송 (상태정보 제외)
     if (explicitNotify !== false) {
-      await sendInterMDQuizToSubscribers(message).catch((err) => {
+      await sendInterMDQuizToSubscribers(quizInfoMessage).catch((err) => {
         logger.error('Failed to send InterMD quiz to subscribers:', err);
       });
     }
 
+    // 관리자 봇으로 상태정보 포함 메시지 반환 (스케줄러/수동 실행 시 관리자에게 전달)
     return {
       success: submitResult.success,
-      message,
+      message: adminMessage,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

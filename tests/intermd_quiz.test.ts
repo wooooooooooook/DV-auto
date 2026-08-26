@@ -77,17 +77,27 @@ describe('InterMD Quiz Tests', () => {
         submitted_item: { item_pseq: 62704, title: '레치타티보(Recitativo)', order: 2, is_answer_hint: true },
       };
 
-      const formatted = formatInterMDQuizMessage(mockQuiz, mockSubmitResult);
-      assert(formatted.includes('📋 [인터엠디 오늘의 퀴즈]'), 'Must include header');
-      assert(formatted.includes('오페라 (2026.08.26 (수))'), 'Must include title and date');
-      assert(formatted.includes('💡 힌트: 보통의 화법'), 'Must include hint');
-      assert(formatted.includes('2. 레치타티보(Recitativo) (★ 정답)'), 'Must mark correct answer with star');
+      // 관리자용 포맷팅 (제출 결과/상태 정보 포함)
+      const adminFormatted = formatInterMDQuizMessage(mockQuiz, mockSubmitResult);
+      assert(adminFormatted.includes('📋 [인터엠디 오늘의 퀴즈]'), 'Must include header');
+      assert(adminFormatted.includes('오페라 (2026.08.26 (수))'), 'Must include title and date');
+      assert(adminFormatted.includes('정답: 2. 레치타티보(Recitativo)'), 'Must include answer directly below date');
+      assert(adminFormatted.includes('💡 힌트: 보통의 화법'), 'Must include hint');
+      assert(adminFormatted.includes('2. 레치타티보(Recitativo) (★ 정답)'), 'Must mark correct answer with star');
       assert(
-        formatted.includes('🎯 제출 결과: ✅ 정답 제출 완료 (선택: 2. 레치타티보(Recitativo))'),
-        'Must include submit result',
+        adminFormatted.includes('🎯 제출 결과: ✅ 정답 제출 완료 (선택: 2. 레치타티보(Recitativo))'),
+        'Admin must include submit result',
       );
-      assert(formatted.includes('📖 [해설]\n레치타티보 해설 내용입니다.'), 'Must include stripped guide');
-      console.log('  ✓ formatInterMDQuizMessage correctly builds formatted message');
+      assert(adminFormatted.includes('📖 [해설]\n레치타티보 해설 내용입니다.'), 'Must include stripped guide');
+
+      // 공지봇용 포맷팅 (상태 정보 제외된 순수 퀴즈 정보)
+      const noticeFormatted = formatInterMDQuizMessage(mockQuiz);
+      assert(noticeFormatted.includes('📋 [인터엠디 오늘의 퀴즈]'), 'Notice must include header');
+      assert(noticeFormatted.includes('정답: 2. 레치타티보(Recitativo)'), 'Notice must include answer below date');
+      assert(noticeFormatted.includes('2. 레치타티보(Recitativo) (★ 정답)'), 'Notice must include quiz questions');
+      assert(!noticeFormatted.includes('제출 결과'), 'Notice must NOT include submit result');
+      assert(!noticeFormatted.includes('상태:'), 'Notice must NOT include status');
+      console.log('  ✓ formatInterMDQuizMessage correctly separates notice quiz info and admin status');
     }
 
     // Test 3: loadEnvFromFile & getCredentials
@@ -215,12 +225,14 @@ describe('InterMD Quiz Tests', () => {
       assert.strictEqual(result.success, true);
       assert(result.message && result.message.includes('정답 제출 완료'), 'Result message should indicate success');
 
-      // Verify cache was populated
+      // Verify cache was populated with pure quiz info (no submit result)
       const cache = getInterMDQuizCache();
       assert.strictEqual(cache?.quizTitle, '오페라');
       assert.strictEqual(cache?.answerItem?.order, 2);
       assert.strictEqual(cache?.answerItem?.title, '보기2');
-      console.log('  ✓ runInterMDQuiz successfully runs, submits quiz, and caches result');
+      assert(cache?.formattedMessage.includes('오페라'), 'Cache formattedMessage should contain quiz info');
+      assert(!cache?.formattedMessage.includes('제출 결과'), 'Cache formattedMessage must NOT contain submit result');
+      console.log('  ✓ runInterMDQuiz successfully runs, submits quiz, and caches pure quiz info');
     }
 
     // Test 7: InterMDClient no quiz today -> silent mode
