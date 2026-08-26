@@ -7,6 +7,7 @@ import path from 'path';
 import type { Telegraf } from 'telegraf';
 import type { BrowserContext, Page } from 'playwright';
 import { getBot } from '../services/bot_instance';
+import { recordChannelMessage } from '../services/channel_message_repository';
 import { httpGet, httpGetJson } from './http_client';
 import { parseLoginStatusHtml, hasSurveyPointExcludedNoticeHtml } from './html_parser';
 
@@ -124,6 +125,14 @@ async function sendTelegram(
   }
 }
 
+function tryRecordChannelMessage(params: Parameters<typeof recordChannelMessage>[0]): void {
+  try {
+    recordChannelMessage(params);
+  } catch (err) {
+    console.error('Failed to record channel message in storage:', err);
+  }
+}
+
 async function sendNotificationToChannel(
   text: string,
   imagePath: string | null = null,
@@ -156,27 +165,62 @@ async function sendNotificationToChannel(
       if (text.length <= TELEGRAM_SAFE_CAPTION_LENGTH) {
         const photoOptions: SendPhotoOptions = { ...messageOptions, caption: text } as SendPhotoOptions;
         const result = await bot.telegram.sendPhoto(CHANNEL_ID, { source: validImagePath }, photoOptions);
+        tryRecordChannelMessage({
+          channelId: CHANNEL_ID,
+          messageId: result.message_id,
+          text,
+          mediaType: 'photo',
+          chunkIndex: 0,
+          totalChunks: 1,
+        });
         return result.message_id;
       } else {
         const result = await bot.telegram.sendPhoto(CHANNEL_ID, { source: validImagePath });
         lastMessageId = result.message_id;
         const chunks = splitTelegramMessage(text, { maxLength: TELEGRAM_SAFE_MESSAGE_LENGTH, parseMode });
+        const totalChunks = 1 + chunks.length;
+        tryRecordChannelMessage({
+          channelId: CHANNEL_ID,
+          messageId: result.message_id,
+          text: '[Photo]',
+          mediaType: 'photo',
+          chunkIndex: 0,
+          totalChunks,
+        });
+
         for (let i = 0; i < chunks.length; i++) {
           const isLast = i === chunks.length - 1;
           const chunkOptions = isLast ? messageOptions : { ...messageOptions, reply_markup: undefined };
           const sendRes = await bot.telegram.sendMessage(CHANNEL_ID, chunks[i], chunkOptions as SendMessageOptions);
           lastMessageId = sendRes.message_id;
+          tryRecordChannelMessage({
+            channelId: CHANNEL_ID,
+            messageId: sendRes.message_id,
+            text: chunks[i],
+            mediaType: 'text',
+            chunkIndex: i + 1,
+            totalChunks,
+          });
           if (!isLast) await sleep(100);
         }
         return lastMessageId;
       }
     } else {
       const chunks = splitTelegramMessage(text, { maxLength: TELEGRAM_SAFE_MESSAGE_LENGTH, parseMode });
+      const totalChunks = chunks.length;
       for (let i = 0; i < chunks.length; i++) {
         const isLast = i === chunks.length - 1;
         const chunkOptions = isLast ? messageOptions : { ...messageOptions, reply_markup: undefined };
         const sendRes = await bot.telegram.sendMessage(CHANNEL_ID, chunks[i], chunkOptions as SendMessageOptions);
         lastMessageId = sendRes.message_id;
+        tryRecordChannelMessage({
+          channelId: CHANNEL_ID,
+          messageId: sendRes.message_id,
+          text: chunks[i],
+          mediaType: 'text',
+          chunkIndex: i,
+          totalChunks,
+        });
         if (!isLast) await sleep(100);
       }
       return lastMessageId;
@@ -193,11 +237,29 @@ async function sendNotificationToChannel(
         if (text.length <= TELEGRAM_SAFE_CAPTION_LENGTH) {
           const fallbackPhotoOptions: SendPhotoOptions = { ...plainOptions, caption: text } as SendPhotoOptions;
           const result = await bot.telegram.sendPhoto(CHANNEL_ID, { source: validImagePath }, fallbackPhotoOptions);
+          tryRecordChannelMessage({
+            channelId: CHANNEL_ID,
+            messageId: result.message_id,
+            text,
+            mediaType: 'photo',
+            chunkIndex: 0,
+            totalChunks: 1,
+          });
           return result.message_id;
         } else {
           const result = await bot.telegram.sendPhoto(CHANNEL_ID, { source: validImagePath });
           let plainLastId: number | null = result.message_id;
           const plainChunks = splitPlainText(text, TELEGRAM_SAFE_MESSAGE_LENGTH);
+          const totalChunks = 1 + plainChunks.length;
+          tryRecordChannelMessage({
+            channelId: CHANNEL_ID,
+            messageId: result.message_id,
+            text: '[Photo]',
+            mediaType: 'photo',
+            chunkIndex: 0,
+            totalChunks,
+          });
+
           for (let i = 0; i < plainChunks.length; i++) {
             const isLast = i === plainChunks.length - 1;
             const chunkOptions = isLast ? plainOptions : { ...plainOptions, reply_markup: undefined };
@@ -207,6 +269,14 @@ async function sendNotificationToChannel(
               chunkOptions as SendMessageOptions,
             );
             plainLastId = sendRes.message_id;
+            tryRecordChannelMessage({
+              channelId: CHANNEL_ID,
+              messageId: sendRes.message_id,
+              text: plainChunks[i],
+              mediaType: 'text',
+              chunkIndex: i + 1,
+              totalChunks,
+            });
             if (!isLast) await sleep(100);
           }
           return plainLastId;
@@ -214,6 +284,7 @@ async function sendNotificationToChannel(
       } else {
         const plainChunks = splitPlainText(text, TELEGRAM_SAFE_MESSAGE_LENGTH);
         let plainLastId: number | null = null;
+        const totalChunks = plainChunks.length;
         for (let i = 0; i < plainChunks.length; i++) {
           const isLast = i === plainChunks.length - 1;
           const chunkOptions = isLast ? plainOptions : { ...plainOptions, reply_markup: undefined };
@@ -223,6 +294,14 @@ async function sendNotificationToChannel(
             chunkOptions as SendMessageOptions,
           );
           plainLastId = sendRes.message_id;
+          tryRecordChannelMessage({
+            channelId: CHANNEL_ID,
+            messageId: sendRes.message_id,
+            text: plainChunks[i],
+            mediaType: 'text',
+            chunkIndex: i,
+            totalChunks,
+          });
           if (!isLast) await sleep(100);
         }
         return plainLastId;
@@ -236,7 +315,15 @@ async function sendNotificationToChannel(
       const errorText = `Failed to send a complex message. Error: ${message}`;
       const errorChunks = splitPlainText(errorText, TELEGRAM_SAFE_MESSAGE_LENGTH);
       for (let i = 0; i < errorChunks.length; i++) {
-        await bot.telegram.sendMessage(CHANNEL_ID, errorChunks[i]);
+        const errorSendRes = await bot.telegram.sendMessage(CHANNEL_ID, errorChunks[i]);
+        tryRecordChannelMessage({
+          channelId: CHANNEL_ID,
+          messageId: errorSendRes.message_id,
+          text: errorChunks[i],
+          mediaType: 'text',
+          chunkIndex: i,
+          totalChunks: errorChunks.length,
+        });
         if (i < errorChunks.length - 1) await sleep(100);
       }
     } catch (nestedError) {

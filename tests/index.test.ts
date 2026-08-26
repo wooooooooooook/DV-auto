@@ -36,6 +36,7 @@ const testFiles = [
   'telegram_notification.test.ts',
   'telegram_truncation.test.ts',
   'telegram_splitting.test.ts',
+  'channel_messages.test.ts',
 ];
 
 let failedCount = 0;

@@ -47,6 +47,8 @@ function testTodayLinksFormatWithUserExample() {
         url: 'https://m.doctorville.co.kr/cme/seminar/5572',
         isPointExcluded: false,
         isAdvancedSurvey: false,
+        currentCount: '15',
+        totalCount: '100',
       },
       {
         date: '8/20',
@@ -56,6 +58,8 @@ function testTodayLinksFormatWithUserExample() {
         url: 'https://m.doctorville.co.kr/cme/seminar/5573',
         isPointExcluded: true,
         isAdvancedSurvey: false,
+        currentCount: '0',
+        totalCount: '500',
       },
     ],
     // 포인트 전환 정보
@@ -84,14 +88,10 @@ function testTodayLinksFormatWithUserExample() {
   assert(message.includes('https://m.doctorville.co.kr/cme/seminar/5538'));
   assert(message.includes('엔블로 Web Symposium ✨<b>[심화설문]</b>'));
 
-  // 4. 신규 세미나 및 강조된 플래그
+  // 4. 신규 세미나 및 20자 truncation, 신청자수 현황(현재/총원), 강조된 플래그
   assert(message.includes('🆕 <b>어제 추가된 신규 세미나</b>'));
-  assert(message.includes('1. [9/1 13:00~13:40] 척수성 근위축증(SMA) 조기 진단과 전원'));
-  assert(
-    message.includes(
-      '2. [8/20 13:00~14:00] <s>ChatGPT 실용 입문 — AI로 알아보고, 읽고, 만들고, 검증하기</s> 🚫[포인트미지급]',
-    ),
-  );
+  assert(message.includes('1. [9/1 13:00~13:40] 척수성 근위축증(SMA) 조기 진단과... (15/100)'));
+  assert(message.includes('2. [8/20 13:00~14:00] <s>ChatGPT 실용 입문 — AI로 ...</s> (0/500) 🚫[포인트미지급]'));
 
   // 5. 포인트 전환 안내 (available: true 일 때 현재 전환 가능 문구)
   assert(message.includes('💳 <b>현재 네이버페이 포인트 전환 가능합니다.</b>'));
@@ -314,6 +314,8 @@ function testYesterdayAddedSeminarsFilter() {
   // 검증: 전날(detectedDate === yesterdayIso)인 것만 1건 포함
   assert.strictEqual(result.length, 2, '전날 detectedDate 세미나 2개 포함되어야 함');
   assert.strictEqual(result[0].seminarId, '5570', 'seminarId 순으로 오름차순 정렬되어야 함');
+  assert.strictEqual(result[0].currentCount, '0', 'currentCount가 정상 유지되어야 함');
+  assert.strictEqual(result[0].totalCount, '100', 'totalCount가 정상 유지되어야 함');
   assert.strictEqual(result[1].seminarId, '5580', 'seminarId 순으로 오름차순 정렬되어야 함');
 
   // legacy key가 없어도 에러 없이 동작하는지 확인 (new_seminars 키 사용 안 함)
@@ -447,9 +449,87 @@ async function testTodayQuizCacheIntegration() {
   console.log('✅ [Pass] today_quiz 캐시 연동 테스트 통과!\n');
 }
 
+function testSeminarNameTruncationAndCapacityFormat() {
+  console.log('--- [Test] 신규 세미나 제목 20자 Truncation 및 신청자수 (현재/총원) 포맷팅 테스트 시작 ---');
+
+  // Case 1: 20자 이하 (15자), 20자 정확히 (20자), 20자 초과 (25자)
+  const input: TodayLinksFormatInput = {
+    quizInfo: null,
+    seminarMessage: null,
+    storedNewSeminars: [
+      {
+        date: '8/27',
+        time: '13:00~14:00',
+        name: '짧은 세미나 제목입니다', // 12자
+        seminarId: '6001',
+        url: 'https://m.doctorville.co.kr/cme/seminar/6001',
+        currentCount: '5',
+        totalCount: '100',
+      },
+      {
+        date: '8/27',
+        time: '13:00~14:00',
+        name: '정확히 스무 글자인 세미나 제목입니다', // 정확히 20자
+        seminarId: '6002',
+        url: 'https://m.doctorville.co.kr/cme/seminar/6002',
+        currentCount: '0',
+        totalCount: '50',
+      },
+      {
+        date: '8/27',
+        time: '13:00~14:00',
+        name: '스무 글자를 초과하는 아주 길고 긴 세미나 제목입니다', // 28자
+        seminarId: '6003',
+        url: 'https://m.doctorville.co.kr/cme/seminar/6003',
+        isPointExcluded: true,
+        currentCount: '30',
+        totalCount: '100',
+      },
+      {
+        date: '8/27',
+        time: '13:00~14:00',
+        name: '인원수 정보 없는 세미나',
+        seminarId: '6004',
+        url: 'https://m.doctorville.co.kr/cme/seminar/6004',
+      },
+    ],
+    pointConversionInfo: null,
+  };
+
+  const { message } = formatTodayLinksBroadcast(input);
+
+  // 1. 20자 이하: 원본 유지 + (5/100)
+  assert.ok(
+    message.includes('1. [8/27 13:00~14:00] 짧은 세미나 제목입니다 (5/100)'),
+    `20자 이하 유지 실패: ${message}`,
+  );
+
+  // 2. 정확히 20자: 말줄임표 없이 원본 유지 + (0/50)
+  assert.ok(
+    message.includes('2. [8/27 13:00~14:00] 정확히 스무 글자인 세미나 제목입니다 (0/50)'),
+    `정확히 20자 원본 유지 실패: ${message}`,
+  );
+
+  // 3. 20자 초과: 20자 slice + '...' + (30/100) + 취소선
+  // '스무 글자를 초과하는 아주 길고 긴 ' (20자)
+  assert.ok(
+    message.includes('3. [8/27 13:00~14:00] <s>스무 글자를 초과하는 아주 길고 긴 ...</s> (30/100) 🚫[포인트미지급]'),
+    `20자 초과 Truncation 및 취소선 실패: ${message}`,
+  );
+
+  // 4. 인원수 미지정: 신청자수 괄호 미표시
+  assert.ok(
+    message.includes('4. [8/27 13:00~14:00] 인원수 정보 없는 세미나\n'),
+    `인원수 미지정 시 괄호 미표시 확인 실패: ${message}`,
+  );
+
+  console.log('✅ [Pass] 신규 세미나 제목 20자 Truncation 및 신청자수 포맷팅 테스트 통과!\n');
+}
+
 testTodayLinksFormatWithUserExample();
 testDateParsingAndCustomDateFormat();
 testPointConversionButtonConditions();
+testSeminarNameTruncationAndCapacityFormat();
 testTodayQuizCacheIntegration().catch((e) => {
   console.error('testTodayQuizCacheIntegration failed:', e);
   process.exit(1);

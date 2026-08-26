@@ -346,7 +346,7 @@ function testPointExcludedFormatting() {
     '일반 세미나 정상 표시 검증',
   );
   assert(
-    message.includes('<s>ChatGPT 실용 입문 — AI로 알아보고, 읽고, 만들고, 검증하기</s> 🚫[포인트미지급]'),
+    message.includes('<s>ChatGPT 실용 입문 — AI로 ...</s> 🚫[포인트미지급]'),
     '신규 세미나 포인트미지급 취소선 태그 검증',
   );
 

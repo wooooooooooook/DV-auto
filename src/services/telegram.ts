@@ -16,6 +16,14 @@ import {
   TELEGRAM_SAFE_MESSAGE_LENGTH,
   TELEGRAM_SAFE_CAPTION_LENGTH,
 } from '../modules/utils';
+import {
+  getChannelMessagesByDate,
+  getChannelMessageById,
+  editChannelMessage,
+  deleteChannelMessage,
+  deleteChannelMessagesByDate,
+  getSeoulDateString,
+} from './channel_message_repository';
 import { extractSeminarIds } from '../tasks/seminar_detail';
 
 const ADMIN_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -1345,6 +1353,122 @@ if (adminBot) {
     }
   });
 
+  adminBot.command(['channel_messages', 'list_channel_messages'], async (ctx) => {
+    try {
+      const parts = ctx.message.text.trim().split(/\s+/);
+      const targetDate = parts[1] || getSeoulDateString();
+      const messages = getChannelMessagesByDate(targetDate);
+
+      if (messages.length === 0) {
+        await replyWithSplit(ctx, `ℹ️ [${targetDate}] 공지방에 전송된 메시지 기록이 없습니다.`);
+        return;
+      }
+
+      const lines: string[] = [`📢 [${targetDate}] 공지방 전송 메시지 목록 (총 ${messages.length}건):\n`];
+      for (let i = 0; i < messages.length; i++) {
+        const m = messages[i];
+        const timeStr = new Date(m.createdAt).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour12: false });
+        const chunkInfo = m.totalChunks > 1 ? ` (${m.chunkIndex + 1}/${m.totalChunks}청크)` : '';
+        const preview = (m.text || '').replace(/\n+/g, ' ').slice(0, 50);
+        lines.push(
+          `${i + 1}. ID: \`${m.messageId}\`${chunkInfo} [${m.mediaType}, ${m.status}] (${timeStr})\n   내용: ${preview || '(내용 없음)'}`,
+        );
+      }
+
+      lines.push('\n💡 메시지 관리:');
+      lines.push('- 수정: `/edit_channel_message <message_id> <새 내용>`');
+      lines.push('- 삭제: `/delete_channel_message <message_id>`');
+      lines.push('- 오늘 전체 삭제: `/delete_today_channel_messages`');
+
+      await replyWithSplit(ctx, lines.join('\n'));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await replyWithSplit(ctx, `❌ 공지방 메시지 목록 조회 실패: ${message}`);
+    }
+  });
+
+  adminBot.command('edit_channel_message', async (ctx) => {
+    try {
+      const text = ctx.message.text.trim();
+      const firstSpace = text.indexOf(' ');
+      if (firstSpace === -1) {
+        await replyWithSplit(ctx, '⚠️ 사용법: /edit_channel_message <message_id> <새로운 메시지 내용>');
+        return;
+      }
+
+      const rest = text.substring(firstSpace + 1).trim();
+      const secondSpace = rest.indexOf(' ');
+      const messageIdStr = secondSpace === -1 ? rest : rest.substring(0, secondSpace).trim();
+      const newText = secondSpace === -1 ? '' : rest.substring(secondSpace + 1).trim();
+
+      const messageId = parseInt(messageIdStr, 10);
+      if (Number.isNaN(messageId)) {
+        await replyWithSplit(ctx, '⚠️ 유효하지 않은 message_id 입니다. 숫자로 입력해주세요.');
+        return;
+      }
+
+      if (!newText) {
+        await replyWithSplit(ctx, '⚠️ 변경할 새 내용을 입력해주세요.\n예: /edit_channel_message 12345 수정할 내용');
+        return;
+      }
+
+      const result = await editChannelMessage(messageId, newText);
+      if (result.success) {
+        await replyWithSplit(ctx, `✅ 공지방 메시지(ID: ${messageId})가 성공적으로 수정되었습니다.`);
+      } else {
+        await replyWithSplit(ctx, `❌ 메시지 수정 실패: ${result.message}`);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await replyWithSplit(ctx, `❌ 메시지 수정 처리 실패: ${message}`);
+    }
+  });
+
+  adminBot.command('delete_channel_message', async (ctx) => {
+    try {
+      const parts = ctx.message.text.trim().split(/\s+/);
+      if (parts.length < 2) {
+        await replyWithSplit(ctx, '⚠️ 사용법: /delete_channel_message <message_id>');
+        return;
+      }
+
+      const messageId = parseInt(parts[1], 10);
+      if (Number.isNaN(messageId)) {
+        await replyWithSplit(ctx, '⚠️ 유효하지 않은 message_id 입니다. 숫자로 입력해주세요.');
+        return;
+      }
+
+      const result = await deleteChannelMessage(messageId);
+      if (result.success) {
+        await replyWithSplit(ctx, `✅ 공지방 메시지(ID: ${messageId})가 성공적으로 삭제되었습니다.`);
+      } else {
+        await replyWithSplit(ctx, `❌ 메시지 삭제 실패: ${result.message}`);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await replyWithSplit(ctx, `❌ 메시지 삭제 처리 실패: ${message}`);
+    }
+  });
+
+  adminBot.command('delete_today_channel_messages', async (ctx) => {
+    try {
+      const today = getSeoulDateString();
+      const result = await deleteChannelMessagesByDate(today);
+      if (result.total === 0) {
+        await replyWithSplit(ctx, `ℹ️ 오늘(${today}) 공지방에 삭제할 메시지가 없습니다.`);
+        return;
+      }
+
+      const summary =
+        `🗑️ 오늘(${today}) 공지방 메시지 일괄 삭제 결과:\n- 대상: 총 ${result.total}건\n- 성공: ${result.deletedCount}건\n- 실패: ${result.failedCount}건\n\n` +
+        result.details.join('\n');
+      await replyWithSplit(ctx, summary);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await replyWithSplit(ctx, `❌ 오늘 공지방 메시지 일괄 삭제 실패: ${message}`);
+    }
+  });
+
   adminBot.command('help', (ctx) => {
     const message = `사용 가능한 명령어:
 
@@ -1372,6 +1496,12 @@ if (adminBot) {
 - /check_advanced_seminars: 최근 2주 심화 세미나 포인트 일괄 확인 (방장 계정 기준)
 - /naverpay_point_exchange [횟수]: 네이버페이포인트교환 작업을 실행합니다. (기본값: 10)
 - /baemin_point_exchange [횟수]: 배민포인트교환 작업을 실행합니다. (기본값: 1)
+
+📢 공지방 메시지 관리:
+- /channel_messages [날짜]: 공지방 전송 메시지 ID 목록 조회 (기본: 오늘)
+- /edit_channel_message <ID> <새 내용>: 특정 공지방 메시지 수정
+- /delete_channel_message <ID>: 특정 공지방 메시지 삭제
+- /delete_today_channel_messages: 오늘 전송된 공지방 메시지 전체 삭제
 
 ⚙️ 시스템 & 관리:
 - /schedules: 스케줄된 작업 목록을 확인합니다.
@@ -1448,6 +1578,11 @@ const adminCommands = [
   { command: 'log', description: '최근 로그 확인' },
   { command: 'update_app', description: '앱 업데이트 (pnpm update:app)' },
   { command: 'inspect', description: '페이지 요소 검사' },
+  // 5. 공지방 메시지 관리
+  { command: 'channel_messages', description: '공지방 메시지 ID 목록 조회 [날짜]' },
+  { command: 'edit_channel_message', description: '공지방 메시지 수정 (message_id 새내용)' },
+  { command: 'delete_channel_message', description: '공지방 메시지 삭제 (message_id)' },
+  { command: 'delete_today_channel_messages', description: '오늘 공지방 메시지 전체 삭제' },
   { command: 'help', description: '도움말' },
 ];
 

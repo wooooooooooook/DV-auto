@@ -81,6 +81,8 @@ type StoredNewSeminars = {
     isAdvancedSurvey?: boolean;
     date?: string;
     time?: string;
+    currentCount?: string;
+    totalCount?: string;
   }>;
 };
 
@@ -400,6 +402,8 @@ function getYesterdayAddedSeminars(yesterdayIso: string): StoredNewSeminars['sem
       isAdvancedSurvey: seminar.isAdvancedSurvey,
       date: seminar.date,
       time: seminar.time,
+      currentCount: seminar.currentCount,
+      totalCount: seminar.totalCount,
     }))
     .sort((a, b) => {
       if (!a.seminarId && !b.seminarId) return 0;
@@ -950,8 +954,11 @@ function formatTodayLinksBroadcast(input: TodayLinksFormatInput): TodayLinksForm
         const pointExcludedSuffix = item.isPointExcluded ? ' 🚫[포인트미지급]' : '';
         const advancedSurveySuffix = item.isAdvancedSurvey ? ' ✨<b>[심화설문]</b>' : '';
         const dateTimePrefix = item.date || item.time ? `[${item.date}${item.time ? ' ' + item.time : ''}] ` : '';
-        const nameDisplay = item.isPointExcluded ? `<s>${escapeHtml(item.name)}</s>` : escapeHtml(item.name);
-        return `${index + 1}. ${dateTimePrefix}${nameDisplay}${pointExcludedSuffix}${advancedSurveySuffix}\n${link}`;
+        const truncatedName = item.name.length > 20 ? `${item.name.slice(0, 20)}...` : item.name;
+        const capacityInfo =
+          item.currentCount || item.totalCount ? ` (${item.currentCount || '0'}/${item.totalCount || '0'})` : '';
+        const nameDisplay = item.isPointExcluded ? `<s>${escapeHtml(truncatedName)}</s>` : escapeHtml(truncatedName);
+        return `${index + 1}. ${dateTimePrefix}${nameDisplay}${capacityInfo}${pointExcludedSuffix}${advancedSurveySuffix}\n${link}`;
       })
       .join('\n');
 

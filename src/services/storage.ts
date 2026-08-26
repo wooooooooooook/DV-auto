@@ -59,6 +59,23 @@ function initDatabase(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_seminars_advanced ON seminars(is_advanced_survey, date);
     CREATE INDEX IF NOT EXISTS idx_seminars_point_paid ON seminars(point_paid);
 
+    CREATE TABLE IF NOT EXISTS channel_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      channel_id TEXT NOT NULL,
+      message_id INTEGER NOT NULL,
+      date TEXT NOT NULL,
+      chunk_index INTEGER DEFAULT 0,
+      total_chunks INTEGER DEFAULT 1,
+      text TEXT,
+      media_type TEXT DEFAULT 'text',
+      status TEXT DEFAULT 'sent',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_channel_messages_date ON channel_messages(date);
+    CREATE INDEX IF NOT EXISTS idx_channel_messages_msg ON channel_messages(channel_id, message_id);
+
     CREATE TABLE IF NOT EXISTS _migration_meta (
       name TEXT PRIMARY KEY,
       migrated_at INTEGER NOT NULL
@@ -501,6 +518,11 @@ function clear(): void {
   const db = getDb();
   db.prepare('DELETE FROM kv_store').run();
   db.prepare('DELETE FROM seminars').run();
+  try {
+    db.prepare('DELETE FROM channel_messages').run();
+  } catch (_e) {
+    // ignore if table does not exist
+  }
 }
 
 export { get, set, deleteKey, getAll, clear };
