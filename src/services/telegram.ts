@@ -31,10 +31,29 @@ import { syncChannelSeminarStatusOnQuizRegister } from '../tasks/monitor_seminar
 
 const ADMIN_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const NOTICE_BOT_TOKEN = process.env.NOTICE_BOT_TOKEN;
+const ADMIN_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 const SEMINAR_QUIZ_CHEATSHEET_FILE = 'data/seminar_quiz_cheatsheet.json';
 const SEMINAR_QUIZ_CHEATSHEET_PATH = path.join(process.cwd(), SEMINAR_QUIZ_CHEATSHEET_FILE);
 const QUIZ_FILE = 'data/quiz.json';
 const QUIZ_PATH = path.join(process.cwd(), QUIZ_FILE);
+
+export function isAuthorizedAdmin(
+  ctx: Pick<Context, 'from' | 'chat'>,
+  configuredChatId: string | undefined = process.env.TELEGRAM_CHAT_ID,
+): boolean {
+  if (!configuredChatId) {
+    return false;
+  }
+  const allowedIds = configuredChatId
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
+
+  const fromId = ctx.from?.id ? String(ctx.from.id) : undefined;
+  const chatId = ctx.chat?.id ? String(ctx.chat.id) : undefined;
+
+  return (fromId !== undefined && allowedIds.includes(fromId)) || (chatId !== undefined && allowedIds.includes(chatId));
+}
 
 type SeminarQuizCheatsheet = Record<string, string>;
 type QuizMapping = Record<string, Array<string | number>>;
@@ -217,6 +236,9 @@ if (!ADMIN_BOT_TOKEN) {
 if (!NOTICE_BOT_TOKEN) {
   logger.warn('NOTICE_BOT_TOKEN is not set. The notice bot will not be initialized.');
 }
+if (!ADMIN_CHAT_ID) {
+  logger.warn('TELEGRAM_CHAT_ID is not set. Admin bot access will be restricted for all users.');
+}
 
 // Force IPv4 for Telegram API requests to work around network issues
 const ipv4Agent = new https.Agent({ family: 4 });
@@ -230,6 +252,19 @@ if (adminBot) {
     logger.error(`Admin Bot Error for ${ctx.updateType}`, err);
     replyWithSplit(ctx, '오류가 발생했습니다. 로그를 확인해주세요.').catch(() => {});
   });
+
+  // 관리자 권한 검증 미들웨어
+  adminBot.use(async (ctx, next) => {
+    if (!isAuthorizedAdmin(ctx)) {
+      const fromInfo = ctx.from ? `${ctx.from.id} (@${ctx.from.username || 'unknown'})` : 'unknown';
+      const chatInfo = ctx.chat ? `${ctx.chat.id} (${ctx.chat.type})` : 'unknown';
+      logger.warn(`Unauthorized access attempt to adminBot from: ${fromInfo} in chat: ${chatInfo}`);
+      await replyWithSplit(ctx, '⛔ 접근 권한이 없습니다.').catch(() => {});
+      return;
+    }
+    return next();
+  });
+
   adminBot.start((ctx) => replyWithSplit(ctx, 'Welcome, Admin!'));
 }
 
