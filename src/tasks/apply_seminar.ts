@@ -361,12 +361,19 @@ export function buildNewSeminarsNoticeMessage(
   newlyAddedIds?: string[] | Set<string>,
   comments: Array<{ userName: string; text: string }> = [],
 ): { text: string; options: Record<string, unknown> } {
-  // 정원 10명 미만인 세미나는 공지 목록에서 제외
-  const visibleSeminars = seminars.filter((item) => {
-    if (!item.totalCount || item.totalCount.trim() === '') return true;
-    const parsed = parseInt(item.totalCount.replace(/[^0-9]/g, ''), 10);
-    return isNaN(parsed) || parsed >= 10;
-  });
+  // 정원 10명 미만인 세미나는 공지 목록에서 제외하고, 발견 순서(detectedAt 오름차순)대로 정렬
+  const visibleSeminars = seminars
+    .filter((item) => {
+      if (!item.totalCount || item.totalCount.trim() === '') return true;
+      const parsed = parseInt(item.totalCount.replace(/[^0-9]/g, ''), 10);
+      return isNaN(parsed) || parsed >= 10;
+    })
+    .sort((a, b) => {
+      if (a.detectedAt && b.detectedAt) {
+        return a.detectedAt.localeCompare(b.detectedAt);
+      }
+      return 0;
+    });
 
   let text = `🆕 오늘 추가된 세미나 모음 (누적 ${visibleSeminars.length}건)\n\n`;
 
@@ -397,7 +404,7 @@ export function buildNewSeminarsNoticeMessage(
     const capacityInfo = item.currentCount && item.totalCount ? ` (${item.currentCount}/${item.totalCount})` : '';
     const truncatedName = truncateSeminarName(item.name || '세미나');
 
-    const itemText = `${prefix}${truncatedName}${capacityInfo}\n${item.url}`;
+    const itemText = `${i + 1}. ${prefix}${truncatedName}${capacityInfo}\n${item.url}`;
 
     if (isHighlighted) {
       formattedItems.push(`━ ✨ 방금 추가됨 ━━━━━\n${itemText}\n━━━━━━━━━━━━━━━━━━━━━`);

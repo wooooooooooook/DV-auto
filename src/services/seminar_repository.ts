@@ -334,13 +334,14 @@ export function clearSeminars(): void {
 
 /**
  * 특정 감지일자(detectedDate)에 새로 등록된 세미나 목록을 조회합니다.
+ * 발견된 순서대로 정렬 (오래된 발견 -> 최근 발견)
  */
 export function getSeminarsByDetectedDate(detectedDate: string): SeminarListItem[] {
   const db = getDatabase();
   const stmt = db.prepare(`
     SELECT * FROM seminars 
     WHERE detected_date = ?
-    ORDER BY CASE WHEN date IS NULL OR date = '' THEN 1 ELSE 0 END, date ASC, time ASC, seminar_id ASC
+    ORDER BY CASE WHEN detected_at IS NULL OR detected_at = '' THEN 1 ELSE 0 END, detected_at ASC, rowid ASC, seminar_id ASC
   `);
   const rows = stmt.all(detectedDate) as SeminarDbRow[];
   return rows.map(rowToSeminarListItem);
