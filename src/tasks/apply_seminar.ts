@@ -30,7 +30,7 @@ import { sendSeminarChangesToSubscribers } from '../services/seminar_subscribers
 import {
   deleteChannelMessage,
   getNewSeminarsChannelMessage,
-  getChannelCommentsByDate,
+  publishAndReplaceChannelNotice,
 } from '../services/channel_message_repository';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
@@ -415,14 +415,16 @@ export function buildNewSeminarsNoticeMessage(
 }
 
 /**
- * 신규 세미나 모음 통합 메시지를 채널에 발송하고 이전 메시지를 삭제합니다.
+ * 신규 세미나 모음 통합 메시지를 채널에 발송하고 이전 메시지를 안전하게 삭제/교체합니다.
+ * - 댓글 보존: 기존 메시지에 연결된 댓글 조회 후 새 메시지 본문에 첨부
+ * - 안전 가드: 댓글 확보 실패 또는 새 메시지 발송 실패 시 기존 메시지 유지
  */
 export async function publishNewSeminarsNotice(
   seminars: SeminarListItem[],
   prevMessageId: number | null,
   newlyAddedIds?: string[] | Set<string>,
   comments?: Array<{ userName: string; text: string }>,
-  date?: string,
+  _date?: string,
 ): Promise<number | null> {
   const visibleSeminars = seminars.filter((item) => {
     if (!item.totalCount || item.totalCount.trim() === '') return true;
@@ -432,20 +434,15 @@ export async function publishNewSeminarsNotice(
 
   if (visibleSeminars.length === 0) return prevMessageId;
 
-  const currentComments = comments || getChannelCommentsByDate(date);
-  const { text, options } = buildNewSeminarsNoticeMessage(visibleSeminars, newlyAddedIds, currentComments);
+  const result = await publishAndReplaceChannelNotice({
+    prevMessageId,
+    buildMessageFn: (commentsToAttach) =>
+      buildNewSeminarsNoticeMessage(visibleSeminars, newlyAddedIds, commentsToAttach),
+    customComments: comments,
+    logPrefix: 'apply_seminar',
+  });
 
-  // 1. 새 메시지 발송
-  const newMessageId = await sendNotificationToChannel(text, null, options as any);
-
-  // 2. 이전 메시지 삭제
-  if (prevMessageId && newMessageId && prevMessageId !== newMessageId) {
-    await deleteChannelMessage(prevMessageId).catch((err) => {
-      console.warn(`[apply_seminar] 이전 신규 세미나 공지 메시지(ID: ${prevMessageId}) 삭제 실패:`, err);
-    });
-  }
-
-  return newMessageId ?? prevMessageId;
+  return result.newMessageId;
 }
 
 async function fetchAndPopulateSeminarInfo(

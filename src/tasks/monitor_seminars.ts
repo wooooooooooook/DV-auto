@@ -27,7 +27,7 @@ import {
   deleteChannelMessage,
   editChannelMessage,
   getSeminarStatusChannelMessage,
-  getChannelCommentsByDate,
+  publishAndReplaceChannelNotice,
   type ChannelCommentRecord,
 } from '../services/channel_message_repository';
 
@@ -121,8 +121,10 @@ export function buildSeminarStatusMessage(
 }
 
 /**
- * 세미나 현황 통합 메시지를 채널에 발송하고 이전 메시지를 삭제합니다.
- * resume 시 기존 메시지와 내용(텍스트)이 완전히 동일하면 재발송하지 않고 기존 메시지 ID를 유지합니다.
+ * 세미나 현황 통합 메시지를 채널에 발송하고 이전 메시지를 안전하게 삭제/교체합니다.
+ * - 댓글 보존: 기존 메시지에 연결된 댓글 조회 후 새 메시지 본문에 첨부
+ * - 안전 가드: 댓글 확보 실패 또는 새 메시지 발송 실패 시 기존 메시지 유지
+ * - resume 시 기존 메시지와 내용(텍스트)이 완전히 동일하면 재발송하지 않고 기존 메시지 ID를 유지합니다.
  */
 export async function publishSeminarStatusNotice(
   periodName: string,
@@ -132,31 +134,16 @@ export async function publishSeminarStatusNotice(
   isAutoResume = false,
   comments?: Array<{ userName: string; text: string }>,
 ): Promise<number | null> {
-  const currentComments = comments || getChannelCommentsByDate();
-  const { text, options } = buildSeminarStatusMessage(periodName, seminars, isAllCompleted, currentComments);
+  const result = await publishAndReplaceChannelNotice({
+    prevMessageId,
+    buildMessageFn: (commentsToAttach) =>
+      buildSeminarStatusMessage(periodName, seminars, isAllCompleted, commentsToAttach),
+    customComments: comments,
+    logPrefix: periodName,
+    skipIfSameContent: isAutoResume,
+  });
 
-  // autoResume 시 기존 메시지와 내용이 완전히 일치하면 재발송 생략
-  if (isAutoResume && prevMessageId) {
-    const existingMsg = getSeminarStatusChannelMessage(periodName);
-    if (existingMsg && existingMsg.text === text) {
-      console.log(
-        `[${periodName}] [isAutoResume] 기존 세미나 현황 메시지와 내용이 일치하여 재발송을 건너뜁니다. (ID: ${prevMessageId})`,
-      );
-      return prevMessageId;
-    }
-  }
-
-  // 1. 새 메시지 발송
-  const newMessageId = await sendNotificationToChannel(text, null, options as any);
-
-  // 2. 이전 메시지 삭제
-  if (prevMessageId && newMessageId && prevMessageId !== newMessageId) {
-    await deleteChannelMessage(prevMessageId).catch((err) => {
-      console.warn(`[${periodName}] 이전 세미나 현황 메시지(ID: ${prevMessageId}) 삭제 실패:`, err);
-    });
-  }
-
-  return newMessageId ?? prevMessageId;
+  return result.newMessageId;
 }
 
 /**

@@ -142,10 +142,10 @@ describe('세미나 모니터링 통합 메시지 (삭제/재발송) 단위 테�
       },
     ];
 
-    vi.spyOn(channelRepoModule, 'getChannelCommentsByDate').mockReturnValue([]);
+    vi.spyOn(channelRepoModule, 'getChannelCommentsByParentMessageId').mockReturnValue([]);
     const { text } = buildSeminarStatusMessage('점심', seminars, false, []);
 
-    vi.spyOn(channelRepoModule, 'getSeminarStatusChannelMessage').mockReturnValue({
+    vi.spyOn(channelRepoModule, 'getChannelMessageById').mockReturnValue({
       id: 1,
       channelId: 'channel_1',
       messageId: 555,
@@ -199,6 +199,7 @@ describe('세미나 모니터링 통합 메시지 (삭제/재발송) 단위 테�
     channelRepoModule.recordChannelComment({
       channelId: 'test_chan',
       messageId: 1001,
+      parentMessageId: 100,
       date: '2026-08-25', // 어제
       userName: '어제유저',
       text: '어제 댓글',
@@ -207,6 +208,7 @@ describe('세미나 모니터링 통합 메시지 (삭제/재발송) 단위 테�
     channelRepoModule.recordChannelComment({
       channelId: 'test_chan',
       messageId: 1002,
+      parentMessageId: 100,
       date: '2026-08-26', // 오늘
       userName: '오늘유저',
       text: '오늘 댓글',

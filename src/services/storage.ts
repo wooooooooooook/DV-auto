@@ -80,6 +80,8 @@ function initDatabase(db: Database.Database): void {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       channel_id TEXT NOT NULL,
       message_id INTEGER NOT NULL,
+      parent_message_id INTEGER,
+      attached_to_message_id INTEGER,
       date TEXT NOT NULL,
       user_id TEXT,
       user_name TEXT NOT NULL,
@@ -87,13 +89,40 @@ function initDatabase(db: Database.Database): void {
       created_at INTEGER NOT NULL
     );
 
-    CREATE INDEX IF NOT EXISTS idx_channel_comments_date ON channel_comments(date);
-    CREATE INDEX IF NOT EXISTS idx_channel_comments_msg ON channel_comments(channel_id, message_id);
+    CREATE TABLE IF NOT EXISTS channel_discussion_threads (
+      thread_id INTEGER PRIMARY KEY,
+      channel_id TEXT NOT NULL,
+      channel_message_id INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    );
 
     CREATE TABLE IF NOT EXISTS _migration_meta (
       name TEXT PRIMARY KEY,
       migrated_at INTEGER NOT NULL
     );
+  `);
+
+  // channel_comments 테이블 컬럼 안전 마이그레이션 (기존 DB 호환)
+  try {
+    const commentColumns = db.prepare(`PRAGMA table_info(channel_comments)`).all() as Array<{ name: string }>;
+    const colNames = commentColumns.map((c) => c.name);
+    if (!colNames.includes('parent_message_id')) {
+      db.exec(`ALTER TABLE channel_comments ADD COLUMN parent_message_id INTEGER;`);
+    }
+    if (!colNames.includes('attached_to_message_id')) {
+      db.exec(`ALTER TABLE channel_comments ADD COLUMN attached_to_message_id INTEGER;`);
+    }
+  } catch (_e) {
+    // ignore
+  }
+
+  // 인덱스 생성 (마이그레이션 컬럼 추가 후 안전하게 생성)
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_channel_comments_date ON channel_comments(date);
+    CREATE INDEX IF NOT EXISTS idx_channel_comments_msg ON channel_comments(channel_id, message_id);
+    CREATE INDEX IF NOT EXISTS idx_channel_comments_parent ON channel_comments(parent_message_id);
+    CREATE INDEX IF NOT EXISTS idx_channel_comments_attached ON channel_comments(attached_to_message_id);
+    CREATE INDEX IF NOT EXISTS idx_discussion_threads_channel_msg ON channel_discussion_threads(channel_id, channel_message_id);
   `);
 }
 
@@ -534,6 +563,16 @@ function clear(): void {
   db.prepare('DELETE FROM seminars').run();
   try {
     db.prepare('DELETE FROM channel_messages').run();
+  } catch (_e) {
+    // ignore if table does not exist
+  }
+  try {
+    db.prepare('DELETE FROM channel_comments').run();
+  } catch (_e) {
+    // ignore if table does not exist
+  }
+  try {
+    db.prepare('DELETE FROM channel_discussion_threads').run();
   } catch (_e) {
     // ignore if table does not exist
   }
