@@ -18,6 +18,7 @@ const testFiles = [
   'seminar_detail.test.ts',
   'monitor_seminars_api.test.ts',
   'apply_seminar_changes.test.ts',
+  'apply_seminar_combined_notice.test.ts',
   'point_only_seminar_detail.test.ts',
   'apply_seminar_api.test.ts',
   'apply_seminar_http_precheck.test.ts',

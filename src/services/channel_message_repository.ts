@@ -239,6 +239,30 @@ export function getSeminarStatusChannelMessage(
   return null;
 }
 
+/**
+ * 특정 일자에 공지 채널로 전송된 '신규 세미나 모음' 메시지 레코드를 조회합니다.
+ */
+export function getNewSeminarsChannelMessage(date?: string, channelId?: string): ChannelMessageRecord | null {
+  const targetDate = date || getSeoulDateString();
+  const targetChannelId = channelId || process.env.NOTICE_CHANNEL_ID;
+  const messages = getChannelMessagesByDate(targetDate, targetChannelId).filter((m) => m.status !== 'deleted');
+
+  // 가장 최근에 전송된 신규 세미나 공지 메시지 검색 (뒤에서부터)
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (
+      m.text &&
+      (m.text.includes('오늘 추가된 세미나 모음') ||
+        m.text.includes('새로 추가된 세미나') ||
+        m.text.includes('새로 발견된 세미나') ||
+        m.text.includes('신규 세미나'))
+    ) {
+      return m;
+    }
+  }
+  return null;
+}
+
 export interface ChannelCommentRecord {
   id?: number;
   channelId: string;

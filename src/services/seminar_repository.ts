@@ -333,6 +333,20 @@ export function clearSeminars(): void {
 }
 
 /**
+ * 특정 감지일자(detectedDate)에 새로 등록된 세미나 목록을 조회합니다.
+ */
+export function getSeminarsByDetectedDate(detectedDate: string): SeminarListItem[] {
+  const db = getDatabase();
+  const stmt = db.prepare(`
+    SELECT * FROM seminars 
+    WHERE detected_date = ?
+    ORDER BY CASE WHEN date IS NULL OR date = '' THEN 1 ELSE 0 END, date ASC, time ASC, seminar_id ASC
+  `);
+  const rows = stmt.all(detectedDate) as SeminarDbRow[];
+  return rows.map(rowToSeminarListItem);
+}
+
+/**
  * 세미나 목록을 통째로 교체합니다 (테스트 mock 주입 및 배치 재설정용)
  */
 export function setAllSeminars(seminars: SeminarListItem[]): void {

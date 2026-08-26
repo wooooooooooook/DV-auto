@@ -390,10 +390,9 @@ function getTodayDateStrings(customDateInput?: string) {
 }
 
 function getYesterdayAddedSeminars(yesterdayIso: string): StoredNewSeminars['seminars'] {
-  const storedSeminars = seminarRepo.getAllSeminars();
+  const storedSeminars = seminarRepo.getSeminarsByDetectedDate(yesterdayIso);
 
   return storedSeminars
-    .filter((seminar) => seminar.detectedDate === yesterdayIso)
     .map((seminar) => ({
       name: seminar.name,
       url: seminar.url,

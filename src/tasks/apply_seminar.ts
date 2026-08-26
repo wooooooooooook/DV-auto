@@ -27,6 +27,11 @@ import * as storage from '../services/storage';
 import * as logger from '../services/logger';
 import * as seminarRepo from '../services/seminar_repository';
 import { sendSeminarChangesToSubscribers } from '../services/seminar_subscribers';
+import {
+  deleteChannelMessage,
+  getNewSeminarsChannelMessage,
+  getChannelCommentsByDate,
+} from '../services/channel_message_repository';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
@@ -316,6 +321,117 @@ export function refreshStoredSeminarList(
   });
 
   return { seminars, newlyAdded, infoChanges };
+}
+
+/**
+ * 세미나명 20글자 truncation 포맷터 (20글자 초과 시 20글자 + '...')
+ */
+export function truncateSeminarName(name: string, maxLen = 20): string {
+  const trimmed = (name || '').trim();
+  if (trimmed.length > maxLen) {
+    return `${trimmed.slice(0, maxLen)}...`;
+  }
+  return trimmed;
+}
+
+/**
+ * 신규 세미나 모음 채널 공지 메시지 빌더
+ * - 헤더: 🆕 오늘 추가된 세미나 모음 (${count}건)
+ * - 세미나명: 20글자 초과 시 truncation
+ * - 이번 회차 신규 세미나(newlyAddedIds)는 위아래 구분선(━━━━━━━━━━━━━━━━━━)으로 감싸 강조
+ * - 토론방 이전 댓글 섹션(최대 5개) 첨부
+ * - link_preview_options: { is_disabled: true }
+ */
+export function buildNewSeminarsNoticeMessage(
+  seminars: SeminarListItem[],
+  newlyAddedIds?: string[] | Set<string>,
+  comments: Array<{ userName: string; text: string }> = [],
+): { text: string; options: Record<string, unknown> } {
+  let text = `🆕 오늘 추가된 세미나 모음 (${seminars.length}건)\n\n`;
+
+  const newIdSet =
+    newlyAddedIds instanceof Set
+      ? newlyAddedIds
+      : new Set(newlyAddedIds ? newlyAddedIds.map((id) => String(id).trim()) : []);
+
+  const formattedItems: string[] = [];
+
+  for (let i = 0; i < seminars.length; i++) {
+    const item = seminars[i];
+    const sid = item.seminarId || getSeminarIdFromUrl(item.url) || '';
+    const isHighlighted = newIdSet.has(sid);
+
+    const tags: string[] = [];
+    if (item.date || item.time) {
+      tags.push(`[${item.date || ''}${item.date && item.time ? ' ' : ''}${item.time || ''}]`);
+    }
+    if (item.isPointExcluded) {
+      tags.push('[포인트미지급]');
+    }
+    if (item.isAdvancedSurvey) {
+      tags.push('[심화설문]');
+    }
+
+    const prefix = tags.length > 0 ? `${tags.join(' ')} ` : '';
+    const capacityInfo = item.currentCount && item.totalCount ? ` (${item.currentCount}/${item.totalCount})` : '';
+    const truncatedName = truncateSeminarName(item.name || '세미나');
+
+    const itemText = `${prefix}${truncatedName}${capacityInfo}\n${item.url}`;
+
+    if (isHighlighted) {
+      formattedItems.push(`━━━━━━━━━━━━━━━━━━\n${itemText}\n━━━━━━━━━━━━━━━━━━`);
+    } else {
+      formattedItems.push(itemText);
+    }
+  }
+
+  text += formattedItems.join('\n\n');
+
+  // 이전 댓글 섹션 첨부 (최근 최대 5개)
+  if (comments.length > 0) {
+    text += `\n\n💬 [이전 댓글]\n`;
+    const recentComments = comments.slice(-5);
+    for (const c of recentComments) {
+      const cleanText = c.text.replace(/\n/g, ' ').slice(0, 100);
+      text += `• ${c.userName}: ${cleanText}\n`;
+    }
+  }
+
+  const options: Record<string, unknown> = {
+    link_preview_options: {
+      is_disabled: true,
+    },
+  };
+
+  return { text, options };
+}
+
+/**
+ * 신규 세미나 모음 통합 메시지를 채널에 발송하고 이전 메시지를 삭제합니다.
+ */
+export async function publishNewSeminarsNotice(
+  seminars: SeminarListItem[],
+  prevMessageId: number | null,
+  newlyAddedIds?: string[] | Set<string>,
+  comments?: Array<{ userName: string; text: string }>,
+  date?: string,
+): Promise<number | null> {
+  if (seminars.length === 0) return prevMessageId;
+
+  const currentComments = comments || getChannelCommentsByDate(date);
+  const { text, options } = buildNewSeminarsNoticeMessage(seminars, newlyAddedIds, currentComments);
+
+  // 1. 새 메시지 발송
+  const newMessageId = await sendNotificationToChannel(text, null, options as any);
+
+  // 2. 이전 메시지 삭제
+  if (prevMessageId && newMessageId && prevMessageId !== newMessageId) {
+    await deleteChannelMessage(prevMessageId).catch((err) => {
+      console.warn(`[apply_seminar] 이전 신규 세미나 공지 메시지(ID: ${prevMessageId}) 삭제 실패:`, err);
+    });
+  }
+
+  return newMessageId ?? prevMessageId;
 }
 
 async function fetchAndPopulateSeminarInfo(
@@ -653,23 +769,26 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
     referenceDate,
   );
 
-  if (enrichedSeminars.length > 0) {
-    seminarRepo.upsertSeminars(enrichedSeminars);
+  if (seminars.length > 0) {
+    seminarRepo.upsertSeminars(seminars);
   }
 
   if (newlyAdded.length > 0) {
-    const newSeminarMessage = newlyAdded
-      .map((item) => {
-        const pointExcludedSuffix = item.isPointExcluded ? ' [포인트미지급]' : '';
-        const advancedSurveySuffix = item.isAdvancedSurvey ? ' [심화설문]' : '';
-        const dateTimePrefix = item.date || item.time ? `[${item.date}${item.time ? ' ' + item.time : ''}] ` : '';
-        const capacityInfo = item.currentCount && item.totalCount ? `(${item.currentCount}/${item.totalCount}) ` : '';
-        return `${dateTimePrefix}${pointExcludedSuffix}${advancedSurveySuffix}${item.name}${capacityInfo}\n${item.url}`;
-      })
-      .join('\n\n');
-    const noticeMessage = `🆕 새로 추가된 세미나 ${newlyAdded.length}건 발견\n\n${newSeminarMessage}`;
-    if (notifyNewSeminarsToTelegram) await sendTelegram(noticeMessage);
-    if (notifyNewSeminarsToChannel) await sendNotificationToChannel(noticeMessage);
+    if (notifyNewSeminarsToChannel) {
+      const todayNewSeminars = seminarRepo.getSeminarsByDetectedDate(referenceDate);
+      const targetSeminars = todayNewSeminars.length > 0 ? todayNewSeminars : newlyAdded;
+      const prevMsg = getNewSeminarsChannelMessage(referenceDate);
+      const newlyAddedIds = newlyAdded
+        .map((s) => s.seminarId || getSeminarIdFromUrl(s.url))
+        .filter(Boolean) as string[];
+      await publishNewSeminarsNotice(
+        targetSeminars,
+        prevMsg ? prevMsg.messageId : null,
+        newlyAddedIds,
+        undefined,
+        referenceDate,
+      );
+    }
   }
 
   const finalSeminars = seminarRepo.getAllSeminars();
@@ -958,23 +1077,26 @@ export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<Ta
       referenceDate,
     );
 
-    if (enrichedSeminars.length > 0) {
-      seminarRepo.upsertSeminars(enrichedSeminars);
+    if (seminars.length > 0) {
+      seminarRepo.upsertSeminars(seminars);
     }
 
     if (newlyAdded.length > 0) {
-      const newSeminarMessage = newlyAdded
-        .map((item) => {
-          const pointExcludedSuffix = item.isPointExcluded ? ' [포인트미지급]' : '';
-          const advancedSurveySuffix = item.isAdvancedSurvey ? ' [심화설문]' : '';
-          const dateTimePrefix = item.date || item.time ? `[${item.date}${item.time ? ' ' + item.time : ''}] ` : '';
-          const capacityInfo = item.currentCount && item.totalCount ? `(${item.currentCount}/${item.totalCount}) ` : '';
-          return `${dateTimePrefix}${pointExcludedSuffix}${advancedSurveySuffix}${item.name}${capacityInfo}\n${item.url}`;
-        })
-        .join('\n\n');
-      const noticeMessage = `🆕 새로 추가된 세미나 ${newlyAdded.length}건 발견\n\n${newSeminarMessage}`;
-      if (notifyNewSeminarsToTelegram) await sendTelegram(noticeMessage);
-      if (notifyNewSeminarsToChannel) await sendNotificationToChannel(noticeMessage);
+      if (notifyNewSeminarsToChannel) {
+        const todayNewSeminars = seminarRepo.getSeminarsByDetectedDate(referenceDate);
+        const targetSeminars = todayNewSeminars.length > 0 ? todayNewSeminars : newlyAdded;
+        const prevMsg = getNewSeminarsChannelMessage(referenceDate);
+        const newlyAddedIds = newlyAdded
+          .map((s) => s.seminarId || getSeminarIdFromUrl(s.url))
+          .filter(Boolean) as string[];
+        await publishNewSeminarsNotice(
+          targetSeminars,
+          prevMsg ? prevMsg.messageId : null,
+          newlyAddedIds,
+          undefined,
+          referenceDate,
+        );
+      }
     }
 
     const finalSeminars = seminarRepo.getAllSeminars();
