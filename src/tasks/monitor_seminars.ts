@@ -64,7 +64,11 @@ export type SeminarInfo = MonitoredSeminarItem;
 /**
  * 세미나 상태 표시 이모지 및 상태 텍스트 반환
  */
-export function getSeminarStatusDisplay(info: Pick<SeminarInfo, 'processState' | 'status' | 'seminarCompleted'>): {
+export function getSeminarStatusDisplay(info: {
+  status?: SeminarStatus | string;
+  processState?: number;
+  seminarCompleted?: number;
+}): {
   emoji: string;
   text: string;
 } {
@@ -284,7 +288,7 @@ export async function syncChannelSeminarStatusOnQuizRegister(
       return { success: true, modified: false, message: '수정할 당일 공지 채널 메시지가 없습니다.' };
     }
 
-    let updatedText = existingMsg.text;
+    const updatedText = existingMsg.text;
     const { loadCheatsheet } = await import('./seminar_quiz');
     const cheatsheet = await loadCheatsheet();
 
@@ -951,7 +955,8 @@ async function monitorSeminars(
       let isPointExcluded = info.isSurveyPointExcluded ?? false;
       let hasEntryHistory = false;
 
-      if (info.seminarId) {
+      // isAutoResume 시에만 입장이력 및 상세 상태 단 1회 확인
+      if (info.seminarId && isAutoResume) {
         const detailCheck = await checkSeminarEndStatusFromApi(info.seminarId);
         isPointExcluded = detailCheck.isPointExcluded;
         hasEntryHistory = detailCheck.hasEntryHistory;
@@ -967,20 +972,10 @@ async function monitorSeminars(
 
       // 상태 초기화
       let currentStatus: SeminarStatus = info.status;
-      let isEnded = false;
+      const isEnded = info.status === '종료';
       const quizResultMessage: string | null = null;
       let startNotified = false;
-      let endNotified = false;
-
-      // 이미 종료된 상태인지 체크
-      if (info.seminarId) {
-        const detailCheck = await checkSeminarEndStatusFromApi(info.seminarId);
-        if (detailCheck.isEnded) {
-          currentStatus = '종료';
-          isEnded = true;
-          endNotified = true;
-        }
-      }
+      const endNotified = isEnded;
 
       const isReadyToEnter =
         currentStatus === '입장가능' ||
@@ -1066,7 +1061,7 @@ async function monitorSeminars(
 
     let loopIteration = 0;
 
-    // 2. API 모니터링 루프 (1분 폴링)
+    // 2. API 모니터링 루프 (1분 폴링: 메인 API만 조회)
     while (true) {
       loopIteration++;
       const currentTime = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
@@ -1102,12 +1097,7 @@ async function monitorSeminars(
 
         if (!monitoredSeminarsMap.has(url)) {
           const targetUrl = info.seminarId ? `${SEMINAR_DETAIL_PAGE}${info.seminarId}` : url;
-          let isPointExcluded = info.isSurveyPointExcluded ?? false;
-          if (info.seminarId) {
-            const detailCheck = await checkSeminarEndStatusFromApi(info.seminarId);
-            isPointExcluded = detailCheck.isPointExcluded;
-            info.isSurveyPointExcluded = isPointExcluded;
-          }
+          const isPointExcluded = info.isSurveyPointExcluded ?? false;
           if (isPointExcluded) {
             excludedSeminarKeys.add(trackingKey);
             continue;
@@ -1146,43 +1136,44 @@ async function monitorSeminars(
           continue;
         }
 
-        // ── B. 종료 감시 (입장 시작되었거나 시작 시간이 지난 경우)
-        if (seminarId) {
-          const endCheck = await checkSeminarEndStatusFromApi(seminarId);
-          if (endCheck.isEnded) {
-            console.log(
-              `[${periodName}] 세미나 종료 감지됨: ${name} (${seminarId}), isSurveyOpen=${endCheck.isSurveyOpen}`,
-            );
+        // ── B. 종료 감시 (메인 API의 status/processState/seminarCompleted로 판정)
+        const isApiEnded =
+          apiInfo?.status === '종료' ||
+          apiInfo?.processState === ProcessState.PROCESS_END ||
+          apiInfo?.processState === ProcessState.PROCESS_COMPLETED ||
+          apiInfo?.seminarCompleted === 1;
 
-            // 1) Playwright 온디맨드로 설문 및 퀴즈 처리
-            let quizResultMessage: string | null = null;
+        if (isApiEnded) {
+          console.log(`[${periodName}] 세미나 종료 감지됨: ${name} (${seminarId})`);
 
-            if (!currentSeminar.isSurveyPointExcluded && !endCheck.isPointExcluded) {
-              await withBrowserContext(providedContext, async (ctx) => {
-                const res = await handleSeminarEndAndQuiz(
-                  ctx,
-                  {
-                    name,
-                    seminarId,
-                    isSurveyPointExcluded: false,
-                  },
-                  url,
-                );
-                quizResultMessage = res.message;
-              });
-            }
+          // 1) Playwright 온디맨드로 설문 및 퀴즈 처리
+          let quizResultMessage: string | null = null;
 
-            currentSeminar.status = '종료';
-            currentSeminar.isEnded = true;
-            currentSeminar.quizResultMessage = quizResultMessage;
-            hasStateChanged = true;
-
-            if (!currentSeminar.endNotified) {
-              currentSeminar.endNotified = true;
-              await sendSeminarLiveEndNotice(currentSeminar).catch(() => {});
-            }
-            continue;
+          if (!currentSeminar.isSurveyPointExcluded && !apiInfo?.isSurveyPointExcluded) {
+            await withBrowserContext(providedContext, async (ctx) => {
+              const res = await handleSeminarEndAndQuiz(
+                ctx,
+                {
+                  name,
+                  seminarId,
+                  isSurveyPointExcluded: false,
+                },
+                url,
+              );
+              quizResultMessage = res.message;
+            });
           }
+
+          currentSeminar.status = '종료';
+          currentSeminar.isEnded = true;
+          currentSeminar.quizResultMessage = quizResultMessage;
+          hasStateChanged = true;
+
+          if (!currentSeminar.endNotified) {
+            currentSeminar.endNotified = true;
+            await sendSeminarLiveEndNotice(currentSeminar).catch(() => {});
+          }
+          continue;
         }
 
         // ── C. 입장 감시 및 자동 입장

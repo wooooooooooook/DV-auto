@@ -10,12 +10,7 @@ import * as scheduler from '../core/scheduler';
 import * as runner from '../core/runner';
 import * as taskRegistry from '../core/taskRegistry';
 import { inspect } from '../modules/inspect';
-import {
-  sendNotificationToChannel,
-  replyWithSplit,
-  TELEGRAM_SAFE_MESSAGE_LENGTH,
-  TELEGRAM_SAFE_CAPTION_LENGTH,
-} from '../modules/utils';
+import { replyWithSplit, TELEGRAM_SAFE_CAPTION_LENGTH } from '../modules/utils';
 import {
   getChannelMessagesByDate,
   getChannelMessageById,
@@ -283,7 +278,12 @@ export function extractParentMessageId(ctx: Context): {
   // 1. reply_to_message 검사
   const replyTo = 'reply_to_message' in msg ? msg.reply_to_message : undefined;
   if (replyTo) {
-    const replyToAny = replyTo as any;
+    const replyToAny = replyTo as unknown as {
+      forward_from_message_id?: number;
+      forward_from_chat?: { id?: number | string };
+      forward_origin?: { type?: string; message_id?: number; chat?: { id?: number | string } };
+      sender_chat?: { type?: string; id?: number | string };
+    };
     // 1-1. replyTo가 자동 포워드된 채널 원본 포스트인 경우 (구 Bot API forward_from_message_id)
     if (typeof replyToAny.forward_from_message_id === 'number') {
       const fwdChatId = replyToAny.forward_from_chat?.id ? String(replyToAny.forward_from_chat.id) : undefined;
@@ -356,7 +356,13 @@ if (noticeBot) {
   noticeBot.use(async (ctx, next) => {
     // 1. 토론 그룹으로 자동 포워딩된 채널 포스트 스레드 매핑 저장
     if (ctx.chat && (ctx.chat.type === 'group' || ctx.chat.type === 'supergroup') && ctx.message) {
-      const msg = ctx.message as any;
+      const msg = ctx.message as unknown as {
+        message_id: number;
+        is_automatic_forward?: boolean;
+        forward_from_message_id?: number;
+        forward_origin?: { type?: string; message_id?: number; chat?: { id?: number | string } };
+        forward_from_chat?: { id?: number | string };
+      };
       const isAutoForward = msg.is_automatic_forward === true;
       const forwardMsgId =
         msg.forward_from_message_id ||

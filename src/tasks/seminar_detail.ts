@@ -7,9 +7,8 @@ import {
   ProcessState,
   SurveyState,
 } from '../modules/seminar_api';
-import { SEMINAR_LIST_KEY, mergeSeminar, type SeminarListItem } from './apply_seminar';
+import { type SeminarListItem } from './apply_seminar';
 import * as seminarRepo from '../services/seminar_repository';
-import * as storage from '../services/storage';
 import { getSeminarIdFromUrl } from '../modules/utils';
 
 const SEMINAR_DETAIL_API = 'https://m-api.doctorville.co.kr/api/mw/seminars/';

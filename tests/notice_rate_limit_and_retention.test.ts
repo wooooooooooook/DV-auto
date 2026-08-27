@@ -1,7 +1,5 @@
 import assert from 'node:assert';
-import * as storage from '../src/services/storage';
 import * as seminarRepo from '../src/services/seminar_repository';
-import type { SeminarListItem } from '../src/tasks/apply_seminar';
 import { isSeminarExpired, updateStoredSeminarFromDetail, type SeminarDetail } from '../src/tasks/seminar_detail';
 import { checkNoticeCooldown, clearNoticeCooldowns, setBot } from '../src/services/bot_instance';
 import type { Telegraf } from 'telegraf';

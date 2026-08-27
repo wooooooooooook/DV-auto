@@ -20,7 +20,6 @@ import {
   addInterMDQuizSubscriber,
   removeInterMDQuizSubscriber,
   getInterMDQuizSubscribers,
-  sendInterMDQuizToSubscribers,
   INTERMD_QUIZ_SUBSCRIBERS_KEY,
 } from '../src/services/intermd_quiz_subscribers';
 import * as storage from '../src/services/storage';

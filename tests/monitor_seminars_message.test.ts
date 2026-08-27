@@ -13,7 +13,7 @@ describe('buildSeminarMonitorStatusMessage 세미나 모니터 현황 메시지 
         seminarId: '5580',
         url: 'https://m.doctorville.co.kr/cme/seminar/5580',
         name: '[재] ENVLO WEB SYMPOSIUM',
-        status: '입장하기',
+        status: '입장가능',
         processState: 1, // PROCESS_ENTER
         time: '18:00~19:00',
         isAdvancedSurvey: true,
@@ -22,7 +22,7 @@ describe('buildSeminarMonitorStatusMessage 세미나 모니터 현황 메시지 
         seminarId: '5579',
         url: 'https://m.doctorville.co.kr/cme/seminar/5579',
         name: '[재] Redefining P-CAB: From Gastritis to GERD',
-        status: '진행중',
+        status: '입장가능',
         processState: 6, // PROCESS_STARTED
         time: '18:30~19:30',
         isAdvancedSurvey: true,
@@ -31,7 +31,7 @@ describe('buildSeminarMonitorStatusMessage 세미나 모니터 현황 메시지 
         seminarId: '5600',
         url: 'https://m.doctorville.co.kr/cme/seminar/5600',
         name: 'DIVE (Digital Innovation, Value & Experience) Web symposium',
-        status: '대기중',
+        status: '대기',
         processState: 2, // PROCESS_APPLY
         time: '19:00~20:00',
         isAdvancedSurvey: false,
@@ -71,8 +71,9 @@ describe('buildSeminarMonitorStatusMessage 세미나 모니터 현황 메시지 
     const seminars: SeminarInfo[] = [
       {
         seminarId: '1234',
+        url: 'https://m.doctorville.co.kr/cme/seminar/1234',
         name: '짧은 세미나 제목',
-        status: '입장하기',
+        status: '입장가능',
         processState: 1,
         time: '12:00~13:00',
         isAdvancedSurvey: false,
@@ -87,6 +88,7 @@ describe('buildSeminarMonitorStatusMessage 세미나 모니터 현황 메시지 
     const seminars: SeminarInfo[] = [
       {
         seminarId: '1234',
+        url: 'https://m.doctorville.co.kr/cme/seminar/1234',
         name: '시간 미정 세미나',
         status: '대기',
         processState: 4,

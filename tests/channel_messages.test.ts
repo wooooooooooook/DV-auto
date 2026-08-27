@@ -63,7 +63,7 @@ describe('공지방 텔레그램 메시지 ID 일자별 추적 및 수정/삭제
       mediaType: 'text',
     });
 
-    const recordOld = recordChannelMessage({
+    recordChannelMessage({
       channelId: mockChannelId,
       messageId: 900,
       date: yesterday,
@@ -113,9 +113,9 @@ describe('공지방 텔레그램 메시지 ID 일자별 추적 및 수정/삭제
 
     // --- 4. Mock Bot 환경에서 editChannelMessage 검증 ---
     console.log('4. editChannelMessage (텍스트 & 포토) 연동 검증');
-    let editMessageTextCalls: Array<{ channelId: string; messageId: number; text: string }> = [];
-    let editMessageCaptionCalls: Array<{ channelId: string; messageId: number; caption: string }> = [];
-    let deleteMessageCalls: Array<{ channelId: string; messageId: number }> = [];
+    const editMessageTextCalls: Array<{ channelId: string; messageId: number; text: string }> = [];
+    const editMessageCaptionCalls: Array<{ channelId: string; messageId: number; caption: string }> = [];
+    const deleteMessageCalls: Array<{ channelId: string; messageId: number }> = [];
 
     const mockNoticeBot = {
       command: () => {},

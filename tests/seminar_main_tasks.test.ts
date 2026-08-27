@@ -605,6 +605,7 @@ async function testPointSyncRequirements() {
       return {
         success: true,
         seminarId: '5580',
+        hasEntryHistory: false,
         isPointExcluded: false,
         rawResponse: {
           seminarDetail: {
@@ -617,7 +618,7 @@ async function testPointSyncRequirements() {
         },
       };
     }
-    return { success: false, seminarId: String(seminarId), errorMessage: 'Not found' };
+    return { success: false, seminarId: String(seminarId), isAuthExpired: false, errorMessage: 'Not found' };
   });
 
   try {

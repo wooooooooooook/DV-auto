@@ -134,7 +134,6 @@ export function splitHtml(html: string, maxLength = TELEGRAM_SAFE_MESSAGE_LENGTH
       // 한 줄 자체가 maxLength보다 긴 경우: 글자 단위로 분할
       let remainingLine = line;
       while (remainingLine.length > 0) {
-        const currentOpeningTagsStr = getOpeningTagsString(currentOpenTags);
         const currentClosingTagsStr = getClosingTagsString(currentOpenTags);
 
         const availableLen = Math.max(50, maxLength - currentChunk.length - currentClosingTagsStr.length - 10);

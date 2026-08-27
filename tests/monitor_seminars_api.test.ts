@@ -212,6 +212,11 @@ describe('monitor_seminars API 기반 모니터링 기능 단위/통합 테스�
     });
     ensureLoggedInSpy.mockResolvedValue(undefined as never);
     safeGotoSpy.mockResolvedValue(undefined as never);
+    processSeminarQuizSpy.mockResolvedValue({
+      success: true,
+      hasQuizResult: true,
+      message: '퀴즈 정답: 1번',
+    });
 
     const mockPage = {
       locator: (selector: string) => ({
@@ -292,7 +297,7 @@ describe('monitor_seminars API 기반 모니터링 기능 단위/통합 테스�
           ],
           rawResponse: {},
         };
-      } else {
+      } else if (step === 3) {
         return {
           success: true,
           items: [
@@ -305,6 +310,23 @@ describe('monitor_seminars API 기반 모니터링 기능 단위/통합 테스�
               useDepthSurvey: 'Y',
               survey: { point: 1000 },
               processState: 6, // 진행 중
+            },
+          ],
+          rawResponse: {},
+        };
+      } else {
+        return {
+          success: true,
+          items: [
+            {
+              seminarId: 9901,
+              seminarNm: 'API 테스트 세미나',
+              startDt: `${todayStr} ${String(currentHour).padStart(2, '0')}:00:00`,
+              endDt: `${todayStr} ${String(currentHour + 1).padStart(2, '0')}:00:00`,
+              useSurvey: 'Y',
+              useDepthSurvey: 'Y',
+              survey: { point: 1000 },
+              processState: 7, // 방송 종료
             },
           ],
           rawResponse: {},
@@ -425,7 +447,7 @@ describe('monitor_seminars API 기반 모니터링 기능 단위/통합 테스�
             useSurvey: 'Y',
             useDepthSurvey: 'N',
             survey: { point: 1000 },
-            processState: 1, // 이미 입장 가능 상태
+            processState: resumeStep < 2 ? 1 : 7, // 이미 입장 가능 상태 -> 종료 상태
           },
         ],
         rawResponse: {},

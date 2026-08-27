@@ -1,13 +1,7 @@
 import path from 'path';
 import fs from 'fs/promises';
 import type { TaskContext, TaskResult } from '../types';
-import {
-  safeGoto,
-  sendNotificationToChannel,
-  sendTelegram,
-  getSeminarIdFromUrl,
-  ensureLoggedIn,
-} from '../modules/utils';
+import { safeGoto, sendTelegram, getSeminarIdFromUrl, ensureLoggedIn } from '../modules/utils';
 import {
   fetchMainFutureSeminars,
   fetchSeminarDetail,
@@ -29,11 +23,7 @@ import {
   sendUrgentSeminarsToSubscribers,
   parseCapacityNumbers,
 } from '../services/subscription_service';
-import {
-  deleteChannelMessage,
-  getNewSeminarsChannelMessage,
-  publishAndReplaceChannelNotice,
-} from '../services/channel_message_repository';
+import { getNewSeminarsChannelMessage, publishAndReplaceChannelNotice } from '../services/channel_message_repository';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
@@ -519,62 +509,94 @@ async function fetchAndPopulateSeminarInfo(
   }
 }
 
+export const LAST_ENRICH_TIMESTAMP_KEY = 'apply_seminar:last_enrich_timestamp';
+export const ENRICH_INTERVAL_MS = 60 * 60 * 1000;
+
+export function shouldRunEnrich(forceEnrich?: boolean): boolean {
+  if (forceEnrich) return true;
+  const lastTime = storage.get<number>(LAST_ENRICH_TIMESTAMP_KEY, 0);
+  return Date.now() - lastTime >= ENRICH_INTERVAL_MS;
+}
+
+export function recordEnrichTime(): void {
+  storage.set(LAST_ENRICH_TIMESTAMP_KEY, Date.now());
+}
+
 /**
- * 모든 세미나의 상세(detail) API를 병렬 조회하여 isPointExcluded 및 최신 메타데이터 갱신
+ * 모든 세미나의 상세(detail) API를 조회하여 isPointExcluded 및 최신 메타데이터 갱신
+ * - 과부하 방지를 위해 Concurrency 2 및 요청 간 150ms 딜레이 적용
  */
 export async function enrichSeminarsWithDetail(
   seminars: SeminarListItem[],
+  concurrency = 2,
+  delayMs = 150,
 ): Promise<{ seminars: SeminarListItem[]; isAuthExpired: boolean }> {
   let isAuthExpired = false;
+  const enriched: SeminarListItem[] = [];
 
-  const enriched = await Promise.all(
-    seminars.map(async (item) => {
-      if (isAuthExpired) return item;
-      const seminarId = item.seminarId || getSeminarIdFromUrl(item.url);
-      if (!seminarId) return item;
+  for (let i = 0; i < seminars.length; i += concurrency) {
+    if (isAuthExpired) break;
+    const chunk = seminars.slice(i, i + concurrency);
 
-      try {
-        const detailRes = await fetchSeminarDetail(seminarId);
-        if (detailRes.isAuthExpired) {
-          isAuthExpired = true;
-          return item;
+    const chunkResults = await Promise.all(
+      chunk.map(async (item) => {
+        if (isAuthExpired) return item;
+        const seminarId = item.seminarId || getSeminarIdFromUrl(item.url);
+        if (!seminarId) return item;
+
+        try {
+          const detailRes = await fetchSeminarDetail(seminarId);
+          if (detailRes.isAuthExpired) {
+            isAuthExpired = true;
+            return item;
+          }
+
+          if (detailRes.success && detailRes.rawResponse?.seminarDetail) {
+            const d = detailRes.rawResponse.seminarDetail;
+            const isPointExcluded = detailRes.isPointExcluded ?? checkIsPointExcluded(d.intro);
+            const isAdvancedSurvey = checkIsAdvancedSurvey(d.useDepthSurvey);
+            const processStateNum = d.processState !== undefined ? Number(d.processState) : item.processState;
+            const cancelProcessStateNum =
+              d.cancelProcessState !== undefined ? Number(d.cancelProcessState) : item.cancelProcessState;
+            const seminarCompletedNum =
+              d.seminarCompleted !== undefined
+                ? typeof d.seminarCompleted === 'boolean'
+                  ? d.seminarCompleted
+                    ? 1
+                    : 0
+                  : Number(d.seminarCompleted)
+                : item.seminarCompleted;
+
+            return {
+              ...item,
+              name: typeof d.seminarNm === 'string' && d.seminarNm ? d.seminarNm : item.name,
+              currentCount: d.applyCnt !== undefined && d.applyCnt !== null ? String(d.applyCnt) : item.currentCount,
+              totalCount:
+                d.maxPeopleCnt !== undefined && d.maxPeopleCnt !== null ? String(d.maxPeopleCnt) : item.totalCount,
+              isAdvancedSurvey,
+              isPointExcluded,
+              processState: processStateNum,
+              cancelProcessState: cancelProcessStateNum,
+              seminarCompleted: seminarCompletedNum,
+            };
+          }
+        } catch (err) {
+          logger.warn(`enrichSeminarsWithDetail: ID ${seminarId} 상세 조회 실패`, err);
         }
+        return item;
+      }),
+    );
 
-        if (detailRes.success && detailRes.rawResponse?.seminarDetail) {
-          const d = detailRes.rawResponse.seminarDetail;
-          const isPointExcluded = detailRes.isPointExcluded ?? checkIsPointExcluded(d.intro);
-          const isAdvancedSurvey = checkIsAdvancedSurvey(d.useDepthSurvey);
-          const processStateNum = d.processState !== undefined ? Number(d.processState) : item.processState;
-          const cancelProcessStateNum =
-            d.cancelProcessState !== undefined ? Number(d.cancelProcessState) : item.cancelProcessState;
-          const seminarCompletedNum =
-            d.seminarCompleted !== undefined
-              ? typeof d.seminarCompleted === 'boolean'
-                ? d.seminarCompleted
-                  ? 1
-                  : 0
-                : Number(d.seminarCompleted)
-              : item.seminarCompleted;
+    enriched.push(...chunkResults);
 
-          return {
-            ...item,
-            name: typeof d.seminarNm === 'string' && d.seminarNm ? d.seminarNm : item.name,
-            currentCount: d.applyCnt !== undefined && d.applyCnt !== null ? String(d.applyCnt) : item.currentCount,
-            totalCount:
-              d.maxPeopleCnt !== undefined && d.maxPeopleCnt !== null ? String(d.maxPeopleCnt) : item.totalCount,
-            isAdvancedSurvey,
-            isPointExcluded,
-            processState: processStateNum,
-            cancelProcessState: cancelProcessStateNum,
-            seminarCompleted: seminarCompletedNum,
-          };
-        }
-      } catch (err) {
-        logger.warn(`enrichSeminarsWithDetail: ID ${seminarId} 상세 조회 실패`, err);
-      }
-      return item;
-    }),
-  );
+    if (i + concurrency < seminars.length && delayMs > 0 && !isAuthExpired) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  if (enriched.length < seminars.length) {
+    enriched.push(...seminars.slice(enriched.length));
+  }
 
   return { seminars: enriched, isAuthExpired };
 }
@@ -726,11 +748,13 @@ export type ApplySeminarOptions = {
   notifyNewSeminarsToChannel?: boolean;
   notifyNewSeminarsToTelegram?: boolean;
   silentIfNoNew?: boolean;
+  forceEnrich?: boolean;
   _checkAdvancedPointStatus?: boolean;
 };
 
 async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Promise<TaskResult> {
-  const { notifyNewSeminarsToChannel = true, notifyNewSeminarsToTelegram = true } = options;
+  const { notifyNewSeminarsToChannel = true, notifyNewSeminarsToTelegram: _notifyNewSeminarsToTelegram = true } =
+    options;
 
   let currentSeminars: RawSeminarData[] = [];
   let normalizedCurrentSeminars: SeminarListItem[] = [];
@@ -757,13 +781,18 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
 
   const storedSeminars = migrateLegacySeminarStorage(referenceDate);
 
-  // 모든 세미나의 상세(detail) API를 조회하여 isPointExcluded 및 최신 메타데이터 갱신
-  const { seminars: enrichedSeminars, isAuthExpired: detailAuthExpired } =
-    await enrichSeminarsWithDetail(normalizedCurrentSeminars);
-  if (detailAuthExpired) {
-    const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
-    await sendTelegram(msg).catch(() => {});
-    return { success: false, message: msg };
+  // 1시간에 1번(또는 forceEnrich=true)만 상세(detail) API를 조회하여 최신 메타데이터 갱신
+  let enrichedSeminars = normalizedCurrentSeminars;
+  if (shouldRunEnrich(options.forceEnrich)) {
+    const { seminars: resSeminars, isAuthExpired: detailAuthExpired } =
+      await enrichSeminarsWithDetail(normalizedCurrentSeminars);
+    if (detailAuthExpired) {
+      const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
+      await sendTelegram(msg).catch(() => {});
+      return { success: false, message: msg };
+    }
+    enrichedSeminars = resSeminars;
+    recordEnrichTime();
   }
 
   const { seminars, newlyAdded, infoChanges } = refreshStoredSeminarList(
@@ -1059,7 +1088,11 @@ export const applySeminarExtraTask = {
 };
 
 export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<TaskResult> {
-  const { notifyNewSeminarsToChannel = true, notifyNewSeminarsToTelegram = true, silentIfNoNew = true } = options;
+  const {
+    notifyNewSeminarsToChannel = true,
+    notifyNewSeminarsToTelegram: _notifyNewSeminarsToTelegram = true,
+    silentIfNoNew = true,
+  } = options;
 
   try {
     let currentSeminars: RawSeminarData[] = [];
@@ -1080,13 +1113,18 @@ export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<Ta
 
     const storedSeminars = migrateLegacySeminarStorage(referenceDate);
 
-    // 모든 세미나의 상세(detail) API를 조회하여 isPointExcluded 및 최신 메타데이터 갱신
-    const { seminars: enrichedSeminars, isAuthExpired: detailAuthExpired } =
-      await enrichSeminarsWithDetail(normalizedCurrentSeminars);
-    if (detailAuthExpired) {
-      const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
-      await sendTelegram(msg).catch(() => {});
-      return { success: false, message: msg };
+    // 1시간에 1번(또는 forceEnrich=true)만 상세(detail) API를 조회하여 최신 메타데이터 갱신
+    let enrichedSeminars = normalizedCurrentSeminars;
+    if (shouldRunEnrich(options.forceEnrich)) {
+      const { seminars: resSeminars, isAuthExpired: detailAuthExpired } =
+        await enrichSeminarsWithDetail(normalizedCurrentSeminars);
+      if (detailAuthExpired) {
+        const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
+        await sendTelegram(msg).catch(() => {});
+        return { success: false, message: msg };
+      }
+      enrichedSeminars = resSeminars;
+      recordEnrichTime();
     }
 
     const { seminars, newlyAdded, infoChanges } = refreshStoredSeminarList(

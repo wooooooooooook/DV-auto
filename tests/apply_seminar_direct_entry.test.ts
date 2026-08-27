@@ -48,6 +48,8 @@ describe('Playwright 직접 상세페이지 진입 테스트', () => {
       .spyOn(seminarApiModule, 'fetchSeminarDetail')
       .mockImplementation(async (id: number | string) => ({
         success: true,
+        seminarId: String(id),
+        hasEntryHistory: false,
         isPointExcluded: false,
         rawResponse: {
           seminarDetail: {

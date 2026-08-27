@@ -23,7 +23,10 @@ test.describe('today_links E2E: collectTodaySeminarMessage with real browser con
     for (const tc of testCases) {
       await page.goto(FIXTURE_URL, { waitUntil: 'domcontentloaded' });
 
-      const result = await collectTodaySeminarMessage(page, tc.dateInput);
+      const result = await collectTodaySeminarMessage(
+        page as unknown as Parameters<typeof collectTodaySeminarMessage>[0],
+        tc.dateInput,
+      );
 
       console.log(
         `[${tc.dateInput}] lunch: ${result.lunchSeminarIds.length}, dinner: ${result.dinnerSeminarIds.length}`,
@@ -51,7 +54,10 @@ test.describe('today_links E2E: collectTodaySeminarMessage with real browser con
 
     for (const fmt of dateFormats) {
       await page.goto(FIXTURE_URL, { waitUntil: 'domcontentloaded' });
-      const result = await collectTodaySeminarMessage(page, fmt);
+      const result = await collectTodaySeminarMessage(
+        page as unknown as Parameters<typeof collectTodaySeminarMessage>[0],
+        fmt,
+      );
       expect(result.lunchSeminarIds.length).toBe(3);
       expect(result.dinnerSeminarIds.length).toBe(5);
     }
@@ -60,7 +66,10 @@ test.describe('today_links E2E: collectTodaySeminarMessage with real browser con
   test('collectTodaySeminarMessage extracts correct seminar IDs', async ({ page }) => {
     await page.goto(FIXTURE_URL, { waitUntil: 'domcontentloaded' });
 
-    const result = await collectTodaySeminarMessage(page, '2026-08-18');
+    const result = await collectTodaySeminarMessage(
+      page as unknown as Parameters<typeof collectTodaySeminarMessage>[0],
+      '2026-08-18',
+    );
 
     expect(result.lunchSeminarIds).toEqual(['5552', '5553', '5567']);
     expect(result.dinnerSeminarIds).toEqual(['5555', '5561', '5568', '5560', '5488']);

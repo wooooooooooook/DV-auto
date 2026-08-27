@@ -51,16 +51,16 @@ describe('세미나 신청 및 약관 동의 API 단위 테스트', () => {
 
     try {
       vi.spyOn(httpClientModule, 'sendDoctorVilleRequest').mockImplementation(
-        async (url: string, options: { method?: string; body?: string }) => {
+        async (url: string, options?: httpClientModule.HttpRequestOptions) => {
           let parsedBody: unknown = undefined;
-          if (typeof options.body === 'string') {
+          if (options && typeof options.body === 'string') {
             try {
               parsedBody = JSON.parse(options.body);
             } catch {
               parsedBody = options.body;
             }
           }
-          requestsMade.push({ url, method: options.method || 'GET', body: parsedBody });
+          requestsMade.push({ url, method: options?.method || 'GET', body: parsedBody });
 
           return {
             status: 200,

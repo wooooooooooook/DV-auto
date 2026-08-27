@@ -18,7 +18,9 @@ describe('Seminar Repository & SQLite Table Migration', () => {
       try {
         storage.closeDatabase();
         fs.unlinkSync(testDbPath);
-      } catch (_e) {}
+      } catch (_e) {
+        /* ignore */
+      }
     }
     storage.setDatabasePath(testDbPath);
 
@@ -198,7 +200,9 @@ describe('Seminar Repository & SQLite Table Migration', () => {
       try {
         storage.closeDatabase();
         fs.unlinkSync(migrationDbPath);
-      } catch (_e) {}
+      } catch (_e) {
+        /* ignore */
+      }
     }
 
     // 레거시 DB 환경 구성: kv_store에 apply_seminar:seminar_list 데이터만 들어있는 상태 시뮬레이션

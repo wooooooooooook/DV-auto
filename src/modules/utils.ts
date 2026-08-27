@@ -46,7 +46,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 async function replyWithSplit(
-  ctx: { reply: Telegraf['telegram']['sendMessage'] } | any,
+  ctx: { reply: (text: string, options?: Parameters<Telegraf['telegram']['sendMessage']>[2]) => Promise<unknown> },
   text: string,
   options?: Parameters<Telegraf['telegram']['sendMessage']>[2],
 ): Promise<void> {
@@ -229,8 +229,8 @@ async function sendNotificationToChannel(
     console.error('Failed to send Telegram notification to channel:', error);
 
     try {
-      const plainOptions: SendMessageOptions | SendPhotoOptions = { ...baseOptions };
-      delete (plainOptions as Partial<SendMessageOptions | SendPhotoOptions>).parse_mode;
+      const plainOptions = { ...baseOptions };
+      delete (plainOptions as Record<string, unknown>).parse_mode;
 
       const validImagePath = imagePath && fs.existsSync(imagePath) ? imagePath : null;
       if (validImagePath) {

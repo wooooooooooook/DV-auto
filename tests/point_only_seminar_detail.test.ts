@@ -65,6 +65,7 @@ describe('Point-Only 세미나 발견 시 세미나 상세 API 연동 테스트'
           return {
             success: true,
             seminarId: '5999',
+            hasEntryHistory: false,
             isPointExcluded: false,
             rawResponse: {
               code: 200,
@@ -94,6 +95,7 @@ describe('Point-Only 세미나 발견 시 세미나 상세 API 연동 테스트'
           return {
             success: true,
             seminarId: '5888',
+            hasEntryHistory: false,
             isPointExcluded: false,
             rawResponse: {
               code: 200,
@@ -123,6 +125,7 @@ describe('Point-Only 세미나 발견 시 세미나 상세 API 연동 테스트'
         return {
           success: false,
           seminarId: '5777',
+          isAuthExpired: false,
           errorMessage: '세미나 정보를 찾을 수 없습니다.',
         };
       });

@@ -508,6 +508,8 @@ export function getDatabase(): Database.Database {
  * - 키가 존재하지 않는 경우 fallback을 반환합니다.
  * - DB 오류나 데이터 손상 시 예외를 발생시킵니다.
  */
+function get<T>(key: string, fallback: T): T;
+function get<T = unknown>(key: string, fallback?: null): T | null;
 function get<T = unknown>(key: string, fallback: T | null = null): T | null {
   const db = getDb();
   if (key === 'intermd_quiz_subscribers') {
@@ -572,7 +574,7 @@ function get<T = unknown>(key: string, fallback: T | null = null): T | null {
       pointCheckedAt: row.point_checked_at ?? undefined,
       detectedDate: row.detected_date ?? undefined,
       detectedAt: row.detected_at ?? undefined,
-      urgentNotified: (row as any).urgent_notified === 1,
+      urgentNotified: (row as unknown as { urgent_notified?: number }).urgent_notified === 1,
     }));
     return items as unknown as T;
   }

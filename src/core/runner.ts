@@ -20,7 +20,7 @@ function releaseLock(name: string): void {
 }
 
 async function runTask(task: Task, ctx: TaskContext = {}): Promise<TaskResult | boolean | string | void> {
-  const name = task && task.name ? task.name : task && task.run ? '(unnamed)' : 'unknown';
+  const name = task && task.name ? task.name : task && typeof task.run === 'function' ? '(unnamed)' : 'unknown';
   logger.info('runTask start', name);
   const locked = acquireLock(name, task.lockTtlMs || 60 * 1000);
   if (!locked) {

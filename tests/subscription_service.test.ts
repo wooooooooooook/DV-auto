@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as storage from '../src/services/storage';
+import type { SeminarListItem } from '../src/tasks/apply_seminar';
 import {
   getSubscription,
   updateSubscription,
@@ -227,15 +228,16 @@ describe('subscription_service', () => {
         },
       },
     };
-    setBot('notice', mockBot as any);
+    setBot('notice', mockBot as unknown as Parameters<typeof setBot>[1]);
 
     updateSubscription(901, { newSeminar: 'urgent_1000' });
     updateSubscription(902, { newSeminar: 'limit_5000' });
 
-    const urgentSeminar = {
+    const urgentSeminar: SeminarListItem = {
       seminarId: '9988',
       name: '마감임박 세미나 테스트',
       url: 'https://m.doctorville.co.kr/cme/seminar/9988',
+      date: '2026-08-27',
       totalCount: '5000',
       currentCount: '4300', // 잔여 700명
       time: '19:00',
@@ -243,9 +245,9 @@ describe('subscription_service', () => {
       isAdvancedSurvey: false,
     };
 
-    seminarRepo.upsertSeminar(urgentSeminar as any);
+    seminarRepo.upsertSeminar(urgentSeminar);
 
-    const res = await sendUrgentSeminarsToSubscribers([urgentSeminar as any]);
+    const res = await sendUrgentSeminarsToSubscribers([urgentSeminar]);
     expect(res.successCount).toBe(1);
     expect(sentMessages.length).toBe(1);
     expect(sentMessages[0].chatId).toBe(901);
@@ -264,11 +266,13 @@ describe('subscription_service', () => {
 
     // 1. 단일 메시지 빌더 검증
     const singleMsg = buildSingleNewSeminarMessage({
+      seminarId: '1111',
       name: '새로운 당뇨 세미나',
       date: '2026-08-27',
       time: '12:30~13:30',
       totalCount: '5000',
       currentCount: '0',
+      nightTime: false,
       isAdvancedSurvey: true,
       isPointExcluded: false,
       url: 'https://m.doctorville.co.kr/cme/seminar/1111',

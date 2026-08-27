@@ -22,7 +22,7 @@ function scheduleTaskCron(task: Task): cron.ScheduledTask {
         // For scheduled runs, ask runner to notify admin on success
         await runner.runTask(task, { notifyAdminOnSuccess: true });
       } catch (e) {
-        logger.error('scheduler: task error', task.name, e && e.stack ? e.stack : e);
+        logger.error('scheduler: task error', task.name, e instanceof Error ? e.stack : e);
       }
     },
     opts,

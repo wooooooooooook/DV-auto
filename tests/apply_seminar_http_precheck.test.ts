@@ -1,7 +1,6 @@
 import assert from 'node:assert';
 import { chromium } from 'playwright';
 import { run as runApplySeminar } from '../src/tasks/apply_seminar';
-import * as httpClientModule from '../src/modules/http_client';
 import * as seminarApiModule from '../src/modules/seminar_api';
 import * as utilsModule from '../src/modules/utils';
 import * as checkSeminarPointModule from '../src/tasks/check_seminar_point';
@@ -48,6 +47,8 @@ describe('apply_seminar HTTP pre-check 및 조건부 Playwright 실행 테스트
       .spyOn(seminarApiModule, 'fetchSeminarDetail')
       .mockImplementation(async (id: number | string) => ({
         success: true,
+        seminarId: String(id),
+        hasEntryHistory: false,
         isPointExcluded: false,
         rawResponse: {
           seminarDetail: {
@@ -83,11 +84,9 @@ describe('apply_seminar HTTP pre-check 및 조건부 Playwright 실행 테스트
 
     const originalFetchMainFuture = vi.spyOn(seminarApiModule, 'fetchMainFutureSeminars');
     const originalApplyWithTerms = vi.spyOn(seminarApiModule, 'applySeminarWithTerms');
-    const originalHttpGet = vi.spyOn(httpClientModule, 'httpGet');
 
     const fetchMainFutureSpy = originalFetchMainFuture;
     const applySeminarWithTermsSpy = originalApplyWithTerms;
-    const httpGetSpy = originalHttpGet;
 
     const createMockPage = () => ({
       context: () => ({}),

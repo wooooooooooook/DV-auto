@@ -113,7 +113,11 @@ describe('Telegram 댓글 보존 및 공지 메시지 교체 (Comment Retention 
         seminarId: '10',
         name: '신규 세미나',
         url: 'https://m.doctorville.co.kr/cme/seminar/10',
+        time: '19:00',
+        currentCount: '10',
         totalCount: '50',
+        nightTime: false,
+        isAdvancedSurvey: false,
       },
     ];
 
@@ -239,7 +243,7 @@ describe('Telegram 댓글 보존 및 공지 메시지 교체 (Comment Retention 
   // Test 7 — Telegram discussion update에서 parent_message_id 추출 검증
   describe('Test 7 — extractParentMessageId Telegram Update 구조 검증', () => {
     it('7-1: 구 Bot API forward_from_message_id로 채널 포스트에 직접 답장한 경우', () => {
-      const mockCtx: any = {
+      const mockCtx = {
         message: {
           message_id: 6001,
           reply_to_message: {
@@ -249,7 +253,7 @@ describe('Telegram 댓글 보존 및 공지 메시지 교체 (Comment Retention 
           },
           text: '직접 답장 댓글',
         },
-      };
+      } as unknown as Parameters<typeof extractParentMessageId>[0];
 
       const extracted = extractParentMessageId(mockCtx);
       assert.strictEqual(extracted.parentMessageId, 100);
@@ -257,7 +261,7 @@ describe('Telegram 댓글 보존 및 공지 메시지 교체 (Comment Retention 
     });
 
     it('7-2: Bot API 7.0+ forward_origin(channel)으로 채널 포스트에 직접 답장한 경우', () => {
-      const mockCtx: any = {
+      const mockCtx = {
         message: {
           message_id: 6002,
           reply_to_message: {
@@ -270,7 +274,7 @@ describe('Telegram 댓글 보존 및 공지 메시지 교체 (Comment Retention 
           },
           text: 'Bot API 7.0 답장 댓글',
         },
-      };
+      } as unknown as Parameters<typeof extractParentMessageId>[0];
 
       const extracted = extractParentMessageId(mockCtx);
       assert.strictEqual(extracted.parentMessageId, 105);
@@ -288,7 +292,7 @@ describe('Telegram 댓글 보존 및 공지 메시지 교체 (Comment Retention 
       });
 
       // 2. 5002번 댓글이 5001번에 reply함
-      const mockCtx: any = {
+      const mockCtx = {
         message: {
           message_id: 5002,
           reply_to_message: {
@@ -297,7 +301,7 @@ describe('Telegram 댓글 보존 및 공지 메시지 교체 (Comment Retention 
           },
           text: '대댓글 작성',
         },
-      };
+      } as unknown as Parameters<typeof extractParentMessageId>[0];
 
       const extracted = extractParentMessageId(mockCtx);
       assert.strictEqual(extracted.parentMessageId, 100, '부모 댓글의 parent_message_id(100)를 상속받아야 함');
@@ -307,25 +311,25 @@ describe('Telegram 댓글 보존 및 공지 메시지 교체 (Comment Retention 
       // 자동 포워딩된 토론 스레드 매핑 (threadId 300 -> channel_message_id 100)
       channelRepoModule.recordDiscussionThread(300, 'test_channel', 100);
 
-      const mockCtx: any = {
+      const mockCtx = {
         message: {
           message_id: 6003,
           message_thread_id: 300,
           text: '토픽 스레드 내 일반 댓글',
         },
-      };
+      } as unknown as Parameters<typeof extractParentMessageId>[0];
 
       const extracted = extractParentMessageId(mockCtx);
       assert.strictEqual(extracted.parentMessageId, 100);
     });
 
     it('7-5: 공지와 무관한 일반 그룹 대화는 parentMessageId가 null이어야 함', () => {
-      const mockCtx: any = {
+      const mockCtx = {
         message: {
           message_id: 7001,
           text: '그냥 잡담',
         },
-      };
+      } as unknown as Parameters<typeof extractParentMessageId>[0];
 
       const extracted = extractParentMessageId(mockCtx);
       assert.strictEqual(extracted.parentMessageId, null);

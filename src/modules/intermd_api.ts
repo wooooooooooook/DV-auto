@@ -187,14 +187,14 @@ export class InterMDClient {
     return { userId, userPw };
   }
 
-  public async requestHttp(
+  public async requestHttp<T = Record<string, unknown>>(
     endpoint: string,
     options: {
       method?: 'GET' | 'POST';
       body?: Record<string, string | number | undefined> | string;
       headers?: Record<string, string>;
     } = {},
-  ): Promise<{ status: number; data: any; headers: Record<string, string | string[]> }> {
+  ): Promise<{ status: number; data: T; headers: Record<string, string | string[]> }> {
     const url = endpoint.startsWith('http') ? endpoint : `${this.baseUrl}${endpoint}`;
     const method = options.method || 'GET';
     const reqHeaders: Record<string, string> = {
@@ -246,7 +246,7 @@ export class InterMDClient {
     this.extractAndStoreCookies(resHeaders['set-cookie']);
 
     const text = await res.body.text();
-    let data: any = null;
+    let data: unknown = null;
     try {
       data = JSON.parse(text);
     } catch (_e) {
@@ -255,7 +255,7 @@ export class InterMDClient {
 
     return {
       status: res.statusCode,
-      data,
+      data: data as T,
       headers: resHeaders,
     };
   }
@@ -273,7 +273,11 @@ export class InterMDClient {
       };
     }
 
-    const res = await this.requestHttp('/login/login.do', {
+    const res = await this.requestHttp<{
+      loginStatus?: string | number;
+      sessionKey?: string;
+      memberInfo?: InterMDMemberInfo;
+    }>('/login/login.do', {
       method: 'POST',
       body: {
         memberId: id,
@@ -320,11 +324,17 @@ export class InterMDClient {
   }
 
   public async getSession(): Promise<{ code: string; memberInfo: InterMDMemberInfo | null }> {
-    const res = await this.requestHttp('/login/getSession.do', {
-      method: 'POST',
-      body: {},
-    });
-    return res.data;
+    const res = await this.requestHttp<{ code?: string; memberInfo?: InterMDMemberInfo | null }>(
+      '/login/getSession.do',
+      {
+        method: 'POST',
+        body: {},
+      },
+    );
+    return {
+      code: String(res.data?.code || ''),
+      memberInfo: res.data?.memberInfo || null,
+    };
   }
 
   public async checkAuth(): Promise<boolean> {
@@ -345,7 +355,9 @@ export class InterMDClient {
   }
 
   public async getTodayQuiz(): Promise<InterMDTodayQuiz | null> {
-    const resToday = await this.requestHttp('/quiz/getTodayQuiz.do', { method: 'GET' });
+    const resToday = await this.requestHttp<{
+      data?: { quizPseq?: number | string; pollPseq?: number | string };
+    }>('/quiz/getTodayQuiz.do', { method: 'GET' });
     const todayData = resToday.data?.data;
     if (!todayData || !todayData.quizPseq) {
       return null;
@@ -354,7 +366,12 @@ export class InterMDClient {
     const quizPseq = Number(todayData.quizPseq);
     const pollPseq = Number(todayData.pollPseq);
 
-    const resQuiz = await this.requestHttp('/quiz/getQuiz.do', {
+    const resQuiz = await this.requestHttp<{
+      quizInfo?: Record<string, unknown>;
+      pageInfo?: Record<string, unknown>;
+      quesInfo?: Array<Record<string, unknown>>;
+      quizUserCheck?: number | string;
+    }>('/quiz/getQuiz.do', {
       method: 'POST',
       body: { quizPseq },
     });
@@ -372,8 +389,9 @@ export class InterMDClient {
         body: { pollPseq, quesPseq },
       });
 
-      const itemsRaw = resItems.data?.quesItemInfo || [];
-      const items: InterMDQuizItem[] = itemsRaw.map((item: any) => ({
+      const resItemsData = resItems.data as Record<string, unknown> | null;
+      const itemsRaw = (resItemsData?.quesItemInfo as Array<Record<string, unknown>>) || [];
+      const items: InterMDQuizItem[] = itemsRaw.map((item: Record<string, unknown>) => ({
         item_pseq: Number(item.quesItemPseq),
         title: String(item.quesItemTitle || ''),
         order: Number(item.quesItemOrder || 0),
@@ -458,7 +476,7 @@ export class InterMDClient {
       ],
     };
 
-    const res = await this.requestHttp('/quiz/saveAjax.do', {
+    const res = await this.requestHttp<{ code?: string; msg?: string }>('/quiz/saveAjax.do', {
       method: 'POST',
       body: {
         data: JSON.stringify(pollResult),

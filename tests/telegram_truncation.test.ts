@@ -6,8 +6,6 @@ import {
   truncateTelegramMessage,
   TELEGRAM_MAX_MESSAGE_LENGTH,
   TELEGRAM_SAFE_MESSAGE_LENGTH,
-  TELEGRAM_MAX_CAPTION_LENGTH,
-  TELEGRAM_SAFE_CAPTION_LENGTH,
 } from '../src/modules/telegram_truncator';
 import { formatTodayLinksBroadcast, type TodayLinksFormatInput } from '../src/tasks/today_links';
 import { describe, it } from 'vitest';

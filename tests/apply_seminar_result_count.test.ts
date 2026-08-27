@@ -63,6 +63,8 @@ describe('apply_seminar 신청 결과 집계 정확성 테스트', () => {
 
     vi.spyOn(seminarApiModule, 'fetchSeminarDetail').mockResolvedValue({
       success: true,
+      seminarId: '100',
+      hasEntryHistory: false,
       isPointExcluded: false,
       rawResponse: {
         seminarDetail: {
@@ -100,9 +102,10 @@ describe('apply_seminar 신청 결과 집계 정확성 테스트', () => {
 
       const resultA = await runApplySeminar({}, { notifyNewSeminarsToTelegram: false });
       assert.strictEqual(resultA.success, true);
-      assert.ok(resultA.message.includes('3개 세미나 신청 완료!'), `전체 성공 메시지 검증: "${resultA.message}"`);
-      assert.ok(resultA.message.includes('(3/3)'), `전체 성공 카운트 검증: "${resultA.message}"`);
-      console.log(`    ✓ [Pass] 결과: "${resultA.message}"\n`);
+      const msgA = resultA.message || '';
+      assert.ok(msgA.includes('3개 세미나 신청 완료!'), `전체 성공 메시지 검증: "${msgA}"`);
+      assert.ok(msgA.includes('(3/3)'), `전체 성공 카운트 검증: "${msgA}"`);
+      console.log(`    ✓ [Pass] 결과: "${msgA}"\n`);
 
       // Case B: 일부 정원 초과 (5606=EXCESS, 5607=CANCEL, 5608=CANCEL)
       console.log('  Case B: 일부 정원 초과로 신청 불가');
@@ -119,11 +122,12 @@ describe('apply_seminar 신청 결과 집계 정확성 테스트', () => {
 
       const resultB = await runApplySeminar({}, { notifyNewSeminarsToTelegram: false });
       assert.strictEqual(resultB.success, true);
-      assert.ok(resultB.message.includes('2개 세미나 신청 완료'), `일부 실패 카운트 검증: "${resultB.message}"`);
-      assert.ok(resultB.message.includes('(2/3)'), `분자/분모 검증: "${resultB.message}"`);
-      assert.ok(resultB.message.includes('1개 정원 초과'), `정원 초과 상세 검증: "${resultB.message}"`);
-      assert.ok(!resultB.message.includes('신청 완료!'), `느낌표 없는 메시지: "${resultB.message}"`);
-      console.log(`    ✓ [Pass] 결과: "${resultB.message}"\n`);
+      const msgB = resultB.message || '';
+      assert.ok(msgB.includes('2개 세미나 신청 완료'), `일부 실패 카운트 검증: "${msgB}"`);
+      assert.ok(msgB.includes('(2/3)'), `분자/분모 검증: "${msgB}"`);
+      assert.ok(msgB.includes('1개 정원 초과'), `정원 초과 상세 검증: "${msgB}"`);
+      assert.ok(!msgB.includes('신청 완료!'), `느낌표 없는 메시지: "${msgB}"`);
+      console.log(`    ✓ [Pass] 결과: "${msgB}"\n`);
 
       // Case C: 정원 초과 + 미신청 혼합
       console.log('  Case C: 정원 초과 + 미신청(PREPARING) 혼합');
@@ -140,11 +144,12 @@ describe('apply_seminar 신청 결과 집계 정확성 테스트', () => {
 
       const resultC = await runApplySeminar({}, { notifyNewSeminarsToTelegram: false });
       assert.strictEqual(resultC.success, true);
-      assert.ok(resultC.message.includes('1개 세미나 신청 완료'), `혼합 카운트 검증: "${resultC.message}"`);
-      assert.ok(resultC.message.includes('(1/3)'), `혼합 분자/분모 검증: "${resultC.message}"`);
-      assert.ok(resultC.message.includes('1개 정원 초과'), `정원 초과 검증: "${resultC.message}"`);
-      assert.ok(resultC.message.includes('1개 미신청'), `미신청 검증: "${resultC.message}"`);
-      console.log(`    ✓ [Pass] 결과: "${resultC.message}"\n`);
+      const msgC = resultC.message || '';
+      assert.ok(msgC.includes('1개 세미나 신청 완료'), `혼합 카운트 검증: "${msgC}"`);
+      assert.ok(msgC.includes('(1/3)'), `혼합 분자/분모 검증: "${msgC}"`);
+      assert.ok(msgC.includes('1개 정원 초과'), `정원 초과 검증: "${msgC}"`);
+      assert.ok(msgC.includes('1개 미신청'), `미신청 검증: "${msgC}"`);
+      console.log(`    ✓ [Pass] 결과: "${msgC}"\n`);
 
       // Case D: 실제 사례 재현 - 30개 세미나 중 일부 정원 초과
       console.log('  Case D: 실제 사례 재현 (30개 세미나, 일부 정원 초과)');
@@ -166,12 +171,13 @@ describe('apply_seminar 신청 결과 집계 정확성 테스트', () => {
 
       const resultD = await runApplySeminar({}, { notifyNewSeminarsToTelegram: false });
       assert.strictEqual(resultD.success, true);
+      const msgD = resultD.message || '';
       // 기존 버그: "30개 세미나 신청 완료! (30/30)" 이었음
-      assert.ok(resultD.message.includes('28개 세미나 신청 완료'), `30/30 버그 수정 검증: "${resultD.message}"`);
-      assert.ok(resultD.message.includes('(28/30)'), `실제 성공 카운트: "${resultD.message}"`);
-      assert.ok(resultD.message.includes('2개 정원 초과'), `정원 초과 카운트: "${resultD.message}"`);
-      assert.ok(!resultD.message.includes('30개 세미나 신청 완료'), `30/30 아님: "${resultD.message}"`);
-      console.log(`    ✓ [Pass] 결과: "${resultD.message}" (기존 버그 "30/30"이 "28/30"으로 수정됨)\n`);
+      assert.ok(msgD.includes('28개 세미나 신청 완료'), `30/30 버그 수정 검증: "${msgD}"`);
+      assert.ok(msgD.includes('(28/30)'), `실제 성공 카운트: "${msgD}"`);
+      assert.ok(msgD.includes('2개 정원 초과'), `정원 초과 카운트: "${msgD}"`);
+      assert.ok(!msgD.includes('30개 세미나 신청 완료'), `30/30 아님: "${msgD}"`);
+      console.log(`    ✓ [Pass] 결과: "${msgD}" (기존 버그 "30/30"이 "28/30"으로 수정됨)\n`);
 
       // Case E: 모든 세미나가 정원 초과
       console.log('  Case E: 모든 세미나 정원 초과');
@@ -187,10 +193,11 @@ describe('apply_seminar 신청 결과 집계 정확성 테스트', () => {
 
       const resultE = await runApplySeminar({}, { notifyNewSeminarsToTelegram: false });
       assert.strictEqual(resultE.success, true);
-      assert.ok(resultE.message.includes('0개 세미나 신청 완료'), `전체 실패 검증: "${resultE.message}"`);
-      assert.ok(resultE.message.includes('(0/2)'), `0/2 카운트: "${resultE.message}"`);
-      assert.ok(resultE.message.includes('2개 정원 초과'), `정원 초과 검증: "${resultE.message}"`);
-      console.log(`    ✓ [Pass] 결과: "${resultE.message}"\n`);
+      const msgE = resultE.message || '';
+      assert.ok(msgE.includes('0개 세미나 신청 완료'), `전체 실패 검증: "${msgE}"`);
+      assert.ok(msgE.includes('(0/2)'), `0/2 카운트: "${msgE}"`);
+      assert.ok(msgE.includes('2개 정원 초과'), `정원 초과 검증: "${msgE}"`);
+      console.log(`    ✓ [Pass] 결과: "${msgE}"\n`);
 
       console.log('🎉 모든 신청 결과 집계 정확성 테스트 통과!\n');
     } finally {

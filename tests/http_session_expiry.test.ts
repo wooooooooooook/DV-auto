@@ -178,7 +178,7 @@ describe('HTTP Session Expiry & Error Classification Tests', () => {
         },
       );
 
-      const taskResult = await applySeminarExtraTask.run({}, { notifyNewSeminarsToTelegram: false });
+      const taskResult = await applySeminarExtraTask.run({}, { notifyNewSeminarsToTelegram: false, forceEnrich: true });
 
       // Assertions for Mid-Task Session Expiry:
       // 1) Task result is failure
@@ -263,7 +263,10 @@ describe('HTTP Session Expiry & Error Classification Tests', () => {
       );
 
       vi.spyOn(utilsModule, 'ensureLoggedIn').mockResolvedValue(true as never);
-      const successTaskResult = await applySeminarExtraTask.run({}, { notifyNewSeminarsToTelegram: false });
+      const successTaskResult = await applySeminarExtraTask.run(
+        {},
+        { notifyNewSeminarsToTelegram: false, forceEnrich: true },
+      );
       assert.strictEqual(successTaskResult.success, true);
 
       const storedAfterSuccess = seminarRepo.getAllSeminars();

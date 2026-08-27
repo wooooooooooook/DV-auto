@@ -183,7 +183,7 @@ function setBot(name: BotName, instance: Telegraf | null): void {
               const subService = await import('./subscription_service');
 
               if (actionData.startsWith('toggle:')) {
-                const topic = actionData.replace('toggle:', '') as any;
+                const topic = actionData.replace('toggle:', '') as Parameters<typeof subService.toggleTopic>[1];
                 subService.toggleTopic(chatId, topic);
                 await ctx.answerCbQuery('설정이 변경되었습니다.').catch(() => {});
                 const { text, replyMarkup } = subService.buildMainMenu(chatId);
@@ -235,7 +235,9 @@ function setBot(name: BotName, instance: Telegraf | null): void {
               }
 
               if (actionData.startsWith('set_new_seminar:')) {
-                const filter = actionData.replace('set_new_seminar:', '') as any;
+                const filter = actionData.replace('set_new_seminar:', '') as Parameters<
+                  typeof subService.setNewSeminarFilter
+                >[1];
                 subService.setNewSeminarFilter(chatId, filter);
                 const label = subService.getNewSeminarFilterLabel(filter);
                 await ctx.answerCbQuery(`신규 세미나 알림이 [${label}] (으)로 설정되었습니다.`).catch(() => {});

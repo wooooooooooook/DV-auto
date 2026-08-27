@@ -87,7 +87,7 @@ export async function publishAndReplaceChannelNotice(
   // 3. 새 메시지 발송
   let newMessageId: number | null = null;
   try {
-    newMessageId = await sendNotificationToChannel(messageContent.text, null, messageContent.options as any);
+    newMessageId = await sendNotificationToChannel(messageContent.text, null, messageContent.options);
   } catch (err) {
     logger.error(`[${logPrefix}] 새 메시지 발송 중 오류:`, err);
     newMessageId = null;

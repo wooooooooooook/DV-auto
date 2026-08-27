@@ -47,6 +47,24 @@ export interface SubscriptionRecord {
   updatedAt: number;
 }
 
+export interface InlineKeyboardMarkup {
+  inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
+}
+
+interface SubscriptionRow {
+  chat_id: number;
+  today_links?: number;
+  today_links_time?: string;
+  today_links_sent_date?: string | null;
+  new_seminar?: string;
+  intermd_quiz?: number;
+  seminar_changes?: number;
+  seminar_live?: number;
+  point_conversion?: number;
+  created_at?: number;
+  updated_at?: number;
+}
+
 const seoulDateString = (): string => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
 
 export function parseCapacityNumbers(item: { currentCount?: string; totalCount?: string }): {
@@ -86,7 +104,7 @@ export function matchesNewSeminarFilter(
 
 export function getSubscription(chatId: number): SubscriptionRecord {
   const db = getDatabase();
-  const row = db.prepare('SELECT * FROM subscriptions WHERE chat_id = ?').get(chatId) as any;
+  const row = db.prepare('SELECT * FROM subscriptions WHERE chat_id = ?').get(chatId) as SubscriptionRow | undefined;
   if (!row) {
     return {
       chatId,
@@ -303,7 +321,7 @@ export async function sendToTopicSubscribers(
     try {
       const chunks = splitTelegramMessage(message, { maxLength: TELEGRAM_SAFE_MESSAGE_LENGTH });
       for (let i = 0; i < chunks.length; i++) {
-        await bot.telegram.sendMessage(chatId, chunks[i], options as any);
+        await bot.telegram.sendMessage(chatId, chunks[i], options);
         if (i < chunks.length - 1) {
           await sleep(100);
         }
@@ -385,7 +403,7 @@ export async function sendNewSeminarToSubscribers(
   buildSingleMessageFn?: (seminar: SeminarListItem) => { text: string; options?: Record<string, unknown> },
 ): Promise<{ successCount: number; failCount: number }> {
   const db = getDatabase();
-  const rows = db.prepare("SELECT * FROM subscriptions WHERE new_seminar != 'off'").all() as Array<any>;
+  const rows = db.prepare("SELECT * FROM subscriptions WHERE new_seminar != 'off'").all() as SubscriptionRow[];
 
   if (rows.length === 0) {
     return { successCount: 0, failCount: 0 };
@@ -411,7 +429,7 @@ export async function sendNewSeminarToSubscribers(
 
   for (const row of rows) {
     const chatId = row.chat_id;
-    const filter = row.new_seminar as NewSeminarFilter;
+    const filter = (row.new_seminar as NewSeminarFilter) || 'all';
 
     const matchedSeminars = targetSeminars.filter((s) => matchesNewSeminarFilter(filter, s));
     if (matchedSeminars.length === 0) {
@@ -426,7 +444,7 @@ export async function sendNewSeminarToSubscribers(
 
         const chunks = splitTelegramMessage(messageContent.text, { maxLength: TELEGRAM_SAFE_MESSAGE_LENGTH });
         for (let i = 0; i < chunks.length; i++) {
-          await bot.telegram.sendMessage(chatId, chunks[i], messageContent.options as any);
+          await bot.telegram.sendMessage(chatId, chunks[i], messageContent.options);
           if (i < chunks.length - 1) {
             await sleep(100);
           }
@@ -516,7 +534,7 @@ export async function sendUrgentSeminarsToSubscribers(
         await bot.telegram.sendMessage(chatId, chunks[i], {
           parse_mode: 'HTML',
           link_preview_options: { is_disabled: true },
-        } as any);
+        });
         if (i < chunks.length - 1) {
           await sleep(100);
         }
@@ -612,7 +630,7 @@ export async function sendHourlyTodayLinksToSubscribers(
     try {
       const chunks = splitTelegramMessage(messageText, { maxLength: TELEGRAM_SAFE_MESSAGE_LENGTH });
       for (let i = 0; i < chunks.length; i++) {
-        await bot.telegram.sendMessage(chatId, chunks[i], messageOptions as any);
+        await bot.telegram.sendMessage(chatId, chunks[i], messageOptions);
         if (i < chunks.length - 1) {
           await sleep(100);
         }
@@ -670,7 +688,7 @@ export function getNewSeminarFilterLabel(filter: NewSeminarFilter): string {
   }
 }
 
-export function buildMainMenu(chatId: number): { text: string; replyMarkup: any } {
+export function buildMainMenu(chatId: number): { text: string; replyMarkup: InlineKeyboardMarkup } {
   const sub = getSubscription(chatId);
 
   const text = [
@@ -746,7 +764,7 @@ export function buildMainMenu(chatId: number): { text: string; replyMarkup: any 
   };
 }
 
-export function buildTodayLinksTimeMenu(chatId: number): { text: string; replyMarkup: any } {
+export function buildTodayLinksTimeMenu(chatId: number): { text: string; replyMarkup: InlineKeyboardMarkup } {
   const sub = getSubscription(chatId);
 
   const text = [
@@ -783,7 +801,7 @@ export function buildTodayLinksTimeMenu(chatId: number): { text: string; replyMa
   };
 }
 
-export function buildNewSeminarMenu(chatId: number): { text: string; replyMarkup: any } {
+export function buildNewSeminarMenu(chatId: number): { text: string; replyMarkup: InlineKeyboardMarkup } {
   const sub = getSubscription(chatId);
 
   const text = [

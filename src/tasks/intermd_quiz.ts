@@ -1,5 +1,4 @@
 import { InterMDClient, type InterMDTodayQuiz, type InterMDSubmitResult } from '../modules/intermd_api';
-import { sendTelegram } from '../modules/utils';
 import * as logger from '../services/logger';
 import * as storage from '../services/storage';
 import { sendInterMDQuizToSubscribers } from '../services/intermd_quiz_subscribers';

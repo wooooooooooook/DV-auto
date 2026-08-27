@@ -247,8 +247,8 @@ async function testSendTelegramAndChannelChunking() {
   const fs = await import('fs');
   const path = await import('path');
 
-  setBot('admin', mockBot as any);
-  setBot('notice', mockBot as any);
+  setBot('admin', mockBot as unknown as Parameters<typeof setBot>[1]);
+  setBot('notice', mockBot as unknown as Parameters<typeof setBot>[1]);
   process.env.TELEGRAM_CHAT_ID = '12345';
   process.env.NOTICE_CHANNEL_ID = '67890';
 
@@ -314,7 +314,7 @@ async function testSeminarSubscribersChunking() {
   } = await import('../src/services/seminar_subscribers');
   const storage = await import('../src/services/storage');
 
-  setBot('notice', mockNoticeBot as any);
+  setBot('notice', mockNoticeBot as unknown as Parameters<typeof setBot>[1]);
   storage.set(SEMINAR_CHANGE_SUBSCRIBERS_KEY, []);
   addSeminarChangeSubscriber(1111);
   addSeminarChangeSubscriber(2222);

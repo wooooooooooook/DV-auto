@@ -28,13 +28,13 @@ describe('apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스�
     const sentChannelMessages: string[] = [];
 
     // 모킹
-    vi.spyOn(utilsModule, 'sendTelegram').mockImplementation(async (msg: string, img?: string) => {
-      sentTelegramMessages.push({ message: msg, imagePath: img });
+    vi.spyOn(utilsModule, 'sendTelegram').mockImplementation(async (msg: string, img?: string | null) => {
+      sentTelegramMessages.push({ message: msg, imagePath: img ?? undefined });
       return true;
     });
     vi.spyOn(utilsModule, 'sendNotificationToChannel').mockImplementation(async (msg: string) => {
       sentChannelMessages.push(msg);
-      return true;
+      return 1;
     });
 
     try {
@@ -250,6 +250,8 @@ describe('apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스�
 
       vi.spyOn(seminarApiModule, 'fetchSeminarDetail').mockResolvedValue({
         success: true,
+        seminarId: '100',
+        hasEntryHistory: false,
         isPointExcluded: false,
         rawResponse: {
           seminarDetail: {
