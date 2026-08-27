@@ -361,6 +361,10 @@ describe('seminar_detail 단위 테스트', () => {
     assert(converted5574.currentCount === '6274', '5574 currentCount 일치');
     assert(converted5574.totalCount === '7000', '5574 totalCount 일치');
     assert(converted5574.detectedDate === '2026-08-18', '5574 createDt 기준 detectedDate');
+    // hiddenYn=N → isClosed=false
+    assert(converted5574.isClosed === false, '5574 hiddenYn=N → isClosed=false');
+    assert(converted5574.hiddenYn === 'N', '5574 hiddenYn 필드 보존');
+    assert(converted5574.diseaseCategoryNm === '심혈관질환', '5574 diseaseCategoryNm 변환');
 
     const converted5572 = convertDetailToSeminarListItem(mock5572Detail, mock5572Raw);
     assert(converted5572.seminarId === '5572', '5572 seminarId 일치');
@@ -369,6 +373,22 @@ describe('seminar_detail 단위 테스트', () => {
     assert(converted5572.nightTime === false, '5572 13시는 nightTime=false');
     assert(converted5572.isPointExcluded === true, '5572 survey 없음 (포인트 미지급)');
     assert(converted5572.processState === 3, '5572 processState=3 (신청완료)');
+    // hiddenYn=N → isClosed=false
+    assert(converted5572.isClosed === false, '5572 hiddenYn=N → isClosed=false');
+    assert(converted5572.diseaseCategoryNm === '신경질환', '5572 diseaseCategoryNm 변환');
+
+    // hiddenYn=Y 비공개 세미나 변환 검증
+    const mockPrivateDetail: SeminarDetail = {
+      ...mock5574Detail,
+      seminarId: 9900,
+      seminarNm: '내과 전용 비공개 세미나',
+      hiddenYn: 'Y',
+      diseaseCategoryNm: '내분비질환',
+    };
+    const convertedPrivate = convertDetailToSeminarListItem(mockPrivateDetail);
+    assert(convertedPrivate.isClosed === true, '비공개 세미나: hiddenYn=Y → isClosed=true');
+    assert(convertedPrivate.hiddenYn === 'Y', '비공개 세미나: hiddenYn 필드 보존');
+    assert(convertedPrivate.diseaseCategoryNm === '내분비질환', '비공개 세미나: diseaseCategoryNm 변환');
     console.log('  ✓ [Pass] convertDetailToSeminarListItem 변환 검증 성공');
 
     // Case 7: updateStoredSeminarFromDetail 신규 세미나 추가 검증

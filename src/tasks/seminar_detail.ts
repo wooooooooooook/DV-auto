@@ -190,6 +190,9 @@ export function convertDetailToSeminarListItem(data: SeminarDetail, _raw?: Semin
           : 0
         : Number(data.seminarCompleted)
       : undefined;
+  const hiddenYn = typeof data.hiddenYn === 'string' ? data.hiddenYn : undefined;
+  const isClosed = hiddenYn === 'Y' || hiddenYn === 'y';
+  const diseaseCategoryNm = typeof data.diseaseCategoryNm === 'string' ? data.diseaseCategoryNm : undefined;
 
   let detectedDate = '';
   if (typeof data.createDt === 'string' && data.createDt.trim().length > 0) {
@@ -215,6 +218,9 @@ export function convertDetailToSeminarListItem(data: SeminarDetail, _raw?: Semin
     processState: processStateNum,
     cancelProcessState: cancelProcessStateNum,
     seminarCompleted: seminarCompletedNum,
+    isClosed,
+    hiddenYn,
+    diseaseCategoryNm,
     detectedDate,
     detectedAt: now,
   };

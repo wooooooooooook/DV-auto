@@ -89,6 +89,73 @@ describe('신규 세미나 모음 통합 공지 (삭제/재발송) 단위 테스
     assert.deepStrictEqual(options.link_preview_options, { is_disabled: true });
   });
 
+  it("buildNewSeminarsNoticeMessage: [비공개], [심혈관질환], '방금 추가됨' 블록이 올바르게 포함되어야 함", () => {
+    const item: SeminarListItem = {
+      seminarId: '5652',
+      name: '개원의를 위한 고혈압 처방 팁',
+      url: 'https://m.doctorville.co.kr/cme/seminar/5652',
+      date: '2026-09-08',
+      time: '13:00~14:00',
+      currentCount: '995',
+      totalCount: '4000',
+      nightTime: false,
+      isClosed: true,
+      hiddenYn: 'Y',
+      diseaseCategoryNm: '심혈관질환',
+      isPointExcluded: false,
+      isAdvancedSurvey: false,
+    };
+
+    const channelNotice = buildNewSeminarsNoticeMessage([item], ['5652']);
+    console.log('  ✓ [비공개] 태그 포함 확인');
+    assert.ok(channelNotice.text.includes('[비공개]'));
+    console.log('  ✓ [심혈관질환] 태그 포함 확인');
+    assert.ok(channelNotice.text.includes('[심혈관질환]'));
+    console.log('  ✓ [비공개] + [심혈관질환] 순서 확인');
+    assert.ok(
+      channelNotice.text.includes('[2026-09-08 13:00~14:00] [비공개] [심혈관질환] 개원의를 위한 고혈압 처방 팁'),
+    );
+  });
+
+  it('buildNewSeminarsNoticeMessage: 질환분류명은 비공개 세미나에만 표시, 공개 세미나는 미표시', () => {
+    const privateSeminar: SeminarListItem = {
+      seminarId: '5652',
+      name: '비공개 심혈관 세미나',
+      url: 'https://m.doctorville.co.kr/cme/seminar/5652',
+      date: '2026-09-08',
+      time: '13:00~14:00',
+      totalCount: '4000',
+      currentCount: '100',
+      nightTime: false,
+      isClosed: true,
+      diseaseCategoryNm: '심혈관질환',
+      isPointExcluded: false,
+      isAdvancedSurvey: false,
+    };
+    const publicSeminar: SeminarListItem = {
+      seminarId: '5653',
+      name: '공개 내분비 세미나',
+      url: 'https://m.doctorville.co.kr/cme/seminar/5653',
+      date: '2026-09-10',
+      time: '13:00~14:00',
+      totalCount: '2000',
+      currentCount: '50',
+      nightTime: false,
+      isClosed: false,
+      diseaseCategoryNm: '내분비질환',
+      isPointExcluded: false,
+      isAdvancedSurvey: false,
+    };
+
+    const { text } = buildNewSeminarsNoticeMessage([privateSeminar, publicSeminar]);
+
+    // 비공개 세미나: [비공개] + [심혈관질환] 모두 표시
+    assert.ok(text.includes('[비공개]'), '비공개 세미나는 [비공개] 태그가 있어야 함');
+    assert.ok(text.includes('[심혈관질환]'), '비공개 세미나의 질환분류명이 표시되어야 함');
+    // 공개 세미나: [비공개] 없음, [내분비질환] 없음
+    assert.ok(!text.includes('[내분비질환]'), '공개 세미나의 질환분류명은 표시되지 않아야 함');
+  });
+
   it('buildNewSeminarsNoticeMessage: 정원 10명 미만 세미나 제외 검증', () => {
     const list: SeminarListItem[] = [
       {

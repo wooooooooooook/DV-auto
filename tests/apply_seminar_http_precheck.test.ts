@@ -383,4 +383,133 @@ describe('apply_seminar HTTP pre-check 및 조건부 Playwright 실행 테스트
       vi.restoreAllMocks();
     }
   });
+
+  it('runHttpOnly: 비공개 세미나 갱신 및 채널 공지 검증', async () => {
+    console.log('===========================================================');
+    console.log('  runHttpOnly: 예정된 비공개 세미나 detail API 갱신 검증');
+    console.log('===========================================================\n');
+
+    const applyModule = await import('../src/tasks/apply_seminar');
+    const { runHttpOnly } = applyModule;
+    const channelRepoModule = await import('../src/services/channel_message_repository');
+
+    // shouldRunEnrich=false 강제 → 공개 세미나 enrich는 건너뜀
+    vi.spyOn(applyModule, 'shouldRunEnrich').mockReturnValue(false);
+
+    seminarRepo.clearSeminars();
+
+    // DB에 예정된 비공개 세미나(5700)와 종료된 비공개 세미나(5701) 저장
+    seminarRepo.upsertSeminars([
+      {
+        seminarId: '5700',
+        name: '비공개 예정 세미나',
+        url: 'https://m.doctorville.co.kr/cme/seminar/5700',
+        date: '2026-09-15',
+        time: '13:00~14:00',
+        totalCount: '4000',
+        currentCount: '100',
+        nightTime: false,
+        isClosed: true,
+        hiddenYn: 'Y',
+        diseaseCategoryNm: '심혈관질환',
+        isPointExcluded: false,
+        isAdvancedSurvey: false,
+        processState: ProcessState.PROCESS_CANCEL,
+        detectedDate: new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' }),
+      },
+      {
+        seminarId: '5701',
+        name: '비공개 종료 세미나',
+        url: 'https://m.doctorville.co.kr/cme/seminar/5701',
+        date: '2026-08-01',
+        time: '13:00~14:00',
+        totalCount: '4000',
+        currentCount: '4000',
+        nightTime: false,
+        isClosed: true,
+        hiddenYn: 'Y',
+        diseaseCategoryNm: '내분비질환',
+        isPointExcluded: false,
+        isAdvancedSurvey: false,
+        processState: ProcessState.PROCESS_END, // 종료 → 갱신 제외 대상
+        detectedDate: new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' }),
+      },
+    ]);
+
+    // 메인 API: 5702 공개 세미나 1개만 반환 (비공개 세미나는 포함되지 않음)
+    vi.spyOn(seminarApiModule, 'fetchMainFutureSeminars').mockResolvedValue({
+      success: true,
+      items: [
+        {
+          seminarId: 5702,
+          seminarNm: '공개 세미나 5702',
+          startDt: '2026-09-20 13:00:00',
+          endDt: '2026-09-20 14:00:00',
+          maxPeopleCnt: 3000,
+          applyCnt: 50,
+          useDepthSurvey: 'N',
+          diseaseCategoryNm: '일반',
+          hiddenYn: 'N',
+          processState: ProcessState.PROCESS_CANCEL,
+          cancelProcessState: 0,
+          seminarCompleted: 0,
+        },
+      ],
+      rawResponse: {},
+    });
+
+    // detail API 호출 추적
+    const detailCalledIds: string[] = [];
+    vi.spyOn(seminarApiModule, 'fetchSeminarDetail').mockImplementation(async (id: string | number) => {
+      detailCalledIds.push(String(id));
+      return {
+        success: true,
+        seminarId: String(id),
+        isPointExcluded: false,
+        hasEntryHistory: false,
+        rawResponse: {
+          seminarDetail: {
+            seminarId: Number(id),
+            seminarNm: `갱신된 세미나 ${id}`,
+            startDt: '2026-09-15 13:00:00',
+            endDt: '2026-09-15 14:00:00',
+            maxPeopleCnt: 4000,
+            applyCnt: 200,
+            hiddenYn: 'Y',
+            diseaseCategoryNm: '심혈관질환',
+            useDepthSurvey: 'N',
+            processState: ProcessState.PROCESS_CANCEL,
+          },
+        },
+      };
+    });
+
+    vi.spyOn(utilsModule, 'sendTelegram').mockResolvedValue(true);
+
+    let publishedText = '';
+    vi.spyOn(channelRepoModule, 'publishAndReplaceChannelNotice').mockImplementation(async (opts) => {
+      const built = opts.buildMessageFn([]);
+      publishedText = built.text;
+      return { newMessageId: 9001, success: true };
+    });
+
+    try {
+      const result = await runHttpOnly({ notifyNewSeminarsToChannel: true, silentIfNoNew: false });
+      assert.strictEqual(result.success, true);
+
+      // 예정된 비공개 세미나(5700)는 detail API로 갱신되어야 함
+      assert.ok(detailCalledIds.includes('5700'), '예정된 비공개 세미나(5700)가 detail API 조회되어야 함');
+      // 종료된 비공개 세미나(5701)는 detail API 갱신 제외
+      assert.ok(!detailCalledIds.includes('5701'), '종료된 비공개 세미나(5701)는 detail API 재조회 제외되어야 함');
+
+      // 채널 공지에 비공개 세미나 태그 포함 확인
+      assert.ok(publishedText.includes('[비공개]'), '채널 공지에 [비공개] 태그가 포함되어야 함');
+      assert.ok(publishedText.includes('[심혈관질환]'), '채널 공지에 [심혈관질환] 태그가 포함되어야 함');
+
+      console.log('  ✓ 비공개 세미나 갱신 및 채널 공지 검증');
+      console.log('🎉 runHttpOnly 비공개 세미나 갱신 테스트 완료!\n');
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
 });

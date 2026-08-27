@@ -329,9 +329,11 @@ describe('세미나 ID 불연속(Gap) 탐색 및 비공개 세미나 발굴/알�
     assert.strictEqual(saved5653.diseaseCategoryNm, '내분비질환');
 
     // 채널 공지 메시지에 [비공개]와 [심혈관질환] 태그가 포함되어 발송되었는지 확인
+    // 비공개 세미나(5652)는 [비공개] + [심혈관질환] 태그가 붙어야 함
     assert.ok(publishedChannelNoticeText.includes('[비공개]'));
     assert.ok(publishedChannelNoticeText.includes('[심혈관질환]'));
-    assert.ok(publishedChannelNoticeText.includes('[내분비질환]'));
+    // 공개 세미나(5653)는 질환분류명 태그를 붙이지 않음
+    assert.ok(!publishedChannelNoticeText.includes('[내분비질환]'));
 
     // 구독자에게도 비공개 세미나(5652)가 전달되었는지 확인
     assert.ok(subscriberSentSeminars.some((s) => s.seminarId === '5652'));

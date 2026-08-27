@@ -390,9 +390,9 @@ export function buildNewSeminarsNoticeMessage(
     }
     if (item.isClosed || item.hiddenYn === 'Y') {
       tags.push('[비공개]');
-    }
-    if (item.diseaseCategoryNm && item.diseaseCategoryNm.trim()) {
-      tags.push(`[${item.diseaseCategoryNm.trim()}]`);
+      if (item.diseaseCategoryNm && item.diseaseCategoryNm.trim()) {
+        tags.push(`[${item.diseaseCategoryNm.trim()}]`);
+      }
     }
     if (item.isPointExcluded) {
       tags.push('[포인트미지급]');
@@ -1415,6 +1415,33 @@ export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<Ta
     if (gapSeminars.length > 0) {
       normalizedCurrentSeminars.push(...gapSeminars);
       currentSeminars.push(...gapSeminars.map(convertSeminarListItemToRawSeminar));
+    }
+
+    // 예정된 비공개 세미나(DB 저장분)는 메인 API에 노출되지 않으므로 매 실행마다 detail API로 최신 상태 갱신
+    const currentIdSet = new Set(
+      normalizedCurrentSeminars.map((s) => s.seminarId || getSeminarIdFromUrl(s.url)).filter(Boolean),
+    );
+    const pendingPrivateSeminars = storedSeminars.filter((s) => {
+      if (!s.isClosed && s.hiddenYn !== 'Y') return false;
+      const sid = s.seminarId || getSeminarIdFromUrl(s.url);
+      if (!sid || currentIdSet.has(sid)) return false;
+      // 이미 종료된 세미나는 제외
+      const ps = s.processState;
+      if (ps === ProcessState.PROCESS_END || ps === ProcessState.PROCESS_COMPLETED) return false;
+      if (s.seminarCompleted === 1) return false;
+      return true;
+    });
+
+    if (pendingPrivateSeminars.length > 0) {
+      const { seminars: refreshedPrivate, isAuthExpired: privateAuthExpired } =
+        await enrichSeminarsWithDetail(pendingPrivateSeminars);
+      if (privateAuthExpired) {
+        const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
+        await sendTelegram(msg).catch(() => {});
+        return { success: false, message: msg };
+      }
+      normalizedCurrentSeminars.push(...refreshedPrivate);
+      currentSeminars.push(...refreshedPrivate.map(convertSeminarListItemToRawSeminar));
     }
 
     // 1시간에 1번(또는 forceEnrich=true)만 상세(detail) API를 조회하여 최신 메타데이터 갱신
