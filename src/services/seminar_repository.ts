@@ -381,6 +381,20 @@ export function getSeminarsByDetectedDate(detectedDate: string): SeminarListItem
 }
 
 /**
+ * 특정 세미나 진행 일자(date)의 세미나 목록을 조회합니다.
+ */
+export function getSeminarsByDate(date: string): SeminarListItem[] {
+  const db = getDatabase();
+  const stmt = db.prepare(`
+    SELECT * FROM seminars 
+    WHERE date = ?
+    ORDER BY time ASC, seminar_id ASC
+  `);
+  const rows = stmt.all(date) as SeminarDbRow[];
+  return rows.map(rowToSeminarListItem);
+}
+
+/**
  * 세미나 목록을 통째로 교체합니다 (테스트 mock 주입 및 배치 재설정용)
  */
 export function setAllSeminars(seminars: SeminarListItem[]): void {

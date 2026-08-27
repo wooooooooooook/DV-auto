@@ -548,5 +548,36 @@ describe('monitor_seminars API 기반 모니터링 기능 단위/통합 테스�
     assert.strictEqual(isSeminarStartedByTime(futureTime, testNowMs), false, '미래 시간은 false');
     assert.strictEqual(isSeminarStartedByTime(undefined, testNowMs), false, 'undefined는 false');
     console.log('  ✓ isSeminarStartedByTime 시간 판정 단위 검증 완료!\n');
+
+    // ── Test 7: API 응답에 없으나 로컬 DB에 저장된 당일 세미나 fallback 복원 검증 ──
+    console.log('--- [Test 7] API 응답에 없으나 로컬 DB에 저장된 당일 세미나 fallback 복원 검증 ---');
+    const seminarRepo = await import('../src/services/seminar_repository');
+    seminarRepo.upsertSeminar({
+      seminarId: '8899',
+      name: '로컬 DB에만 존재하는 종료된 세미나',
+      url: 'https://m.doctorville.co.kr/cme/seminar/8899',
+      date: '2026-08-24',
+      time: '19:00~20:00',
+      currentCount: '10',
+      totalCount: '100',
+      nightTime: true,
+      isAdvancedSurvey: false,
+      processState: 7, // PROCESS_END
+      seminarCompleted: 1,
+    });
+
+    fetchMainFutureSpy.mockResolvedValue({
+      success: true,
+      items: [], // mainFuture API에는 세미나가 제거되어 없음
+      rawResponse: {},
+    });
+
+    const fallbackDinnerRes = await getTodaysSeminarsFromApi(17, 22, '2026-08-24');
+    assert.strictEqual(fallbackDinnerRes.success, true);
+    const fallbackSem = Object.values(fallbackDinnerRes.seminars).find((s) => s.seminarId === '8899');
+    assert.ok(fallbackSem, 'API 응답이 비어있어도 로컬 DB의 8899 세미나가 복원되어야 함');
+    assert.strictEqual(fallbackSem.status, '종료', 'DB의 processState에 따라 종료 상태여야 함');
+    assert.strictEqual(fallbackSem.name, '로컬 DB에만 존재하는 종료된 세미나');
+    console.log('  ✓ 로컬 DB fallback 복원 검증 완료!\n');
   });
 });

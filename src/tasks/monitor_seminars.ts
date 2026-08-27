@@ -577,6 +577,58 @@ export async function getTodaysSeminarsFromApi(
     }
   }
 
+  // 3. 메인 미래 세미나 API에 빠져있지만 로컬 DB에 당일 해당 시간대로 저장되어 있는 세미나 보충 (fallback)
+  for (const stored of storedList) {
+    if (stored.date !== targetDate) continue;
+
+    const sid = stored.seminarId ? String(stored.seminarId).trim() : '';
+    const fullUrl = stored.url || (sid ? `${SEMINAR_DETAIL_PAGE}${sid}` : '');
+    if (!fullUrl || seminars[fullUrl]) continue;
+
+    let storedStartHour = NaN;
+    if (stored.time) {
+      const startHM = stored.time.split('~')[0]?.trim();
+      if (startHM && startHM.includes(':')) {
+        storedStartHour = parseInt(startHM.split(':')[0], 10);
+      }
+    }
+
+    const inTimeWindow = Number.isFinite(storedStartHour)
+      ? storedStartHour >= startHour && storedStartHour < endHour
+      : startHour >= 16
+        ? stored.nightTime === true
+        : stored.nightTime === false;
+
+    if (inTimeWindow) {
+      const processStateNum = stored.processState;
+      const cancelProcessStateNum = stored.cancelProcessState;
+      const seminarCompletedNum = stored.seminarCompleted;
+
+      let statusText: SeminarStatus = '대기';
+      if (
+        processStateNum === ProcessState.PROCESS_END ||
+        processStateNum === ProcessState.PROCESS_COMPLETED ||
+        seminarCompletedNum === 1
+      ) {
+        statusText = '종료';
+      }
+
+      seminars[fullUrl] = {
+        status: statusText,
+        name: stored.name || '세미나',
+        seminarId: sid,
+        url: fullUrl,
+        time: stored.time,
+        hasSurvey: true,
+        isSurveyPointExcluded: stored.isPointExcluded ?? false,
+        isAdvancedSurvey: stored.isAdvancedSurvey ?? false,
+        processState: processStateNum,
+        cancelProcessState: cancelProcessStateNum,
+        seminarCompleted: seminarCompletedNum,
+      };
+    }
+  }
+
   return {
     success: true,
     isAuthExpired: false,
