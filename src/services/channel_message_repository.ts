@@ -284,6 +284,29 @@ export function getSeminarStatusChannelMessage(
 }
 
 /**
+ * 특정 일자의 세미나 현황 공지가 '모두 종료' 상태까지 완료되었는지 판별합니다.
+ */
+export function isSeminarNoticeCompleted(periodName: string, date?: string, channelId?: string): boolean {
+  const msg = getSeminarStatusChannelMessage(periodName, date, channelId);
+  if (!msg || !msg.text || msg.status === 'deleted') {
+    return false;
+  }
+  return msg.text.includes('🏁') || msg.text.includes('모두 종료되었습니다') || msg.text.includes('모두 종료');
+}
+
+/**
+ * 특정 일자의 세미나 모니터링이 autoResume 대상인지 판별합니다.
+ * (공지방에 공지된 메시지가 존재하면서, 아직 '모두 종료' 메시지가 전송되지 않은 상태)
+ */
+export function shouldResumeSeminarMonitor(periodName: string, date?: string, channelId?: string): boolean {
+  const msg = getSeminarStatusChannelMessage(periodName, date, channelId);
+  if (!msg || !msg.text || msg.status === 'deleted') {
+    return false;
+  }
+  return !isSeminarNoticeCompleted(periodName, date, channelId);
+}
+
+/**
  * 특정 일자에 공지 채널로 전송된 '신규 세미나 모음' 메시지 레코드를 조회합니다.
  */
 export function getNewSeminarsChannelMessage(date?: string, channelId?: string): ChannelMessageRecord | null {

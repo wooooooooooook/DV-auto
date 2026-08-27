@@ -1117,10 +1117,12 @@ async function monitorSeminars(
       let hasEntryHistory = false;
       let initialIsEnded = info.status === '종료';
 
+      let initialSurveyState: number | undefined;
       if (info.seminarId) {
         const detailCheck = await checkSeminarEndStatusFromApi(info.seminarId);
         isPointExcluded = detailCheck.isPointExcluded;
         hasEntryHistory = detailCheck.hasEntryHistory;
+        initialSurveyState = detailCheck.surveyState;
         info.isSurveyPointExcluded = isPointExcluded;
         if (detailCheck.isEnded) {
           initialIsEnded = true;
@@ -1138,9 +1140,35 @@ async function monitorSeminars(
       let currentStatus: SeminarStatus = initialIsEnded ? '종료' : info.status;
       const isEnded = initialIsEnded;
       const endedAt = isEnded ? Date.now() : undefined;
-      const quizResultMessage: string | null = null;
+      let quizResultMessage: string | null = null;
       let startNotified = false;
       const endNotified = isEnded;
+
+      // 설문 진행 중(surveyState===1)인 경우에만 온디맨드 퀴즈 처리 시도 (이미 마감/완료 시 생략)
+      const shouldAttemptQuiz =
+        initialIsEnded &&
+        !isPointExcluded &&
+        info.hasSurvey !== false &&
+        initialSurveyState === SurveyState.SURVEY_PROGRESS;
+
+      if (shouldAttemptQuiz) {
+        try {
+          await withBrowserContext(providedContext, async (ctx) => {
+            const res = await handleSeminarEndAndQuiz(
+              ctx,
+              {
+                name: info.name,
+                seminarId: info.seminarId,
+                isSurveyPointExcluded: false,
+              },
+              targetUrl,
+            );
+            quizResultMessage = res.message;
+          });
+        } catch (quizErr) {
+          console.warn(`[${periodName}] 초기 세미나 퀴즈 처리 건너뜀 (${info.name}):`, quizErr);
+        }
+      }
 
       const isReadyToEnter =
         currentStatus === '입장가능' ||
@@ -1201,13 +1229,6 @@ async function monitorSeminars(
       return true;
     }
 
-    const initialSeminarNames = seminarList.map((s) => `  - ${s.name} (${s.status})`).join('\n');
-    await sendTelegram(
-      `[${periodName}] 총 ${seminarList.length}개의 세미나 감시를 시작합니다.\n${initialSeminarNames}`,
-    );
-
-    // 초기 발송 조건 체크: 입장가능 또는 종료 상태인 세미나가 있는 경우에만 발송
-    const hasInitialActiveOrEnded = seminarList.some((s) => s.status === '입장가능' || s.status === '종료');
     const isAllInitiallySeminarsEnded = seminarList.length > 0 && seminarList.every((s) => s.status === '종료');
     const isAllInitiallySurveysClosed = seminarList.every((s) => {
       if (s.status !== '종료') return false;
@@ -1217,17 +1238,55 @@ async function monitorSeminars(
     });
     const isAllInitiallyCompleted = isAllInitiallySeminarsEnded && (!waitForSurveyClose || isAllInitiallySurveysClosed);
 
+    const initialSeminarNames = seminarList.map((s) => `  - ${s.name} (${s.status})`).join('\n');
+    if (isAutoResume) {
+      if (isAllInitiallyCompleted) {
+        await sendTelegram(
+          `🔄 [${periodName}] 세미나 감시가 재개(autoResume)되었으며, 모든 세미나 및 설문이 이미 종료되어 모니터링을 완료합니다.\n${initialSeminarNames}`,
+        ).catch(() => {});
+      } else {
+        await sendTelegram(
+          `🔄 [${periodName}] 세미나 감시가 재개(autoResume)되었습니다.\n${initialSeminarNames}`,
+        ).catch(() => {});
+      }
+    } else {
+      await sendTelegram(
+        `[${periodName}] 총 ${seminarList.length}개의 세미나 감시를 시작합니다.\n${initialSeminarNames}`,
+      ).catch(() => {});
+    }
+
+    // 초기 발송 조건 체크: 입장가능 또는 종료 상태인 세미나가 있는 경우에만 발송
+    const hasInitialActiveOrEnded = seminarList.some((s) => s.status === '입장가능' || s.status === '종료');
     let lastStatusNoticeText: string | null = null;
 
     if (hasInitialActiveOrEnded) {
-      lastStatusNoticeMessageId = await publishSeminarStatusNotice(
-        periodName,
-        seminarList,
-        lastStatusNoticeMessageId,
-        isAllInitiallyCompleted,
-        isAutoResume,
-      );
-      lastStatusNoticeText = buildSeminarStatusMessage(periodName, seminarList, isAllInitiallyCompleted).text;
+      const targetStatusText = buildSeminarStatusMessage(periodName, seminarList, isAllInitiallyCompleted).text;
+
+      // resume 시 기존 공지 메시지가 존재하는 경우: 인플레이스 수정(edit)을 우선 시도하여 불필요한 채널 푸시 알림 방지
+      if (isAutoResume && lastStatusNoticeMessageId) {
+        const editRes = await editChannelMessage(lastStatusNoticeMessageId, targetStatusText);
+        if (editRes.success) {
+          lastStatusNoticeText = targetStatusText;
+        } else {
+          lastStatusNoticeMessageId = await publishSeminarStatusNotice(
+            periodName,
+            seminarList,
+            lastStatusNoticeMessageId,
+            isAllInitiallyCompleted,
+            isAutoResume,
+          );
+          lastStatusNoticeText = targetStatusText;
+        }
+      } else {
+        lastStatusNoticeMessageId = await publishSeminarStatusNotice(
+          periodName,
+          seminarList,
+          lastStatusNoticeMessageId,
+          isAllInitiallyCompleted,
+          isAutoResume,
+        );
+        lastStatusNoticeText = targetStatusText;
+      }
     }
 
     if (isAllInitiallyCompleted) {
@@ -1477,28 +1536,25 @@ async function monitorSeminars(
         currentNowMs,
       ).text;
 
-      if (hasStateChanged) {
-        // 주요 상태 변화 (대기->입장가능 또는 입장가능->종료): publishSeminarStatusNotice
-        lastStatusNoticeMessageId = await publishSeminarStatusNotice(
-          periodName,
-          currentList,
-          lastStatusNoticeMessageId,
-          isAllCompleted,
-          isAutoResume,
-        );
-        lastStatusNoticeText = currentStatusText;
-
-        if (isAllCompleted) {
-          console.log(`[${periodName}] 모든 세미나 및 설문이 종료되었습니다. 모니터링을 완료합니다.`);
-          break;
-        }
-      } else if (lastStatusNoticeText !== currentStatusText && lastStatusNoticeMessageId) {
-        // 10분 단위 설문 잔여 시간 변경 등 텍스트 변화 시: editChannelMessage로 인플레이스 수정
-        const editRes = await editChannelMessage(lastStatusNoticeMessageId, currentStatusText);
-        if (editRes.success) {
-          lastStatusNoticeText = currentStatusText;
+      if (hasStateChanged || lastStatusNoticeText !== currentStatusText) {
+        if (lastStatusNoticeMessageId) {
+          // 기존 공지 메시지가 있는 경우: 항상 editChannelMessage로 인플레이스 수정하여 추가 알림 억제
+          const editRes = await editChannelMessage(lastStatusNoticeMessageId, currentStatusText);
+          if (editRes.success) {
+            lastStatusNoticeText = currentStatusText;
+          } else {
+            // 수정 실패 시(메시지 삭제 등) publishSeminarStatusNotice로 fallback
+            lastStatusNoticeMessageId = await publishSeminarStatusNotice(
+              periodName,
+              currentList,
+              lastStatusNoticeMessageId,
+              isAllCompleted,
+              isAutoResume,
+            );
+            lastStatusNoticeText = currentStatusText;
+          }
         } else {
-          // 수정 실패 시 publishSeminarStatusNotice로 재시도
+          // 최초 공지 발송
           lastStatusNoticeMessageId = await publishSeminarStatusNotice(
             periodName,
             currentList,

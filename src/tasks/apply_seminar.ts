@@ -24,6 +24,7 @@ import {
   parseCapacityNumbers,
 } from '../services/subscription_service';
 import * as channelRepo from '../services/channel_message_repository';
+import { checkAndTriggerSeminarMonitors } from '../services/seminar_monitor_trigger';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
@@ -1333,6 +1334,11 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
     }
 
     message += `\n${SEMINAR_DETAIL_PAGE}`;
+
+    await checkAndTriggerSeminarMonitors(seminars, { targetDate: referenceDate }).catch((err) => {
+      logger.error('checkAndTriggerSeminarMonitors error in run:', err);
+    });
+
     const result: TaskResult = {
       success: true,
       message,
@@ -1524,6 +1530,10 @@ export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<Ta
 
     const totalSeminarsAvailable = currentSeminars.length;
     const message = `🔄 세미나 목록 갱신 완료 (${totalSeminarsAvailable}개)`;
+
+    await checkAndTriggerSeminarMonitors(finalSeminars, { targetDate: referenceDate }).catch((err) => {
+      logger.error('checkAndTriggerSeminarMonitors error in runHttpOnly:', err);
+    });
 
     const result: TaskResult = { success: true, message };
     if (silentIfNoNew && newlyAdded.length === 0) result.silent = true;

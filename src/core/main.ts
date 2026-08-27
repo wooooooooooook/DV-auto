@@ -24,6 +24,7 @@ import * as seminarDetailTaskModule from '../tasks/seminar_detail';
 import * as intermdQuizTaskModule from '../tasks/intermd_quiz';
 import { sendOrUpdateTodayLinksNotification } from '../services/broadcast_today_links';
 import { sendToTopicSubscribers, sendHourlyTodayLinksToSubscribers } from '../services/subscription_service';
+import { shouldResumeSeminarMonitor } from '../services/channel_message_repository';
 import type { Task } from '../types';
 
 dns.setDefaultResultOrder('ipv4first');
@@ -36,9 +37,6 @@ const BROADCAST_TODAY_LINKS_CRON = '0 9 * * *';
 const HOURLY_TODAY_LINKS_EARLY_CRON = '2 0 * * *';
 const HOURLY_TODAY_LINKS_CRON = '0 1-12 * * *';
 const APPLY_SEMINAR_EXTRA_CRON = '*/10 6-23 * * *';
-const LUNCH_MONITOR_CRON = '0 11 * * *';
-const DINNER_MONITOR_CRON = '0 16 * * *';
-const MONITOR_RESUME_DURATION_HOURS = 5;
 const POINT_CONVERSION_STATE_KEY = 'point_conversion:last_available';
 let isFastPolling = false;
 let fastPollingInterval: NodeJS.Timeout | null = null;
@@ -115,17 +113,6 @@ function stopFastPolling(): void {
     clearInterval(fastPollingInterval);
     fastPollingInterval = null;
   }
-}
-function getStartHourFromCron(cronExpr: string): number | null {
-  const parts = cronExpr.trim().split(/\s+/);
-  if (parts.length < 2) return null;
-  const hour = Number(parts[1]);
-  return Number.isNaN(hour) ? null : hour;
-}
-function isWithinWindow(currentHour: number, startHour: number, durationHours: number): boolean {
-  const endHour = (startHour + durationHours) % 24;
-  if (startHour < endHour) return currentHour >= startHour && currentHour < endHour;
-  return currentHour >= startHour || currentHour < endHour;
 }
 
 const scheduledTask: Task = {
@@ -348,8 +335,7 @@ const runSeminarQuizTask: Task = {
 taskRegistry.registerTask(runSeminarQuizTask);
 const monitorLunchSeminarsTask: Task = {
   name: 'monitor_lunch_seminars',
-  schedule: LUNCH_MONITOR_CRON,
-  timezone: TIMEZONE,
+  lockTtlMs: 6 * 60 * 60 * 1000,
   run: async (ctx) => {
     await applySeminarTask
       .run()
@@ -360,11 +346,10 @@ const monitorLunchSeminarsTask: Task = {
   },
 };
 taskRegistry.registerTask(monitorLunchSeminarsTask);
-scheduler.scheduleTaskCron(monitorLunchSeminarsTask);
+
 const monitorDinnerSeminarsTask: Task = {
   name: 'monitor_dinner_seminars',
-  schedule: DINNER_MONITOR_CRON,
-  timezone: TIMEZONE,
+  lockTtlMs: 6 * 60 * 60 * 1000,
   run: async (ctx) => {
     await applySeminarTask
       .run()
@@ -375,7 +360,6 @@ const monitorDinnerSeminarsTask: Task = {
   },
 };
 taskRegistry.registerTask(monitorDinnerSeminarsTask);
-scheduler.scheduleTaskCron(monitorDinnerSeminarsTask);
 
 const naverpayPointExchange: Task = {
   name: '네이버페이포인트교환',
@@ -484,21 +468,22 @@ scheduler.scheduleTaskCron(intermdQuizTask);
 
 process.stdin.resume();
 function checkAndResumeTasks(): void {
-  const now = new Date(new Date().toLocaleString('en-US', { timeZone: TIMEZONE }));
-  const currentHour = now.getHours();
-  const lunchStartHour = getStartHourFromCron(LUNCH_MONITOR_CRON);
-  if (lunchStartHour !== null && isWithinWindow(currentHour, lunchStartHour, MONITOR_RESUME_DURATION_HOURS))
+  if (shouldResumeSeminarMonitor('점심')) {
+    logger.info('공지방 상태 감지: 점심 세미나 모니터링을 autoResume합니다.');
     runTask(monitorLunchSeminarsTask, { isAutoResume: true }).catch((err) =>
-      logger.error('Failed to auto-resume lunch monitoring task:', err),
+      logger.error('점심 세미나 모니터링 autoResume 실패:', err),
     );
-  const dinnerStartHour = getStartHourFromCron(DINNER_MONITOR_CRON);
-  if (dinnerStartHour !== null && isWithinWindow(currentHour, dinnerStartHour, MONITOR_RESUME_DURATION_HOURS))
+  }
+  if (shouldResumeSeminarMonitor('저녁')) {
+    logger.info('공지방 상태 감지: 저녁 세미나 모니터링을 autoResume합니다.');
     runTask(monitorDinnerSeminarsTask, { isAutoResume: true }).catch((err) =>
-      logger.error('Failed to auto-resume dinner monitoring task:', err),
+      logger.error('저녁 세미나 모니터링 autoResume 실패:', err),
     );
+  }
 }
 checkAndNotifyPointConversion().catch((err) => logger.error('Startup point-conversion check failed:', err));
 checkAndResumeTasks();
+runTask(applySeminarExtraTask).catch((err) => logger.error('Startup apply_seminar_extra check failed:', err));
 function setupGracefulShutdown(): void {
   let isShuttingDown = false;
   const handleShutdown = (signal: string) => {
