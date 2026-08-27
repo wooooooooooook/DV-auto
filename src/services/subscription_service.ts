@@ -407,6 +407,12 @@ export function buildSingleNewSeminarMessage(item: SeminarListItem): {
   if (item.date || item.time) {
     tags.push(`[${item.date || ''}${item.date && item.time ? ' ' : ''}${item.time || ''}]`);
   }
+  if (item.isClosed || item.hiddenYn === 'Y') {
+    tags.push('[비공개]');
+  }
+  if (item.diseaseCategoryNm && item.diseaseCategoryNm.trim()) {
+    tags.push(`[${item.diseaseCategoryNm.trim()}]`);
+  }
   if (item.isPointExcluded) {
     tags.push('[포인트미지급]');
   }

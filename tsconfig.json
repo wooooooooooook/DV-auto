@@ -14,7 +14,9 @@
     "tsBuildInfoFile": "dist/.tsbuildinfo",
     "noEmitOnError": false,
     "types": [
-      "node"
+      "node",
+      "node-cron",
+      "better-sqlite3"
     ]
   },
   "include": [

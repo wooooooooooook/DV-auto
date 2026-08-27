@@ -6,7 +6,7 @@ import pluginPrettier from 'eslint-plugin-prettier';
 
 export default tseslint.config(
   {
-    ignores: ['node_modules/', 'dist/'],
+    ignores: ['node_modules/', 'dist/', 'scratch/'],
   },
   pluginJs.configs.recommended,
   prettier,

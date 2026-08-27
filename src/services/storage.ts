@@ -53,6 +53,8 @@ function initDatabase(db: Database.Database): void {
       detected_date TEXT,
       detected_at TEXT,
       urgent_notified INTEGER DEFAULT 0,
+      is_closed INTEGER DEFAULT 0,
+      disease_category_nm TEXT,
       updated_at INTEGER NOT NULL
     );
 
@@ -125,6 +127,12 @@ function initDatabase(db: Database.Database): void {
     const colNames = seminarColumns.map((c) => c.name);
     if (!colNames.includes('urgent_notified')) {
       db.exec(`ALTER TABLE seminars ADD COLUMN urgent_notified INTEGER DEFAULT 0;`);
+    }
+    if (!colNames.includes('is_closed')) {
+      db.exec(`ALTER TABLE seminars ADD COLUMN is_closed INTEGER DEFAULT 0;`);
+    }
+    if (!colNames.includes('disease_category_nm')) {
+      db.exec(`ALTER TABLE seminars ADD COLUMN disease_category_nm TEXT;`);
     }
   } catch (_e) {
     // ignore
@@ -583,6 +591,8 @@ function get<T = unknown>(key: string, fallback: T | null = null): T | null {
       detectedDate: row.detected_date ?? undefined,
       detectedAt: row.detected_at ?? undefined,
       urgentNotified: (row as unknown as { urgent_notified?: number }).urgent_notified === 1,
+      isClosed: (row as unknown as { is_closed?: number }).is_closed === 1,
+      diseaseCategoryNm: (row as unknown as { disease_category_nm?: string }).disease_category_nm ?? undefined,
     }));
     return items as unknown as T;
   }
@@ -661,13 +671,13 @@ function set<T = unknown>(key: string, value: T): void {
           night_time, is_point_excluded, is_advanced_survey, process_state,
           cancel_process_state, seminar_completed, point_paid, point,
           point_text, point_date, point_content, point_checked_at,
-          detected_date, detected_at, updated_at
+          detected_date, detected_at, is_closed, disease_category_nm, updated_at
         ) VALUES (
           ?, ?, ?, ?, ?, ?, ?,
           ?, ?, ?, ?,
           ?, ?, ?, ?,
           ?, ?, ?, ?,
-          ?, ?, ?
+          ?, ?, ?, ?, ?
         )
       `);
 
@@ -702,6 +712,8 @@ function set<T = unknown>(key: string, value: T): void {
           typeof item.pointCheckedAt === 'string' ? item.pointCheckedAt : null,
           typeof item.detectedDate === 'string' ? item.detectedDate : null,
           typeof item.detectedAt === 'string' ? item.detectedAt : null,
+          item.isClosed ? 1 : 0,
+          typeof item.diseaseCategoryNm === 'string' ? item.diseaseCategoryNm : null,
           now,
         );
       }

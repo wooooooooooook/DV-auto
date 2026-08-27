@@ -13,6 +13,7 @@ import { monitorSeminars } from '../src/tasks/monitor_seminars';
 import * as seminarApiModule from '../src/modules/seminar_api';
 import * as utilsModule from '../src/modules/utils';
 import * as seminarQuizModule from '../src/tasks/seminar_quiz';
+import * as checkPointModule from '../src/tasks/check_seminar_point';
 import * as storage from '../src/services/storage';
 import * as seminarRepo from '../src/services/seminar_repository';
 
@@ -21,6 +22,10 @@ describe('닥터빌 API 과다 호출 방지 및 라이브 모니터링 최적�
     vi.restoreAllMocks();
     storage.deleteKey(LAST_ENRICH_TIMESTAMP_KEY);
     seminarRepo.clearSeminars();
+    vi.spyOn(checkPointModule, 'searchSeminarPoints').mockResolvedValue({
+      success: true,
+      points: new Map(),
+    });
   });
 
   it('1. shouldRunEnrich 1시간 주기 및 forceEnrich 옵션 검증', () => {
