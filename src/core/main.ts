@@ -481,9 +481,6 @@ function checkAndResumeTasks(): void {
     );
   }
 }
-checkAndNotifyPointConversion().catch((err) => logger.error('Startup point-conversion check failed:', err));
-checkAndResumeTasks();
-runTask(applySeminarExtraTask).catch((err) => logger.error('Startup apply_seminar_extra check failed:', err));
 function setupGracefulShutdown(): void {
   let isShuttingDown = false;
   const handleShutdown = (signal: string) => {
@@ -509,8 +506,14 @@ function setupGracefulShutdown(): void {
 
 setupGracefulShutdown();
 
+// 봇을 먼저 초기화하여 task 및 autoResume 중 editChannelMessage와 알림이 정상 동작하도록 보장
 telegram.launch();
+
 const nowStr = new Date().toLocaleString('ko-KR', { timeZone: TIMEZONE });
 utils
   .sendTelegram(`🚀 앱이 온라인 상태입니다. (${nowStr})`)
   .catch((err) => logger.error('Failed to send startup notification:', err));
+
+checkAndNotifyPointConversion().catch((err) => logger.error('Startup point-conversion check failed:', err));
+checkAndResumeTasks();
+runTask(applySeminarExtraTask).catch((err) => logger.error('Startup apply_seminar_extra check failed:', err));

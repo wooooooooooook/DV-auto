@@ -219,4 +219,91 @@ describe('monitor_seminars_all_cases (앱 재시작 및 공지방 상태 기반 
     // 2. 관리자 텔레그램봇으로 autoResume 재개 사실이 전송되었는지 검증
     expect(sendTelegramSpy).toHaveBeenCalledWith(expect.stringContaining('세미나 감시가 재개(autoResume)되었으며'));
   });
+
+  it('Case 7: 과거에 이미 종료된 세미나(endDt 기준 1시간 이상 경과)의 설문 마감 시간이 60분으로 리셋되지 않고 즉시 완료 처리되는지 검증', async () => {
+    const fetchMainFutureSpy = vi.spyOn(seminarApiModule, 'fetchMainFutureSeminars');
+    const fetchSeminarDetailSpy = vi.spyOn(seminarApiModule, 'fetchSeminarDetail');
+    const sendNotificationToChannelSpy = vi.spyOn(utilsModule, 'sendNotificationToChannel');
+    const sendTelegramSpy = vi.spyOn(utilsModule, 'sendTelegram');
+
+    sendNotificationToChannelSpy.mockResolvedValue(9999);
+    sendTelegramSpy.mockResolvedValue(true);
+
+    const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+    channelRepo.recordChannelMessage({
+      channelId: 'notice_chan',
+      messageId: 802,
+      date: todayStr,
+      text: '🔔 점심세미나\n\n🟢 입장가능 | 12:30 고혈압 세미나',
+      status: 'sent',
+    });
+
+    fetchMainFutureSpy.mockResolvedValue({
+      success: true,
+      items: [
+        {
+          seminarId: 903,
+          seminarNm: '고혈압 세미나',
+          startDt: `${todayStr} 11:30:00`,
+          endDt: `${todayStr} 12:30:00`,
+          useSurvey: 'Y',
+          processState: 8, // PROCESS_COMPLETED
+          seminarCompleted: 1,
+        },
+      ],
+      rawResponse: {},
+    });
+
+    fetchSeminarDetailSpy.mockResolvedValue({
+      success: true,
+      seminarId: '903',
+      surveyState: 2, // 이미 설문 마감/완료 상태
+      isPointExcluded: false,
+      hasEntryHistory: true,
+      rawResponse: { surveyState: 2, seminarDetail: { processState: 8, seminarCompleted: 1 } },
+    });
+
+    const editChannelMessageSpy = vi.spyOn(channelRepo, 'editChannelMessage');
+    editChannelMessageSpy.mockResolvedValue({ success: true, message: 'edited' });
+
+    const result = await monitorSeminars('점심', 11, 15, {
+      isAutoResume: true,
+      pollIntervalMs: 10,
+      waitForSurveyClose: true,
+    });
+
+    expect(result).toBe(true);
+    // endDt로부터 1시간 이상 경과했으므로 "60분 남음"이 아니라 즉시 모두종료 메시지로 update
+    expect(editChannelMessageSpy).toHaveBeenCalledWith(
+      802,
+      expect.stringContaining('🏁 점심세미나가 모두 종료되었습니다.'),
+    );
+  });
+
+  it('resolveSeminarEndedAt 및 parseSeminarEndTimestamp 단위 동작 검증', async () => {
+    const { parseSeminarEndTimestamp, resolveSeminarEndedAt, getSurveyRemainingMinutes } =
+      await import('../src/tasks/monitor_seminars');
+
+    const now = Date.now();
+    const twoHoursAgo = now - 2 * 60 * 60 * 1000;
+    const iso2hAgo = new Date(twoHoursAgo).toISOString();
+
+    // 1. endDt가 2시간 전인 경우
+    const parsedTs = parseSeminarEndTimestamp({ endDt: iso2hAgo });
+    expect(parsedTs).toBe(new Date(iso2hAgo).getTime());
+
+    // 2. 2시간 전에 끝난 세미나의 endedAt 및 잔여 시간 계산 (0분 반환 확인)
+    const resolvedEndedAt = resolveSeminarEndedAt({ endDt: iso2hAgo }, 1, 0, now);
+    expect(resolvedEndedAt).toBe(parsedTs);
+
+    const remainingMinutes = getSurveyRemainingMinutes({ endedAt: resolvedEndedAt }, now);
+    expect(remainingMinutes).toBe(0);
+
+    // 3. 방금 막 끝난 세미나(endDt 없음, surveyState 1)의 경우 현재 시각 반환 (60분 반환 확인)
+    const freshEndedAt = resolveSeminarEndedAt({}, 1, 0, now);
+    expect(freshEndedAt).toBe(now);
+
+    const freshRemainingMinutes = getSurveyRemainingMinutes({ endedAt: freshEndedAt }, now);
+    expect(freshRemainingMinutes).toBe(60);
+  });
 });
