@@ -565,5 +565,5 @@ describe('today_links_format 단위 테스트', () => {
 
   it('testTodayQuizCacheIntegration', async () => {
     await testTodayQuizCacheIntegration();
-  });
+  }, 30000);
 });

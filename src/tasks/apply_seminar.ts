@@ -835,7 +835,7 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
 
   // 마감 임박(잔여 1,000명 이하) 진입 세미나 감지 및 알림 발송
   const newUrgentSeminars: SeminarListItem[] = [];
-  for (const s of currentSeminars) {
+  for (const s of enrichedSeminars) {
     const sid = s.seminarId || getSeminarIdFromUrl(s.url);
     if (!sid) continue;
     const { total, remaining } = parseCapacityNumbers(s);
@@ -1171,7 +1171,7 @@ export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<Ta
 
     // 마감 임박(잔여 1,000명 이하) 진입 세미나 감지 및 알림 발송
     const newUrgentSeminars: SeminarListItem[] = [];
-    for (const s of currentSeminars) {
+    for (const s of enrichedSeminars) {
       const sid = s.seminarId || getSeminarIdFromUrl(s.url);
       if (!sid) continue;
       const { total, remaining } = parseCapacityNumbers(s);

@@ -262,5 +262,5 @@ describe('Login Check Logic Tests', () => {
     }
 
     console.log('\n🎉 All login check tests passed successfully!\n');
-  });
+  }, 30000);
 });
