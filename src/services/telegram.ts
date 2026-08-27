@@ -1784,6 +1784,7 @@ if (noticeBot) {
   noticeBot.command('help', (ctx) => {
     const message = `사용 가능한 명령어:
 
+- /subscribe_settings (/구독설정): 맞춤 알림 구독 항목 및 시간 설정
 - /today_links: 오늘의 세미나/퀴즈/출석 링크 모음
 - /intermd_quiz: 인터엠디 오늘의 퀴즈 정답 확인
 - /seminar_detail <세미나번호>: 세미나 상세 정보 조회 (예: /seminar_detail 5566)
@@ -1834,6 +1835,7 @@ const adminCommands = [
 ];
 
 const noticeCommands = [
+  { command: 'subscribe_settings', description: '알림 구독 항목 및 시간 설정 (/구독설정)' },
   { command: 'today_links', description: '오늘의 세미나/퀴즈/출석 링크 모음' },
   { command: 'intermd_quiz', description: '인터엠디 오늘의 퀴즈 정답 확인' },
   { command: 'seminar_detail', description: '세미나 번호로 상세 정보 조회' },

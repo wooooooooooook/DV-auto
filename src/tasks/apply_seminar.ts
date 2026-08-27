@@ -28,6 +28,11 @@ import * as logger from '../services/logger';
 import * as seminarRepo from '../services/seminar_repository';
 import { sendSeminarChangesToSubscribers } from '../services/seminar_subscribers';
 import {
+  sendNewSeminarToSubscribers,
+  sendUrgentSeminarsToSubscribers,
+  parseCapacityNumbers,
+} from '../services/subscription_service';
+import {
   deleteChannelMessage,
   getNewSeminarsChannelMessage,
   publishAndReplaceChannelNotice,
@@ -822,6 +827,34 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
         referenceDate,
       );
     }
+    await sendNewSeminarToSubscribers(
+      newlyAdded,
+      newlyAdded.map((s) => s.seminarId || getSeminarIdFromUrl(s.url)).filter(Boolean) as string[],
+    ).catch(() => {});
+  }
+
+  // 마감 임박(잔여 1,000명 이하) 진입 세미나 감지 및 알림 발송
+  const newUrgentSeminars: SeminarListItem[] = [];
+  for (const s of currentSeminars) {
+    const sid = s.seminarId || getSeminarIdFromUrl(s.url);
+    if (!sid) continue;
+    const { total, remaining } = parseCapacityNumbers(s);
+    if (total > 0 && remaining <= 1000) {
+      const stored = storedSeminars.find((item) => (item.seminarId || getSeminarIdFromUrl(item.url)) === sid);
+      if (!stored?.urgentNotified) {
+        newUrgentSeminars.push(s);
+      }
+    }
+  }
+
+  if (newUrgentSeminars.length > 0) {
+    await sendUrgentSeminarsToSubscribers(newUrgentSeminars).catch(() => {});
+    for (const u of newUrgentSeminars) {
+      const sid = u.seminarId || getSeminarIdFromUrl(u.url);
+      if (sid) {
+        seminarRepo.markSeminarUrgentNotified(sid);
+      }
+    }
   }
 
   const finalSeminars = seminarRepo.getAllSeminars();
@@ -1129,6 +1162,34 @@ export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<Ta
           undefined,
           referenceDate,
         );
+      }
+      await sendNewSeminarToSubscribers(
+        newlyAdded,
+        newlyAdded.map((s) => s.seminarId || getSeminarIdFromUrl(s.url)).filter(Boolean) as string[],
+      ).catch(() => {});
+    }
+
+    // 마감 임박(잔여 1,000명 이하) 진입 세미나 감지 및 알림 발송
+    const newUrgentSeminars: SeminarListItem[] = [];
+    for (const s of currentSeminars) {
+      const sid = s.seminarId || getSeminarIdFromUrl(s.url);
+      if (!sid) continue;
+      const { total, remaining } = parseCapacityNumbers(s);
+      if (total > 0 && remaining <= 1000) {
+        const stored = storedSeminars.find((item) => (item.seminarId || getSeminarIdFromUrl(item.url)) === sid);
+        if (!stored?.urgentNotified) {
+          newUrgentSeminars.push(s);
+        }
+      }
+    }
+
+    if (newUrgentSeminars.length > 0) {
+      await sendUrgentSeminarsToSubscribers(newUrgentSeminars).catch(() => {});
+      for (const u of newUrgentSeminars) {
+        const sid = u.seminarId || getSeminarIdFromUrl(u.url);
+        if (sid) {
+          seminarRepo.markSeminarUrgentNotified(sid);
+        }
       }
     }
 

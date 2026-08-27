@@ -30,6 +30,7 @@ import {
   publishAndReplaceChannelNotice,
   type ChannelCommentRecord,
 } from '../services/channel_message_repository';
+import { sendToTopicSubscribers } from '../services/subscription_service';
 
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
 const SEMINAR_DETAIL_PC_PAGE = 'https://www.doctorville.co.kr/seminar/seminarDetail';
@@ -187,6 +188,7 @@ export async function publishSeminarStatusNotice(
   isAutoResume = false,
   comments?: Array<{ userName: string; text: string }>,
 ): Promise<number | null> {
+  const messageData = buildSeminarStatusMessage(periodName, seminars, isAllCompleted, comments);
   const result = await publishAndReplaceChannelNotice({
     prevMessageId,
     buildMessageFn: (commentsToAttach) =>
@@ -195,6 +197,10 @@ export async function publishSeminarStatusNotice(
     logPrefix: periodName,
     skipIfSameContent: isAutoResume,
   });
+
+  if (result.success && messageData.text) {
+    await sendToTopicSubscribers('seminar_live', messageData.text, messageData.options as any).catch(() => {});
+  }
 
   return result.newMessageId;
 }

@@ -23,6 +23,7 @@ import * as runSeminarQuizTaskModule from '../tasks/run_seminar_quiz';
 import * as seminarDetailTaskModule from '../tasks/seminar_detail';
 import * as intermdQuizTaskModule from '../tasks/intermd_quiz';
 import { sendOrUpdateTodayLinksNotification } from '../services/broadcast_today_links';
+import { sendToTopicSubscribers, sendHourlyTodayLinksToSubscribers } from '../services/subscription_service';
 import type { Task } from '../types';
 
 dns.setDefaultResultOrder('ipv4first');
@@ -32,6 +33,8 @@ const TIMEZONE = process.env.SCHEDULE_TZ || 'Asia/Seoul';
 const DAILY_ROUTINE_CRON = process.env.DAILY_CRON || '1 0 * * *';
 const INTERMD_QUIZ_CRON = process.env.INTERMD_QUIZ_CRON || '1 8 * * *';
 const BROADCAST_TODAY_LINKS_CRON = '0 9 * * *';
+const HOURLY_TODAY_LINKS_EARLY_CRON = '2 0 * * *';
+const HOURLY_TODAY_LINKS_CRON = '0 1-12 * * *';
 const APPLY_SEMINAR_EXTRA_CRON = '*/10 6-23 * * *';
 const LUNCH_MONITOR_CRON = '0 11 * * *';
 const DINNER_MONITOR_CRON = '0 16 * * *';
@@ -74,24 +77,25 @@ async function checkAndNotifyPointConversion(): Promise<void> {
     if (prev === available) return;
     writeConversionState(available);
     if (prev !== null) {
-      if (available)
-        await utils.sendNotificationToChannel(
-          [
-            '네이버페이포인트 전환이 가능해졌습니다',
-            'https://www.doctorville.co.kr/my/point/pointUseHistoryList',
-            '',
-            '[Q&A]',
-            'Q. 연동된 네이버 계정 없음',
-            'A. 아닙니다 광클하세요',
-            '',
-            'Q. 포인트 월 한도 초과 안내 : 네이버페이포인트 전환에 실패했습니다.',
-            'A. 아닙니다 광클하세요',
-          ].join('\n'),
-        );
-      else
-        await utils.sendNotificationToChannel(
-          `네이버페이포인트 전환 마감되었습니다. 다음 전환 가능 예정: ${plannedAt} ${meridiem}`,
-        );
+      if (available) {
+        const msg = [
+          '네이버페이포인트 전환이 가능해졌습니다',
+          'https://www.doctorville.co.kr/my/point/pointUseHistoryList',
+          '',
+          '[Q&A]',
+          'Q. 연동된 네이버 계정 없음',
+          'A. 아닙니다 광클하세요',
+          '',
+          'Q. 포인트 월 한도 초과 안내 : 네이버페이포인트 전환에 실패했습니다.',
+          'A. 아닙니다 광클하세요',
+        ].join('\n');
+        await utils.sendNotificationToChannel(msg);
+        await sendToTopicSubscribers('point_conversion', msg).catch(() => {});
+      } else {
+        const msg = `네이버페이포인트 전환 마감되었습니다. 다음 전환 가능 예정: ${plannedAt} ${meridiem}`;
+        await utils.sendNotificationToChannel(msg);
+        await sendToTopicSubscribers('point_conversion', msg).catch(() => {});
+      }
     }
   } catch (err) {
     logger.error('checkAndNotifyPointConversion error:', err);
@@ -444,6 +448,28 @@ const broadcastTodayLinksTask: Task = {
 };
 scheduler.scheduleTaskCron(broadcastTodayLinksTask);
 taskRegistry.registerTask(broadcastTodayLinksTask);
+
+const hourlyTodayLinksEarlyTask: Task = {
+  name: 'hourly_today_links_early',
+  schedule: HOURLY_TODAY_LINKS_EARLY_CRON,
+  timezone: TIMEZONE,
+  run: async () => {
+    await sendHourlyTodayLinksToSubscribers('00:02');
+  },
+};
+scheduler.scheduleTaskCron(hourlyTodayLinksEarlyTask);
+taskRegistry.registerTask(hourlyTodayLinksEarlyTask);
+
+const hourlyTodayLinksTask: Task = {
+  name: 'hourly_today_links',
+  schedule: HOURLY_TODAY_LINKS_CRON,
+  timezone: TIMEZONE,
+  run: async () => {
+    await sendHourlyTodayLinksToSubscribers();
+  },
+};
+scheduler.scheduleTaskCron(hourlyTodayLinksTask);
+taskRegistry.registerTask(hourlyTodayLinksTask);
 
 const intermdQuizTask: Task = {
   name: 'intermd_quiz',

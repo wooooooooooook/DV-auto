@@ -25,6 +25,7 @@ export type SeminarListItem = {
   seminarCompleted?: number;
   detectedDate?: string;
   detectedAt?: string;
+  urgentNotified?: boolean;
 } & SeminarPointStatus;
 
 export type SeminarDbRow = {
@@ -49,6 +50,7 @@ export type SeminarDbRow = {
   point_checked_at: string | null;
   detected_date: string | null;
   detected_at: string | null;
+  urgent_notified?: number;
   updated_at: number;
 };
 
@@ -76,6 +78,7 @@ export function rowToSeminarListItem(row: SeminarDbRow): SeminarListItem {
     pointCheckedAt: row.point_checked_at ?? undefined,
     detectedDate: row.detected_date ?? undefined,
     detectedAt: row.detected_at ?? undefined,
+    urgentNotified: row.urgent_notified === 1,
   };
 }
 
@@ -129,6 +132,7 @@ export function mergeSeminarRecord(existing: SeminarListItem | undefined, incomi
     pointCheckedAt: incoming.pointCheckedAt || existing.pointCheckedAt,
     detectedDate: existing.detectedDate || incoming.detectedDate,
     detectedAt: existing.detectedAt || incoming.detectedAt,
+    urgentNotified: incoming.urgentNotified ?? existing.urgentNotified ?? false,
   };
 }
 
@@ -177,13 +181,13 @@ export function upsertSeminar(incoming: SeminarListItem): SeminarListItem {
         night_time, is_point_excluded, is_advanced_survey, process_state,
         cancel_process_state, seminar_completed, point_paid, point,
         point_text, point_date, point_content, point_checked_at,
-        detected_date, detected_at, updated_at
+        detected_date, detected_at, urgent_notified, updated_at
       ) VALUES (
         ?, ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?,
         ?, ?, ?, ?,
         ?, ?, ?, ?,
-        ?, ?, ?
+        ?, ?, ?, ?
       )
     `);
 
@@ -209,6 +213,7 @@ export function upsertSeminar(incoming: SeminarListItem): SeminarListItem {
       merged.pointCheckedAt ?? null,
       merged.detectedDate ?? null,
       merged.detectedAt ?? null,
+      merged.urgentNotified ? 1 : 0,
       now,
     );
   });
@@ -234,13 +239,13 @@ export function upsertSeminars(incomingList: SeminarListItem[]): SeminarListItem
         night_time, is_point_excluded, is_advanced_survey, process_state,
         cancel_process_state, seminar_completed, point_paid, point,
         point_text, point_date, point_content, point_checked_at,
-        detected_date, detected_at, updated_at
+        detected_date, detected_at, urgent_notified, updated_at
       ) VALUES (
         ?, ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?,
         ?, ?, ?, ?,
         ?, ?, ?, ?,
-        ?, ?, ?
+        ?, ?, ?, ?
       )
     `);
 
@@ -275,6 +280,7 @@ export function upsertSeminars(incomingList: SeminarListItem[]): SeminarListItem
         merged.pointCheckedAt ?? null,
         merged.detectedDate ?? null,
         merged.detectedAt ?? null,
+        merged.urgentNotified ? 1 : 0,
         now,
       );
     }
@@ -282,6 +288,14 @@ export function upsertSeminars(incomingList: SeminarListItem[]): SeminarListItem
 
   batchTx();
   return results;
+}
+
+/**
+ * 특정 세미나를 마감 임박 알림 발송 완료(urgent_notified = 1)로 마킹합니다.
+ */
+export function markSeminarUrgentNotified(seminarId: string): void {
+  const db = getDatabase();
+  db.prepare('UPDATE seminars SET urgent_notified = 1, updated_at = ? WHERE seminar_id = ?').run(Date.now(), seminarId);
 }
 
 /**

@@ -52,6 +52,7 @@ function initDatabase(db: Database.Database): void {
       point_checked_at TEXT,
       detected_date TEXT,
       detected_at TEXT,
+      urgent_notified INTEGER DEFAULT 0,
       updated_at INTEGER NOT NULL
     );
 
@@ -96,11 +97,59 @@ function initDatabase(db: Database.Database): void {
       created_at INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS subscriptions (
+      chat_id INTEGER PRIMARY KEY,
+      today_links INTEGER DEFAULT 0,
+      today_links_time TEXT DEFAULT '09:00',
+      today_links_sent_date TEXT,
+      new_seminar TEXT DEFAULT 'off',
+      intermd_quiz INTEGER DEFAULT 0,
+      seminar_changes INTEGER DEFAULT 0,
+      seminar_live INTEGER DEFAULT 0,
+      point_conversion INTEGER DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS _migration_meta (
       name TEXT PRIMARY KEY,
       migrated_at INTEGER NOT NULL
     );
   `);
+
+  // seminars 테이블 컬럼 안전 마이그레이션 (기존 DB 호환)
+  try {
+    const seminarColumns = db.prepare(`PRAGMA table_info(seminars)`).all() as Array<{ name: string }>;
+    const colNames = seminarColumns.map((c) => c.name);
+    if (!colNames.includes('urgent_notified')) {
+      db.exec(`ALTER TABLE seminars ADD COLUMN urgent_notified INTEGER DEFAULT 0;`);
+    }
+  } catch (_e) {
+    // ignore
+  }
+
+  // subscriptions 테이블 컬럼 안전 마이그레이션 (기존 DB 호환)
+  try {
+    const subColumns = db.prepare(`PRAGMA table_info(subscriptions)`).all() as Array<{ name: string }>;
+    const colNames = subColumns.map((c) => c.name);
+    if (!colNames.includes('today_links_time')) {
+      db.exec(`ALTER TABLE subscriptions ADD COLUMN today_links_time TEXT DEFAULT '09:00';`);
+    }
+    if (!colNames.includes('today_links_sent_date')) {
+      db.exec(`ALTER TABLE subscriptions ADD COLUMN today_links_sent_date TEXT;`);
+    }
+    if (!colNames.includes('new_seminar')) {
+      db.exec(`ALTER TABLE subscriptions ADD COLUMN new_seminar TEXT DEFAULT 'off';`);
+    }
+    if (!colNames.includes('seminar_live')) {
+      db.exec(`ALTER TABLE subscriptions ADD COLUMN seminar_live INTEGER DEFAULT 0;`);
+    }
+    if (!colNames.includes('point_conversion')) {
+      db.exec(`ALTER TABLE subscriptions ADD COLUMN point_conversion INTEGER DEFAULT 0;`);
+    }
+  } catch (_e) {
+    // ignore
+  }
 
   // channel_comments 테이블 컬럼 안전 마이그레이션 (기존 DB 호환)
   try {
@@ -312,6 +361,85 @@ export function migrateSeminarListTableIfNeeded(db: Database.Database): boolean 
   return true;
 }
 
+/**
+ * kv_store의 intermd_quiz_subscribers와 seminar_change_subscribers 데이터를 subscriptions 테이블로 안전하게 이관합니다.
+ */
+export function migrateSubscriptionsTableIfNeeded(db: Database.Database): boolean {
+  const metaCheck = db
+    .prepare('SELECT name FROM _migration_meta WHERE name = ?')
+    .get('subscriptions_table_migration') as { name: string } | undefined;
+
+  if (metaCheck) {
+    return false;
+  }
+
+  const now = Date.now();
+  const intermdRow = db.prepare('SELECT value FROM kv_store WHERE key = ?').get('intermd_quiz_subscribers') as
+    | { value: string }
+    | undefined;
+  const seminarRow = db.prepare('SELECT value FROM kv_store WHERE key = ?').get('seminar_change_subscribers') as
+    | { value: string }
+    | undefined;
+
+  let intermdIds: number[] = [];
+  let seminarIds: number[] = [];
+
+  if (intermdRow && intermdRow.value) {
+    try {
+      const parsed = JSON.parse(intermdRow.value);
+      if (Array.isArray(parsed)) intermdIds = parsed.map(Number).filter((n) => !Number.isNaN(n));
+    } catch (_e) {
+      // ignore
+    }
+  }
+
+  if (seminarRow && seminarRow.value) {
+    try {
+      const parsed = JSON.parse(seminarRow.value);
+      if (Array.isArray(parsed)) seminarIds = parsed.map(Number).filter((n) => !Number.isNaN(n));
+    } catch (_e) {
+      // ignore
+    }
+  }
+
+  const allChatIds = Array.from(new Set([...intermdIds, ...seminarIds]));
+
+  const migrateTx = db.transaction(() => {
+    const insertOrUpdateStmt = db.prepare(`
+      INSERT INTO subscriptions (
+        chat_id, today_links, today_links_time, today_links_sent_date,
+        new_seminar, intermd_quiz, seminar_changes, seminar_live, point_conversion,
+        created_at, updated_at
+      ) VALUES (
+        @chatId, 0, '09:00', NULL,
+        'off', @intermdQuiz, @seminarChanges, 0, 0,
+        @now, @now
+      )
+      ON CONFLICT(chat_id) DO UPDATE SET
+        intermd_quiz = CASE WHEN excluded.intermd_quiz = 1 THEN 1 ELSE subscriptions.intermd_quiz END,
+        seminar_changes = CASE WHEN excluded.seminar_changes = 1 THEN 1 ELSE subscriptions.seminar_changes END,
+        updated_at = excluded.updated_at
+    `);
+
+    for (const chatId of allChatIds) {
+      insertOrUpdateStmt.run({
+        chatId,
+        intermdQuiz: intermdIds.includes(chatId) ? 1 : 0,
+        seminarChanges: seminarIds.includes(chatId) ? 1 : 0,
+        now,
+      });
+    }
+
+    db.prepare('INSERT OR REPLACE INTO _migration_meta (name, migrated_at) VALUES (?, ?)').run(
+      'subscriptions_table_migration',
+      now,
+    );
+  });
+
+  migrateTx();
+  return true;
+}
+
 function getDb(): Database.Database {
   if (!dbInstance) {
     if (currentDbPath !== ':memory:') {
@@ -326,6 +454,8 @@ function getDb(): Database.Database {
     migrateFromJsonIfNeeded(dbInstance);
     // kv_store에 남은 seminar_list가 있으면 seminars 테이블로 자동 마이그레이션
     migrateSeminarListTableIfNeeded(dbInstance);
+    // kv_store에 남은 구독자 데이터가 있으면 subscriptions 테이블로 자동 마이그레이션
+    migrateSubscriptionsTableIfNeeded(dbInstance);
   }
   return dbInstance;
 }
@@ -348,6 +478,7 @@ export function setDatabasePath(dbPath: string, autoMigrate: boolean = false): v
     migrateFromJsonIfNeeded(dbInstance);
   }
   migrateSeminarListTableIfNeeded(dbInstance);
+  migrateSubscriptionsTableIfNeeded(dbInstance);
 }
 
 /**
@@ -379,6 +510,18 @@ export function getDatabase(): Database.Database {
  */
 function get<T = unknown>(key: string, fallback: T | null = null): T | null {
   const db = getDb();
+  if (key === 'intermd_quiz_subscribers') {
+    const rows = db.prepare('SELECT chat_id FROM subscriptions WHERE intermd_quiz = 1').all() as Array<{
+      chat_id: number;
+    }>;
+    return rows.map((r) => r.chat_id) as unknown as T;
+  }
+  if (key === 'seminar_change_subscribers') {
+    const rows = db.prepare('SELECT chat_id FROM subscriptions WHERE seminar_changes = 1').all() as Array<{
+      chat_id: number;
+    }>;
+    return rows.map((r) => r.chat_id) as unknown as T;
+  }
   if (key === 'apply_seminar:seminar_list') {
     const rows = db.prepare('SELECT * FROM seminars ORDER BY date DESC, seminar_id DESC').all() as Array<{
       seminar_id: string;
@@ -429,6 +572,7 @@ function get<T = unknown>(key: string, fallback: T | null = null): T | null {
       pointCheckedAt: row.point_checked_at ?? undefined,
       detectedDate: row.detected_date ?? undefined,
       detectedAt: row.detected_at ?? undefined,
+      urgentNotified: (row as any).urgent_notified === 1,
     }));
     return items as unknown as T;
   }
@@ -450,10 +594,53 @@ function get<T = unknown>(key: string, fallback: T | null = null): T | null {
 /**
  * 저장소에 키/값을 저장합니다.
  * - 'apply_seminar:seminar_list' 키인 경우 seminars 테이블에 반영하여 호환성을 유지합니다.
+ * - 'intermd_quiz_subscribers', 'seminar_change_subscribers' 키인 경우 subscriptions 테이블과 동기화합니다.
  * - DB 오류 시 예외를 발생시킵니다.
  */
 function set<T = unknown>(key: string, value: T): void {
   const db = getDb();
+  if (key === 'intermd_quiz_subscribers' && Array.isArray(value)) {
+    const now = Date.now();
+    const ids = (value as number[]).map(Number).filter((n) => !Number.isNaN(n));
+    const tx = db.transaction(() => {
+      db.prepare('UPDATE subscriptions SET intermd_quiz = 0, updated_at = ?').run(now);
+      const upsertStmt = db.prepare(`
+        INSERT INTO subscriptions (
+          chat_id, today_links, today_links_time, today_links_sent_date,
+          new_seminar, intermd_quiz, seminar_changes, seminar_live, point_conversion,
+          created_at, updated_at
+        ) VALUES (?, 0, '09:00', NULL, 'off', 1, 0, 0, 0, ?, ?)
+        ON CONFLICT(chat_id) DO UPDATE SET intermd_quiz = 1, updated_at = ?
+      `);
+      for (const id of ids) {
+        upsertStmt.run(id, now, now, now);
+      }
+    });
+    tx();
+    return;
+  }
+
+  if (key === 'seminar_change_subscribers' && Array.isArray(value)) {
+    const now = Date.now();
+    const ids = (value as number[]).map(Number).filter((n) => !Number.isNaN(n));
+    const tx = db.transaction(() => {
+      db.prepare('UPDATE subscriptions SET seminar_changes = 0, updated_at = ?').run(now);
+      const upsertStmt = db.prepare(`
+        INSERT INTO subscriptions (
+          chat_id, today_links, today_links_time, today_links_sent_date,
+          new_seminar, intermd_quiz, seminar_changes, seminar_live, point_conversion,
+          created_at, updated_at
+        ) VALUES (?, 0, '09:00', NULL, 'off', 0, 1, 0, 0, ?, ?)
+        ON CONFLICT(chat_id) DO UPDATE SET seminar_changes = 1, updated_at = ?
+      `);
+      for (const id of ids) {
+        upsertStmt.run(id, now, now, now);
+      }
+    });
+    tx();
+    return;
+  }
+
   if (key === 'apply_seminar:seminar_list' && Array.isArray(value)) {
     const now = Date.now();
     const tx = db.transaction(() => {
@@ -525,12 +712,19 @@ function set<T = unknown>(key: string, value: T): void {
 /**
  * 저장소에서 키를 삭제합니다.
  * - 'apply_seminar:seminar_list' 키인 경우 seminars 테이블도 함께 비웁니다.
+ * - 'intermd_quiz_subscribers', 'seminar_change_subscribers' 키인 경우 subscriptions 테이블의 해당 플래그를 0으로 리셋합니다.
  * - DB 오류 시 예외를 발생시킵니다.
  */
 function deleteKey(key: string): void {
   const db = getDb();
   if (key === 'apply_seminar:seminar_list') {
     db.prepare('DELETE FROM seminars').run();
+  }
+  if (key === 'intermd_quiz_subscribers') {
+    db.prepare('UPDATE subscriptions SET intermd_quiz = 0, updated_at = ?').run(Date.now());
+  }
+  if (key === 'seminar_change_subscribers') {
+    db.prepare('UPDATE subscriptions SET seminar_changes = 0, updated_at = ?').run(Date.now());
   }
   const stmt = db.prepare('DELETE FROM kv_store WHERE key = ?');
   stmt.run(key);
@@ -561,6 +755,11 @@ function clear(): void {
   const db = getDb();
   db.prepare('DELETE FROM kv_store').run();
   db.prepare('DELETE FROM seminars').run();
+  try {
+    db.prepare('DELETE FROM subscriptions').run();
+  } catch (_e) {
+    // ignore if table does not exist
+  }
   try {
     db.prepare('DELETE FROM channel_messages').run();
   } catch (_e) {

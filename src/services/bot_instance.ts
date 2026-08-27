@@ -146,6 +146,162 @@ function setBot(name: BotName, instance: Telegraf | null): void {
             await ctx.reply(`구독 해제 실패: ${message}`);
           }
         });
+        instance.command(['subscribe_settings', '구독설정', '구독', 'settings', 'subscribe'], async (ctx: Context) => {
+          try {
+            if (ctx.from?.id && !checkNoticeCooldown(ctx.from.id)) {
+              await ctx.reply('⏳ 요청이 너무 빠릅니다. 2초 후 다시 시도해주세요.');
+              return;
+            }
+            const chatId = ctx.chat?.id;
+            if (!chatId) {
+              await ctx.reply('⚠️ 유효하지 않은 채팅방 ID입니다.');
+              return;
+            }
+            const { buildMainMenu } = await import('./subscription_service');
+            const { text, replyMarkup } = buildMainMenu(chatId);
+            await ctx.reply(text, {
+              parse_mode: 'HTML',
+              reply_markup: replyMarkup,
+            });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            await ctx.reply(`구독 설정 조회 실패: ${message}`);
+          }
+        });
+
+        // 콜백 쿼리 (인라인 키보드 인터랙션)
+        if (typeof instance.action === 'function') {
+          instance.action(/^sub:(.+)$/, async (ctx: Context & { match?: RegExpExecArray }) => {
+            try {
+              const chatId = ctx.chat?.id;
+              if (!chatId) {
+                await ctx.answerCbQuery('⚠️ 유효하지 않은 채팅방 ID입니다.').catch(() => {});
+                return;
+              }
+
+              const actionData = ctx.match?.[1] || '';
+              const subService = await import('./subscription_service');
+
+              if (actionData.startsWith('toggle:')) {
+                const topic = actionData.replace('toggle:', '') as any;
+                subService.toggleTopic(chatId, topic);
+                await ctx.answerCbQuery('설정이 변경되었습니다.').catch(() => {});
+                const { text, replyMarkup } = subService.buildMainMenu(chatId);
+                await ctx
+                  .editMessageText(text, {
+                    parse_mode: 'HTML',
+                    reply_markup: replyMarkup,
+                  })
+                  .catch(() => {});
+                return;
+              }
+
+              if (actionData === 'menu:today_links_time') {
+                await ctx.answerCbQuery().catch(() => {});
+                const { text, replyMarkup } = subService.buildTodayLinksTimeMenu(chatId);
+                await ctx
+                  .editMessageText(text, {
+                    parse_mode: 'HTML',
+                    reply_markup: replyMarkup,
+                  })
+                  .catch(() => {});
+                return;
+              }
+
+              if (actionData.startsWith('set_time:')) {
+                const time = actionData.replace('set_time:', '');
+                subService.setTodayLinksTime(chatId, time);
+                await ctx.answerCbQuery(`오늘의 링크 시간이 ${time}으로 설정되었습니다.`).catch(() => {});
+                const { text, replyMarkup } = subService.buildMainMenu(chatId);
+                await ctx
+                  .editMessageText(text, {
+                    parse_mode: 'HTML',
+                    reply_markup: replyMarkup,
+                  })
+                  .catch(() => {});
+                return;
+              }
+
+              if (actionData === 'menu:new_seminar') {
+                await ctx.answerCbQuery().catch(() => {});
+                const { text, replyMarkup } = subService.buildNewSeminarMenu(chatId);
+                await ctx
+                  .editMessageText(text, {
+                    parse_mode: 'HTML',
+                    reply_markup: replyMarkup,
+                  })
+                  .catch(() => {});
+                return;
+              }
+
+              if (actionData.startsWith('set_new_seminar:')) {
+                const filter = actionData.replace('set_new_seminar:', '') as any;
+                subService.setNewSeminarFilter(chatId, filter);
+                const label = subService.getNewSeminarFilterLabel(filter);
+                await ctx.answerCbQuery(`신규 세미나 알림이 [${label}] (으)로 설정되었습니다.`).catch(() => {});
+                const { text, replyMarkup } = subService.buildMainMenu(chatId);
+                await ctx
+                  .editMessageText(text, {
+                    parse_mode: 'HTML',
+                    reply_markup: replyMarkup,
+                  })
+                  .catch(() => {});
+                return;
+              }
+
+              if (actionData === 'all_on') {
+                subService.setAllTopics(chatId, true);
+                await ctx.answerCbQuery('모든 알림이 켜졌습니다.').catch(() => {});
+                const { text, replyMarkup } = subService.buildMainMenu(chatId);
+                await ctx
+                  .editMessageText(text, {
+                    parse_mode: 'HTML',
+                    reply_markup: replyMarkup,
+                  })
+                  .catch(() => {});
+                return;
+              }
+
+              if (actionData === 'all_off') {
+                subService.setAllTopics(chatId, false);
+                await ctx.answerCbQuery('모든 알림이 꺼졌습니다.').catch(() => {});
+                const { text, replyMarkup } = subService.buildMainMenu(chatId);
+                await ctx
+                  .editMessageText(text, {
+                    parse_mode: 'HTML',
+                    reply_markup: replyMarkup,
+                  })
+                  .catch(() => {});
+                return;
+              }
+
+              if (actionData === 'menu:main') {
+                await ctx.answerCbQuery().catch(() => {});
+                const { text, replyMarkup } = subService.buildMainMenu(chatId);
+                await ctx
+                  .editMessageText(text, {
+                    parse_mode: 'HTML',
+                    reply_markup: replyMarkup,
+                  })
+                  .catch(() => {});
+                return;
+              }
+
+              if (actionData === 'close') {
+                await ctx.answerCbQuery('구독 설정이 완료되었습니다.').catch(() => {});
+                await ctx.deleteMessage().catch(async () => {
+                  await ctx
+                    .editMessageText('✅ <b>구독 설정이 완료되었습니다.</b>', { parse_mode: 'HTML' })
+                    .catch(() => {});
+                });
+                return;
+              }
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error);
+              await ctx.answerCbQuery(`오류 발생: ${message}`).catch(() => {});
+            }
+          });
+        }
       }
 
       instance.command('subscribe_seminar_changes', async (ctx: Context) => {

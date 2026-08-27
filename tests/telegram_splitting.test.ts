@@ -306,10 +306,16 @@ async function testSeminarSubscribersChunking() {
   };
 
   const { setBot } = await import('../src/services/bot_instance');
-  const { addSeminarChangeSubscriber, removeSeminarChangeSubscriber, sendSeminarChangesToSubscribers } =
-    await import('../src/services/seminar_subscribers');
+  const {
+    addSeminarChangeSubscriber,
+    removeSeminarChangeSubscriber,
+    sendSeminarChangesToSubscribers,
+    SEMINAR_CHANGE_SUBSCRIBERS_KEY,
+  } = await import('../src/services/seminar_subscribers');
+  const storage = await import('../src/services/storage');
 
   setBot('notice', mockNoticeBot as any);
+  storage.set(SEMINAR_CHANGE_SUBSCRIBERS_KEY, []);
   addSeminarChangeSubscriber(1111);
   addSeminarChangeSubscriber(2222);
 
