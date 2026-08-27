@@ -22,7 +22,7 @@ import {
 } from './channel_message_repository';
 import { sendOrUpdateTodayLinksNotification } from './broadcast_today_links';
 import { extractSeminarIds } from '../tasks/seminar_detail';
-import { syncChannelSeminarStatusOnQuizRegister } from '../tasks/monitor_seminars';
+import { syncChannelSeminarStatusOnQuizRegister, setSeminarQuizAnswer } from '../tasks/monitor_seminars';
 
 const ADMIN_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const NOTICE_BOT_TOKEN = process.env.NOTICE_BOT_TOKEN;
@@ -903,6 +903,46 @@ if (adminBot) {
     }
   });
 
+  // /set_seminar_quiz <seminarId> <정답텍스트> — 공지방 세미나 항목의 퀴즈 정답 수동 등록/수정
+  adminBot.command('set_seminar_quiz', async (ctx) => {
+    logger.info('User requested set_seminar_quiz', { from: ctx.from?.username });
+    const messageText = ctx.message?.text || '';
+    const content = messageText.replace(/^\/set_seminar_quiz(@\w+)?\s*/, '').trim();
+
+    if (!content) {
+      return replyWithSplit(
+        ctx,
+        '사용법: /set_seminar_quiz <seminarId> <정답텍스트>\n' +
+          '예시 1) /set_seminar_quiz 12345 1번 O, 2번 X\n' +
+          '예시 2) /set_seminar_quiz 12345 112',
+      );
+    }
+
+    const firstSpaceIdx = content.search(/\s/);
+    if (firstSpaceIdx === -1) {
+      return replyWithSplit(
+        ctx,
+        '❌ 정답 텍스트를 함께 입력해주세요.\n사용법: /set_seminar_quiz <seminarId> <정답텍스트>\n예: /set_seminar_quiz 12345 112',
+      );
+    }
+
+    const seminarId = content.substring(0, firstSpaceIdx).trim();
+    const rawAnswer = content.substring(firstSpaceIdx + 1).trim();
+
+    if (!seminarId || !rawAnswer) {
+      return replyWithSplit(ctx, '❌ 세미나 번호와 정답 텍스트를 모두 입력해주세요.\n예: /set_seminar_quiz 12345 112');
+    }
+
+    try {
+      const result = await setSeminarQuizAnswer(seminarId, rawAnswer);
+      await replyWithSplit(ctx, result.message);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error('/set_seminar_quiz 처리 중 오류 발생', error);
+      await replyWithSplit(ctx, `❌ 퀴즈 정답 등록/수정 실패: ${message}`);
+    }
+  });
+
   adminBot.command('add_seminar_answer_batch', async (ctx) => {
     logger.info('User requested batch seminar quiz registration', { from: ctx.from?.username });
     const messageText = ctx.message?.text || '';
@@ -1642,6 +1682,7 @@ if (adminBot) {
 
 📚 세미나 & 퀴즈 족보:
 - /run_seminar_quiz <seminarId> [advanced]: 특정 세미나의 설문 퀴즈를 수동 실행합니다. (advanced: 심화설문)
+- /set_seminar_quiz <seminarId> <정답>: 공지방 세미나 항목의 퀴즈 정답을 수동으로 등록/수정합니다.
 - /add_seminar_answer_batch: 알림 내용을 복사하여 일괄 등록 (마지막 줄에 정답번호 포함)
 - /list_seminar_quiz: 등록된 족보 목록
 - /delete_seminar_quiz <키워드>: 족보 삭제

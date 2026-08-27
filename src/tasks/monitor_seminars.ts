@@ -25,6 +25,8 @@ import {
   editChannelMessage,
   getSeminarStatusChannelMessage,
   publishAndReplaceChannelNotice,
+  getRecentChannelMessages,
+  updateChannelMessageStatus,
 } from '../services/channel_message_repository';
 import { sendToTopicSubscribers, type SubscriptionTopic } from '../services/subscription_service';
 
@@ -427,6 +429,211 @@ export async function syncChannelSeminarStatusOnQuizRegister(
     const errMsg = err instanceof Error ? err.message : String(err);
     return { success: false, modified: false, message: `채널 메시지 수정 오류: ${errMsg}` };
   }
+}
+
+export const activeMonitors = new Set<Map<string, MonitoredSeminarItem>>();
+
+/**
+ * 사용자가 입력한 퀴즈 정답 텍스트를 공지 표준 형식으로 포맷팅합니다.
+ * "단순하게 퀴즈정답 뒤에 입력한 텍스트를 붙인다"
+ * - 예: "112" -> "퀴즈 정답 112"
+ * - 예: "1번 O, 2번 X" -> "퀴즈 정답 1번 O, 2번 X"
+ * - 이미 "퀴즈 정답" / "퀴즈정답" 으로 시작하는 경우 중복 추가 방지
+ */
+export function formatQuizAnswerInput(rawAnswer: string): string {
+  const trimmed = rawAnswer.trim();
+  if (!trimmed) return '';
+  if (trimmed.startsWith('퀴즈 정답') || trimmed.startsWith('퀴즈정답')) {
+    return trimmed;
+  }
+  return `퀴즈 정답 ${trimmed}`;
+}
+
+/**
+ * 실행 중인 세미나 모니터링 인메모리 맵에 퀴즈 정답을 반영합니다.
+ */
+export function updateActiveSeminarQuiz(seminarId: string, formattedQuizAnswer: string): boolean {
+  const cleanId = seminarId.trim();
+  let updated = false;
+  for (const monitorMap of activeMonitors) {
+    for (const item of monitorMap.values()) {
+      if (item.seminarId === cleanId || (item.url && item.url.includes(`/seminar/${cleanId}`))) {
+        item.quizResultMessage = formattedQuizAnswer;
+        updated = true;
+      }
+    }
+  }
+  return updated;
+}
+
+/**
+ * 공지방 메시지 텍스트에서 특정 세미나 항목의 퀴즈 정답을 삽입하거나 교체합니다.
+ */
+export function updateSeminarQuizInMessageText(
+  originalText: string,
+  seminarId: string,
+  formattedQuizAnswer: string,
+): { updatedText: string; success: boolean } {
+  const lines = originalText.split('\n');
+  const cleanSeminarId = seminarId.trim();
+
+  let targetUrlLineIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (
+      line.startsWith('http') &&
+      (line.includes(`/seminar/${cleanSeminarId}`) ||
+        line.includes(`seminar_id=${cleanSeminarId}`) ||
+        line.endsWith(`/${cleanSeminarId}`))
+    ) {
+      targetUrlLineIdx = i;
+      break;
+    }
+  }
+
+  if (targetUrlLineIdx === -1) {
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].includes(cleanSeminarId)) {
+        targetUrlLineIdx = i;
+        break;
+      }
+    }
+  }
+
+  if (targetUrlLineIdx === -1) {
+    return { updatedText: originalText, success: false };
+  }
+
+  const nextLineIdx = targetUrlLineIdx + 1;
+  const nextLine = nextLineIdx < lines.length ? lines[nextLineIdx].trim() : '';
+
+  const isSurveyLine = (l: string) => l.startsWith('(') && (l.includes('설문') || l.includes('마감'));
+  const isSectionBoundary = (l: string) =>
+    l === '' ||
+    l.startsWith('🔔') ||
+    l.startsWith('💬') ||
+    l.startsWith('━') ||
+    l.startsWith('🏁') ||
+    /^[🔴🟢⏳]/u.test(l);
+
+  if (nextLineIdx >= lines.length || isSectionBoundary(nextLine)) {
+    // URL 바로 뒤에 새 라인 삽입
+    lines.splice(targetUrlLineIdx + 1, 0, formattedQuizAnswer);
+  } else if (isSurveyLine(nextLine)) {
+    // 설문 라인 앞에 퀴즈 정답 삽입
+    lines.splice(nextLineIdx, 0, formattedQuizAnswer);
+  } else {
+    // 기존 퀴즈 라인이 있는 경우 교체
+    lines[nextLineIdx] = formattedQuizAnswer;
+  }
+
+  return { updatedText: lines.join('\n'), success: true };
+}
+
+/**
+ * 특정 세미나의 퀴즈 정답을 공지방(채널) 메시지 및 활성 모니터링 상태에 수동으로 등록/수정합니다.
+ */
+export async function setSeminarQuizAnswer(
+  seminarId: string,
+  rawAnswer: string,
+): Promise<{
+  success: boolean;
+  message: string;
+  formattedAnswer: string;
+  channelMessageId?: number;
+  isLiveUpdated: boolean;
+}> {
+  const cleanSeminarId = seminarId.trim();
+  const formattedAnswer = formatQuizAnswerInput(rawAnswer);
+
+  if (!cleanSeminarId) {
+    return {
+      success: false,
+      message: '세미나 번호(seminarId)가 입력되지 않았습니다.',
+      formattedAnswer: '',
+      isLiveUpdated: false,
+    };
+  }
+
+  if (!formattedAnswer) {
+    return {
+      success: false,
+      message: '퀴즈 정답 내용이 입력되지 않았습니다.',
+      formattedAnswer: '',
+      isLiveUpdated: false,
+    };
+  }
+
+  // 1. 활성 모니터링 맵 업데이트 (실행 중인 모니터링이 있는 경우)
+  const isLiveUpdated = updateActiveSeminarQuiz(cleanSeminarId, formattedAnswer);
+
+  // 2. 공지방(채널) 메시지 검색
+  const recentMessages = getRecentChannelMessages(50).filter((m) => m.status !== 'deleted' && m.text);
+
+  // seminarId가 포함된 가장 최근의 세미나 현황 메시지 검색 (뒤에서부터)
+  const targetMsg = recentMessages
+    .slice()
+    .reverse()
+    .find(
+      (m) =>
+        m.text &&
+        (m.text.includes(`/seminar/${cleanSeminarId}`) ||
+          m.text.includes(`seminar_id=${cleanSeminarId}`) ||
+          m.text.includes(cleanSeminarId)),
+    );
+
+  if (!targetMsg) {
+    return {
+      success: true,
+      message: isLiveUpdated
+        ? `✅ 활성 세미나 모니터링에 퀴즈 정답이 반영되었습니다. (공지방 메시지는 아직 전송되지 않음)\n• 정답: ${formattedAnswer}`
+        : `⚠️ 공지방에서 세미나(${cleanSeminarId})가 포함된 메시지를 찾지 못했습니다.\n• 정답: ${formattedAnswer}${isLiveUpdated ? ' (활성 모니터링 반영됨)' : ''}`,
+      formattedAnswer,
+      isLiveUpdated,
+    };
+  }
+
+  const { updatedText, success: updateSuccess } = updateSeminarQuizInMessageText(
+    targetMsg.text!,
+    cleanSeminarId,
+    formattedAnswer,
+  );
+
+  if (!updateSuccess) {
+    return {
+      success: false,
+      message: `❌ 공지 메시지(ID: ${targetMsg.messageId}) 내에서 세미나(${cleanSeminarId}) 항목의 위치를 찾지 못했습니다.`,
+      formattedAnswer,
+      channelMessageId: targetMsg.messageId,
+      isLiveUpdated,
+    };
+  }
+
+  // Telegram 채널 메시지 수정
+  const editRes = await editChannelMessage(targetMsg.messageId, updatedText, {
+    channelId: targetMsg.channelId,
+  });
+
+  if (!editRes.success) {
+    return {
+      success: false,
+      message: `❌ 공지방 메시지(ID: ${targetMsg.messageId}) 수정 실패: ${editRes.message}`,
+      formattedAnswer,
+      channelMessageId: targetMsg.messageId,
+      isLiveUpdated,
+    };
+  }
+
+  // DB 갱신
+  updateChannelMessageStatus(targetMsg.messageId, 'edited', updatedText, targetMsg.channelId);
+
+  return {
+    success: true,
+    message: `📢 공지방 세미나(${cleanSeminarId}) 퀴즈 정답 수정 완료!\n\n• 수정된 내용: ${formattedAnswer}\n• 메시지 ID: ${targetMsg.messageId}${isLiveUpdated ? '\n• 실시간 모니터링 상태 동기화 완료' : ''}`,
+    formattedAnswer,
+    channelMessageId: targetMsg.messageId,
+    isLiveUpdated,
+  };
 }
 
 const getSeminarTrackingKey = (url: string, seminarId: string | null | undefined): string => seminarId || url;
@@ -1086,6 +1293,7 @@ async function monitorSeminars(
 
   // 전체 모니터링 대상 세미나 목록 (URL -> MonitoredSeminarItem)
   const monitoredSeminarsMap = new Map<string, MonitoredSeminarItem>();
+  activeMonitors.add(monitoredSeminarsMap);
   let lastStatusNoticeMessageId: number | null = null;
 
   try {
@@ -1582,6 +1790,8 @@ async function monitorSeminars(
     const message = e instanceof Error ? e.message : String(e);
     await sendTelegram(`❗ [${periodName}] 세미나 감시 작업 오류: ${message}`).catch(() => {});
     return false;
+  } finally {
+    activeMonitors.delete(monitoredSeminarsMap);
   }
 }
 
