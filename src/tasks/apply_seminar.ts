@@ -101,7 +101,6 @@ const MEANINGFUL_FIELDS: Array<{
   { key: 'totalCount', label: '총원' },
   { key: 'isPointExcluded', label: '포인트미지급' },
   { key: 'isAdvancedSurvey', label: '심화설문' },
-  { key: 'diseaseCategoryNm', label: '질환분류' },
   { key: 'isClosed', label: '비공개' },
 ];
 
