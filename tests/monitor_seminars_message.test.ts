@@ -180,6 +180,7 @@ describe('buildSeminarMonitorStatusMessage 세미나 모니터 현황 메시지 
       status: '종료' as const,
       time: '12:00~13:00',
       endDt: '2026-08-27 13:00:00',
+      endedAt: baseTime,
       quizResultMessage: '정답 : 1번 O',
       hasSurvey: true,
     };
@@ -191,6 +192,7 @@ describe('buildSeminarMonitorStatusMessage 세미나 모니터 현황 메시지 
       status: '종료' as const,
       time: '12:00~13:00',
       endDt: '2026-08-27 13:00:00',
+      endedAt: baseTime,
       hasSurvey: false,
     };
 
@@ -211,16 +213,27 @@ describe('buildSeminarMonitorStatusMessage 세미나 모니터 현황 메시지 
     const msgAt1350 = buildSeminarMonitorStatusMessage('점심', [seminar1, seminar2], baseTime + 50 * 60 * 1000);
     assert(msgAt1350.includes('(설문 마감 약 10분 남음)'));
 
-    // 5. 60분 후 (14:00) -> 설문 마감
-    const msgAt1400 = buildSeminarMonitorStatusMessage('점심', [seminar1, seminar2], baseTime + 60 * 60 * 1000);
-    assert(msgAt1400.includes('(설문 마감)'));
-    assert(!msgAt1400.includes('약 0분 남음'));
+    // 6. endedAt이 없는 경우 -> 설문 남은 시간 문구 표시 안 함
+    const seminarNoEndedAt = {
+      seminarId: '5599',
+      url: 'https://m.doctorville.co.kr/cme/seminar/5599',
+      name: '종료 세미나 (endedAt 없음)',
+      status: '종료' as const,
+      time: '12:00~13:00',
+      quizResultMessage: '정답 : 2번',
+      hasSurvey: true,
+    };
+    const msgNoEndedAt = buildSeminarMonitorStatusMessage('점심', [seminarNoEndedAt], baseTime);
+    assert(msgNoEndedAt.includes('정답 : 2번'));
+    assert(!msgNoEndedAt.includes('설문 마감'));
+    assert(!msgNoEndedAt.includes('남음'));
 
     // getSurveyRemainingMinutes 유틸리티 검증
     expect(getSurveyRemainingMinutes(seminar1, baseTime + 12 * 60 * 1000)).toBe(50); // 48분 남음 -> 50분
     expect(getSurveyRemainingMinutes(seminar1, baseTime + 38 * 60 * 1000)).toBe(20); // 22분 남음 -> 20분
     expect(getSurveyRemainingMinutes(seminar1, baseTime + 52 * 60 * 1000)).toBe(10); // 8분 남음 -> 10분
     expect(getSurveyRemainingMinutes(seminar1, baseTime + 60 * 60 * 1000)).toBe(0); // 0분 -> 0분
+    expect(getSurveyRemainingMinutes(seminarNoEndedAt)).toBe(null);
   });
 
   it('buildSurveyClosingMessage 설문 마감 20분전 / 10분전 알림 포맷 검증', async () => {
@@ -270,6 +283,7 @@ describe('buildSeminarMonitorStatusMessage 세미나 모니터 현황 메시지 
       status: '종료' as const,
       time: '12:00~13:00',
       endDt: '2026-08-27 13:00:00',
+      endedAt: baseTime,
       quizResultMessage: multiLineQuizMessage,
       hasSurvey: true,
     };

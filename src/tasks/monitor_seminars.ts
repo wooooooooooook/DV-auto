@@ -68,30 +68,10 @@ export interface MonitoredSeminarItem {
 export type SeminarInfo = MonitoredSeminarItem;
 
 /**
- * 세미나의 설문 마감 시각(종료시각 + 60분)을 구합니다.
- * - endDt가 유효한 경우: endDt + 60분 (3600000ms)
- * - time이 유효한 경우: 당일 time 종료시간 + 60분
- * - endedAt(종료 감지 시각)이 유효한 경우: endedAt + 60분
+ * 세미나의 설문 마감 시각(종료 감지 시각 + 60분)을 구합니다.
+ * - endedAt(종료 감지 시각)이 유효한 경우: endedAt + 60분 (3600000ms)
  */
-export function getSeminarSurveyEndTime(seminar: { endDt?: string; time?: string; endedAt?: number }): number | null {
-  if (seminar.endDt) {
-    const cleanEnd = seminar.endDt.trim().replace('T', ' ');
-    const isoStr = cleanEnd.includes('+') ? cleanEnd : `${cleanEnd.replace(' ', 'T')}+09:00`;
-    const endMs = new Date(isoStr).getTime();
-    if (!Number.isNaN(endMs)) {
-      return endMs + 60 * 60 * 1000;
-    }
-  }
-  if (seminar.time && seminar.time.includes('~')) {
-    const endHM = seminar.time.split('~')[1]?.trim();
-    if (endHM && endHM.includes(':')) {
-      const today = seoulDateString();
-      const endMs = new Date(`${today}T${endHM}:00+09:00`).getTime();
-      if (!Number.isNaN(endMs)) {
-        return endMs + 60 * 60 * 1000;
-      }
-    }
-  }
+export function getSeminarSurveyEndTime(seminar: { endedAt?: number }): number | null {
   if (seminar.endedAt) {
     return seminar.endedAt + 60 * 60 * 1000;
   }
@@ -102,13 +82,11 @@ export function getSeminarSurveyEndTime(seminar: { endDt?: string; time?: string
  * 설문 마감까지 남은 시간(분)을 10분 단위로 계산합니다.
  * 예: 45~54분 -> 50분, 15~24분 -> 20분, 5~14분 -> 10분
  * 60분 초과 시 최대 60분으로 clamp, 0분 이하 시 0분 반환.
+ * endedAt을 알 수 없는 경우 null 반환.
  */
-export function getSurveyRemainingMinutes(
-  seminar: { endDt?: string; time?: string; endedAt?: number },
-  nowMs = Date.now(),
-): number {
+export function getSurveyRemainingMinutes(seminar: { endedAt?: number }, nowMs = Date.now()): number | null {
   const surveyEndTime = getSeminarSurveyEndTime(seminar);
-  if (!surveyEndTime) return 0;
+  if (!surveyEndTime) return null;
   const diffMs = surveyEndTime - nowMs;
   if (diffMs <= 0) return 0;
 
@@ -174,7 +152,7 @@ export function extractQuizSummaryOnly(quizMessage?: string | null): string | nu
  * - 시작종료시각을 제목 앞에 표시
  * - 제목은 20글자로 트렁케이션
  * - 퀴즈정답은 요약(퀴즈정답: 123 등)만 표시 (상세 퀴즈 문항/답 제외)
- * - 종료된 세미나의 설문 가능 시간(약 몇분 남음) 표시
+ * - 종료된 세미나의 설문 가능 시간(약 몇분 남음) 표시 (endedAt이 있는 경우)
  */
 export function buildSeminarStatusMessage(
   periodName: string,
@@ -206,22 +184,17 @@ export function buildSeminarStatusMessage(
       const summaryQuiz = extractQuizSummaryOnly(s.quizResultMessage);
       if (summaryQuiz) {
         text += `\n${summaryQuiz}`;
-        if (s.hasSurvey !== false) {
-          const minutesLeft = getSurveyRemainingMinutes(s, nowMs);
+      }
+      if (s.hasSurvey === false) {
+        text += `\n(설문이 없는 세미나)`;
+      } else {
+        const minutesLeft = getSurveyRemainingMinutes(s, nowMs);
+        if (minutesLeft !== null) {
           if (minutesLeft > 0) {
             text += `\n(설문 마감 약 ${minutesLeft}분 남음)`;
           } else {
             text += `\n(설문 마감)`;
           }
-        }
-      } else if (s.hasSurvey === false) {
-        text += `\n(설문이 없는 세미나)`;
-      } else {
-        const minutesLeft = getSurveyRemainingMinutes(s, nowMs);
-        if (minutesLeft > 0) {
-          text += `\n(설문 마감 약 ${minutesLeft}분 남음)`;
-        } else {
-          text += `\n(설문 마감)`;
         }
       }
     }
@@ -1187,7 +1160,8 @@ async function monitorSeminars(
     const isAllInitiallySurveysClosed = seminarList.every((s) => {
       if (s.status !== '종료') return false;
       if (s.hasSurvey === false) return true;
-      return getSurveyRemainingMinutes(s) === 0;
+      const minutesLeft = getSurveyRemainingMinutes(s);
+      return minutesLeft === null || minutesLeft === 0;
     });
     const isAllInitiallyCompleted = isAllInitiallySeminarsEnded && (!waitForSurveyClose || isAllInitiallySurveysClosed);
 
@@ -1438,7 +1412,8 @@ async function monitorSeminars(
       const isAllSurveysClosed = currentList.every((s) => {
         if (s.status !== '종료') return false;
         if (s.hasSurvey === false) return true;
-        return getSurveyRemainingMinutes(s, currentNowMs) === 0;
+        const minutesLeft = getSurveyRemainingMinutes(s, currentNowMs);
+        return minutesLeft === null || minutesLeft === 0;
       });
       const isAllCompleted = isAllSeminarsEnded && (!waitForSurveyClose || isAllSurveysClosed);
 

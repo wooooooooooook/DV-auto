@@ -19,35 +19,26 @@ describe('monitor_seminars_closing (설문 가능 시간 및 마감 알림)', ()
     storage.closeDatabase();
   });
 
-  it('endDt, time, endedAt 기반 설문 마감 시각(종료 후 60분) 계산 검증', () => {
-    // 1. endDt 기준
-    const itemWithEndDt = {
-      endDt: '2026-08-27 13:00:00',
-    };
-    const expectedEndDtMs = new Date('2026-08-27T13:00:00+09:00').getTime() + 60 * 60 * 1000;
-    expect(getSeminarSurveyEndTime(itemWithEndDt)).toBe(expectedEndDtMs);
-
-    // 2. time 기준
-    const itemWithTime = {
-      time: '12:00~13:00',
-    };
-    expect(getSeminarSurveyEndTime(itemWithTime)).toBe(expectedEndDtMs);
-
-    // 3. endedAt 기준
+  it('endedAt 기반 설문 마감 시각(종료 감지 후 60분) 계산 검증', () => {
+    // 1. endedAt 기준
     const endedAt = Date.now();
     const itemWithEndedAt = {
       endedAt,
     };
     expect(getSeminarSurveyEndTime(itemWithEndedAt)).toBe(endedAt + 60 * 60 * 1000);
 
-    // 4. 정보가 전혀 없는 경우 null 반환
+    // 2. endDt나 time만 있고 endedAt이 없는 경우 null 반환
+    expect(getSeminarSurveyEndTime({ endDt: '2026-08-27 13:00:00' })).toBe(null);
+    expect(getSeminarSurveyEndTime({ time: '12:00~13:00' })).toBe(null);
+
+    // 3. 정보가 전혀 없는 경우 null 반환
     expect(getSeminarSurveyEndTime({})).toBe(null);
   });
 
   it('10분 단위 잔여 시간 계산(getSurveyRemainingMinutes) 검증', () => {
-    const endMs = new Date('2026-08-27T13:00:00+09:00').getTime(); // 종료 시각
+    const endMs = new Date('2026-08-27T13:00:00+09:00').getTime(); // 종료 감지 시각
     const seminar = {
-      endDt: '2026-08-27 13:00:00', // 마감 시각 = 14:00 (endMs + 60분)
+      endedAt: endMs, // 마감 시각 = 14:00 (endMs + 60분)
     };
 
     // 13:00 (60분 전) -> 60분
@@ -67,6 +58,10 @@ describe('monitor_seminars_closing (설문 가능 시간 및 마감 알림)', ()
 
     // 14:05 (마감 이후) -> 0분
     expect(getSurveyRemainingMinutes(seminar, endMs + 65 * 60 * 1000)).toBe(0);
+
+    // endedAt을 알 수 없는 경우 -> null 반환
+    expect(getSurveyRemainingMinutes({})).toBe(null);
+    expect(getSurveyRemainingMinutes({ endedAt: undefined })).toBe(null);
   });
 
   it('sendSurveyClosingNotice가 20분전 / 10분전 구독자에게 알림을 발송해야 한다', async () => {
