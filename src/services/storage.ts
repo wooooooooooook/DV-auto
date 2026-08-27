@@ -106,6 +106,8 @@ function initDatabase(db: Database.Database): void {
       intermd_quiz INTEGER DEFAULT 0,
       seminar_changes INTEGER DEFAULT 0,
       seminar_live INTEGER DEFAULT 0,
+      survey_closing_20 INTEGER DEFAULT 0,
+      survey_closing_10 INTEGER DEFAULT 0,
       point_conversion INTEGER DEFAULT 0,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
@@ -143,6 +145,12 @@ function initDatabase(db: Database.Database): void {
     }
     if (!colNames.includes('seminar_live')) {
       db.exec(`ALTER TABLE subscriptions ADD COLUMN seminar_live INTEGER DEFAULT 0;`);
+    }
+    if (!colNames.includes('survey_closing_20')) {
+      db.exec(`ALTER TABLE subscriptions ADD COLUMN survey_closing_20 INTEGER DEFAULT 0;`);
+    }
+    if (!colNames.includes('survey_closing_10')) {
+      db.exec(`ALTER TABLE subscriptions ADD COLUMN survey_closing_10 INTEGER DEFAULT 0;`);
     }
     if (!colNames.includes('point_conversion')) {
       db.exec(`ALTER TABLE subscriptions ADD COLUMN point_conversion INTEGER DEFAULT 0;`);

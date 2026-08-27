@@ -11,6 +11,8 @@ export type SubscriptionTopic =
   | 'new_seminar'
   | 'seminar_changes'
   | 'seminar_live'
+  | 'survey_closing_20'
+  | 'survey_closing_10'
   | 'point_conversion';
 
 export type NewSeminarFilter = 'all' | 'limit_5000' | 'limit_3000' | 'urgent_1000' | 'off';
@@ -42,6 +44,8 @@ export interface SubscriptionRecord {
   intermdQuiz: boolean;
   seminarChanges: boolean;
   seminarLive: boolean;
+  surveyClosing20: boolean;
+  surveyClosing10: boolean;
   pointConversion: boolean;
   createdAt: number;
   updatedAt: number;
@@ -60,6 +64,8 @@ interface SubscriptionRow {
   intermd_quiz?: number;
   seminar_changes?: number;
   seminar_live?: number;
+  survey_closing_20?: number;
+  survey_closing_10?: number;
   point_conversion?: number;
   created_at?: number;
   updated_at?: number;
@@ -115,6 +121,8 @@ export function getSubscription(chatId: number): SubscriptionRecord {
       intermdQuiz: false,
       seminarChanges: false,
       seminarLive: false,
+      surveyClosing20: false,
+      surveyClosing10: false,
       pointConversion: false,
       createdAt: 0,
       updatedAt: 0,
@@ -130,6 +138,8 @@ export function getSubscription(chatId: number): SubscriptionRecord {
     intermdQuiz: row.intermd_quiz === 1,
     seminarChanges: row.seminar_changes === 1,
     seminarLive: row.seminar_live === 1,
+    surveyClosing20: row.survey_closing_20 === 1,
+    surveyClosing10: row.survey_closing_10 === 1,
     pointConversion: row.point_conversion === 1,
     createdAt: row.created_at || 0,
     updatedAt: row.updated_at || 0,
@@ -157,11 +167,13 @@ export function updateSubscription(
     `
     INSERT INTO subscriptions (
       chat_id, today_links, today_links_time, today_links_sent_date,
-      new_seminar, intermd_quiz, seminar_changes, seminar_live, point_conversion,
+      new_seminar, intermd_quiz, seminar_changes, seminar_live,
+      survey_closing_20, survey_closing_10, point_conversion,
       created_at, updated_at
     ) VALUES (
       @chatId, @todayLinks, @todayLinksTime, @todayLinksSentDate,
-      @newSeminar, @intermdQuiz, @seminarChanges, @seminarLive, @pointConversion,
+      @newSeminar, @intermdQuiz, @seminarChanges, @seminarLive,
+      @surveyClosing20, @surveyClosing10, @pointConversion,
       @createdAt, @updatedAt
     )
     ON CONFLICT(chat_id) DO UPDATE SET
@@ -172,6 +184,8 @@ export function updateSubscription(
       intermd_quiz = excluded.intermd_quiz,
       seminar_changes = excluded.seminar_changes,
       seminar_live = excluded.seminar_live,
+      survey_closing_20 = excluded.survey_closing_20,
+      survey_closing_10 = excluded.survey_closing_10,
       point_conversion = excluded.point_conversion,
       updated_at = excluded.updated_at
   `,
@@ -184,6 +198,8 @@ export function updateSubscription(
     intermdQuiz: next.intermdQuiz ? 1 : 0,
     seminarChanges: next.seminarChanges ? 1 : 0,
     seminarLive: next.seminarLive ? 1 : 0,
+    surveyClosing20: next.surveyClosing20 ? 1 : 0,
+    surveyClosing10: next.surveyClosing10 ? 1 : 0,
     pointConversion: next.pointConversion ? 1 : 0,
     createdAt: next.createdAt,
     updatedAt: next.updatedAt,
@@ -194,7 +210,14 @@ export function updateSubscription(
 
 export function toggleTopic(
   chatId: number,
-  topic: 'today_links' | 'intermd_quiz' | 'seminar_changes' | 'seminar_live' | 'point_conversion',
+  topic:
+    | 'today_links'
+    | 'intermd_quiz'
+    | 'seminar_changes'
+    | 'seminar_live'
+    | 'survey_closing_20'
+    | 'survey_closing_10'
+    | 'point_conversion',
 ): SubscriptionRecord {
   const current = getSubscription(chatId);
   switch (topic) {
@@ -206,6 +229,10 @@ export function toggleTopic(
       return updateSubscription(chatId, { seminarChanges: !current.seminarChanges });
     case 'seminar_live':
       return updateSubscription(chatId, { seminarLive: !current.seminarLive });
+    case 'survey_closing_20':
+      return updateSubscription(chatId, { surveyClosing20: !current.surveyClosing20 });
+    case 'survey_closing_10':
+      return updateSubscription(chatId, { surveyClosing10: !current.surveyClosing10 });
     case 'point_conversion':
       return updateSubscription(chatId, { pointConversion: !current.pointConversion });
   }
@@ -226,6 +253,8 @@ export function setAllTopics(chatId: number, enable: boolean): SubscriptionRecor
     intermdQuiz: enable,
     seminarChanges: enable,
     seminarLive: enable,
+    surveyClosing20: enable,
+    surveyClosing10: enable,
     pointConversion: enable,
   });
 }
@@ -253,6 +282,12 @@ export function getSubscribersForTopic(topic: SubscriptionTopic): number[] {
       break;
     case 'seminar_live':
       query = 'SELECT chat_id FROM subscriptions WHERE seminar_live = 1';
+      break;
+    case 'survey_closing_20':
+      query = 'SELECT chat_id FROM subscriptions WHERE survey_closing_20 = 1';
+      break;
+    case 'survey_closing_10':
+      query = 'SELECT chat_id FROM subscriptions WHERE survey_closing_10 = 1';
       break;
     case 'point_conversion':
       query = 'SELECT chat_id FROM subscriptions WHERE point_conversion = 1';
@@ -703,6 +738,8 @@ export function buildMainMenu(chatId: number): { text: string; replyMarkup: Inli
     `• ❓ <b>인터엠디 퀴즈</b>: ${sub.intermdQuiz ? '🟢 ON' : '🔴 OFF'}`,
     `• 🔄 <b>세미나 정보 변경/심화</b>: ${sub.seminarChanges ? '🟢 ON' : '🔴 OFF'}`,
     `• 🔴 <b>세미나 라이브/퀴즈</b>: ${sub.seminarLive ? '🟢 ON' : '🔴 OFF'}`,
+    `• ⏳ <b>설문 마감 20분전</b>: ${sub.surveyClosing20 ? '🟢 ON' : '🔴 OFF'}`,
+    `• ⏳ <b>설문 마감 10분전</b>: ${sub.surveyClosing10 ? '🟢 ON' : '🔴 OFF'}`,
     `• 💰 <b>네페 포인트 전환</b>: ${sub.pointConversion ? '🟢 ON' : '🔴 OFF'}`,
   ].join('\n');
 
@@ -741,6 +778,18 @@ export function buildMainMenu(chatId: number): { text: string; replyMarkup: Inli
       {
         text: `🔴 세미나 라이브/퀴즈: ${sub.seminarLive ? 'ON 🟢' : 'OFF 🔴'}`,
         callback_data: 'sub:toggle:seminar_live',
+      },
+    ],
+    [
+      {
+        text: `⏳ 설문 마감 20분전: ${sub.surveyClosing20 ? 'ON 🟢' : 'OFF 🔴'}`,
+        callback_data: 'sub:toggle:survey_closing_20',
+      },
+    ],
+    [
+      {
+        text: `⏳ 설문 마감 10분전: ${sub.surveyClosing10 ? 'ON 🟢' : 'OFF 🔴'}`,
+        callback_data: 'sub:toggle:survey_closing_10',
       },
     ],
     [

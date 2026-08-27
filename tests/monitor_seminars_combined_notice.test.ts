@@ -70,7 +70,7 @@ describe('세미나 모니터링 통합 메시지 (삭제/재발송) 단위 테�
 
     assert.ok(text.includes('🔴 종료 | 1번 점심 세미나'));
     assert.ok(text.includes('퀴즈 정답 123'));
-    assert.ok(text.includes('✅ Q1: 정답1 (1번)'));
+    assert.ok(!text.includes('✅ Q1: 정답1 (1번)'), '공지 채널 현황에는 상세 퀴즈 문항이 제외되어야 함');
     assert.ok(text.includes('🟢 입장가능 | 2번 점심 세미나'));
   });
 

@@ -46,24 +46,32 @@ describe('subscription_service', () => {
     expect(defaultSub.intermdQuiz).toBe(false);
     expect(defaultSub.seminarChanges).toBe(false);
     expect(defaultSub.seminarLive).toBe(false);
+    expect(defaultSub.surveyClosing20).toBe(false);
+    expect(defaultSub.surveyClosing10).toBe(false);
     expect(defaultSub.pointConversion).toBe(false);
 
     const updated = updateSubscription(12345, {
       todayLinks: true,
       todayLinksTime: '08:00',
       newSeminar: 'limit_5000',
+      surveyClosing20: true,
+      surveyClosing10: true,
       pointConversion: true,
     });
 
     expect(updated.todayLinks).toBe(true);
     expect(updated.todayLinksTime).toBe('08:00');
     expect(updated.newSeminar).toBe('limit_5000');
+    expect(updated.surveyClosing20).toBe(true);
+    expect(updated.surveyClosing10).toBe(true);
     expect(updated.pointConversion).toBe(true);
 
     const fetched = getSubscription(12345);
     expect(fetched.todayLinks).toBe(true);
     expect(fetched.todayLinksTime).toBe('08:00');
     expect(fetched.newSeminar).toBe('limit_5000');
+    expect(fetched.surveyClosing20).toBe(true);
+    expect(fetched.surveyClosing10).toBe(true);
     expect(fetched.pointConversion).toBe(true);
   });
 
@@ -84,6 +92,12 @@ describe('subscription_service', () => {
 
     toggleTopic(100, 'seminar_live');
     expect(getSubscription(100).seminarLive).toBe(true);
+
+    toggleTopic(100, 'survey_closing_20');
+    expect(getSubscription(100).surveyClosing20).toBe(true);
+
+    toggleTopic(100, 'survey_closing_10');
+    expect(getSubscription(100).surveyClosing10).toBe(true);
 
     toggleTopic(100, 'point_conversion');
     expect(getSubscription(100).pointConversion).toBe(true);
@@ -133,6 +147,8 @@ describe('subscription_service', () => {
     expect(sub.intermdQuiz).toBe(true);
     expect(sub.seminarChanges).toBe(true);
     expect(sub.seminarLive).toBe(true);
+    expect(sub.surveyClosing20).toBe(true);
+    expect(sub.surveyClosing10).toBe(true);
     expect(sub.pointConversion).toBe(true);
 
     setAllTopics(400, false);
@@ -142,6 +158,8 @@ describe('subscription_service', () => {
     expect(sub.intermdQuiz).toBe(false);
     expect(sub.seminarChanges).toBe(false);
     expect(sub.seminarLive).toBe(false);
+    expect(sub.surveyClosing20).toBe(false);
+    expect(sub.surveyClosing10).toBe(false);
     expect(sub.pointConversion).toBe(false);
   });
 
@@ -165,13 +183,15 @@ describe('subscription_service', () => {
   });
 
   it('토픽별 구독자 조회가 올바르게 동작해야 한다', () => {
-    updateSubscription(601, { pointConversion: true, seminarLive: true });
-    updateSubscription(602, { pointConversion: true, seminarLive: false });
-    updateSubscription(603, { newSeminar: 'limit_3000' });
+    updateSubscription(601, { pointConversion: true, seminarLive: true, surveyClosing20: true });
+    updateSubscription(602, { pointConversion: true, seminarLive: false, surveyClosing10: true });
+    updateSubscription(603, { newSeminar: 'limit_3000', surveyClosing20: true, surveyClosing10: true });
 
     expect(getSubscribersForTopic('point_conversion')).toEqual([601, 602]);
     expect(getSubscribersForTopic('seminar_live')).toEqual([601]);
     expect(getSubscribersForTopic('new_seminar')).toEqual([603]);
+    expect(getSubscribersForTopic('survey_closing_20')).toEqual([601, 603]);
+    expect(getSubscribersForTopic('survey_closing_10')).toEqual([602, 603]);
   });
 
   it('UI 마크업 생성 헬퍼가 버튼과 텍스트를 정상 반환해야 한다', () => {

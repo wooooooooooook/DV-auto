@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { describe, it } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import {
   buildSeminarMonitorStatusMessage,
   getSeminarStatusDisplay,
@@ -165,5 +165,139 @@ describe('buildSeminarMonitorStatusMessage 세미나 모니터 현황 메시지 
     });
     assert(endMsgNoSurvey.text.includes('🔴 <b>[세미나 종료]</b>'));
     assert(endMsgNoSurvey.text.includes('(설문이 없는 세미나)'));
+  });
+
+  it('종료된 세미나의 설문 잔여 시간(약 N분 남음) 포맷팅 및 설문 없는 세미나 검증', async () => {
+    const { buildSeminarMonitorStatusMessage, getSurveyRemainingMinutes } =
+      await import('../src/tasks/monitor_seminars');
+
+    const baseTime = new Date('2026-08-27T13:00:00+09:00').getTime(); // 종료 시점 (13:00)
+
+    const seminar1 = {
+      seminarId: '5580',
+      url: 'https://m.doctorville.co.kr/cme/seminar/5580',
+      name: '당뇨 세미나',
+      status: '종료' as const,
+      time: '12:00~13:00',
+      endDt: '2026-08-27 13:00:00',
+      quizResultMessage: '정답 : 1번 O',
+      hasSurvey: true,
+    };
+
+    const seminar2 = {
+      seminarId: '5590',
+      url: 'https://m.doctorville.co.kr/cme/seminar/5590',
+      name: '설문 없는 세미나',
+      status: '종료' as const,
+      time: '12:00~13:00',
+      endDt: '2026-08-27 13:00:00',
+      hasSurvey: false,
+    };
+
+    // 1. 종료 직후 (13:00) -> 마감까지 60분 남음
+    const msgAt1300 = buildSeminarMonitorStatusMessage('점심', [seminar1, seminar2], baseTime);
+    assert(msgAt1300.includes('(설문 마감 약 60분 남음)'));
+    assert(msgAt1300.includes('(설문이 없는 세미나)'));
+
+    // 2. 10분 후 (13:10) -> 마감까지 50분 남음
+    const msgAt1310 = buildSeminarMonitorStatusMessage('점심', [seminar1, seminar2], baseTime + 10 * 60 * 1000);
+    assert(msgAt1310.includes('(설문 마감 약 50분 남음)'));
+
+    // 3. 40분 후 (13:40) -> 마감까지 20분 남음
+    const msgAt1340 = buildSeminarMonitorStatusMessage('점심', [seminar1, seminar2], baseTime + 40 * 60 * 1000);
+    assert(msgAt1340.includes('(설문 마감 약 20분 남음)'));
+
+    // 4. 50분 후 (13:50) -> 마감까지 10분 남음
+    const msgAt1350 = buildSeminarMonitorStatusMessage('점심', [seminar1, seminar2], baseTime + 50 * 60 * 1000);
+    assert(msgAt1350.includes('(설문 마감 약 10분 남음)'));
+
+    // 5. 60분 후 (14:00) -> 설문 마감
+    const msgAt1400 = buildSeminarMonitorStatusMessage('점심', [seminar1, seminar2], baseTime + 60 * 60 * 1000);
+    assert(msgAt1400.includes('(설문 마감)'));
+    assert(!msgAt1400.includes('약 0분 남음'));
+
+    // getSurveyRemainingMinutes 유틸리티 검증
+    expect(getSurveyRemainingMinutes(seminar1, baseTime + 12 * 60 * 1000)).toBe(50); // 48분 남음 -> 50분
+    expect(getSurveyRemainingMinutes(seminar1, baseTime + 38 * 60 * 1000)).toBe(20); // 22분 남음 -> 20분
+    expect(getSurveyRemainingMinutes(seminar1, baseTime + 52 * 60 * 1000)).toBe(10); // 8분 남음 -> 10분
+    expect(getSurveyRemainingMinutes(seminar1, baseTime + 60 * 60 * 1000)).toBe(0); // 0분 -> 0분
+  });
+
+  it('buildSurveyClosingMessage 설문 마감 20분전 / 10분전 알림 포맷 검증', async () => {
+    const { buildSurveyClosingMessage } = await import('../src/tasks/monitor_seminars');
+
+    const seminar = {
+      seminarId: '7788',
+      url: 'https://m.doctorville.co.kr/cme/seminar/7788',
+      name: '고혈압 최신지견',
+      status: '종료' as const,
+      time: '12:00~13:00',
+      isAdvancedSurvey: true,
+      quizResultMessage: '정답 : 2번 X',
+    };
+
+    // 20분 전 메시지
+    const msg20 = buildSurveyClosingMessage(seminar, 20);
+    assert(msg20.text.includes('⏳ <b>[설문 마감 20분 전]</b>'));
+    assert(msg20.text.includes('[12:00~13:00]'));
+    assert(msg20.text.includes('<b>고혈압 최신지견</b> [심화설문]'));
+    assert(msg20.text.includes('정답 : 2번 X'));
+    assert(msg20.text.includes('약 20분 남았습니다.'));
+
+    // 10분 전 메시지
+    const msg10 = buildSurveyClosingMessage(seminar, 10);
+    assert(msg10.text.includes('⏳ <b>[설문 마감 10분 전]</b>'));
+    assert(msg10.text.includes('약 10분 남았습니다.'));
+  });
+
+  it('공지채널 세미나현황에서는 퀴즈정답 요약만 노출되고 상세 문항/답은 제거되며, 개별알림에서는 상세 유지 검증', async () => {
+    const {
+      buildSeminarMonitorStatusMessage,
+      buildSeminarLiveEndMessage,
+      buildSurveyClosingMessage,
+      extractQuizSummaryOnly,
+    } = await import('../src/tasks/monitor_seminars');
+
+    const multiLineQuizMessage = `[퀴즈] 정답 123\n\n[퀴즈]\n✅ Q1: 1차 치료제는 무엇인가요?\n   → 메트포르민 (1번)\n✅ Q2: 병용 요법의 장점은?\n   → 혈당 강하 (2번)\n✅ Q3: 투약 간격은?\n   → 1일 1회 (3번)`;
+
+    const baseTime = new Date('2026-08-27T13:00:00+09:00').getTime();
+    const seminar = {
+      seminarId: '9988',
+      url: 'https://m.doctorville.co.kr/cme/seminar/9988',
+      name: '당뇨 심화 세미나',
+      status: '종료' as const,
+      time: '12:00~13:00',
+      endDt: '2026-08-27 13:00:00',
+      quizResultMessage: multiLineQuizMessage,
+      hasSurvey: true,
+    };
+
+    // 1. extractQuizSummaryOnly 단위 검증
+    expect(extractQuizSummaryOnly(multiLineQuizMessage)).toBe('[퀴즈] 정답 123');
+    expect(extractQuizSummaryOnly('정답 : 1번 O\n상세설명')).toBe('정답 : 1번 O');
+    expect(extractQuizSummaryOnly(null)).toBe(null);
+
+    // 2. 공지 채널 세미나 현황 메시지 검증: 요약만 포함, 상세 문항/답 제거
+    const channelStatusMsg = buildSeminarMonitorStatusMessage('점심', [seminar], baseTime);
+    assert(channelStatusMsg.includes('[퀴즈] 정답 123'), '요약은 포함되어야 함');
+    assert(
+      !channelStatusMsg.includes('✅ Q1: 1차 치료제는 무엇인가요?'),
+      '공지 채널에는 상세 퀴즈 문항이 제거되어야 함',
+    );
+    assert(!channelStatusMsg.includes('메트포르민 (1번)'), '공지 채널에는 상세 퀴즈 답이 제거되어야 함');
+    assert(channelStatusMsg.includes('(설문 마감 약 60분 남음)'), '설문 잔여시간 표시 확인');
+
+    // 3. 개별 알림 (세미나 종료 및 설문 마감) 메시지 검증: 상세 내용 유지
+    const endNotice = buildSeminarLiveEndMessage(seminar);
+    assert(endNotice.text.includes('[퀴즈] 정답 123'));
+    assert(endNotice.text.includes('✅ Q1: 1차 치료제는 무엇인가요?'), '개별 알림에는 상세 퀴즈 문항이 유지되어야 함');
+    assert(endNotice.text.includes('메트포르민 (1번)'), '개별 알림에는 상세 퀴즈 답이 유지되어야 함');
+
+    const closingNotice = buildSurveyClosingMessage(seminar, 20);
+    assert(closingNotice.text.includes('[퀴즈] 정답 123'));
+    assert(
+      closingNotice.text.includes('✅ Q1: 1차 치료제는 무엇인가요?'),
+      '개별 알림(마감)에는 상세 퀴즈 문항이 유지되어야 함',
+    );
   });
 });

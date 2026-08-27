@@ -26,10 +26,12 @@ import {
   getSeminarStatusChannelMessage,
   publishAndReplaceChannelNotice,
 } from '../services/channel_message_repository';
-import { sendToTopicSubscribers } from '../services/subscription_service';
+import { sendToTopicSubscribers, type SubscriptionTopic } from '../services/subscription_service';
 
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
 const SEMINAR_DETAIL_PC_PAGE = 'https://www.doctorville.co.kr/seminar/seminarDetail';
+
+const seoulDateString = (): string => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
 
 // API 폴링 주기: 1분 (60초)
 export const API_POLL_INTERVAL_MS = 60 * 1000;
@@ -50,6 +52,8 @@ export interface MonitoredSeminarItem {
   autoEnterDone?: boolean;
   isEntryStarted?: boolean;
   isEnded?: boolean;
+  endedAt?: number;
+  surveyEndTime?: number;
   quizResultMessage?: string | null;
   processState?: number;
   cancelProcessState?: number;
@@ -57,9 +61,61 @@ export interface MonitoredSeminarItem {
   surveyState?: number;
   startNotified?: boolean;
   endNotified?: boolean;
+  notifiedClosing20?: boolean;
+  notifiedClosing10?: boolean;
 }
 
 export type SeminarInfo = MonitoredSeminarItem;
+
+/**
+ * 세미나의 설문 마감 시각(종료시각 + 60분)을 구합니다.
+ * - endDt가 유효한 경우: endDt + 60분 (3600000ms)
+ * - time이 유효한 경우: 당일 time 종료시간 + 60분
+ * - endedAt(종료 감지 시각)이 유효한 경우: endedAt + 60분
+ */
+export function getSeminarSurveyEndTime(seminar: { endDt?: string; time?: string; endedAt?: number }): number | null {
+  if (seminar.endDt) {
+    const cleanEnd = seminar.endDt.trim().replace('T', ' ');
+    const isoStr = cleanEnd.includes('+') ? cleanEnd : `${cleanEnd.replace(' ', 'T')}+09:00`;
+    const endMs = new Date(isoStr).getTime();
+    if (!Number.isNaN(endMs)) {
+      return endMs + 60 * 60 * 1000;
+    }
+  }
+  if (seminar.time && seminar.time.includes('~')) {
+    const endHM = seminar.time.split('~')[1]?.trim();
+    if (endHM && endHM.includes(':')) {
+      const today = seoulDateString();
+      const endMs = new Date(`${today}T${endHM}:00+09:00`).getTime();
+      if (!Number.isNaN(endMs)) {
+        return endMs + 60 * 60 * 1000;
+      }
+    }
+  }
+  if (seminar.endedAt) {
+    return seminar.endedAt + 60 * 60 * 1000;
+  }
+  return null;
+}
+
+/**
+ * 설문 마감까지 남은 시간(분)을 10분 단위로 계산합니다.
+ * 예: 45~54분 -> 50분, 15~24분 -> 20분, 5~14분 -> 10분
+ * 60분 초과 시 최대 60분으로 clamp, 0분 이하 시 0분 반환.
+ */
+export function getSurveyRemainingMinutes(
+  seminar: { endDt?: string; time?: string; endedAt?: number },
+  nowMs = Date.now(),
+): number {
+  const surveyEndTime = getSeminarSurveyEndTime(seminar);
+  if (!surveyEndTime) return 0;
+  const diffMs = surveyEndTime - nowMs;
+  if (diffMs <= 0) return 0;
+
+  const rawMinutes = diffMs / (60 * 1000);
+  const rounded10 = Math.round(rawMinutes / 10) * 10;
+  return Math.min(60, Math.max(0, rounded10));
+}
 
 /**
  * 세미나 상태 표시 이모지 및 상태 텍스트 반환
@@ -99,16 +155,33 @@ export function getSeminarStatusDisplay(info: {
 }
 
 /**
+ * 퀴즈 결과 메시지에서 퀴즈정답 요약(예: "퀴즈 정답 123", "[퀴즈] 정답 123", "정답 : 1번 O" 등)만 추출하고
+ * 하단의 퀴즈:답 상세 내역(Q1: ..., → ...)은 제거합니다.
+ */
+export function extractQuizSummaryOnly(quizMessage?: string | null): string | null {
+  if (!quizMessage) return null;
+  const lines = quizMessage
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+  if (lines.length === 0) return null;
+  return lines[0];
+}
+
+/**
  * 세미나 현황 통합 메시지 및 인라인 키보드 생성 (댓글 섹션 포함)
  * - 제목의 **(볼드) 제거
  * - 시작종료시각을 제목 앞에 표시
  * - 제목은 20글자로 트렁케이션
+ * - 퀴즈정답은 요약(퀴즈정답: 123 등)만 표시 (상세 퀴즈 문항/답 제외)
+ * - 종료된 세미나의 설문 가능 시간(약 몇분 남음) 표시
  */
 export function buildSeminarStatusMessage(
   periodName: string,
   seminars: MonitoredSeminarItem[],
   isAllCompleted = false,
   comments: Array<{ userName: string; text: string }> = [],
+  nowMs = Date.now(),
 ): { text: string; options: Record<string, unknown> } {
   if (seminars.length === 0) {
     return {
@@ -130,10 +203,26 @@ export function buildSeminarStatusMessage(
     text += `${statusDisplay.emoji} ${statusDisplay.text} | ${timeStr}${truncatedName}${advancedSuffix}\n${targetUrl}`;
 
     if (s.status === '종료' || statusDisplay.text === '종료') {
-      if (s.quizResultMessage) {
-        text += `\n${s.quizResultMessage.trim()}`;
+      const summaryQuiz = extractQuizSummaryOnly(s.quizResultMessage);
+      if (summaryQuiz) {
+        text += `\n${summaryQuiz}`;
+        if (s.hasSurvey !== false) {
+          const minutesLeft = getSurveyRemainingMinutes(s, nowMs);
+          if (minutesLeft > 0) {
+            text += `\n(설문 마감 약 ${minutesLeft}분 남음)`;
+          } else {
+            text += `\n(설문 마감)`;
+          }
+        }
       } else if (s.hasSurvey === false) {
         text += `\n(설문이 없는 세미나)`;
+      } else {
+        const minutesLeft = getSurveyRemainingMinutes(s, nowMs);
+        if (minutesLeft > 0) {
+          text += `\n(설문 마감 약 ${minutesLeft}분 남음)`;
+        } else {
+          text += `\n(설문 마감)`;
+        }
       }
     }
 
@@ -171,9 +260,10 @@ export function buildSeminarStatusMessage(
 export function buildSeminarMonitorStatusMessage(
   periodName: string,
   seminars: SeminarInfo[] | Record<string, SeminarInfo>,
+  nowMs = Date.now(),
 ): string {
   const list = Array.isArray(seminars) ? seminars : Object.values(seminars);
-  return buildSeminarStatusMessage(periodName, list).text;
+  return buildSeminarStatusMessage(periodName, list, false, [], nowMs).text;
 }
 
 /**
@@ -244,6 +334,48 @@ export async function sendSeminarLiveEndNotice(
 ): Promise<{ successCount: number; failCount: number }> {
   const { text, options } = buildSeminarLiveEndMessage(seminar);
   return sendToTopicSubscribers('seminar_live', text, options);
+}
+
+/**
+ * 설문 마감 임박(20분 전, 10분 전) 개별 알림 메시지 빌더
+ */
+export function buildSurveyClosingMessage(
+  seminar: MonitoredSeminarItem,
+  minutesLeft: number,
+): {
+  text: string;
+  options: Record<string, unknown>;
+} {
+  const timeStr = seminar.time ? `[${seminar.time}] ` : '';
+  const advancedSuffix = seminar.isAdvancedSurvey ? ' [심화설문]' : '';
+  const targetUrl = seminar.url || (seminar.seminarId ? `${SEMINAR_DETAIL_PAGE}${seminar.seminarId}` : '');
+
+  let text = `⏳ <b>[설문 마감 ${minutesLeft}분 전]</b>\n\n${timeStr}<b>${seminar.name}</b>${advancedSuffix}\n${targetUrl}`;
+
+  if (seminar.quizResultMessage) {
+    text += `\n\n${seminar.quizResultMessage.trim()}`;
+  }
+  text += `\n\n⚠️ <b>설문 참여 마감까지 약 ${minutesLeft}분 남았습니다.</b>`;
+
+  return {
+    text,
+    options: {
+      parse_mode: 'HTML',
+      link_preview_options: { is_disabled: true },
+    },
+  };
+}
+
+/**
+ * 설문 마감 20분전 / 10분전 알림을 해당 토픽 구독자들에게 발송합니다.
+ */
+export async function sendSurveyClosingNotice(
+  seminar: MonitoredSeminarItem,
+  minutesLeft: 20 | 10,
+): Promise<{ successCount: number; failCount: number }> {
+  const topic: SubscriptionTopic = minutesLeft === 20 ? 'survey_closing_20' : 'survey_closing_10';
+  const { text, options } = buildSurveyClosingMessage(seminar, minutesLeft);
+  return sendToTopicSubscribers(topic, text, options);
 }
 
 /**
@@ -322,8 +454,6 @@ export async function syncChannelSeminarStatusOnQuizRegister(
     return { success: false, modified: false, message: `채널 메시지 수정 오류: ${errMsg}` };
   }
 }
-
-const seoulDateString = (): string => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
 
 const getSeminarTrackingKey = (url: string, seminarId: string | null | undefined): string => seminarId || url;
 
@@ -873,6 +1003,7 @@ export type MonitorSeminarsOptions = {
   context?: BrowserContext;
   page?: Page;
   pollIntervalMs?: number;
+  waitForSurveyClose?: boolean;
 };
 
 /**
@@ -919,7 +1050,11 @@ async function monitorSeminars(
     providedContext = options.context;
   }
 
-  const { isAutoResume, pollIntervalMs = API_POLL_INTERVAL_MS } = options;
+  const {
+    isAutoResume,
+    pollIntervalMs = API_POLL_INTERVAL_MS,
+    waitForSurveyClose = process.env.NODE_ENV !== 'test',
+  } = options;
   const todayIsoDate = seoulDateString();
   const excludedSeminarKeys = new Set<string>();
 
@@ -973,6 +1108,7 @@ async function monitorSeminars(
       // 상태 초기화
       let currentStatus: SeminarStatus = info.status;
       const isEnded = info.status === '종료';
+      const endedAt = isEnded ? Date.now() : undefined;
       const quizResultMessage: string | null = null;
       let startNotified = false;
       const endNotified = isEnded;
@@ -1016,6 +1152,7 @@ async function monitorSeminars(
         url: targetUrl,
         status: currentStatus,
         isEnded,
+        endedAt,
         quizResultMessage,
         startNotified,
         endNotified,
@@ -1042,7 +1179,15 @@ async function monitorSeminars(
 
     // 초기 발송 조건 체크: 입장가능 또는 종료 상태인 세미나가 있는 경우에만 발송
     const hasInitialActiveOrEnded = seminarList.some((s) => s.status === '입장가능' || s.status === '종료');
-    const isAllInitiallyCompleted = seminarList.length > 0 && seminarList.every((s) => s.status === '종료');
+    const isAllInitiallySeminarsEnded = seminarList.length > 0 && seminarList.every((s) => s.status === '종료');
+    const isAllInitiallySurveysClosed = seminarList.every((s) => {
+      if (s.status !== '종료') return false;
+      if (s.hasSurvey === false) return true;
+      return getSurveyRemainingMinutes(s) === 0;
+    });
+    const isAllInitiallyCompleted = isAllInitiallySeminarsEnded && (!waitForSurveyClose || isAllInitiallySurveysClosed);
+
+    let lastStatusNoticeText: string | null = null;
 
     if (hasInitialActiveOrEnded) {
       lastStatusNoticeMessageId = await publishSeminarStatusNotice(
@@ -1052,10 +1197,11 @@ async function monitorSeminars(
         isAllInitiallyCompleted,
         isAutoResume,
       );
+      lastStatusNoticeText = buildSeminarStatusMessage(periodName, seminarList, isAllInitiallyCompleted).text;
     }
 
     if (isAllInitiallyCompleted) {
-      console.log(`[${periodName}] 모든 세미나가 이미 종료 상태이므로 모니터링을 종료합니다.`);
+      console.log(`[${periodName}] 모든 세미나 및 설문이 이미 종료 상태이므로 모니터링을 종료합니다.`);
       return true;
     }
 
@@ -1166,6 +1312,7 @@ async function monitorSeminars(
 
           currentSeminar.status = '종료';
           currentSeminar.isEnded = true;
+          currentSeminar.endedAt = currentSeminar.endedAt || Date.now();
           currentSeminar.quizResultMessage = quizResultMessage;
           hasStateChanged = true;
 
@@ -1222,11 +1369,58 @@ async function monitorSeminars(
         }
       }
 
-      // 상태 변화가 발생한 경우 통합 메시지 발송 & 이전 메시지 삭제
-      if (hasStateChanged) {
-        const currentList = Array.from(monitoredSeminarsMap.values());
-        const isAllCompleted = currentList.length > 0 && currentList.every((s) => s.status === '종료');
+      // ── D. 설문 마감 임박 알림 (20분 전, 10분 전) 감시
+      const currentNowMs = Date.now();
+      for (const currentSeminar of monitoredSeminarsMap.values()) {
+        if (
+          currentSeminar.status === '종료' &&
+          currentSeminar.hasSurvey !== false &&
+          !currentSeminar.isSurveyPointExcluded
+        ) {
+          const surveyEndTime = getSeminarSurveyEndTime(currentSeminar);
+          if (surveyEndTime) {
+            const diffMs = surveyEndTime - currentNowMs;
+            const rawMinutes = diffMs / (60 * 1000);
 
+            // 20분 전 알림 (잔여 시간 20분 이하 0분 초과)
+            if (rawMinutes <= 20 && rawMinutes > 0 && !currentSeminar.notifiedClosing20) {
+              currentSeminar.notifiedClosing20 = true;
+              await sendSurveyClosingNotice(currentSeminar, 20).catch((e) => {
+                console.error(`[${periodName}] 설문 마감 20분전 알림 발송 실패 (${currentSeminar.name})`, e);
+              });
+            }
+
+            // 10분 전 알림 (잔여 시간 10분 이하 0분 초과)
+            if (rawMinutes <= 10 && rawMinutes > 0 && !currentSeminar.notifiedClosing10) {
+              currentSeminar.notifiedClosing10 = true;
+              await sendSurveyClosingNotice(currentSeminar, 10).catch((e) => {
+                console.error(`[${periodName}] 설문 마감 10분전 알림 발송 실패 (${currentSeminar.name})`, e);
+              });
+            }
+          }
+        }
+      }
+
+      // ── E. 상태 변화 및 10분 단위 설문 잔여 시간 변경 시 공지 수정/발송
+      const currentList = Array.from(monitoredSeminarsMap.values());
+      const isAllSeminarsEnded = currentList.length > 0 && currentList.every((s) => s.status === '종료');
+      const isAllSurveysClosed = currentList.every((s) => {
+        if (s.status !== '종료') return false;
+        if (s.hasSurvey === false) return true;
+        return getSurveyRemainingMinutes(s, currentNowMs) === 0;
+      });
+      const isAllCompleted = isAllSeminarsEnded && (!waitForSurveyClose || isAllSurveysClosed);
+
+      const currentStatusText = buildSeminarStatusMessage(
+        periodName,
+        currentList,
+        isAllCompleted,
+        undefined,
+        currentNowMs,
+      ).text;
+
+      if (hasStateChanged) {
+        // 주요 상태 변화 (대기->입장가능 또는 입장가능->종료): publishSeminarStatusNotice
         lastStatusNoticeMessageId = await publishSeminarStatusNotice(
           periodName,
           currentList,
@@ -1234,9 +1428,31 @@ async function monitorSeminars(
           isAllCompleted,
           isAutoResume,
         );
+        lastStatusNoticeText = currentStatusText;
 
         if (isAllCompleted) {
-          console.log(`[${periodName}] 모든 세미나가 종료되었습니다. 모니터링을 완료합니다.`);
+          console.log(`[${periodName}] 모든 세미나 및 설문이 종료되었습니다. 모니터링을 완료합니다.`);
+          break;
+        }
+      } else if (lastStatusNoticeText !== currentStatusText && lastStatusNoticeMessageId) {
+        // 10분 단위 설문 잔여 시간 변경 등 텍스트 변화 시: editChannelMessage로 인플레이스 수정
+        const editRes = await editChannelMessage(lastStatusNoticeMessageId, currentStatusText);
+        if (editRes.success) {
+          lastStatusNoticeText = currentStatusText;
+        } else {
+          // 수정 실패 시 publishSeminarStatusNotice로 재시도
+          lastStatusNoticeMessageId = await publishSeminarStatusNotice(
+            periodName,
+            currentList,
+            lastStatusNoticeMessageId,
+            isAllCompleted,
+            isAutoResume,
+          );
+          lastStatusNoticeText = currentStatusText;
+        }
+
+        if (isAllCompleted) {
+          console.log(`[${periodName}] 모든 세미나 및 설문이 종료되었습니다. 모니터링을 완료합니다.`);
           break;
         }
       }
