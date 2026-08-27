@@ -19,9 +19,6 @@ import {
 import {
   getChannelMessagesByDate,
   getChannelMessageById,
-  editChannelMessage,
-  deleteChannelMessage,
-  deleteChannelMessagesByDate,
   getSeoulDateString,
   recordChannelComment,
   recordDiscussionThread,
@@ -1617,97 +1614,10 @@ if (adminBot) {
         );
       }
 
-      lines.push('\n💡 메시지 관리:');
-      lines.push('- 수정: `/edit_channel_message <message_id> <새 내용>`');
-      lines.push('- 삭제: `/delete_channel_message <message_id>`');
-      lines.push('- 오늘 전체 삭제: `/delete_today_channel_messages`');
-
       await replyWithSplit(ctx, lines.join('\n'));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       await replyWithSplit(ctx, `❌ 공지방 메시지 목록 조회 실패: ${message}`);
-    }
-  });
-
-  adminBot.command('edit_channel_message', async (ctx) => {
-    try {
-      const text = ctx.message.text.trim();
-      const firstSpace = text.indexOf(' ');
-      if (firstSpace === -1) {
-        await replyWithSplit(ctx, '⚠️ 사용법: /edit_channel_message <message_id> <새로운 메시지 내용>');
-        return;
-      }
-
-      const rest = text.substring(firstSpace + 1).trim();
-      const secondSpace = rest.indexOf(' ');
-      const messageIdStr = secondSpace === -1 ? rest : rest.substring(0, secondSpace).trim();
-      const newText = secondSpace === -1 ? '' : rest.substring(secondSpace + 1).trim();
-
-      const messageId = parseInt(messageIdStr, 10);
-      if (Number.isNaN(messageId)) {
-        await replyWithSplit(ctx, '⚠️ 유효하지 않은 message_id 입니다. 숫자로 입력해주세요.');
-        return;
-      }
-
-      if (!newText) {
-        await replyWithSplit(ctx, '⚠️ 변경할 새 내용을 입력해주세요.\n예: /edit_channel_message 12345 수정할 내용');
-        return;
-      }
-
-      const result = await editChannelMessage(messageId, newText);
-      if (result.success) {
-        await replyWithSplit(ctx, `✅ 공지방 메시지(ID: ${messageId})가 성공적으로 수정되었습니다.`);
-      } else {
-        await replyWithSplit(ctx, `❌ 메시지 수정 실패: ${result.message}`);
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      await replyWithSplit(ctx, `❌ 메시지 수정 처리 실패: ${message}`);
-    }
-  });
-
-  adminBot.command('delete_channel_message', async (ctx) => {
-    try {
-      const parts = ctx.message.text.trim().split(/\s+/);
-      if (parts.length < 2) {
-        await replyWithSplit(ctx, '⚠️ 사용법: /delete_channel_message <message_id>');
-        return;
-      }
-
-      const messageId = parseInt(parts[1], 10);
-      if (Number.isNaN(messageId)) {
-        await replyWithSplit(ctx, '⚠️ 유효하지 않은 message_id 입니다. 숫자로 입력해주세요.');
-        return;
-      }
-
-      const result = await deleteChannelMessage(messageId);
-      if (result.success) {
-        await replyWithSplit(ctx, `✅ 공지방 메시지(ID: ${messageId})가 성공적으로 삭제되었습니다.`);
-      } else {
-        await replyWithSplit(ctx, `❌ 메시지 삭제 실패: ${result.message}`);
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      await replyWithSplit(ctx, `❌ 메시지 삭제 처리 실패: ${message}`);
-    }
-  });
-
-  adminBot.command('delete_today_channel_messages', async (ctx) => {
-    try {
-      const today = getSeoulDateString();
-      const result = await deleteChannelMessagesByDate(today);
-      if (result.total === 0) {
-        await replyWithSplit(ctx, `ℹ️ 오늘(${today}) 공지방에 삭제할 메시지가 없습니다.`);
-        return;
-      }
-
-      const summary =
-        `🗑️ 오늘(${today}) 공지방 메시지 일괄 삭제 결과:\n- 대상: 총 ${result.total}건\n- 성공: ${result.deletedCount}건\n- 실패: ${result.failedCount}건\n\n` +
-        result.details.join('\n');
-      await replyWithSplit(ctx, summary);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      await replyWithSplit(ctx, `❌ 오늘 공지방 메시지 일괄 삭제 실패: ${message}`);
     }
   });
 
@@ -1742,9 +1652,6 @@ if (adminBot) {
 
 📢 공지방 메시지 관리:
 - /channel_messages [날짜]: 공지방 전송 메시지 ID 목록 조회 (기본: 오늘)
-- /edit_channel_message <ID> <새 내용>: 특정 공지방 메시지 수정
-- /delete_channel_message <ID>: 특정 공지방 메시지 삭제
-- /delete_today_channel_messages: 오늘 전송된 공지방 메시지 전체 삭제
 
 ⚙️ 시스템 & 관리:
 - /schedules: 스케줄된 작업 목록을 확인합니다.
@@ -1784,20 +1691,17 @@ if (noticeBot) {
   noticeBot.command('help', (ctx) => {
     const message = `사용 가능한 명령어:
 
-- /subscribe_settings (/구독설정): 맞춤 알림 구독 항목 및 시간 설정
+- /settings (/구독설정): 맞춤 알림 구독 항목 및 시간 설정
 - /today_links: 오늘의 세미나/퀴즈/출석 링크 모음
 - /intermd_quiz: 인터엠디 오늘의 퀴즈 정답 확인
 - /seminar_detail <세미나번호>: 세미나 상세 정보 조회 (예: /seminar_detail 5566)
 - /check_advanced_seminars: 최근 2주 심화 세미나 포인트 지급 현황 (방장 계정 기준)
-- /subscribe_seminar_changes: 세미나 정보 변경 알림 구독
-- /unsubscribe_seminar_changes: 세미나 정보 변경 알림 구독 해제
-- /subscribe_intermd_quiz: 인터엠디 퀴즈 알림 구독
-- /unsubscribe_intermd_quiz: 인터엠디 퀴즈 알림 구독 해제`;
+- /help: 도움말`;
     replyWithSplit(ctx, message);
   });
 }
 
-const adminCommands = [
+export const adminCommands = [
   // 1. 루틴 / 실행
   { command: 'run_routine_now', description: '즉시 daily_routine 실행' },
   { command: 'today_links', description: '세미나/퀴즈 링크 모음 [날짜 지정 가능]' },
@@ -1828,22 +1732,15 @@ const adminCommands = [
   { command: 'inspect', description: '페이지 요소 검사' },
   // 5. 공지방 메시지 관리
   { command: 'channel_messages', description: '공지방 메시지 ID 목록 조회 [날짜]' },
-  { command: 'edit_channel_message', description: '공지방 메시지 수정 (message_id 새내용)' },
-  { command: 'delete_channel_message', description: '공지방 메시지 삭제 (message_id)' },
-  { command: 'delete_today_channel_messages', description: '오늘 공지방 메시지 전체 삭제' },
   { command: 'help', description: '도움말' },
 ];
 
-const noticeCommands = [
-  { command: 'subscribe_settings', description: '알림 구독 항목 및 시간 설정 (/구독설정)' },
+export const noticeCommands = [
+  { command: 'settings', description: '알림 구독 항목 및 시간 설정 (/구독설정)' },
   { command: 'today_links', description: '오늘의 세미나/퀴즈/출석 링크 모음' },
   { command: 'intermd_quiz', description: '인터엠디 오늘의 퀴즈 정답 확인' },
   { command: 'seminar_detail', description: '세미나 번호로 상세 정보 조회' },
   { command: 'check_advanced_seminars', description: '최근 2주 심화 세미나 포인트 확인 (방장 계정 기준)' },
-  { command: 'subscribe_seminar_changes', description: '세미나 정보 변경 알림 구독' },
-  { command: 'unsubscribe_seminar_changes', description: '세미나 정보 변경 알림 구독 해제' },
-  { command: 'subscribe_intermd_quiz', description: '인터엠디 퀴즈 알림 구독' },
-  { command: 'unsubscribe_intermd_quiz', description: '인터엠디 퀴즈 알림 구독 해제' },
   { command: 'help', description: '도움말' },
 ];
 
