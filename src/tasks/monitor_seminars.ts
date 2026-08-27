@@ -1089,13 +1089,16 @@ async function monitorSeminars(
       const targetUrl = info.seminarId ? `${SEMINAR_DETAIL_PAGE}${info.seminarId}` : url;
       let isPointExcluded = info.isSurveyPointExcluded ?? false;
       let hasEntryHistory = false;
+      let initialIsEnded = info.status === '종료';
 
-      // isAutoResume 시에만 입장이력 및 상세 상태 단 1회 확인
-      if (info.seminarId && isAutoResume) {
+      if (info.seminarId) {
         const detailCheck = await checkSeminarEndStatusFromApi(info.seminarId);
         isPointExcluded = detailCheck.isPointExcluded;
         hasEntryHistory = detailCheck.hasEntryHistory;
         info.isSurveyPointExcluded = isPointExcluded;
+        if (detailCheck.isEnded) {
+          initialIsEnded = true;
+        }
       }
 
       // 포인트 미지급 세미나: 채널 공지 대상에서 제외
@@ -1106,8 +1109,8 @@ async function monitorSeminars(
       }
 
       // 상태 초기화
-      let currentStatus: SeminarStatus = info.status;
-      const isEnded = info.status === '종료';
+      let currentStatus: SeminarStatus = initialIsEnded ? '종료' : info.status;
+      const isEnded = initialIsEnded;
       const endedAt = isEnded ? Date.now() : undefined;
       const quizResultMessage: string | null = null;
       let startNotified = false;
@@ -1207,7 +1210,7 @@ async function monitorSeminars(
 
     let loopIteration = 0;
 
-    // 2. API 모니터링 루프 (1분 폴링: 메인 API만 조회)
+    // 2. API 모니터링 루프 (1분 폴링)
     while (true) {
       loopIteration++;
       const currentTime = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
@@ -1243,7 +1246,16 @@ async function monitorSeminars(
 
         if (!monitoredSeminarsMap.has(url)) {
           const targetUrl = info.seminarId ? `${SEMINAR_DETAIL_PAGE}${info.seminarId}` : url;
-          const isPointExcluded = info.isSurveyPointExcluded ?? false;
+          let isPointExcluded = info.isSurveyPointExcluded ?? false;
+          let initialIsEnded = info.status === '종료';
+          if (info.seminarId) {
+            const detailCheck = await checkSeminarEndStatusFromApi(info.seminarId);
+            isPointExcluded = detailCheck.isPointExcluded;
+            info.isSurveyPointExcluded = isPointExcluded;
+            if (detailCheck.isEnded) {
+              initialIsEnded = true;
+            }
+          }
           if (isPointExcluded) {
             excludedSeminarKeys.add(trackingKey);
             continue;
@@ -1252,11 +1264,12 @@ async function monitorSeminars(
           monitoredSeminarsMap.set(url, {
             ...info,
             url: targetUrl,
-            status: info.status || '대기',
-            isEnded: false,
+            status: initialIsEnded ? '종료' : info.status || '대기',
+            isEnded: initialIsEnded,
+            endedAt: initialIsEnded ? Date.now() : undefined,
             quizResultMessage: null,
             startNotified: false,
-            endNotified: false,
+            endNotified: initialIsEnded,
           });
         }
       }
@@ -1282,20 +1295,37 @@ async function monitorSeminars(
           continue;
         }
 
-        // ── B. 종료 감시 (메인 API의 status/processState/seminarCompleted로 판정)
-        const isApiEnded =
+        // ── B. 종료 감시
+        // 1) 메인 API의 status/processState/seminarCompleted로 1차 판정
+        let isEnded =
           apiInfo?.status === '종료' ||
           apiInfo?.processState === ProcessState.PROCESS_END ||
           apiInfo?.processState === ProcessState.PROCESS_COMPLETED ||
           apiInfo?.seminarCompleted === 1;
 
-        if (isApiEnded) {
-          console.log(`[${periodName}] 세미나 종료 감지됨: ${name} (${seminarId})`);
+        let isSurveyOpen = false;
+        let isDetailPointExcluded = currentSeminar.isSurveyPointExcluded;
+
+        // 2) 활성 세미나 상세 API(checkSeminarEndStatusFromApi)로 실시간 설문 오픈(surveyState===1) 및 종료 상태 확인
+        if (seminarId && !isEnded) {
+          const endCheck = await checkSeminarEndStatusFromApi(seminarId);
+          if (endCheck.isEnded) {
+            isEnded = true;
+            isSurveyOpen = endCheck.isSurveyOpen;
+          }
+          if (endCheck.isPointExcluded !== undefined) {
+            isDetailPointExcluded = endCheck.isPointExcluded;
+            currentSeminar.isSurveyPointExcluded = isDetailPointExcluded;
+          }
+        }
+
+        if (isEnded) {
+          console.log(`[${periodName}] 세미나 종료 감지됨: ${name} (${seminarId}), isSurveyOpen=${isSurveyOpen}`);
 
           // 1) Playwright 온디맨드로 설문 및 퀴즈 처리
           let quizResultMessage: string | null = null;
 
-          if (!currentSeminar.isSurveyPointExcluded && !apiInfo?.isSurveyPointExcluded) {
+          if (!currentSeminar.isSurveyPointExcluded && !isDetailPointExcluded) {
             await withBrowserContext(providedContext, async (ctx) => {
               const res = await handleSeminarEndAndQuiz(
                 ctx,

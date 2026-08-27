@@ -235,80 +235,60 @@ describe('닥터빌 API 과다 호출 방지 및 라이브 모니터링 최적�
     console.log('  ✓ [Pass] runHttpOnly 평소 detail 미호출 및 1시간 주기 정상 enrich 검증 완료\n');
   });
 
-  it('4. monitorSeminars: 1분 모니터링 폴링 중 detail API 호출 전면 제거 검증', async () => {
-    console.log('--- [Test 4] monitorSeminars 루프 내 detail API 호출 미발생 검증 ---');
+  it('4. monitorSeminars: 메인 API 미반영 시에도 상세 API(surveyState/processState)를 통한 실시간 종료 감지 검증', async () => {
+    console.log('--- [Test 4] monitorSeminars 상세 API 연동을 통한 실시간 종료 감지 검증 ---');
 
     let detailApiCallCount = 0;
-    vi.spyOn(seminarApiModule, 'fetchSeminarDetail').mockImplementation(async (id: number | string) => {
-      detailApiCallCount++;
-      return {
-        success: true,
-        seminarId: String(id),
-        hasEntryHistory: false,
-        survey: { point: 1000 },
-        isPointExcluded: false,
-        rawResponse: { seminarDetail: { processState: 7 } },
-      };
-    });
-
     let loopStep = 0;
     const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
     const currentHour = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' })).getHours();
 
-    vi.spyOn(seminarApiModule, 'fetchMainFutureSeminars').mockImplementation(async () => {
-      loopStep++;
-      if (loopStep === 1) {
-        // 초기: 대기 상태
+    vi.spyOn(seminarApiModule, 'fetchSeminarDetail').mockImplementation(async (id: number | string) => {
+      detailApiCallCount++;
+      const sid = String(id);
+      // 초기화 및 1단계: 진행 중 (surveyState: 5, processState: 1)
+      // 2단계 이후: 설문 오픈 (surveyState: 1, processState: 6) -> 종료 감지
+      if (loopStep < 2) {
         return {
           success: true,
-          items: [
-            {
-              seminarId: 301,
-              seminarNm: '모니터링 테스트 세미나 301',
-              startDt: `${todayStr} ${String(currentHour).padStart(2, '0')}:00:00`,
-              endDt: `${todayStr} ${String(currentHour + 1).padStart(2, '0')}:00:00`,
-              useSurvey: 'Y',
-              useDepthSurvey: 'N',
-              processState: 2, // 대기
-            },
-          ],
-          rawResponse: {},
-        };
-      } else if (loopStep === 2) {
-        // 1분 후: 입장가능 상태
-        return {
-          success: true,
-          items: [
-            {
-              seminarId: 301,
-              seminarNm: '모니터링 테스트 세미나 301',
-              startDt: `${todayStr} ${String(currentHour).padStart(2, '0')}:00:00`,
-              endDt: `${todayStr} ${String(currentHour + 1).padStart(2, '0')}:00:00`,
-              useSurvey: 'Y',
-              useDepthSurvey: 'N',
-              processState: 1, // 입장가능
-            },
-          ],
-          rawResponse: {},
+          seminarId: sid,
+          hasEntryHistory: false,
+          survey: { point: 1000 },
+          surveyState: 5,
+          isPointExcluded: false,
+          rawResponse: { surveyState: 5, seminarDetail: { processState: 1 } },
         };
       } else {
-        // 2분 후: 방송종료 상태
         return {
           success: true,
-          items: [
-            {
-              seminarId: 301,
-              seminarNm: '모니터링 테스트 세미나 301',
-              startDt: `${todayStr} ${String(currentHour).padStart(2, '0')}:00:00`,
-              endDt: `${todayStr} ${String(currentHour + 1).padStart(2, '0')}:00:00`,
-              useSurvey: 'Y',
-              useDepthSurvey: 'N',
-              processState: 7, // 방송종료
-            },
-          ],
-          rawResponse: {},
+          seminarId: sid,
+          hasEntryHistory: false,
+          survey: { point: 1000 },
+          surveyState: 1, // 설문 진행 중 (종료 감지 트리거)
+          isPointExcluded: false,
+          rawResponse: { surveyState: 1, seminarDetail: { processState: 6 } },
         };
       }
+    });
+
+    // 메인 API는 방송 종료 후에도 processState: 1 로 계속 남아있는 상황 시뮬레이션
+    vi.spyOn(seminarApiModule, 'fetchMainFutureSeminars').mockImplementation(async () => {
+      loopStep++;
+      return {
+        success: true,
+        items: [
+          {
+            seminarId: 301,
+            seminarNm: '모니터링 테스트 세미나 301',
+            startDt: `${todayStr} ${String(currentHour).padStart(2, '0')}:00:00`,
+            endDt: `${todayStr} ${String(currentHour + 1).padStart(2, '0')}:00:00`,
+            useSurvey: 'Y',
+            useDepthSurvey: 'N',
+            processState: 1, // 메인 API는 여전히 입장가능 상태
+          },
+        ],
+        rawResponse: {},
+      };
     });
 
     vi.spyOn(utilsModule, 'sendNotificationToChannel').mockResolvedValue(100);
@@ -363,12 +343,11 @@ describe('닥터빌 API 과다 호출 방지 및 라이브 모니터링 최적�
     });
 
     assert.strictEqual(monitorSuccess, true);
-    assert.strictEqual(
-      detailApiCallCount,
-      0,
-      '모니터링 전체 주기 동안 fetchSeminarDetail 호출이 0회여야 함 (메인 API만으로 상태 감시 및 온디맨드 퀴즈)',
+    assert.ok(
+      detailApiCallCount > 0,
+      `메인 API에 종료가 미반영되어도 상세 API 호출(${detailApiCallCount}회)을 통해 surveyState=1을 감지하여 정상 종료되어야 함`,
     );
 
-    console.log('  ✓ [Pass] monitorSeminars 폴링 루프 중 detail API 호출 0회 확인 완료\n');
+    console.log('  ✓ [Pass] monitorSeminars 메인 API 미반영 상황에서 상세 API 연동을 통한 정상 종료 감지 검증 완료\n');
   });
 });
