@@ -202,6 +202,54 @@ export function updateChannelMessageStatus(
 }
 
 /**
+ * 텍스트가 '오늘의 링크' 메시지인지 판별합니다.
+ */
+export function isTodayLinksMessageText(text?: string | null): boolean {
+  if (!text) return false;
+  return text.includes('mypage/attendance') || (text.includes('출석체크') && text.includes('오늘의 퀴즈'));
+}
+
+/**
+ * 텍스트가 '세미나 현황' 메시지인지 판별합니다.
+ */
+export function isSeminarStatusMessageText(text?: string | null, periodName?: string): boolean {
+  if (!text) return false;
+  if (isTodayLinksMessageText(text)) return false;
+
+  if (periodName) {
+    return (
+      (text.includes('🔔') || text.includes('🏁')) &&
+      (text.includes(`${periodName}세미나`) || text.includes(`${periodName} 세미나`))
+    );
+  }
+
+  return (
+    (text.includes('🔔') || text.includes('🏁')) &&
+    (text.includes('점심세미나') ||
+      text.includes('점심 세미나') ||
+      text.includes('저녁세미나') ||
+      text.includes('저녁 세미나'))
+  );
+}
+
+/**
+ * 텍스트가 '신규 세미나 모음' 공지 메시지인지 판별합니다.
+ */
+export function isNewSeminarsMessageText(text?: string | null): boolean {
+  if (!text) return false;
+  if (isTodayLinksMessageText(text)) return false;
+  if (isSeminarStatusMessageText(text)) return false;
+
+  return (
+    text.includes('오늘 추가된 세미나 모음') ||
+    text.includes('새로 추가된 세미나 모음') ||
+    text.includes('신규 세미나 모음') ||
+    text.includes('새로 추가된 세미나') ||
+    text.includes('새로 발견된 세미나')
+  );
+}
+
+/**
  * 특정 일자에 공지 채널로 전송된 '오늘의 링크' 메시지 레코드를 조회합니다.
  */
 export function getTodayLinksChannelMessage(date?: string, channelId?: string): ChannelMessageRecord | null {
@@ -209,11 +257,7 @@ export function getTodayLinksChannelMessage(date?: string, channelId?: string): 
   const targetChannelId = channelId || process.env.NOTICE_CHANNEL_ID;
   const messages = getChannelMessagesByDate(targetDate, targetChannelId).filter((m) => m.status !== 'deleted');
 
-  const found = messages.find(
-    (m) =>
-      m.text &&
-      (m.text.includes('mypage/attendance') || (m.text.includes('출석체크') && m.text.includes('오늘의 퀴즈'))),
-  );
+  const found = messages.find((m) => isTodayLinksMessageText(m.text));
   return found || null;
 }
 
@@ -232,7 +276,7 @@ export function getSeminarStatusChannelMessage(
   // 가장 최근에 전송된 해당 periodName의 세미나 현황 메시지 검색 (뒤에서부터)
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
-    if (m.text && (m.text.includes(`${periodName}세미나`) || m.text.includes(`${periodName} 세미나`))) {
+    if (isSeminarStatusMessageText(m.text, periodName)) {
       return m;
     }
   }
@@ -250,13 +294,7 @@ export function getNewSeminarsChannelMessage(date?: string, channelId?: string):
   // 가장 최근에 전송된 신규 세미나 공지 메시지 검색 (뒤에서부터)
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
-    if (
-      m.text &&
-      (m.text.includes('오늘 추가된 세미나 모음') ||
-        m.text.includes('새로 추가된 세미나') ||
-        m.text.includes('새로 발견된 세미나') ||
-        m.text.includes('신규 세미나'))
-    ) {
+    if (isNewSeminarsMessageText(m.text)) {
       return m;
     }
   }

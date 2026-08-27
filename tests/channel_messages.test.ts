@@ -14,6 +14,12 @@ import {
   deleteChannelMessage,
   deleteChannelMessagesByDate,
   getSeoulDateString,
+  getTodayLinksChannelMessage,
+  getNewSeminarsChannelMessage,
+  getSeminarStatusChannelMessage,
+  isTodayLinksMessageText,
+  isNewSeminarsMessageText,
+  isSeminarStatusMessageText,
 } from '../src/services/channel_message_repository';
 import { sendNotificationToChannel } from '../src/modules/utils';
 import { describe, it } from 'vitest';
@@ -233,5 +239,117 @@ describe('공지방 텔레그램 메시지 ID 일자별 추적 및 수정/삭제
     }
 
     console.log('\n🎉 모든 공지방 메시지 ID 추적 및 수정/삭제 테스트 100% 통과!\n');
+  });
+
+  it('Today Links 메시지가 신규 세미나 모음 또는 세미나 현황 메시지로 오인되지 않는지 검증', () => {
+    // 테스트 DB 초기화
+    storage.clear();
+    const mockChannelId = '-1001234567890';
+    const testDate = '2026-08-27';
+
+    // 1. 09:00에 전송된 Today Links 메시지 (출석체크, 퀴즈, 점심/저녁 세미나, 어제 추가된 신규 세미나 포함)
+    const todayLinksText = `✨ <b>출석체크:</b> https://m.doctorville.co.kr/mypage/attendance
+
+✏️ <b>오늘의 퀴즈:</b> 오늘은 퀴즈가 없습니다. ☕
+
+📖 <b>오늘의 세미나 리스트:</b>
+🍴 <b>[점심 세미나]</b>
+- 13:00. 1번 세미나 https://m.doctorville.co.kr/cme/seminar/101
+
+🍴 <b>[저녁 세미나]</b>
+- 19:00. 2번 세미나 https://m.doctorville.co.kr/cme/seminar/102
+
+🆕 <b>어제 추가된 신규 세미나</b>
+1. [2026-08-28 13:00] 신규 세미나 1 (0/100)
+https://m.doctorville.co.kr/cme/seminar/103
+
+<blockquote>🤖 <b>닥터빌 텔레그램방에 전송된 메시지입니다.</b></blockquote>`;
+
+    recordChannelMessage({
+      channelId: mockChannelId,
+      messageId: 2439,
+      date: testDate,
+      chunkIndex: 0,
+      totalChunks: 1,
+      text: todayLinksText,
+      mediaType: 'text',
+    });
+
+    // Today Links 텍스트 판별 확인
+    assert.strictEqual(isTodayLinksMessageText(todayLinksText), true);
+    assert.strictEqual(isNewSeminarsMessageText(todayLinksText), false);
+    assert.strictEqual(isSeminarStatusMessageText(todayLinksText, '점심'), false);
+    assert.strictEqual(isSeminarStatusMessageText(todayLinksText, '저녁'), false);
+
+    // Repository 조회 함수 확인
+    const todayLinksFound = getTodayLinksChannelMessage(testDate, mockChannelId);
+    assert.ok(todayLinksFound !== null);
+    assert.strictEqual(todayLinksFound?.messageId, 2439);
+
+    // 신규 세미나 모음이나 세미나 현황으로 조회했을 때 2439가 반환되면 안 됨 (null이어야 함)
+    const newSeminarsFound = getNewSeminarsChannelMessage(testDate, mockChannelId);
+    assert.strictEqual(newSeminarsFound, null, 'Today Links 메시지는 신규 세미나 모음으로 검색되면 안 됨');
+
+    const lunchSeminarFound = getSeminarStatusChannelMessage('점심', testDate, mockChannelId);
+    assert.strictEqual(lunchSeminarFound, null, 'Today Links 메시지는 점심 세미나 현황으로 검색되면 안 됨');
+
+    const dinnerSeminarFound = getSeminarStatusChannelMessage('저녁', testDate, mockChannelId);
+    assert.strictEqual(dinnerSeminarFound, null, 'Today Links 메시지는 저녁 세미나 현황으로 검색되면 안 됨');
+
+    // 2. 10:30에 신규 세미나 모음 메시지가 전송된 경우
+    const newSeminarsText = `🆕 오늘 추가된 세미나 모음 (누적 1건)
+
+━ ✨ 방금 추가됨 ━━━━━
+1. [2026-08-29 13:00] 방금 추가된 세미나 (0/50)
+https://m.doctorville.co.kr/cme/seminar/201
+━━━━━━━━━━━━━━━━━━━━━`;
+
+    recordChannelMessage({
+      channelId: mockChannelId,
+      messageId: 2440,
+      date: testDate,
+      chunkIndex: 0,
+      totalChunks: 1,
+      text: newSeminarsText,
+      mediaType: 'text',
+    });
+
+    assert.strictEqual(isTodayLinksMessageText(newSeminarsText), false);
+    assert.strictEqual(isNewSeminarsMessageText(newSeminarsText), true);
+    assert.strictEqual(isSeminarStatusMessageText(newSeminarsText, '점심'), false);
+
+    const newSeminarsAfterAdd = getNewSeminarsChannelMessage(testDate, mockChannelId);
+    assert.ok(newSeminarsAfterAdd !== null);
+    assert.strictEqual(newSeminarsAfterAdd?.messageId, 2440, '신규 세미나 모음 메시지만 정확히 조회되어야 함');
+
+    const todayLinksAfterAdd = getTodayLinksChannelMessage(testDate, mockChannelId);
+    assert.strictEqual(todayLinksAfterAdd?.messageId, 2439, 'Today Links 메시지는 여전히 2439로 정상 조회되어야 함');
+
+    // 3. 11:50에 점심 세미나 현황 메시지가 전송된 경우
+    const lunchStatusText = `🔔 점심세미나
+
+⏳ 대기 | 13:00 1번 세미나
+https://m.doctorville.co.kr/cme/seminar/101`;
+
+    recordChannelMessage({
+      channelId: mockChannelId,
+      messageId: 2441,
+      date: testDate,
+      chunkIndex: 0,
+      totalChunks: 1,
+      text: lunchStatusText,
+      mediaType: 'text',
+    });
+
+    assert.strictEqual(isTodayLinksMessageText(lunchStatusText), false);
+    assert.strictEqual(isNewSeminarsMessageText(lunchStatusText), false);
+    assert.strictEqual(isSeminarStatusMessageText(lunchStatusText, '점심'), true);
+    assert.strictEqual(isSeminarStatusMessageText(lunchStatusText, '저녁'), false);
+
+    const lunchStatusFound = getSeminarStatusChannelMessage('점심', testDate, mockChannelId);
+    assert.strictEqual(lunchStatusFound?.messageId, 2441);
+
+    const dinnerStatusFound = getSeminarStatusChannelMessage('저녁', testDate, mockChannelId);
+    assert.strictEqual(dinnerStatusFound, null, '저녁 세미나 현황은 아직 없으므로 null이어야 함');
   });
 });
