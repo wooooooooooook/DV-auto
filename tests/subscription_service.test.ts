@@ -203,6 +203,8 @@ describe('subscription_service', () => {
 
     const mainUI = buildMainMenu(700);
     expect(mainUI.text).toContain('공지봇 맞춤 알림 구독 설정');
+    expect(mainUI.text).toContain('음소거');
+    expect(mainUI.text).toContain('채널 나가기');
     expect(mainUI.text).toContain('00:02');
     expect(mainUI.text).toContain('마감 임박');
     expect(mainUI.replyMarkup.inline_keyboard.length).toBeGreaterThan(5);

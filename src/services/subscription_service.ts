@@ -729,8 +729,10 @@ export function buildMainMenu(chatId: number): { text: string; replyMarkup: Inli
   const text = [
     '🔔 <b>공지봇 맞춤 알림 구독 설정</b>',
     '',
-    '현재 설정된 구독 항목 현황입니다.',
+    '현재 설정된 맞춤 알림 구독 현황입니다.',
     '버튼을 눌러 각 항목의 <b>ON/OFF</b> 및 <b>상세 조건</b>을 설정하세요.',
+    '',
+    '💡 <i>일부 알림(세미나 라이브/퀴즈/링크 등)은 전체 공지채널과 중복될 수 있습니다. 중복 알림이 불편하신 경우 <b>공지채널을 음소거</b>하거나 <b>채널 나가기</b> 후 공지봇 알림만 받아보시는 것을 권장합니다.</i>',
     '',
     '📋 <b>[구독 현황]</b>',
     `• 🔗 <b>오늘의 링크</b>: ${sub.todayLinks ? `🟢 ON (수신 시간: ${sub.todayLinksTime})` : '🔴 OFF'}`,

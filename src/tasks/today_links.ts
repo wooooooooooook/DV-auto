@@ -984,8 +984,13 @@ function formatTodayLinksBroadcast(input: TodayLinksFormatInput): TodayLinksForm
   }
 
   message += `\n<blockquote>🤖 <b>닥터빌 텔레그램방에 전송된 메시지입니다.</b>
-매일 오전 9시 링크모음 발송, 세미나 시작/종료, 퀴즈 정답 알림, 지금 가입하세요!
-https://t.me/+J1UGmvLA9jU4NjQ1</blockquote>\n<blockquote>✨세미나정보변경/포인트지급내역 알림 등 상세 알림을 받으려면 알림봇을 구독해주세요! https://t.me/DV_notice_bot </blockquote>`;
+매일 오전 링크모음 발송, 세미나 시작/종료, 퀴즈 정답 알림, 지금 가입하세요!
+https://t.me/+J1UGmvLA9jU4NjQ1</blockquote>\n<blockquote>✨ <b>공지봇(@DV_notice_bot)에서 나만의 개인별 맞춤 알림을 설정해보세요!</b>
+• <b>링크모음 수신 시간 자유 설정</b> (00시~12시 원하는 시간 지정)
+• <b>설문 마감 20분전 / 10분전 개별 알림</b>
+• <b>신규 세미나 등록</b> (정원 제한 필터링 등) & <b>라이브 시작/종료</b>
+• <b>세미나 정보 변경 / 포인트 지급 / 인터엠디 퀴즈 알림</b>
+👉 나만의 알림 설정하기: https://t.me/DV_notice_bot</blockquote>`;
 
   const inlineKeyboard: Array<Array<{ text: string; url: string }>> = [];
 
@@ -1007,6 +1012,9 @@ https://t.me/+J1UGmvLA9jU4NjQ1</blockquote>\n<blockquote>✨세미나정보변�
 
   // 세미나 목록 바로가기 버튼 추가
   inlineKeyboard.push([{ text: '📋 세미나 목록 바로가기', url: SEMINAR_PAGE }]);
+
+  // 공지봇 맞춤 알림 설정 바로가기 버튼 추가
+  inlineKeyboard.push([{ text: '🔔 공지봇 맞춤 알림 설정', url: 'https://t.me/DV_notice_bot' }]);
 
   const options = {
     parse_mode: 'HTML' as const,

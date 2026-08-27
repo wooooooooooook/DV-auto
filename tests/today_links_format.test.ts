@@ -134,20 +134,20 @@ function testTodayLinksFormatWithUserExample() {
   // 6. 하단 봇 안내 인용구
   assert(
     message.includes(
-      '<blockquote>🤖 <b>닥터빌 텔레그램방에 전송된 메시지입니다.</b>\n매일 오전 9시 링크모음 발송, 세미나 시작/종료, 퀴즈 정답 알림, 지금 가입하세요!\nhttps://t.me/+J1UGmvLA9jU4NjQ1</blockquote>',
+      '<blockquote>🤖 <b>닥터빌 텔레그램방에 전송된 메시지입니다.</b>\n매일 오전 링크모음 발송, 세미나 시작/종료, 퀴즈 정답 알림, 지금 가입하세요!\nhttps://t.me/+J1UGmvLA9jU4NjQ1</blockquote>',
     ),
   );
   assert(
-    message.includes(
-      '<blockquote>✨세미나정보변경/포인트지급내역 알림 등 상세 알림을 받으려면 알림봇을 구독해주세요! https://t.me/DV_notice_bot </blockquote>',
-    ),
-    '알림봇 구독 안내 blockquote 누락',
+    message.includes('✨ <b>공지봇(@DV_notice_bot)에서 나만의 개인별 맞춤 알림을 설정해보세요!</b>'),
+    '알림봇 맞춤 설정 안내 blockquote 누락',
   );
+  assert(message.includes('00시~12시'), '링크모음 시간 설정 안내 누락');
+  assert(message.includes('https://t.me/DV_notice_bot'), '알림봇 링크 누락');
 
   // 7. 인라인 키보드 버튼 및 링크 미리보기 비활성화 검증
   assert.strictEqual(options.parse_mode, 'HTML');
   assert.strictEqual(options.link_preview_options?.is_disabled, true);
-  assert.strictEqual(options.reply_markup.inline_keyboard.length, 3);
+  assert.strictEqual(options.reply_markup.inline_keyboard.length, 4);
   assert.strictEqual(options.reply_markup.inline_keyboard[0][0].text, '✨ 출석체크 바로가기');
   assert.strictEqual(options.reply_markup.inline_keyboard[0][0].url, 'https://m.doctorville.co.kr/mypage/attendance');
   assert.strictEqual(options.reply_markup.inline_keyboard[0][1].text, '✏️ 오늘의 퀴즈 풀기');
@@ -162,6 +162,8 @@ function testTodayLinksFormatWithUserExample() {
   );
   assert.strictEqual(options.reply_markup.inline_keyboard[2][0].text, '📋 세미나 목록 바로가기');
   assert.strictEqual(options.reply_markup.inline_keyboard[2][0].url, 'https://www.doctorville.co.kr/seminar/main');
+  assert.strictEqual(options.reply_markup.inline_keyboard[3][0].text, '🔔 공지봇 맞춤 알림 설정');
+  assert.strictEqual(options.reply_markup.inline_keyboard[3][0].url, 'https://t.me/DV_notice_bot');
 
   console.log('\n✅ [Pass] 예시 문구 포맷팅 검증을 성공적으로 통과했습니다!\n');
 }

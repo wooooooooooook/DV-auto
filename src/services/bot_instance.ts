@@ -146,28 +146,31 @@ function setBot(name: BotName, instance: Telegraf | null): void {
             await ctx.reply(`구독 해제 실패: ${message}`);
           }
         });
-        instance.command(['subscribe_settings', '구독설정', '구독', 'settings', 'subscribe'], async (ctx: Context) => {
-          try {
-            if (ctx.from?.id && !checkNoticeCooldown(ctx.from.id)) {
-              await ctx.reply('⏳ 요청이 너무 빠릅니다. 2초 후 다시 시도해주세요.');
-              return;
+        instance.command(
+          ['start', 'subscribe_settings', '구독설정', '구독', 'settings', 'subscribe'],
+          async (ctx: Context) => {
+            try {
+              if (ctx.from?.id && !checkNoticeCooldown(ctx.from.id)) {
+                await ctx.reply('⏳ 요청이 너무 빠릅니다. 2초 후 다시 시도해주세요.');
+                return;
+              }
+              const chatId = ctx.chat?.id;
+              if (!chatId) {
+                await ctx.reply('⚠️ 유효하지 않은 채팅방 ID입니다.');
+                return;
+              }
+              const { buildMainMenu } = await import('./subscription_service');
+              const { text, replyMarkup } = buildMainMenu(chatId);
+              await ctx.reply(text, {
+                parse_mode: 'HTML',
+                reply_markup: replyMarkup,
+              });
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error);
+              await ctx.reply(`구독 설정 조회 실패: ${message}`);
             }
-            const chatId = ctx.chat?.id;
-            if (!chatId) {
-              await ctx.reply('⚠️ 유효하지 않은 채팅방 ID입니다.');
-              return;
-            }
-            const { buildMainMenu } = await import('./subscription_service');
-            const { text, replyMarkup } = buildMainMenu(chatId);
-            await ctx.reply(text, {
-              parse_mode: 'HTML',
-              reply_markup: replyMarkup,
-            });
-          } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            await ctx.reply(`구독 설정 조회 실패: ${message}`);
-          }
-        });
+          },
+        );
 
         // 콜백 쿼리 (인라인 키보드 인터랙션)
         if (typeof instance.action === 'function') {
