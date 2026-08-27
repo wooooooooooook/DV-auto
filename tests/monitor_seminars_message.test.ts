@@ -122,4 +122,46 @@ describe('buildSeminarMonitorStatusMessage 세미나 모니터 현황 메시지 
     const message = buildSeminarMonitorStatusMessage('저녁', []);
     assert.strictEqual(message, '🔔 저녁세미나\n\n예정된 세미나가 없습니다.');
   });
+
+  it('buildSeminarLiveStartMessage 및 buildSeminarLiveEndMessage 개별 알림 포맷 검증', async () => {
+    const { buildSeminarLiveStartMessage, buildSeminarLiveEndMessage } = await import('../src/tasks/monitor_seminars');
+
+    // 1. 시작 알림
+    const startMsg = buildSeminarLiveStartMessage({
+      seminarId: '5580',
+      url: 'https://m.doctorville.co.kr/cme/seminar/5580',
+      name: 'ENVLO WEB SYMPOSIUM',
+      status: '입장가능',
+      time: '18:00~19:00',
+      isAdvancedSurvey: true,
+    });
+    assert(startMsg.text.includes('🟢 <b>[세미나 시작]</b>'));
+    assert(startMsg.text.includes('[18:00~19:00]'));
+    assert(startMsg.text.includes('<b>ENVLO WEB SYMPOSIUM</b> [심화설문]'));
+    assert(startMsg.text.includes('https://m.doctorville.co.kr/cme/seminar/5580'));
+
+    // 2. 종료 알림 (퀴즈 결과 포함)
+    const endMsgWithQuiz = buildSeminarLiveEndMessage({
+      seminarId: '5580',
+      url: 'https://m.doctorville.co.kr/cme/seminar/5580',
+      name: 'ENVLO WEB SYMPOSIUM',
+      status: '종료',
+      time: '18:00~19:00',
+      isAdvancedSurvey: true,
+      quizResultMessage: '📋 퀴즈 정답\n1. O\n2. X',
+    });
+    assert(endMsgWithQuiz.text.includes('🔴 <b>[세미나 종료]</b>'));
+    assert(endMsgWithQuiz.text.includes('📋 퀴즈 정답\n1. O\n2. X'));
+
+    // 3. 종료 알림 (설문 없는 세미나)
+    const endMsgNoSurvey = buildSeminarLiveEndMessage({
+      seminarId: '5590',
+      url: 'https://m.doctorville.co.kr/cme/seminar/5590',
+      name: '설문 없는 세미나',
+      status: '종료',
+      hasSurvey: false,
+    });
+    assert(endMsgNoSurvey.text.includes('🔴 <b>[세미나 종료]</b>'));
+    assert(endMsgNoSurvey.text.includes('(설문이 없는 세미나)'));
+  });
 });

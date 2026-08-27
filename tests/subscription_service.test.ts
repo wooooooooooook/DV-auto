@@ -256,4 +256,73 @@ describe('subscription_service', () => {
     const stored = seminarRepo.getSeminarById('9988');
     expect(stored?.urgentNotified).toBe(true);
   });
+
+  it('신규 세미나 등록 시 통합빌드가 아닌 개별 메시지로 각 세미나마다 전송되어야 한다', async () => {
+    const { setBot } = await import('../src/services/bot_instance');
+    const { sendNewSeminarToSubscribers, buildSingleNewSeminarMessage } =
+      await import('../src/services/subscription_service');
+
+    // 1. 단일 메시지 빌더 검증
+    const singleMsg = buildSingleNewSeminarMessage({
+      name: '새로운 당뇨 세미나',
+      date: '2026-08-27',
+      time: '12:30~13:30',
+      totalCount: '5000',
+      currentCount: '0',
+      isAdvancedSurvey: true,
+      isPointExcluded: false,
+      url: 'https://m.doctorville.co.kr/cme/seminar/1111',
+    });
+    expect(singleMsg.text).toContain('🆕 <b>[신규 세미나 등록]</b>');
+    expect(singleMsg.text).toContain('[2026-08-27 12:30~13:30]');
+    expect(singleMsg.text).toContain('[심화설문]');
+    expect(singleMsg.text).toContain('<b>새로운 당뇨 세미나</b> (0/5000)');
+    expect(singleMsg.text).toContain('https://m.doctorville.co.kr/cme/seminar/1111');
+
+    // 2. 2건의 신규 세미나 발송 시 개별로 2건 메시지가 전송되는지 검증
+    const sentMessages: Array<{ chatId: number; text: string }> = [];
+    const mockBot = {
+      command: () => {},
+      action: () => {},
+      telegram: {
+        sendMessage: async (chatId: number, text: string) => {
+          sentMessages.push({ chatId, text });
+          return { message_id: 999 };
+        },
+      },
+    };
+    setBot('notice', mockBot as unknown as Parameters<typeof setBot>[1]);
+
+    updateSubscription(999, { newSeminar: 'all' });
+
+    const newSeminars = [
+      {
+        seminarId: '1001',
+        name: '세미나 A',
+        url: 'https://m.doctorville.co.kr/cme/seminar/1001',
+        totalCount: '5000',
+        currentCount: '0',
+      },
+      {
+        seminarId: '1002',
+        name: '세미나 B',
+        url: 'https://m.doctorville.co.kr/cme/seminar/1002',
+        totalCount: '3000',
+        currentCount: '0',
+      },
+    ];
+
+    const result = await sendNewSeminarToSubscribers(
+      newSeminars as unknown as Parameters<typeof sendNewSeminarToSubscribers>[0],
+    );
+    expect(result.successCount).toBe(1);
+
+    // 통합 모음 메시지가 아니라 세미나 개수만큼 2건이 개별 전송되어야 함
+    expect(sentMessages.length).toBe(2);
+    expect(sentMessages[0].chatId).toBe(999);
+    expect(sentMessages[0].text).toContain('세미나 A');
+    expect(sentMessages[0].text).not.toContain('오늘 추가된 세미나 모음');
+    expect(sentMessages[1].chatId).toBe(999);
+    expect(sentMessages[1].text).toContain('세미나 B');
+  });
 });

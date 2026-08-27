@@ -339,13 +339,50 @@ export async function sendToTopicSubscribers(
   return { successCount, failCount };
 }
 
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 /**
- * 신규 세미나 등록 시 각 구독자의 조건(all, limit_5000, limit_3000, urgent_1000)에 맞춰 개인별 맞춤 알림을 발송합니다.
+ * 단일 신규 세미나 알림 메시지 빌더 (구독자 개인별 개별 전송용)
+ */
+export function buildSingleNewSeminarMessage(item: SeminarListItem): {
+  text: string;
+  options: Record<string, unknown>;
+} {
+  const tags: string[] = [];
+  if (item.date || item.time) {
+    tags.push(`[${item.date || ''}${item.date && item.time ? ' ' : ''}${item.time || ''}]`);
+  }
+  if (item.isPointExcluded) {
+    tags.push('[포인트미지급]');
+  }
+  if (item.isAdvancedSurvey) {
+    tags.push('[심화설문]');
+  }
+
+  const tagPrefix = tags.length > 0 ? `${tags.join(' ')} ` : '';
+  const capacityInfo = item.currentCount && item.totalCount ? ` (${item.currentCount}/${item.totalCount})` : '';
+  const targetUrl = item.url || (item.seminarId ? `https://m.doctorville.co.kr/cme/seminar/${item.seminarId}` : '');
+
+  const text = `🆕 <b>[신규 세미나 등록]</b>\n\n${tagPrefix}<b>${escapeHtml(item.name || '세미나')}</b>${capacityInfo}\n${targetUrl}`;
+
+  return {
+    text,
+    options: {
+      parse_mode: 'HTML',
+      link_preview_options: { is_disabled: true },
+    },
+  };
+}
+
+/**
+ * 신규 세미나 등록 시 각 구독자의 조건(all, limit_5000, limit_3000, urgent_1000)에 맞춰 개인별 맞춤 알림을 개별 세미나 단위로 발송합니다.
  */
 export async function sendNewSeminarToSubscribers(
   seminars: SeminarListItem[],
   newlyAddedIds?: string[] | Set<string>,
-  buildMessageFn?: (matchedSeminars: SeminarListItem[]) => { text: string; options?: Record<string, unknown> },
+  buildSingleMessageFn?: (seminar: SeminarListItem) => { text: string; options?: Record<string, unknown> },
 ): Promise<{ successCount: number; failCount: number }> {
   const db = getDatabase();
   const rows = db.prepare("SELECT * FROM subscriptions WHERE new_seminar != 'off'").all() as Array<any>;
@@ -382,20 +419,19 @@ export async function sendNewSeminarToSubscribers(
     }
 
     try {
-      let messageContent: { text: string; options?: Record<string, unknown> };
-      if (buildMessageFn) {
-        messageContent = buildMessageFn(matchedSeminars);
-      } else {
-        const { buildNewSeminarsNoticeMessage } = await import('../tasks/apply_seminar');
-        messageContent = buildNewSeminarsNoticeMessage(matchedSeminars, newlyAddedIds);
-      }
+      for (const seminar of matchedSeminars) {
+        const messageContent = buildSingleMessageFn
+          ? buildSingleMessageFn(seminar)
+          : buildSingleNewSeminarMessage(seminar);
 
-      const chunks = splitTelegramMessage(messageContent.text, { maxLength: TELEGRAM_SAFE_MESSAGE_LENGTH });
-      for (let i = 0; i < chunks.length; i++) {
-        await bot.telegram.sendMessage(chatId, chunks[i], messageContent.options as any);
-        if (i < chunks.length - 1) {
-          await sleep(100);
+        const chunks = splitTelegramMessage(messageContent.text, { maxLength: TELEGRAM_SAFE_MESSAGE_LENGTH });
+        for (let i = 0; i < chunks.length; i++) {
+          await bot.telegram.sendMessage(chatId, chunks[i], messageContent.options as any);
+          if (i < chunks.length - 1) {
+            await sleep(100);
+          }
         }
+        await sleep(100);
       }
       successCount++;
     } catch (error) {

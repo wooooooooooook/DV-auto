@@ -21,14 +21,10 @@ import {
 } from '../modules/seminar_api';
 import { processSeminarQuiz } from './seminar_quiz';
 import * as seminarRepo from '../services/seminar_repository';
-import * as storage from '../services/storage';
-import { SEMINAR_LIST_KEY, type SeminarListItem } from './apply_seminar';
 import {
-  deleteChannelMessage,
   editChannelMessage,
   getSeminarStatusChannelMessage,
   publishAndReplaceChannelNotice,
-  type ChannelCommentRecord,
 } from '../services/channel_message_repository';
 import { sendToTopicSubscribers } from '../services/subscription_service';
 
@@ -59,6 +55,8 @@ export interface MonitoredSeminarItem {
   cancelProcessState?: number;
   seminarCompleted?: number;
   surveyState?: number;
+  startNotified?: boolean;
+  endNotified?: boolean;
 }
 
 export type SeminarInfo = MonitoredSeminarItem;
@@ -175,6 +173,76 @@ export function buildSeminarMonitorStatusMessage(
 }
 
 /**
+ * 세미나 라이브 시작(입장가능) 개별 알림 메시지 빌더
+ */
+export function buildSeminarLiveStartMessage(seminar: MonitoredSeminarItem): {
+  text: string;
+  options: Record<string, unknown>;
+} {
+  const timeStr = seminar.time ? `[${seminar.time}] ` : '';
+  const advancedSuffix = seminar.isAdvancedSurvey ? ' [심화설문]' : '';
+  const targetUrl = seminar.url || (seminar.seminarId ? `${SEMINAR_DETAIL_PAGE}${seminar.seminarId}` : '');
+
+  const text = `🟢 <b>[세미나 시작]</b>\n\n${timeStr}<b>${seminar.name}</b>${advancedSuffix}\n${targetUrl}`;
+
+  return {
+    text,
+    options: {
+      parse_mode: 'HTML',
+      link_preview_options: { is_disabled: true },
+    },
+  };
+}
+
+/**
+ * 세미나 시작(입장가능) 시 seminar_live 토픽 구독자에게 개별 알림을 발송합니다.
+ */
+export async function sendSeminarLiveStartNotice(
+  seminar: MonitoredSeminarItem,
+): Promise<{ successCount: number; failCount: number }> {
+  const { text, options } = buildSeminarLiveStartMessage(seminar);
+  return sendToTopicSubscribers('seminar_live', text, options);
+}
+
+/**
+ * 세미나 라이브 종료(퀴즈 결과 포함) 개별 알림 메시지 빌더
+ */
+export function buildSeminarLiveEndMessage(seminar: MonitoredSeminarItem): {
+  text: string;
+  options: Record<string, unknown>;
+} {
+  const timeStr = seminar.time ? `[${seminar.time}] ` : '';
+  const advancedSuffix = seminar.isAdvancedSurvey ? ' [심화설문]' : '';
+  const targetUrl = seminar.url || (seminar.seminarId ? `${SEMINAR_DETAIL_PAGE}${seminar.seminarId}` : '');
+
+  let text = `🔴 <b>[세미나 종료]</b>\n\n${timeStr}<b>${seminar.name}</b>${advancedSuffix}\n${targetUrl}`;
+
+  if (seminar.quizResultMessage) {
+    text += `\n\n${seminar.quizResultMessage.trim()}`;
+  } else if (seminar.hasSurvey === false) {
+    text += `\n\n(설문이 없는 세미나)`;
+  }
+
+  return {
+    text,
+    options: {
+      parse_mode: 'HTML',
+      link_preview_options: { is_disabled: true },
+    },
+  };
+}
+
+/**
+ * 세미나 종료 및 퀴즈 처리 완료 시 seminar_live 토픽 구독자에게 개별 알림을 발송합니다.
+ */
+export async function sendSeminarLiveEndNotice(
+  seminar: MonitoredSeminarItem,
+): Promise<{ successCount: number; failCount: number }> {
+  const { text, options } = buildSeminarLiveEndMessage(seminar);
+  return sendToTopicSubscribers('seminar_live', text, options);
+}
+
+/**
  * 세미나 현황 통합 메시지를 채널에 발송하고 이전 메시지를 안전하게 삭제/교체합니다.
  * - 댓글 보존: 기존 메시지에 연결된 댓글 조회 후 새 메시지 본문에 첨부
  * - 안전 가드: 댓글 확보 실패 또는 새 메시지 발송 실패 시 기존 메시지 유지
@@ -188,7 +256,6 @@ export async function publishSeminarStatusNotice(
   isAutoResume = false,
   comments?: Array<{ userName: string; text: string }>,
 ): Promise<number | null> {
-  const messageData = buildSeminarStatusMessage(periodName, seminars, isAllCompleted, comments);
   const result = await publishAndReplaceChannelNotice({
     prevMessageId,
     buildMessageFn: (commentsToAttach) =>
@@ -197,10 +264,6 @@ export async function publishSeminarStatusNotice(
     logPrefix: periodName,
     skipIfSameContent: isAutoResume,
   });
-
-  if (result.success && messageData.text) {
-    await sendToTopicSubscribers('seminar_live', messageData.text, messageData.options as any).catch(() => {});
-  }
 
   return result.newMessageId;
 }
@@ -905,7 +968,9 @@ async function monitorSeminars(
       // 상태 초기화
       let currentStatus: SeminarStatus = info.status;
       let isEnded = false;
-      let quizResultMessage: string | null = null;
+      const quizResultMessage: string | null = null;
+      let startNotified = false;
+      let endNotified = false;
 
       // 이미 종료된 상태인지 체크
       if (info.seminarId) {
@@ -913,6 +978,7 @@ async function monitorSeminars(
         if (detailCheck.isEnded) {
           currentStatus = '종료';
           isEnded = true;
+          endNotified = true;
         }
       }
 
@@ -925,6 +991,10 @@ async function monitorSeminars(
       if (isReadyToEnter && !isEnded) {
         currentStatus = '입장가능';
         info.isEntryStarted = true;
+
+        if (isAutoResume) {
+          startNotified = true;
+        }
 
         // 온디맨드 자동 입장
         if (isAutoResume && hasEntryHistory) {
@@ -946,13 +1016,22 @@ async function monitorSeminars(
         }
       }
 
-      monitoredSeminarsMap.set(url, {
+      const item: MonitoredSeminarItem = {
         ...info,
         url: targetUrl,
         status: currentStatus,
         isEnded,
         quizResultMessage,
-      });
+        startNotified,
+        endNotified,
+      };
+
+      if (currentStatus === '입장가능' && !isEnded && !startNotified) {
+        item.startNotified = true;
+        await sendSeminarLiveStartNotice(item).catch(() => {});
+      }
+
+      monitoredSeminarsMap.set(url, item);
     }
 
     const seminarList = Array.from(monitoredSeminarsMap.values());
@@ -1040,6 +1119,8 @@ async function monitorSeminars(
             status: info.status || '대기',
             isEnded: false,
             quizResultMessage: null,
+            startNotified: false,
+            endNotified: false,
           });
         }
       }
@@ -1075,7 +1156,6 @@ async function monitorSeminars(
 
             // 1) Playwright 온디맨드로 설문 및 퀴즈 처리
             let quizResultMessage: string | null = null;
-            let foundSurveyButton = false;
 
             if (!currentSeminar.isSurveyPointExcluded && !endCheck.isPointExcluded) {
               await withBrowserContext(providedContext, async (ctx) => {
@@ -1089,7 +1169,6 @@ async function monitorSeminars(
                   url,
                 );
                 quizResultMessage = res.message;
-                foundSurveyButton = res.foundSurveyButton;
               });
             }
 
@@ -1097,6 +1176,11 @@ async function monitorSeminars(
             currentSeminar.isEnded = true;
             currentSeminar.quizResultMessage = quizResultMessage;
             hasStateChanged = true;
+
+            if (!currentSeminar.endNotified) {
+              currentSeminar.endNotified = true;
+              await sendSeminarLiveEndNotice(currentSeminar).catch(() => {});
+            }
             continue;
           }
         }
@@ -1114,6 +1198,11 @@ async function monitorSeminars(
             currentSeminar.status = '입장가능';
             currentSeminar.isEntryStarted = true;
             hasStateChanged = true;
+
+            if (!currentSeminar.startNotified) {
+              currentSeminar.startNotified = true;
+              await sendSeminarLiveStartNotice(currentSeminar).catch(() => {});
+            }
 
             // 자동 입장 시도
             await withBrowserContext(providedContext, async (ctx) => {
