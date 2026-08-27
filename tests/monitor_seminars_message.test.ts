@@ -243,11 +243,13 @@ describe('buildSeminarMonitorStatusMessage 세미나 모니터 현황 메시지 
     assert(msg20.text.includes('<b>고혈압 최신지견</b> [심화설문]'));
     assert(msg20.text.includes('정답 : 2번 X'));
     assert(msg20.text.includes('약 20분 남았습니다.'));
+    assert(msg20.text.includes('설문 진행 여부와 관계없이 발송'));
 
     // 10분 전 메시지
     const msg10 = buildSurveyClosingMessage(seminar, 10);
     assert(msg10.text.includes('⏳ <b>[설문 마감 10분 전]</b>'));
     assert(msg10.text.includes('약 10분 남았습니다.'));
+    assert(msg10.text.includes('설문 진행 여부와 관계없이 발송'));
   });
 
   it('공지채널 세미나현황에서는 퀴즈정답 요약만 노출되고 상세 문항/답은 제거되며, 개별알림에서는 상세 유지 검증', async () => {

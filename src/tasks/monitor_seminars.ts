@@ -356,6 +356,7 @@ export function buildSurveyClosingMessage(
     text += `\n\n${seminar.quizResultMessage.trim()}`;
   }
   text += `\n\n⚠️ <b>설문 참여 마감까지 약 ${minutesLeft}분 남았습니다.</b>`;
+  text += `\n<i>(※ 본 알림은 설문 진행 여부와 관계없이 발송되며, 이미 설문을 완료하셨다면 무시하셔도 됩니다.)</i>`;
 
   return {
     text,

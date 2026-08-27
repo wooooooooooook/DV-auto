@@ -187,8 +187,29 @@ function setBot(name: BotName, instance: Telegraf | null): void {
 
               if (actionData.startsWith('toggle:')) {
                 const topic = actionData.replace('toggle:', '') as Parameters<typeof subService.toggleTopic>[1];
-                subService.toggleTopic(chatId, topic);
-                await ctx.answerCbQuery('설정이 변경되었습니다.').catch(() => {});
+                const updatedSub = subService.toggleTopic(chatId, topic);
+                let alertMessage = '설정이 변경되었습니다.';
+                let showAlert = false;
+
+                if (topic === 'survey_closing_20') {
+                  if (updatedSub.surveyClosing20) {
+                    alertMessage =
+                      '⏳ 설문 마감 20분전 알림이 켜졌습니다.\n\n※ 이미 설문을 진행/완료하셨더라도 해당 시간에 알림이 전송됩니다.';
+                    showAlert = true;
+                  } else {
+                    alertMessage = '설문 마감 20분전 알림이 꺼졌습니다.';
+                  }
+                } else if (topic === 'survey_closing_10') {
+                  if (updatedSub.surveyClosing10) {
+                    alertMessage =
+                      '⏳ 설문 마감 10분전 알림이 켜졌습니다.\n\n※ 이미 설문을 진행/완료하셨더라도 해당 시간에 알림이 전송됩니다.';
+                    showAlert = true;
+                  } else {
+                    alertMessage = '설문 마감 10분전 알림이 꺼졌습니다.';
+                  }
+                }
+
+                await ctx.answerCbQuery(alertMessage, { show_alert: showAlert }).catch(() => {});
                 const { text, replyMarkup } = subService.buildMainMenu(chatId);
                 await ctx
                   .editMessageText(text, {
@@ -256,7 +277,14 @@ function setBot(name: BotName, instance: Telegraf | null): void {
 
               if (actionData === 'all_on') {
                 subService.setAllTopics(chatId, true);
-                await ctx.answerCbQuery('모든 알림이 켜졌습니다.').catch(() => {});
+                await ctx
+                  .answerCbQuery(
+                    '모든 알림이 켜졌습니다.\n\n※ 설문 마감 알림은 설문 진행 여부와 관계없이 전송됩니다.',
+                    {
+                      show_alert: true,
+                    },
+                  )
+                  .catch(() => {});
                 const { text, replyMarkup } = subService.buildMainMenu(chatId);
                 await ctx
                   .editMessageText(text, {
