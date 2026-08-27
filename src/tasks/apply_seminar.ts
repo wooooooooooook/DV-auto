@@ -6,11 +6,8 @@ import {
   sendNotificationToChannel,
   sendTelegram,
   getSeminarIdFromUrl,
-  isSurveyPointExcludedSeminarHttp,
   ensureLoggedIn,
 } from '../modules/utils';
-import { httpGet } from '../modules/http_client';
-import { parseSeminarListHtml, parseCompletionCountHtml } from '../modules/html_parser';
 import {
   fetchMainFutureSeminars,
   fetchSeminarDetail,
@@ -40,7 +37,6 @@ import {
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
-const SEMINAR_DETAIL_SSR_PAGE = 'https://www.doctorville.co.kr/seminar/seminarDetail?seminarId=';
 export const SEMINAR_LIST_KEY = 'apply_seminar:seminar_list';
 const LEGACY_NEW_SEMINAR_KEY = 'apply_seminar:new_seminars';
 const LEGACY_HISTORY_KEY = 'apply_seminar:new_seminars_history';
@@ -110,7 +106,6 @@ const MEANINGFUL_FIELDS: Array<{
   { key: 'date', label: '날짜' },
   { key: 'time', label: '시간' },
   { key: 'totalCount', label: '총원' },
-  { key: 'nightTime', label: '야간세미나' },
   { key: 'isPointExcluded', label: '포인트미지급' },
   { key: 'isAdvancedSurvey', label: '심화설문' },
 ];
@@ -574,22 +569,6 @@ export async function enrichSeminarsWithDetail(
             seminarCompleted: seminarCompletedNum,
           };
         }
-
-        // detail API 실패 시 HTML fallback
-        if (typeof item.isPointExcluded !== 'boolean') {
-          const link = `${SEMINAR_DETAIL_SSR_PAGE}${seminarId}`;
-          const pointExRes = await isSurveyPointExcludedSeminarHttp(link);
-          if (pointExRes.status === 'auth_expired') {
-            isAuthExpired = true;
-            return item;
-          }
-          if (pointExRes.status === 'success') {
-            return {
-              ...item,
-              isPointExcluded: pointExRes.excluded,
-            };
-          }
-        }
       } catch (err) {
         logger.warn(`enrichSeminarsWithDetail: ID ${seminarId} 상세 조회 실패`, err);
       }
@@ -756,33 +735,19 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
   let currentSeminars: RawSeminarData[] = [];
   let normalizedCurrentSeminars: SeminarListItem[] = [];
   const referenceDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
-  let mainHtmlBody = '';
 
   try {
     const apiRes = await fetchMainFutureSeminars();
-    if (apiRes.success) {
-      currentSeminars = apiRes.items.map(convertApiItemToRawSeminar);
-      normalizedCurrentSeminars = apiRes.items.map((item) => convertApiItemToSeminarListItem(item, referenceDate));
-    } else {
+    if (!apiRes.success) {
       if (apiRes.isAuthExpired) {
         const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
         await sendTelegram(msg).catch(() => {});
         return { success: false, message: msg };
       }
-      console.warn('fetchMainFutureSeminars 실패, HTML 파싱 fallback 시도:', apiRes.errorMessage);
-      const mainRes = await httpGet(SEMINAR_PAGE);
-      if (mainRes.resultType === 'AUTH_EXPIRED') {
-        const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
-        await sendTelegram(msg).catch(() => {});
-        return { success: false, message: msg };
-      }
-      if (mainRes.status !== 200 || !mainRes.body) {
-        throw new Error(apiRes.errorMessage || `HTTP GET ${SEMINAR_PAGE} failed with status ${mainRes.status}`);
-      }
-      mainHtmlBody = mainRes.body;
-      currentSeminars = parseSeminarListHtml(mainRes.body);
-      normalizedCurrentSeminars = normalizeParsedSeminars(currentSeminars, referenceDate);
+      throw new Error(apiRes.errorMessage || 'fetchMainFutureSeminars 실패');
     }
+    currentSeminars = apiRes.items.map(convertApiItemToRawSeminar);
+    normalizedCurrentSeminars = apiRes.items.map((item) => convertApiItemToSeminarListItem(item, referenceDate));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error('apply_seminar HTTP pre-check error:', message);
@@ -878,8 +843,7 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
   if (!hasApplyTarget) {
     // API 경로: processState 기반으로 정확한 신청 완료 건수 계산
     const appliedCount = currentSeminars.filter((s) => isAppliedSeminar(s.processState)).length;
-    // HTML fallback 경로: .ico_completion 파싱
-    const completionCount = mainHtmlBody ? parseCompletionCountHtml(mainHtmlBody) : appliedCount;
+    const completionCount = appliedCount;
 
     const unappliedCount = totalSeminarsAvailable - completionCount;
     let message: string;
@@ -1103,28 +1067,16 @@ export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<Ta
     const referenceDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
 
     const apiRes = await fetchMainFutureSeminars();
-    if (apiRes.success) {
-      currentSeminars = apiRes.items.map(convertApiItemToRawSeminar);
-      normalizedCurrentSeminars = apiRes.items.map((item) => convertApiItemToSeminarListItem(item, referenceDate));
-    } else {
+    if (!apiRes.success) {
       if (apiRes.isAuthExpired) {
         const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
         await sendTelegram(msg).catch(() => {});
         return { success: false, message: msg };
       }
-      console.warn('runHttpOnly: fetchMainFutureSeminars 실패, HTML 파싱 fallback 시도:', apiRes.errorMessage);
-      const mainRes = await httpGet(SEMINAR_PAGE);
-      if (mainRes.resultType === 'AUTH_EXPIRED') {
-        const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
-        await sendTelegram(msg).catch(() => {});
-        return { success: false, message: msg };
-      }
-      if (mainRes.status !== 200 || !mainRes.body) {
-        throw new Error(apiRes.errorMessage || `HTTP GET ${SEMINAR_PAGE} failed with status ${mainRes.status}`);
-      }
-      currentSeminars = parseSeminarListHtml(mainRes.body);
-      normalizedCurrentSeminars = normalizeParsedSeminars(currentSeminars, referenceDate);
+      throw new Error(apiRes.errorMessage || 'fetchMainFutureSeminars 실패');
     }
+    currentSeminars = apiRes.items.map(convertApiItemToRawSeminar);
+    normalizedCurrentSeminars = apiRes.items.map((item) => convertApiItemToSeminarListItem(item, referenceDate));
 
     const storedSeminars = migrateLegacySeminarStorage(referenceDate);
 

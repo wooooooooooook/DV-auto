@@ -12,7 +12,7 @@ import {
 } from '../src/tasks/apply_seminar';
 import * as runner from '../src/core/runner';
 import * as utilsModule from '../src/modules/utils';
-import * as httpClientModule from '../src/modules/http_client';
+import * as seminarApiModule from '../src/modules/seminar_api';
 import * as checkSeminarPointModule from '../src/tasks/check_seminar_point';
 import * as seminarRepo from '../src/services/seminar_repository';
 import type { PlaywrightRunArgs } from '../src/types';
@@ -83,6 +83,18 @@ describe('apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스�
       const changesName = getSeminarInfoChanges(nameA, nameB);
       assert.strictEqual(changesName.length, 0, '세미나 제목(name)만 변경된 경우 변경 알림 대상에서 제외되어야 함');
       console.log('  ✓ [Pass] 세미나 제목만 변경 시 변경 알림 없음\n');
+
+      // 2-2. nightTime (야간세미나) 만 변경 시 변경 감지 없음
+      console.log('--- Case 2-2: nightTime(야간세미나) 만 변경 시 변경 감지 없음 ---');
+      const nightA: SeminarListItem = { ...sameA, nightTime: false };
+      const nightB: SeminarListItem = { ...sameB, nightTime: true };
+      const changesNight = getSeminarInfoChanges(nightA, nightB);
+      assert.strictEqual(
+        changesNight.length,
+        0,
+        '야간세미나(nightTime)만 변경된 경우 변경 알림 대상에서 제외되어야 함',
+      );
+      console.log('  ✓ [Pass] 야간세미나만 변경 시 변경 알림 없음\n');
 
       // 3. 시간 변경 시 변경 감지
       console.log('--- Case 3: 시간 변경 시 변경 감지 ---');
@@ -218,23 +230,36 @@ describe('apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스�
       vi.spyOn(utilsModule, 'ensureLoggedIn').mockResolvedValue(true as never);
       vi.spyOn(utilsModule, 'safeGoto').mockResolvedValue(undefined as never);
 
-      vi.spyOn(httpClientModule, 'httpGet').mockResolvedValue({
-        status: 200,
-        body: `
-        <div class="list_cont">
-          <div class="seminar_day"><span class="date">2026-08-24</span></div>
-          <a class="list_detail" href="/seminar/seminarDetail?seminarId=100">
-            <div class="list_tit"><span class="tit">테스트 세미나</span></div>
-            <span class="txt_num time night_time">21:00</span>
-            <div class="person"><span class="txt_num">15</span><span class="total"><span class="txt_num">/100</span></span></div>
-          </a>
-        </div>
-      `,
-        statusText: '200',
-        headers: {},
-        url: 'https://www.doctorville.co.kr/seminar/main',
-        redirected: false,
-        resultType: 'SUCCESS' as const,
+      vi.spyOn(seminarApiModule, 'fetchMainFutureSeminars').mockResolvedValue({
+        success: true,
+        items: [
+          {
+            seminarId: 100,
+            seminarNm: '테스트 세미나',
+            startDt: '2026-08-24 21:00:00',
+            applyCnt: 15,
+            maxPeopleCnt: 100,
+            processState: seminarApiModule.ProcessState.PROCESS_CANCEL,
+            cancelProcessState: 0,
+            seminarCompleted: 0,
+            useDepthSurvey: false,
+          },
+        ],
+        rawResponse: {},
+      });
+
+      vi.spyOn(seminarApiModule, 'fetchSeminarDetail').mockResolvedValue({
+        success: true,
+        isPointExcluded: false,
+        rawResponse: {
+          seminarDetail: {
+            seminarId: 100,
+            seminarNm: '테스트 세미나',
+            applyCnt: 15,
+            maxPeopleCnt: 100,
+            processState: seminarApiModule.ProcessState.PROCESS_CANCEL,
+          },
+        },
       });
 
       // Mock page with minimal locator implementations
@@ -246,22 +271,6 @@ describe('apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스�
             if (selector === '.ico_finish') return { count: async () => 0 };
             if (selector === 'a:has(.ico_apply)') return { evaluateAll: async () => [] };
             if (selector === 'a:has(.ico_completion)') return { count: async () => 1 };
-            if (selector === '.list_cont') {
-              return {
-                evaluateAll: async () => [
-                  {
-                    url: 'https://www.doctorville.co.kr/seminar/seminarDetail?seminarId=100',
-                    name: '테스트 세미나',
-                    date: '2026-08-24',
-                    time: '21:00', // 기존 20:00에서 21:00로 변경
-                    currentCount: '15', // currentCount 변경
-                    totalCount: '100',
-                    nightTime: true,
-                    isAdvancedSurvey: false,
-                  },
-                ],
-              };
-            }
             return {
               count: async () => 0,
               evaluateAll: async () => [],

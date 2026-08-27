@@ -112,21 +112,37 @@ describe('HTTP Session Expiry & Error Classification Tests', () => {
         return originalLaunch(...args);
       });
 
-      // First HTTP call (seminar list) -> 200 OK + valid list HTML containing a newly added seminar
+      // First HTTP call (seminar list) -> 200 OK + valid list JSON containing a newly added seminar
       // Second HTTP call (detail page check for newly added seminar) -> 200 OK + AUTH_EXPIRED ("로그인이 되어 있지 않습니다")
-      const mockListHtml = `
-      <div class="list_cont">
-        <span class="seminar_day"><span class="date">8/25</span></span>
-        <a class="list_detail" href="/cme/seminar/101">
-          <span class="list_tit"><span class="tit">신규 세미나 101</span></span>
-          <span class="txt_num time">13:00~14:00</span>
-        </a>
-        <a class="list_detail" href="/cme/seminar/102">
-          <span class="list_tit"><span class="tit">신규 세미나 102</span></span>
-          <span class="txt_num time">14:00~15:00</span>
-        </a>
-      </div>
-    `;
+      const mockListJson = JSON.stringify({
+        code: 200,
+        futureSeminarList: {
+          items: [
+            {
+              seminarId: 101,
+              seminarNm: '신규 세미나 101',
+              startDt: '2026-08-25 13:00:00',
+              endDt: '2026-08-25 14:00:00',
+              applyCnt: 10,
+              maxPeopleCnt: 100,
+              processState: 2,
+              cancelProcessState: 0,
+              seminarCompleted: 0,
+            },
+            {
+              seminarId: 102,
+              seminarNm: '신규 세미나 102',
+              startDt: '2026-08-25 14:00:00',
+              endDt: '2026-08-25 15:00:00',
+              applyCnt: 10,
+              maxPeopleCnt: 100,
+              processState: 2,
+              cancelProcessState: 0,
+              seminarCompleted: 0,
+            },
+          ],
+        },
+      });
       const mockExpiredHtml = '<script>alert("로그인이 되어 있지 않습니다.\\n로그인 해주시기 바랍니다.");</script>';
 
       vi.spyOn(checkSeminarPointModule, 'searchSeminarPoints').mockResolvedValue({
@@ -142,7 +158,7 @@ describe('HTTP Session Expiry & Error Classification Tests', () => {
               status: 200,
               statusText: '200',
               headers: {},
-              body: mockListHtml,
+              body: mockListJson,
               url,
               redirected: false,
               resultType: 'SUCCESS' as const,
@@ -206,7 +222,14 @@ describe('HTTP Session Expiry & Error Classification Tests', () => {
       // 7. 신규 세미나 정상 추가 및 상세 조회/포인트 제외 판정 성공 시 seminar_list 정상 업데이트 검증
       seminarRepo.setAllSeminars(initialStorageData);
 
-      const mockDetailSuccessHtml = '<html><body><div>세미나 상세 내용 (포인트 지급 세미나)</div></body></html>';
+      const mockDetailSuccessJson = JSON.stringify({
+        code: 200,
+        seminarDetail: {
+          intro: '포인트 지급 세미나',
+          useDepthSurvey: false,
+          processState: 2,
+        },
+      });
 
       vi.spyOn(checkSeminarPointModule, 'searchSeminarPoints').mockResolvedValue({
         success: true,
@@ -220,7 +243,7 @@ describe('HTTP Session Expiry & Error Classification Tests', () => {
               status: 200,
               statusText: '200',
               headers: {},
-              body: mockListHtml,
+              body: mockListJson,
               url,
               redirected: false,
               resultType: 'SUCCESS' as const,
@@ -230,7 +253,7 @@ describe('HTTP Session Expiry & Error Classification Tests', () => {
               status: 200,
               statusText: '200',
               headers: {},
-              body: mockDetailSuccessHtml,
+              body: mockDetailSuccessJson,
               url,
               redirected: false,
               resultType: 'SUCCESS' as const,

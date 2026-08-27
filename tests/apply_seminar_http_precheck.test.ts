@@ -309,34 +309,37 @@ describe('apply_seminar HTTP pre-check 및 조건부 Playwright 실행 테스트
       assert.strictEqual(storedD.length, 2, 'New seminar should be saved via HTTP processing');
       console.log('  ✓ [Pass] 새 세미나가 있어도 PROCESS_APPLY가 없으면 Playwright 미실행 및 HTTP 수집 완료\n');
 
-      // --- Case E: API 실패 + HTML fallback 경로의 AUTH_EXPIRED → Playwright 없이 에러 처리 ---
-      console.log('--- Case E: API 실패 + HTML AUTH_EXPIRED 발생 시 Playwright fallback 없음 ---');
+      // --- Case E: API 실패 시 AUTH_EXPIRED 및 일반 오류 처리 검증 ---
+      console.log('--- Case E: API 실패 시 AUTH_EXPIRED 및 일반 오류 처리 검증 ---');
       safeGotoCallCount = 0;
       safeGotoUrls.length = 0;
       browserLaunchCount = 0;
 
+      // E-1: 세션 만료 시
+      fetchMainFutureSpy.mockResolvedValue({
+        success: false,
+        isAuthExpired: true,
+        errorMessage: '세션 만료',
+      });
+
+      const resultE1 = await runApplySeminar({}, { notifyNewSeminarsToTelegram: false });
+      assert.strictEqual(resultE1.success, false);
+      assert.ok((resultE1.message || '').includes('로그인이 필요합니다'));
+      assert.strictEqual(safeGotoCallCount, 0, 'safeGoto should NOT be called on AUTH_EXPIRED');
+      assert.strictEqual(browserLaunchCount, 0, 'Chromium should NOT be launched on AUTH_EXPIRED');
+
+      // E-2: 일반 API 오류 시 즉시 실패 반환
       fetchMainFutureSpy.mockResolvedValue({
         success: false,
         isAuthExpired: false,
-        errorMessage: 'API 실패',
+        errorMessage: 'API 서버 오류 500',
       });
 
-      httpGetSpy.mockResolvedValue({
-        status: 200,
-        statusText: '200',
-        headers: {},
-        url: 'https://www.doctorville.co.kr/seminar/main',
-        redirected: false,
-        body: '<script>alert("로그인이 되어 있지 않습니다.");</script>',
-        resultType: 'AUTH_EXPIRED' as const,
-      });
-
-      const resultE = await runApplySeminar({}, { notifyNewSeminarsToTelegram: false });
-      assert.strictEqual(resultE.success, false);
-      assert.ok((resultE.message || '').includes('로그인이 필요합니다'));
-      assert.strictEqual(safeGotoCallCount, 0, 'safeGoto should NOT be called on AUTH_EXPIRED');
-      assert.strictEqual(browserLaunchCount, 0, 'Chromium should NOT be launched on AUTH_EXPIRED');
-      console.log('  ✓ [Pass] AUTH_EXPIRED 발생 시 Playwright fallback 없이 정상 세션 만료 반환\n');
+      const resultE2 = await runApplySeminar({}, { notifyNewSeminarsToTelegram: false });
+      assert.strictEqual(resultE2.success, false);
+      assert.ok((resultE2.message || '').includes('API 서버 오류 500'));
+      assert.strictEqual(safeGotoCallCount, 0, 'safeGoto should NOT be called on API error');
+      console.log('  ✓ [Pass] API 실패 시 HTML fallback 없이 즉시 실패 반환 검증 완료\n');
 
       // --- Case F: PROCESS_APPLY 있지만 신청 후 실패 (processState가 바뀌지 않음) ---
       console.log('--- Case F: PROCESS_APPLY → 신청 시도했지만 실패 (processState 변경 안 됨) ---');
