@@ -23,7 +23,7 @@ import {
   sendUrgentSeminarsToSubscribers,
   parseCapacityNumbers,
 } from '../services/subscription_service';
-import { getNewSeminarsChannelMessage, publishAndReplaceChannelNotice } from '../services/channel_message_repository';
+import * as channelRepo from '../services/channel_message_repository';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
@@ -446,6 +446,7 @@ export async function publishNewSeminarsNotice(
   newlyAddedIds?: string[] | Set<string>,
   comments?: Array<{ userName: string; text: string }>,
   _date?: string,
+  channelId?: string,
 ): Promise<number | null> {
   const visibleSeminars = seminars.filter((item) => {
     if (!item.totalCount || item.totalCount.trim() === '') return true;
@@ -455,7 +456,8 @@ export async function publishNewSeminarsNotice(
 
   if (visibleSeminars.length === 0) return prevMessageId;
 
-  const result = await publishAndReplaceChannelNotice({
+  const result = await channelRepo.publishAndReplaceChannelNotice({
+    channelId,
     prevMessageId,
     buildMessageFn: (commentsToAttach) =>
       buildNewSeminarsNoticeMessage(visibleSeminars, newlyAddedIds, commentsToAttach),
@@ -464,6 +466,73 @@ export async function publishNewSeminarsNotice(
   });
 
   return result.newMessageId;
+}
+
+/**
+ * 기존 공지 메시지 본문에서 '━ ✨ 방금 추가됨 ━━━━━'으로 감싸진 강조 블록의 세미나 ID 목록을 추출합니다.
+ */
+export function extractHighlightedSeminarIds(messageText?: string | null): string[] {
+  if (!messageText) return [];
+  const highlightedIds: string[] = [];
+  const regex = /━ ✨ 방금 추가됨 ━━━━━([\s\S]*?)━━━━━━━━━━━━━━━━━━━━━/g;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(messageText)) !== null) {
+    const blockContent = match[1];
+    const urlMatch = blockContent.match(/https?:\/\/[^\s]+/);
+    if (urlMatch) {
+      const sid = getSeminarIdFromUrl(urlMatch[0]);
+      if (sid) {
+        highlightedIds.push(sid);
+      }
+    }
+  }
+  return highlightedIds;
+}
+
+/**
+ * 오늘 발견된 세미나 누적 공지를 동기화합니다.
+ * - newlyAdded.length > 0: 새 메시지 발행 및 이전 메시지 교체 (이번 회차 신규 세미나 강조)
+ * - newlyAdded.length === 0: 기존 메시지가 있을 경우, 기존 강조 표시를 보존한 채 최신 세미나 목록/정원 정보로 메시지 인플레이스 수정 (editChannelMessage)
+ */
+export async function syncNewSeminarsNotice(
+  referenceDate: string,
+  newlyAdded: SeminarListItem[] = [],
+  channelId?: string,
+): Promise<number | null> {
+  const targetChannelId = channelId || process.env.NOTICE_CHANNEL_ID;
+  const prevMsg = channelRepo.getNewSeminarsChannelMessage(referenceDate, targetChannelId);
+  const todayNewSeminars = seminarRepo.getSeminarsByDetectedDate(referenceDate);
+
+  if (newlyAdded.length > 0) {
+    const targetSeminars = todayNewSeminars.length > 0 ? todayNewSeminars : newlyAdded;
+    const newlyAddedIds = newlyAdded.map((s) => s.seminarId || getSeminarIdFromUrl(s.url)).filter(Boolean) as string[];
+    return await publishNewSeminarsNotice(
+      targetSeminars,
+      prevMsg ? prevMsg.messageId : null,
+      newlyAddedIds,
+      undefined,
+      referenceDate,
+      targetChannelId,
+    );
+  }
+
+  // 신규 세미나가 없지만 오늘 기존 공지 메시지가 전송되어 있는 경우: 인플레이스 수정
+  if (prevMsg && todayNewSeminars.length > 0) {
+    const prevText = prevMsg.text || '';
+    const highlightedIds = extractHighlightedSeminarIds(prevText);
+    const commentRecords = channelRepo.getChannelCommentsByParentMessageId(prevMsg.messageId, targetChannelId);
+    const comments = commentRecords.map((r) => ({ userName: r.userName, text: r.text }));
+
+    const { text: newText } = buildNewSeminarsNoticeMessage(todayNewSeminars, highlightedIds, comments);
+
+    if (newText.trim() !== prevText.trim()) {
+      logger.info(`[apply_seminar] 오늘 발견된 세미나 누적 공지 정원/정보 수정 (Message ID: ${prevMsg.messageId})`);
+      await channelRepo.editChannelMessage(prevMsg.messageId, newText, { channelId: targetChannelId });
+    }
+    return prevMsg.messageId;
+  }
+
+  return prevMsg ? prevMsg.messageId : null;
 }
 
 async function fetchAndPopulateSeminarInfo(
@@ -1035,22 +1104,11 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
     seminarRepo.upsertSeminars(seminars);
   }
 
+  if (notifyNewSeminarsToChannel) {
+    await syncNewSeminarsNotice(referenceDate, newlyAdded);
+  }
+
   if (newlyAdded.length > 0) {
-    if (notifyNewSeminarsToChannel) {
-      const todayNewSeminars = seminarRepo.getSeminarsByDetectedDate(referenceDate);
-      const targetSeminars = todayNewSeminars.length > 0 ? todayNewSeminars : newlyAdded;
-      const prevMsg = getNewSeminarsChannelMessage(referenceDate);
-      const newlyAddedIds = newlyAdded
-        .map((s) => s.seminarId || getSeminarIdFromUrl(s.url))
-        .filter(Boolean) as string[];
-      await publishNewSeminarsNotice(
-        targetSeminars,
-        prevMsg ? prevMsg.messageId : null,
-        newlyAddedIds,
-        undefined,
-        referenceDate,
-      );
-    }
     await sendNewSeminarToSubscribers(
       newlyAdded,
       newlyAdded.map((s) => s.seminarId || getSeminarIdFromUrl(s.url)).filter(Boolean) as string[],
@@ -1383,22 +1441,11 @@ export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<Ta
       seminarRepo.upsertSeminars(seminars);
     }
 
+    if (notifyNewSeminarsToChannel) {
+      await syncNewSeminarsNotice(referenceDate, newlyAdded);
+    }
+
     if (newlyAdded.length > 0) {
-      if (notifyNewSeminarsToChannel) {
-        const todayNewSeminars = seminarRepo.getSeminarsByDetectedDate(referenceDate);
-        const targetSeminars = todayNewSeminars.length > 0 ? todayNewSeminars : newlyAdded;
-        const prevMsg = getNewSeminarsChannelMessage(referenceDate);
-        const newlyAddedIds = newlyAdded
-          .map((s) => s.seminarId || getSeminarIdFromUrl(s.url))
-          .filter(Boolean) as string[];
-        await publishNewSeminarsNotice(
-          targetSeminars,
-          prevMsg ? prevMsg.messageId : null,
-          newlyAddedIds,
-          undefined,
-          referenceDate,
-        );
-      }
       await sendNewSeminarToSubscribers(
         newlyAdded,
         newlyAdded.map((s) => s.seminarId || getSeminarIdFromUrl(s.url)).filter(Boolean) as string[],

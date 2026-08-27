@@ -4,6 +4,8 @@ import {
   truncateSeminarName,
   buildNewSeminarsNoticeMessage,
   publishNewSeminarsNotice,
+  extractHighlightedSeminarIds,
+  syncNewSeminarsNotice,
   type SeminarListItem,
 } from '../src/tasks/apply_seminar';
 import * as utilsModule from '../src/modules/utils';
@@ -411,5 +413,140 @@ describe('신규 세미나 모음 통합 공지 (삭제/재발송) 단위 테스
     // 이전 메시지 ID 1001이 삭제되었는지 검증
     assert.strictEqual(deletedIds.length, 1);
     assert.strictEqual(deletedIds[0], 1001);
+  });
+
+  it('extractHighlightedSeminarIds: 공지 메시지 본문에서 강조된 세미나 ID 추출 검증', () => {
+    // 1. null 또는 빈 문자열
+    assert.deepStrictEqual(extractHighlightedSeminarIds(null), []);
+    assert.deepStrictEqual(extractHighlightedSeminarIds(''), []);
+    assert.deepStrictEqual(extractHighlightedSeminarIds('일반 메시지입니다.'), []);
+
+    // 2. 단일 강조 항목
+    const singleMsg = `🆕 오늘 추가된 세미나 모음 (누적 2건)
+
+1. [2026-08-27 13:00] 일반 세미나 (15/100)
+https://m.doctorville.co.kr/cme/seminar/101
+
+━ ✨ 방금 추가됨 ━━━━━
+2. [2026-08-28 19:00] 신규 세미나 (5/50)
+https://m.doctorville.co.kr/cme/seminar/102
+━━━━━━━━━━━━━━━━━━━━━`;
+    assert.deepStrictEqual(extractHighlightedSeminarIds(singleMsg), ['102']);
+
+    // 3. 복수 강조 항목
+    const multiMsg = `🆕 오늘 추가된 세미나 모음 (누적 2건)
+
+━ ✨ 방금 추가됨 ━━━━━
+1. [2026-08-27 13:00] 첫번째 신규 세미나 (15/100)
+https://m.doctorville.co.kr/cme/seminar/201
+━━━━━━━━━━━━━━━━━━━━━
+
+━ ✨ 방금 추가됨 ━━━━━
+2. [2026-08-28 19:00] 두번째 신규 세미나 (5/50)
+https://m.doctorville.co.kr/cme/seminar/202
+━━━━━━━━━━━━━━━━━━━━━`;
+    assert.deepStrictEqual(extractHighlightedSeminarIds(multiMsg), ['201', '202']);
+  });
+
+  it('syncNewSeminarsNotice: 신규 세미나 없이 정원/인원 수치 변경 시 기존 강조 표시 유지하며 editChannelMessage 호출 검증', async () => {
+    seminarRepo.clearSeminars();
+    const targetDate = '2026-08-27';
+    const channelId = '-100999888777';
+
+    // 1. 초기 세미나 2개 등록 (101은 일반, 102는 신규 강조)
+    const initialSeminars: SeminarListItem[] = [
+      {
+        seminarId: '101',
+        name: '101번 세미나',
+        url: 'https://m.doctorville.co.kr/cme/seminar/101',
+        date: targetDate,
+        time: '13:00',
+        currentCount: '10',
+        totalCount: '100',
+        nightTime: false,
+        isAdvancedSurvey: false,
+        detectedDate: targetDate,
+        detectedAt: '2026-08-27T01:00:00.000Z',
+      },
+      {
+        seminarId: '102',
+        name: '102번 세미나 (신규 강조)',
+        url: 'https://m.doctorville.co.kr/cme/seminar/102',
+        date: targetDate,
+        time: '19:00',
+        currentCount: '5',
+        totalCount: '50',
+        nightTime: true,
+        isAdvancedSurvey: false,
+        detectedDate: targetDate,
+        detectedAt: '2026-08-27T02:00:00.000Z',
+      },
+    ];
+    seminarRepo.upsertSeminars(initialSeminars);
+
+    // 2. 초기 공지 메시지 모의 생성 및 DB 저장
+    const initialNoticeText = buildNewSeminarsNoticeMessage(initialSeminars, ['102']).text;
+    channelRepoModule.recordChannelMessage({
+      channelId,
+      messageId: 5001,
+      text: initialNoticeText,
+      date: targetDate,
+      mediaType: 'text',
+      status: 'sent',
+    });
+
+    // 3. 세미나 인원 변경 (101번: 10/100 -> 35/100, 102번: 5/50 -> 40/50)
+    const updatedSeminars: SeminarListItem[] = [
+      {
+        ...initialSeminars[0],
+        currentCount: '35',
+      },
+      {
+        ...initialSeminars[1],
+        currentCount: '40',
+      },
+    ];
+    seminarRepo.upsertSeminars(updatedSeminars);
+
+    // editChannelMessage spy 생성
+    let editedMessageId: number | null = null;
+    let editedNewText = '';
+    vi.spyOn(channelRepoModule, 'editChannelMessage').mockImplementation(async (msgId, newText) => {
+      editedMessageId = msgId;
+      editedNewText = newText;
+      return { success: true, message: 'OK' };
+    });
+
+    // 4. newlyAdded = [] 상태로 syncNewSeminarsNotice 호출
+    const resultMsgId = await syncNewSeminarsNotice(targetDate, [], channelId);
+
+    // 5. 검증:
+    // - 메시지 ID가 유지됨
+    assert.strictEqual(resultMsgId, 5001);
+    // - editChannelMessage가 5001번에 대해 호출됨
+    assert.strictEqual(editedMessageId, 5001);
+    // - 101번과 102번의 정원/인원 정보가 최신으로 갱신됨
+    assert.ok(editedNewText.includes('1. [2026-08-27 13:00] 101번 세미나 (35/100)'));
+    // - 102번 세미나의 "━ ✨ 방금 추가됨 ━━━━━" 강조 표시가 그대로 유지됨
+    assert.ok(
+      editedNewText.includes(
+        '━ ✨ 방금 추가됨 ━━━━━\n2. [2026-08-27 19:00] 102번 세미나 (신규 강조) (40/50)\nhttps://m.doctorville.co.kr/cme/seminar/102\n━━━━━━━━━━━━━━━━━━━━━',
+      ),
+    );
+
+    // 6. 한 번 더 호출했을 때(변경사항 없음)는 editChannelMessage가 호출되지 않아야 함
+    editedMessageId = null;
+    editedNewText = '';
+    // DB의 메시지 텍스트를 업데이트된 텍스트로 수정해둔 상태 시뮬레이션
+    channelRepoModule.updateChannelMessageStatus(5001, 'edited', initialNoticeText, channelId); // reset test
+    channelRepoModule.updateChannelMessageStatus(
+      5001,
+      'edited',
+      buildNewSeminarsNoticeMessage(updatedSeminars, ['102']).text,
+      channelId,
+    );
+
+    await syncNewSeminarsNotice(targetDate, [], channelId);
+    assert.strictEqual(editedMessageId, null, '내용 변경이 없을 시 editChannelMessage를 호출하지 않아야 함');
   });
 });
