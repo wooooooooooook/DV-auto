@@ -254,6 +254,17 @@
 - **내 정보 및 포인트 조회 (`/member/getMyInfo`)**:
   - `POST https://api.keymedi.com/api/member/getMyInfo`
   - 응답: 회원명, 전문과, 보유 포인트(`point_balance`, `total_point`)
+- **설문 상단 요약 정보 조회 (`/survey/surveyTopInfo`)**:
+  - `POST https://api.keymedi.com/api/survey/surveyTopInfo`
+  - 응답: `possible_cnt`(참여가능 설문 수), `acquire_point`(획득가능 총 포인트)
+- **설문 목록 조회 (`/survey/surveyList`)**:
+  - `POST https://api.keymedi.com/api/survey/surveyList`
+  - 파라미터: `type: "general"`, `page`, `per_page`
+  - 응답: 설문 목록 (`idx`, `title`, `gift_point`, `vote_status`, `people_closed_status`, `medical_part`, `end_at` 등)
+- **투표 목록 조회 (`/survey/voteList`)**:
+  - `POST https://api.keymedi.com/api/survey/voteList`
+  - 파라미터: `banner_location: "survey_pc"`, `banner_type: "survey_vote"`, `page`, `per_page`
+  - 응답: 투표 목록 (`idx`, `title`, `gift_point`, `vote_status`, `medical_part`, `end_at` 등)
 
 ---
 

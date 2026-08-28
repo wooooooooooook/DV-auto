@@ -35,12 +35,62 @@ export function formatKeymediAttendanceMessage(result: KeymediAttendanceWorkflow
     attendStatusText = `⚠️ 출석 실패 (${result.attendance.message})`;
   }
 
+  // 1. 참여 가능 설문
+  const availableSurveys = result.surveys?.availableSurveys || [];
+  let surveySectionText = '';
+  if (availableSurveys.length > 0) {
+    const totalSurveyPoints = availableSurveys.reduce((sum, s) => sum + (s.gift_point || 0), 0);
+    const surveyLines = availableSurveys.map((s) => {
+      let deadlineStr = '';
+      if (s.end_at) {
+        const parts = s.end_at.split(' ')[0].split('-');
+        if (parts.length === 3) {
+          deadlineStr = ` (~${parseInt(parts[1], 10)}/${parseInt(parts[2], 10)})`;
+        }
+      }
+      return `  • [${s.gift_point}P] ${s.title}${deadlineStr}\n    https://www.keymedi.com/survey/list/${s.idx}`;
+    });
+
+    surveySectionText = [
+      `📝 참여가능 설문: ${availableSurveys.length}건 (최대 ${totalSurveyPoints.toLocaleString()}P)`,
+      ...surveyLines,
+    ].join('\n');
+  } else {
+    surveySectionText = '📝 참여가능 설문: 없음 (0건)';
+  }
+
+  // 2. 참여 가능 투표
+  const availableVotes = result.votes?.availableVotes || [];
+  let voteSectionText = '';
+  if (availableVotes.length > 0) {
+    const totalVotePoints = availableVotes.reduce((sum, v) => sum + (v.gift_point || 0), 0);
+    const voteLines = availableVotes.map((v) => {
+      let deadlineStr = '';
+      if (v.end_at) {
+        const parts = v.end_at.split(' ')[0].split('-');
+        if (parts.length === 3) {
+          deadlineStr = ` (~${parseInt(parts[1], 10)}/${parseInt(parts[2], 10)})`;
+        }
+      }
+      return `  • [${v.gift_point}P] ${v.title}${deadlineStr}\n    https://www.keymedi.com/survey/vote/${v.idx}`;
+    });
+
+    voteSectionText = [
+      `🗳️ 참여가능 투표: ${availableVotes.length}건 (최대 ${totalVotePoints.toLocaleString()}P)`,
+      ...voteLines,
+    ].join('\n');
+  } else {
+    voteSectionText = '🗳️ 참여가능 투표: 없음 (0건)';
+  }
+
   const lines = [
     '📋 [키메디 출석체크 & 포인트 현황]',
     `📅 일시: ${kstDateStr}`,
     `👤 회원: ${memberName}${memberUid}`,
     `📌 출석: ${attendStatusText}`,
     `💰 보유 포인트: ${result.totalPoint.toLocaleString()} P${accumulateDays}`,
+    surveySectionText,
+    voteSectionText,
   ];
 
   return lines.join('\n');
@@ -52,7 +102,7 @@ export async function run(ctx?: TaskContext): Promise<TaskResult> {
   const password = ctx?.args?.password;
 
   try {
-    logger.info('keymedi_attendance task: Starting workflow (login -> attendance -> points)...');
+    logger.info('keymedi_attendance task: Starting workflow (login -> attendance -> points -> surveys -> votes)...');
     const result = await client.executeAttendanceAndPoints(uid, password);
     const message = formatKeymediAttendanceMessage(result);
 
