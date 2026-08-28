@@ -219,4 +219,41 @@ describe('세미나 모니터링 통합 메시지 (삭제/재발송) 단위 테�
     assert.strictEqual(todayComments[0].userName, '오늘유저');
     assert.strictEqual(todayComments[0].text, '오늘 댓글');
   });
+
+  it('세미나 상태 변경(종료 등) 발생 시 삭제 후 재전송(publishSeminarStatusNotice) 검증', async () => {
+    const deletedMessageIds: number[] = [];
+    const sentMessages: string[] = [];
+
+    vi.spyOn(utilsModule, 'sendNotificationToChannel').mockImplementation(async (text: string) => {
+      sentMessages.push(text);
+      return 999;
+    });
+
+    vi.spyOn(channelRepoModule, 'deleteChannelMessage').mockImplementation(async (msgId: number) => {
+      deletedMessageIds.push(msgId);
+      return { success: true, message: 'deleted' };
+    });
+
+    // 종료 상태로 변경된 세미나 목록
+    const seminars: MonitoredSeminarItem[] = [
+      {
+        seminarId: '101',
+        name: '종료된 세미나',
+        url: 'https://m.doctorville.co.kr/cme/seminar/101',
+        status: '종료',
+      },
+    ];
+
+    const prevMsgId = 888;
+    const newMsgId = await publishSeminarStatusNotice('점심', seminars, prevMsgId, false, false);
+
+    assert.strictEqual(newMsgId, 999);
+    assert.strictEqual(sentMessages.length, 1);
+    assert.strictEqual(deletedMessageIds.length, 1);
+    assert.strictEqual(
+      deletedMessageIds[0],
+      888,
+      '세미나 종료 시 기존 메시지 ID 888이 삭제되고 새 메시지가 발송되어야 함',
+    );
+  });
 });

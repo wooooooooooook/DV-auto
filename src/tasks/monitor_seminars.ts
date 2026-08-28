@@ -1653,6 +1653,7 @@ async function monitorSeminars(
             startNotified: false,
             endNotified: initialIsEnded,
           });
+          hasStateChanged = true;
         }
       }
 
@@ -1832,9 +1833,24 @@ async function monitorSeminars(
         currentNowMs,
       ).text;
 
-      if (hasStateChanged || lastStatusNoticeText !== currentStatusText) {
+      if (hasStateChanged) {
+        // 주요 상태 변화 (대기->입장가능, 입장가능->종료, 신규 세미나 추가 등): 이전 메시지 삭제 후 재전송하여 채널 알림 발송
+        lastStatusNoticeMessageId = await publishSeminarStatusNotice(
+          periodName,
+          currentList,
+          lastStatusNoticeMessageId,
+          isAllCompleted,
+          isAutoResume,
+        );
+        lastStatusNoticeText = currentStatusText;
+
+        if (isAllCompleted) {
+          console.log(`[${periodName}] 모든 세미나 및 설문이 종료되었습니다. 모니터링을 완료합니다.`);
+          break;
+        }
+      } else if (lastStatusNoticeText !== currentStatusText) {
         if (lastStatusNoticeMessageId) {
-          // 기존 공지 메시지가 있는 경우: 항상 editChannelMessage로 인플레이스 수정하여 추가 알림 억제
+          // 세미나 상태 변화 없이 10분 단위 설문 잔여 시간 등 텍스트만 변경된 경우: editChannelMessage로 인플레이스 수정하여 불필요한 알림 억제
           const editRes = await editChannelMessage(lastStatusNoticeMessageId, currentStatusText);
           if (editRes.success) {
             lastStatusNoticeText = currentStatusText;
