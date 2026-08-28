@@ -787,6 +787,42 @@ if (adminBot) {
     }
   });
 
+  adminBot.command(['run_hmp_attendance_now', 'hmp_attendance_now', 'hmp_attendance'], async (ctx) => {
+    logger.info('User requested to run hmp_attendance now', { from: ctx.from?.username });
+    const task = taskRegistry.getByName('hmp_attendance');
+    if (!task) {
+      logger.error('hmp_attendance task not found, cannot run');
+      return replyWithSplit(ctx, 'hmp_attendance task not found!');
+    }
+
+    try {
+      runner
+        .runTask(task)
+        .then(async (result) => {
+          if (result && typeof result === 'object' && (result as { message?: string }).message) {
+            await replyWithSplit(
+              ctx,
+              (result as { message: string }).message,
+              (result as { options?: Record<string, unknown> }).options as Parameters<Context['reply']>[1],
+            );
+          } else if (typeof result === 'string') {
+            await replyWithSplit(ctx, result);
+          } else if (result === true) {
+            await replyWithSplit(ctx, 'HMP 출석체크 작업이 성공적으로 완료되었습니다.');
+          } else {
+            await replyWithSplit(ctx, 'HMP 출석체크 작업이 완료되었습니다.');
+          }
+        })
+        .catch((e) => {
+          const message = e instanceof Error ? e.message : String(e);
+          replyWithSplit(ctx, `hmp_attendance failed: ${message}`);
+        });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      replyWithSplit(ctx, `Failed to start hmp_attendance: ${message}`);
+    }
+  });
+
   adminBot.command('monitor_lunch_seminar_now', async (ctx) => {
     logger.info('User requested to run monitor_lunch_seminars now', { from: ctx.from?.username });
     const task = taskRegistry.getByName('monitor_lunch_seminars');
@@ -1714,6 +1750,7 @@ if (adminBot) {
 - /run_quiz_now: 즉시 오늘의 퀴즈 작업(today_quiz)을 실행합니다.
 - /run_intermd_quiz_now: 즉시 인터엠디 오늘의 퀴즈 작업(intermd_quiz)을 실행합니다.
 - /run_keymedi_attendance_now: 즉시 키메디 출석체크 & 포인트 확인(keymedi_attendance)을 실행합니다.
+- /run_hmp_attendance_now: 즉시 HMP 출석체크 & 보유 캡슐 확인(hmp_attendance)을 실행합니다.
 - /monitor_lunch_seminar_now: 즉시 점심 세미나 모니터링을 시작합니다.
 - /monitor_dinner_seminar_now: 즉시 저녁 세미나 모니터링을 시작합니다.
 
@@ -1793,6 +1830,8 @@ export const adminCommands = [
   { command: 'apply_seminar_now', description: '즉시 세미나 신청(apply_seminar) 실행' },
   { command: 'run_quiz_now', description: '즉시 오늘의 퀴즈(today_quiz) 실행' },
   { command: 'run_intermd_quiz_now', description: '즉시 인터엠디 오늘의 퀴즈(intermd_quiz) 실행' },
+  { command: 'run_keymedi_attendance_now', description: '즉시 키메디 출석체크(keymedi_attendance) 실행' },
+  { command: 'run_hmp_attendance_now', description: '즉시 HMP 출석체크(hmp_attendance) 실행' },
   { command: 'monitor_lunch_seminar_now', description: '즉시 점심 세미나 모니터링 시작' },
   { command: 'monitor_dinner_seminar_now', description: '즉시 저녁 세미나 모니터링 시작' },
   // 2. 세미나 & 퀴즈 족보
