@@ -137,7 +137,7 @@ describe('apply_seminar 신청 결과 집계 정확성 테스트', () => {
         items: [
           createFutureSeminarApiItem(5606, ProcessState.PROCESS_EXCESS, 2500, 2500),
           createFutureSeminarApiItem(5607, ProcessState.PROCESS_CANCEL, 2359, 7000),
-          createFutureSeminarApiItem(5610, ProcessState.PROCESS_PREPARING, 0, 5000),
+          createFutureSeminarApiItem(5608, ProcessState.PROCESS_PREPARING, 0, 5000),
         ],
         rawResponse: { futureSeminarList: { items: [] } },
       });

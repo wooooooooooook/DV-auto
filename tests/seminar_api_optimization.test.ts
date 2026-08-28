@@ -207,6 +207,22 @@ describe('닥터빌 API 과다 호출 방지 및 라이브 모니터링 최적�
       isAuthExpired: false,
     });
 
+    // 201번 세미나가 이미 저장소에 등록되어 있는 상태 설정
+    seminarRepo.setAllSeminars([
+      {
+        seminarId: '201',
+        name: '메인목록 세미나 201',
+        url: 'https://m.doctorville.co.kr/cme/seminar/201',
+        date: '2026-08-27',
+        time: '19:00~20:00',
+        currentCount: '0',
+        totalCount: '100',
+        nightTime: true,
+        isAdvancedSurvey: false,
+        isPointExcluded: false,
+      },
+    ]);
+
     // Case A: 10분 전 실행 기록 있음 (1시간 미경과) -> detail API 호출 0회
     storage.set(LAST_ENRICH_TIMESTAMP_KEY, Date.now() - 10 * 60 * 1000);
     detailApiCallCount = 0;

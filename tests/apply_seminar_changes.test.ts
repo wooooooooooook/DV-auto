@@ -3,6 +3,7 @@ import {
   getSeminarInfoChanges,
   formatSeminarChangeNotification,
   refreshSeminarPointStatus,
+  buildNewSeminarsNoticeMessage,
   run as runApplySeminar,
   runHttpOnly,
   applySeminarExtraTask,
@@ -10,6 +11,7 @@ import {
   type SeminarInfoChange,
   type SeminarPointChange,
 } from '../src/tasks/apply_seminar';
+import { buildSingleNewSeminarMessage } from '../src/services/subscription_service';
 import * as runner from '../src/core/runner';
 import * as utilsModule from '../src/modules/utils';
 import * as seminarApiModule from '../src/modules/seminar_api';
@@ -139,6 +141,65 @@ describe('apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스�
       assert.strictEqual(changesSurvey[0].oldValue, false);
       assert.strictEqual(changesSurvey[0].newValue, true);
       console.log('  ✓ [Pass] 심화설문 여부 변경 감지 성공 (false → true)\n');
+
+      // 6-1. 포인트미지급(isPointExcluded) undefined -> false 시 변경 감지 안 됨 (신규 세미나 등록 후 기본값 확인 시 오탐 방지)
+      console.log('--- Case 6-1: 포인트미지급 undefined -> false 시 변경 감지 없음 ---');
+      const pointExcludedUndef: SeminarListItem = { ...sameA, isPointExcluded: undefined };
+      const pointExcludedFalse: SeminarListItem = { ...sameA, isPointExcluded: false };
+      const changesPointExcludedDefault = getSeminarInfoChanges(pointExcludedUndef, pointExcludedFalse);
+      assert.strictEqual(
+        changesPointExcludedDefault.length,
+        0,
+        'undefined -> false 는 기본값이 채워진 것이므로 변경 알림 대상이 아니어야 함',
+      );
+      console.log('  ✓ [Pass] 포인트미지급 undefined -> false 시 변경 알림 없음\n');
+
+      // 6-2. 포인트미지급(isPointExcluded) undefined -> true 시 변경 감지 안 됨 (미확인 상태에서 초기 정보 수집 시 오탐 방지)
+      console.log('--- Case 6-2: 포인트미지급 undefined -> true 시 변경 감지 없음 ---');
+      const pointExcludedTrue: SeminarListItem = { ...sameA, isPointExcluded: true };
+      const changesPointExcludedFromUndefToTrue = getSeminarInfoChanges(pointExcludedUndef, pointExcludedTrue);
+      assert.strictEqual(
+        changesPointExcludedFromUndefToTrue.length,
+        0,
+        'undefined -> true 는 초기 정보 수집이 완료된 것이므로 변경 알림 대상이 아니어야 함',
+      );
+      console.log('  ✓ [Pass] 포인트미지급 undefined -> true 시 변경 알림 없음\n');
+
+      // 6-3. 포인트미지급(isPointExcluded) false -> true 시 변경 감지 (실제 주최측 정보 변경)
+      console.log('--- Case 6-3: 포인트미지급 false -> true 시 변경 감지 ---');
+      const changesPointExcludedFalseToTrue = getSeminarInfoChanges(pointExcludedFalse, pointExcludedTrue);
+      assert.strictEqual(changesPointExcludedFalseToTrue.length, 1);
+      assert.strictEqual(changesPointExcludedFalseToTrue[0].field, 'isPointExcluded');
+      assert.strictEqual(changesPointExcludedFalseToTrue[0].oldValue, false);
+      assert.strictEqual(changesPointExcludedFalseToTrue[0].newValue, true);
+      console.log('  ✓ [Pass] 포인트미지급 false -> true 시 변경 감지 성공 (false → true)\n');
+
+      // 6-4. 포인트미지급(isPointExcluded) true -> false 시 변경 감지 (true → false)
+      console.log('--- Case 6-4: 포인트미지급 true -> false 시 변경 감지 ---');
+      const changesPointExcludedToFalse = getSeminarInfoChanges(pointExcludedTrue, pointExcludedFalse);
+      assert.strictEqual(changesPointExcludedToFalse.length, 1);
+      assert.strictEqual(changesPointExcludedToFalse[0].field, 'isPointExcluded');
+      assert.strictEqual(changesPointExcludedToFalse[0].oldValue, true);
+      assert.strictEqual(changesPointExcludedToFalse[0].newValue, false);
+      console.log('  ✓ [Pass] 포인트미지급 true -> false 시 변경 감지 성공 (true → false)\n');
+
+      // 6-5. 비공개(isClosed) undefined -> false 시 변경 감지 없음
+      console.log('--- Case 6-5: 비공개(isClosed) undefined -> false 시 변경 감지 없음 ---');
+      const closedUndef: SeminarListItem = { ...sameA, isClosed: undefined };
+      const closedFalse: SeminarListItem = { ...sameA, isClosed: false };
+      const changesClosedDefault = getSeminarInfoChanges(closedUndef, closedFalse);
+      assert.strictEqual(changesClosedDefault.length, 0);
+      console.log('  ✓ [Pass] 비공개 undefined -> false 시 변경 알림 없음\n');
+
+      // 6-6. 심화설문(isAdvancedSurvey) undefined -> false 시 변경 감지 없음
+      console.log('--- Case 6-6: 심화설문(isAdvancedSurvey) undefined -> false 시 변경 감지 없음 ---');
+      const advancedUndef: SeminarListItem = { ...sameA, isAdvancedSurvey: false };
+      const changesAdvancedDefault = getSeminarInfoChanges(
+        { ...sameA, isAdvancedSurvey: undefined as unknown as boolean },
+        advancedUndef,
+      );
+      assert.strictEqual(changesAdvancedDefault.length, 0);
+      console.log('  ✓ [Pass] 심화설문 undefined -> false 시 변경 알림 없음\n');
 
       // 7. 포인트 false -> true 시 신규 지급 감지
       console.log('--- Case 7 & 8: 포인트 false -> true 및 true -> true 테스트 ---');
@@ -371,6 +432,113 @@ describe('apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스�
       );
 
       console.log('  ✓ [Pass] apply_seminar_extra 실행 시 아무런 변경이 없으면 텔레그램 메시지를 일체 전송하지 않음\n');
+
+      // 13. 신규 세미나가 처음에 isPointExcluded: undefined로 등록된 후, 1시간 뒤 상세 조회로 isPointExcluded: false가 확인되어도 변경 감지 오탐 알림이 발생하지 않는지 검증
+      console.log('--- Case 13: 신규 세미나 등록 후 포인트미지급 false 확인 시 변경 감지 오탐 방지 검증 ---');
+      sentTelegramMessages.length = 0;
+      sentChannelMessages.length = 0;
+
+      // 1) 신규 세미나가 처음에 저장소에 isPointExcluded: undefined (또는 필드 없음) 상태로 등록되어 있음
+      const initial500: SeminarListItem = {
+        seminarId: '500',
+        name: '신규 발견 세미나',
+        url: 'https://m.doctorville.co.kr/cme/seminar/500',
+        date: '2026-08-25',
+        time: '19:00',
+        currentCount: '0',
+        totalCount: '500',
+        nightTime: true,
+        isPointExcluded: undefined,
+        isAdvancedSurvey: false,
+        pointPaid: false,
+      };
+      seminarRepo.setAllSeminars([initial500]);
+
+      // 2) 상세 조회를 통해 isPointExcluded: false (일반 포인트 지급 세미나)가 들어오는 상황
+      const incoming500: SeminarListItem = {
+        ...initial500,
+        isPointExcluded: false,
+      };
+
+      const changes500 = getSeminarInfoChanges(initial500, incoming500);
+      assert.strictEqual(
+        changes500.length,
+        0,
+        'undefined -> false 는 기본값 확인이므로 변경 감지 목록에 포함되면 안 됨',
+      );
+
+      const notificationText = formatSeminarChangeNotification(
+        changes500.length > 0 ? [{ seminarId: '500', name: '신규 발견 세미나', url: '', changes: changes500 }] : [],
+        [],
+      );
+      assert.strictEqual(notificationText, null, '알림 메시지가 생성되지 않아야 함');
+
+      console.log('  ✓ [Pass] 신규 세미나 undefined -> false 확인 시 변경 감지 오탐 방지 검증 완료\n');
+
+      // 14. 신규 세미나가 실제 포인트 미지급 세미나인 경우, 즉시 enrich되어 신규 세미나 알림 시점에 [포인트미지급] 플래그가 정상 반영되는지 검증
+      console.log('--- Case 14: 신규 포인트 미지급 세미나 등록 시 [포인트미지급] 태그 정상 발송 검증 ---');
+      sentTelegramMessages.length = 0;
+      sentChannelMessages.length = 0;
+
+      vi.spyOn(seminarApiModule, 'fetchMainFutureSeminars').mockResolvedValue({
+        success: true,
+        items: [
+          {
+            seminarId: 600,
+            seminarNm: '신규 포인트 미지급 세미나',
+            startDt: '2026-08-25 19:00:00',
+            applyCnt: 0,
+            maxPeopleCnt: 500,
+            processState: seminarApiModule.ProcessState.PROCESS_APPLY,
+            // 목록 API에는 intro가 제공되지 않음
+          },
+        ],
+        rawResponse: {},
+      });
+
+      vi.spyOn(seminarApiModule, 'fetchSeminarDetail').mockResolvedValue({
+        success: true,
+        seminarId: '600',
+        hasEntryHistory: false,
+        isPointExcluded: true, // 포인트 미지급 세미나
+        rawResponse: {
+          seminarDetail: {
+            seminarId: 600,
+            seminarNm: '신규 포인트 미지급 세미나',
+            intro: '본 세미나는 포인트가 지급되지 않는 세미나입니다.',
+            applyCnt: 0,
+            maxPeopleCnt: 500,
+            processState: seminarApiModule.ProcessState.PROCESS_APPLY,
+          },
+        },
+      });
+
+      seminarRepo.setAllSeminars([]);
+
+      // 신규 세미나 등록 실행 (forceEnrich=false 평소 루틴)
+      const newNoPointResult = await runHttpOnly({ forceEnrich: false });
+      assert.strictEqual(newNoPointResult.success, true);
+
+      // 저장소에 등록된 600번 세미나 확인
+      const stored600 = seminarRepo.getAllSeminars().find((s) => s.seminarId === '600');
+      assert(stored600 !== undefined, '600번 세미나가 저장소에 저장되어야 함');
+      assert.strictEqual(stored600.isPointExcluded, true, 'isPointExcluded: true 로 등록되어야 함');
+
+      // 1) 채널 공지 메시지 빌더 검증
+      const channelNotice = buildNewSeminarsNoticeMessage([stored600], ['600']);
+      assert.ok(
+        channelNotice.text.includes('[포인트미지급]'),
+        `채널 공지 메시지에 [포인트미지급] 태그가 포함되어야 함: "${channelNotice.text}"`,
+      );
+
+      // 2) 개인 구독자 알림 메시지 빌더 검증
+      const subscriberNotice = buildSingleNewSeminarMessage(stored600);
+      assert.ok(
+        subscriberNotice.text.includes('[포인트미지급]'),
+        `구독자 알림 메시지에 [포인트미지급] 태그가 포함되어야 함: "${subscriberNotice.text}"`,
+      );
+
+      console.log('  ✓ [Pass] 신규 포인트 미지급 세미나 등록 시 [포인트미지급] 플래그 정상 반영 검증 완료\n');
 
       console.log('🎉 모든 apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스트 통과!\n');
     } finally {

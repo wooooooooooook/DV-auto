@@ -124,6 +124,8 @@ export function isAppliedSeminar(processState?: number): boolean {
   ).includes(processState);
 }
 
+const BOOLEAN_FIELDS = new Set<keyof SeminarListItem>(['isPointExcluded', 'isAdvancedSurvey', 'isClosed']);
+
 export function getSeminarInfoChanges(existing: SeminarListItem, incoming: SeminarListItem): SeminarFieldChange[] {
   const changes: SeminarFieldChange[] = [];
   for (const { key, label } of MEANINGFUL_FIELDS) {
@@ -131,6 +133,23 @@ export function getSeminarInfoChanges(existing: SeminarListItem, incoming: Semin
     const newVal = incoming[key];
 
     if (newVal === undefined && oldVal !== undefined) continue;
+
+    // 기존 값이 undefined(또는 빈 문자열)였던 경우:
+    // 이전에 상세 정보를 조회하지 못해 미확인 상태였다가 처음으로 값이 채워진 것이므로
+    // "세미나 정보 변경" 알림 대상이 아님 (기존 값이 유효하게 존재했던 경우에만 변경 감지)
+    if (oldVal === undefined || oldVal === '') continue;
+
+    if (BOOLEAN_FIELDS.has(key)) {
+      if (oldVal !== newVal) {
+        changes.push({
+          field: key,
+          label,
+          oldValue: oldVal as boolean,
+          newValue: newVal as boolean,
+        });
+      }
+      continue;
+    }
 
     if (oldVal !== newVal) {
       changes.push({
@@ -1080,7 +1099,15 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
     currentSeminars.push(...gapSeminars.map(convertSeminarListItemToRawSeminar));
   }
 
-  // 1시간에 1번(또는 forceEnrich=true)만 상세(detail) API를 조회하여 최신 메타데이터 갱신
+  // 1시간에 1번(또는 forceEnrich=true)만 전체 세미나 상세(detail) API를 조회하여 최신 메타데이터 갱신
+  // 단, 저장소에 없는 신규 세미나가 처음 발견된 경우 해당 신규 세미나는 즉시 enrich하여 포인트미지급 등 메타데이터 보강
+  const storedIdSet = new Set(storedSeminars.map((s) => s.seminarId || getSeminarIdFromUrl(s.url)).filter(Boolean));
+  const gapIdSet = new Set(gapSeminars.map((s) => s.seminarId || getSeminarIdFromUrl(s.url)).filter(Boolean));
+  const newlyDiscovered = normalizedCurrentSeminars.filter((s) => {
+    const sid = s.seminarId || getSeminarIdFromUrl(s.url);
+    return sid && !storedIdSet.has(sid) && !gapIdSet.has(sid);
+  });
+
   let enrichedSeminars = normalizedCurrentSeminars;
   if (shouldRunEnrich(options.forceEnrich)) {
     const { seminars: resSeminars, isAuthExpired: detailAuthExpired } =
@@ -1092,6 +1119,19 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
     }
     enrichedSeminars = resSeminars;
     recordEnrichTime();
+  } else if (newlyDiscovered.length > 0) {
+    const { seminars: resNewlyEnriched, isAuthExpired: detailAuthExpired } =
+      await enrichSeminarsWithDetail(newlyDiscovered);
+    if (detailAuthExpired) {
+      const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
+      await sendTelegram(msg).catch(() => {});
+      return { success: false, message: msg };
+    }
+    const newlyMap = new Map(resNewlyEnriched.map((s) => [s.seminarId || getSeminarIdFromUrl(s.url), s]));
+    enrichedSeminars = normalizedCurrentSeminars.map((s) => {
+      const sid = s.seminarId || getSeminarIdFromUrl(s.url);
+      return (sid ? newlyMap.get(sid) : undefined) || s;
+    });
   }
 
   const { seminars, newlyAdded, infoChanges } = refreshStoredSeminarList(
@@ -1449,7 +1489,15 @@ export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<Ta
       currentSeminars.push(...refreshedPrivate.map(convertSeminarListItemToRawSeminar));
     }
 
-    // 1시간에 1번(또는 forceEnrich=true)만 상세(detail) API를 조회하여 최신 메타데이터 갱신
+    // 1시간에 1번(또는 forceEnrich=true)만 전체 세미나 상세(detail) API를 조회하여 최신 메타데이터 갱신
+    // 단, 저장소에 없는 신규 세미나가 처음 발견된 경우 해당 신규 세미나는 즉시 enrich하여 포인트미지급 등 메타데이터 보강
+    const storedIdSet = new Set(storedSeminars.map((s) => s.seminarId || getSeminarIdFromUrl(s.url)).filter(Boolean));
+    const gapIdSet = new Set(gapSeminars.map((s) => s.seminarId || getSeminarIdFromUrl(s.url)).filter(Boolean));
+    const newlyDiscovered = normalizedCurrentSeminars.filter((s) => {
+      const sid = s.seminarId || getSeminarIdFromUrl(s.url);
+      return sid && !storedIdSet.has(sid) && !gapIdSet.has(sid);
+    });
+
     let enrichedSeminars = normalizedCurrentSeminars;
     if (shouldRunEnrich(options.forceEnrich)) {
       const { seminars: resSeminars, isAuthExpired: detailAuthExpired } =
@@ -1461,6 +1509,19 @@ export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<Ta
       }
       enrichedSeminars = resSeminars;
       recordEnrichTime();
+    } else if (newlyDiscovered.length > 0) {
+      const { seminars: resNewlyEnriched, isAuthExpired: detailAuthExpired } =
+        await enrichSeminarsWithDetail(newlyDiscovered);
+      if (detailAuthExpired) {
+        const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
+        await sendTelegram(msg).catch(() => {});
+        return { success: false, message: msg };
+      }
+      const newlyMap = new Map(resNewlyEnriched.map((s) => [s.seminarId || getSeminarIdFromUrl(s.url), s]));
+      enrichedSeminars = normalizedCurrentSeminars.map((s) => {
+        const sid = s.seminarId || getSeminarIdFromUrl(s.url);
+        return (sid ? newlyMap.get(sid) : undefined) || s;
+      });
     }
 
     const { seminars, newlyAdded, infoChanges } = refreshStoredSeminarList(
