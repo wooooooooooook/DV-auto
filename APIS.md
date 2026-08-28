@@ -236,6 +236,25 @@
   - `POST https://www.intermd.co.kr/quiz/saveAjax.do`
   - 파라미터: `quizCd`, `quesCd`, `quesItemCd`, `replyText`
 
+### 5.5 키메디 API (`https://api.keymedi.com/api`)
+- **공통 헤더**:
+  - `Content-Type`: `application/json`
+  - `AccessToken`: `eab08ef6278eb83448b1e12db0e33c18897060532e8425c3e2faee334e2d5ec19de474d1eee1dc621a0f223eefbf515804b7de28b4cb0d355dd498950e16ced7`
+  - `Authorization`: `Bearer <access_token>` (인증 필요 요청 시)
+- **로그인 (`/auth/login`)**:
+  - `POST https://api.keymedi.com/api/auth/login`
+  - Body: `{"uid": "<KEYMEDI_USER>", "password": "<KEYMEDI_PASS>", "remember": false}`
+  - 응답: JWT 토큰 (`data.token.access_token`) 및 회원 기본 정보
+- **출석 캘린더 현황 조회 (`/member/attendanceCalendar`)**:
+  - `POST https://api.keymedi.com/api/member/attendanceCalendar`
+  - 응답: `current_date`, 당월 출석 목록(`attendance: [{point, day, accumulate}]`), 누적 출석일(`count_attendance`)
+- **출석체크 실행 (`/member/attendanceAdd`)**:
+  - `POST https://api.keymedi.com/api/member/attendanceAdd`
+  - 응답: 성공 시 `code: 0` (`data.point`), 이미 완료 시 `code: 1601` (`이미 출석 하였습니다.`)
+- **내 정보 및 포인트 조회 (`/member/getMyInfo`)**:
+  - `POST https://api.keymedi.com/api/member/getMyInfo`
+  - 응답: 회원명, 전문과, 보유 포인트(`point_balance`, `total_point`)
+
 ---
 
 ## 6. 주요 상태 코드 및 Enum 정리
