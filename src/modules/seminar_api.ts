@@ -6,6 +6,9 @@ export const MAIN_FUTURE_SEMINARS_API_URL = 'https://m-api.doctorville.co.kr/api
 export const SEMINAR_DETAIL_API_URL = 'https://m-api.doctorville.co.kr/api/mw/seminars';
 export const SEMINAR_APPLY_API_URL = 'https://api.doctorville.co.kr/api/seminars/apply';
 export const SEMINAR_TERMS_INFO_API_URL = 'https://m-api.doctorville.co.kr/api/mw/seminar/terms-info';
+export const SEMINAR_ATTEND_API_URL = 'https://m-api.doctorville.co.kr/api/mw/seminars';
+export const UAS_SESSION_API_URL = 'https://m-api.doctorville.co.kr/api/mw/uas/session';
+export const UAS_ACTIVITY_API_URL = 'https://m-api.doctorville.co.kr/api/mw/uas/activity';
 
 export const ProcessState = {
   PROCESS_ENTER: 1, // 입장하기 (라이브 입장 가능)
@@ -826,4 +829,181 @@ export async function applySeminarWithTerms(
     processState: postPs,
     rawResponse: postDetail.rawResponse,
   };
+}
+
+export interface AttendSeminarApiResult {
+  success: boolean;
+  hasEntryHistory: boolean;
+  isAuthExpired: boolean;
+  errorMessage?: string;
+  debugInfo?: {
+    attendStatusCode?: number;
+    attendResponse?: unknown;
+    uasSessionResponse?: unknown;
+    uasActivityResponse?: unknown;
+    postDetailResponse?: unknown;
+  };
+  rawResponse?: unknown;
+}
+
+/**
+ * 세미나 라이브 방송 입장 API 호출 (순수 HTTP)
+ * 1. GET /api/mw/seminars/{seminarId}/attend (입장 권한 및 라이브 세미나 정보 조회)
+ * 2. GET /api/mw/uas/session (UAS 시청 세션 발급/확인)
+ * 3. GET /api/mw/uas/activity/{seminarId}?contentType=LIVE{channel} (UAS 시청 활동 기록)
+ * 4. GET /api/mw/seminars/{seminarId} 재조회하여 hasEntryHistory(joinDt/applyTy) 검증
+ */
+export async function attendSeminarApi(
+  seminarId: number | string,
+  channel: number | string = 1,
+  baseUrl: string = SEMINAR_ATTEND_API_URL,
+): Promise<AttendSeminarApiResult> {
+  const sid = String(seminarId).trim();
+  const attendUrl = `${baseUrl}/${sid}/attend`;
+  const debugInfo: NonNullable<AttendSeminarApiResult['debugInfo']> = {};
+
+  try {
+    // 1. 세미나 입장 API 호출
+    const attendRes: HttpResponse = await httpGet(attendUrl, {
+      Accept: 'application/json, text/plain, */*',
+      Referer: `https://m.doctorville.co.kr/cme/seminar/attend?seminarId=${sid}&channel=${channel}`,
+      Origin: 'https://m.doctorville.co.kr',
+    });
+
+    debugInfo.attendStatusCode = attendRes.status;
+
+    if (attendRes.resultType === 'AUTH_EXPIRED' || isAuthExpiredHtml(attendRes.body)) {
+      debugInfo.attendResponse = attendRes.body;
+      return {
+        success: false,
+        hasEntryHistory: false,
+        isAuthExpired: true,
+        errorMessage: '세션이 만료되었습니다. 로그인이 필요합니다.',
+        debugInfo,
+      };
+    }
+
+    if (attendRes.status !== 200 || !attendRes.body) {
+      debugInfo.attendResponse = attendRes.body;
+      return {
+        success: false,
+        hasEntryHistory: false,
+        isAuthExpired: false,
+        errorMessage: `세미나 입장 API HTTP 요청 실패 (상태 코드: ${attendRes.status}, ${attendRes.statusText})`,
+        debugInfo,
+        rawResponse: attendRes.body,
+      };
+    }
+
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(attendRes.body);
+      debugInfo.attendResponse = parsed;
+    } catch (parseErr) {
+      debugInfo.attendResponse = attendRes.body;
+      return {
+        success: false,
+        hasEntryHistory: false,
+        isAuthExpired: false,
+        errorMessage: `세미나 입장 응답 JSON 파싱 실패: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`,
+        debugInfo,
+        rawResponse: attendRes.body,
+      };
+    }
+
+    if (
+      parsed.code === 401 ||
+      parsed.code === '401' ||
+      (typeof parsed.message === 'string' && parsed.message.includes('로그인'))
+    ) {
+      return {
+        success: false,
+        hasEntryHistory: false,
+        isAuthExpired: true,
+        errorMessage: (parsed.message as string) || '로그인이 필요합니다.',
+        debugInfo,
+        rawResponse: parsed,
+      };
+    }
+
+    // 접근 권한 체크 (differResponseData.accessAllowed 또는 accessAllowed)
+    const differData = parsed.differResponseData as Record<string, unknown> | undefined;
+    const accessAllowed = differData?.accessAllowed ?? parsed.accessAllowed;
+    if (accessAllowed === false) {
+      return {
+        success: false,
+        hasEntryHistory: false,
+        isAuthExpired: false,
+        errorMessage: '세미나 신청 대상자가 아니거나 입장 권한이 없습니다 (accessAllowed: false).',
+        debugInfo,
+        rawResponse: parsed,
+      };
+    }
+
+    // 2. UAS 시청 세션 생성 및 활동 기록 API 호출
+    try {
+      const sessionRes = await httpGet(UAS_SESSION_API_URL, {
+        Accept: 'application/json, text/plain, */*',
+        Referer: `https://m.doctorville.co.kr/cme/seminar/attend?seminarId=${sid}&channel=${channel}`,
+        Origin: 'https://m.doctorville.co.kr',
+      });
+      try {
+        debugInfo.uasSessionResponse = JSON.parse(sessionRes.body);
+      } catch {
+        debugInfo.uasSessionResponse = sessionRes.body;
+      }
+
+      if (sessionRes.resultType === 'AUTH_EXPIRED' || isAuthExpiredHtml(sessionRes.body)) {
+        return {
+          success: false,
+          hasEntryHistory: false,
+          isAuthExpired: true,
+          errorMessage: 'UAS 세션 요청 중 세션이 만료되었습니다.',
+          debugInfo,
+        };
+      }
+
+      const activityUrl = `${UAS_ACTIVITY_API_URL}/${sid}?contentType=LIVE${channel}`;
+      const actRes = await httpGet(activityUrl, {
+        Accept: 'application/json, text/plain, */*',
+        Referer: `https://m.doctorville.co.kr/cme/seminar/attend?seminarId=${sid}&channel=${channel}`,
+        Origin: 'https://m.doctorville.co.kr',
+      });
+      try {
+        debugInfo.uasActivityResponse = JSON.parse(actRes.body);
+      } catch {
+        debugInfo.uasActivityResponse = actRes.body;
+      }
+    } catch (uasErr) {
+      console.warn(
+        `[attendSeminarApi] seminarId ${sid} UAS 활동 로깅 중 경고 (입장 처리는 계속):`,
+        uasErr instanceof Error ? uasErr.message : String(uasErr),
+      );
+    }
+
+    // 3. 상세 정보 재조회하여 실제 입장이력(joinDt 또는 applyTy === 1) 검증
+    const postDetail = await fetchSeminarDetail(sid);
+    debugInfo.postDetailResponse = postDetail.rawResponse;
+    const hasEntryHistory = postDetail.success ? postDetail.hasEntryHistory : false;
+
+    return {
+      success: true,
+      hasEntryHistory,
+      isAuthExpired: false,
+      debugInfo,
+      rawResponse: {
+        attendResponse: parsed,
+        postDetail: postDetail.rawResponse,
+      },
+    };
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    return {
+      success: false,
+      hasEntryHistory: false,
+      isAuthExpired: false,
+      errorMessage: `attendSeminarApi(${sid}) 호출 중 예외 발생: ${errorMessage}`,
+      debugInfo,
+    };
+  }
 }

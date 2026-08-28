@@ -55,7 +55,67 @@
 
 ---
 
-### 2.3 세미나 약관 동의 제출
+### 2.3 세미나 라이브 방송 입장 권한 조회
+- **Method / URL**: `GET https://m-api.doctorville.co.kr/api/mw/seminars/{seminarId}/attend`
+- **호출 위치**: `src/modules/seminar_api.ts` (`attendSeminarApi`)
+- **주요 사용 태스크**: `monitor_seminars` (세미나 라이브 시작 시 1차 순수 HTTP 자동 입장 시도)
+- **헤더**:
+  - `Accept`: `application/json, text/plain, */*`
+  - `Referer`: `https://m.doctorville.co.kr/cme/seminar/attend?seminarId={seminarId}&channel={channel}`
+  - `Origin`: `https://m.doctorville.co.kr`
+- **주요 응답 데이터**:
+  ```json
+  {
+    "accessAllowed": true,
+    "seminarInfo": {
+      "seminarId": 5585,
+      "seminarNm": "세미나명",
+      "broadcastUrl": "...",
+      "chattingRoom": "..."
+    }
+  }
+  ```
+- **설명**: 모바일 세미나 입장 페이지 진입 시 호출되는 핵심 API로, 회원의 입장 자격 및 방송 스트림 정보를 조회합니다.
+
+---
+
+### 2.4 시청 세션 발급 / 확인 (UAS Session)
+- **Method / URL**: `GET https://m-api.doctorville.co.kr/api/mw/uas/session`
+- **호출 위치**: `src/modules/seminar_api.ts` (`attendSeminarApi`)
+- **주요 사용 태스크**: `monitor_seminars`
+- **헤더**:
+  - `Accept`: `application/json, text/plain, */*`
+  - `Referer`: `https://m.doctorville.co.kr/cme/seminar/attend?seminarId={seminarId}&channel={channel}`
+- **주요 응답 데이터**:
+  ```json
+  {
+    "response_no": "100",
+    "sessionKey": "b286114e-2c8e-4767-9141-507acb484cc1",
+    "response_msg": "성공"
+  }
+  ```
+
+---
+
+### 2.5 시청 활동 기록 (UAS Activity)
+- **Method / URL**: `GET https://m-api.doctorville.co.kr/api/mw/uas/activity/{seminarId}?contentType=LIVE{channel}`
+- **호출 위치**: `src/modules/seminar_api.ts` (`attendSeminarApi`)
+- **주요 사용 태스크**: `monitor_seminars`
+- **헤더**:
+  - `Accept`: `application/json, text/plain, */*`
+  - `Referer`: `https://m.doctorville.co.kr/cme/seminar/attend?seminarId={seminarId}&channel={channel}`
+- **주요 응답 데이터**:
+  ```json
+  {
+    "response_no": "100",
+    "activityKey": "8ad5926e-d6b5-4599-ba85-51fb2a17b6c9"
+  }
+  ```
+- **설명**: 라이브 방송 시청 출석 및 활동 로그를 기록합니다 (`contentType`: `LIVE1` 또는 `LIVE2`).
+
+---
+
+### 2.6 세미나 약관 동의 제출
 - **Method / URL**: `POST https://m-api.doctorville.co.kr/api/mw/seminar/terms-info`
 - **호출 위치**: `src/modules/seminar_api.ts` (`submitSeminarTermsAgree`)
 - **주요 사용 태스크**: `apply_seminar` (세미나 신청 전 선행 동의)
@@ -74,7 +134,7 @@
 
 ---
 
-### 2.4 회원 포인트 조회
+### 2.7 회원 포인트 조회
 - **Method / URL**: `GET https://m-api.doctorville.co.kr/api/mw/my/point`
 - **호출 위치**: `src/tasks/check_point.ts` (`getPoint`)
 - **주요 사용 태스크**: `check_point`, `baemin_point_exchange`, `naverpay_point_exchange`
@@ -95,7 +155,7 @@
 
 ---
 
-### 2.5 포인트 사용/적립 내역 조회
+### 2.8 포인트 사용/적립 내역 조회
 - **Method / URL**: `GET https://m-api.doctorville.co.kr/api/mw/my/point/histories/use?page={page}&pageSize={pageSize}&startDt={YY-MM-DD}&endDt={YY-MM-DD}`
 - **호출 위치**: `src/tasks/check_seminar_point.ts` (`searchSeminarPoints`)
 - **주요 사용 태스크**: `check_seminar_point`, `apply_seminar`

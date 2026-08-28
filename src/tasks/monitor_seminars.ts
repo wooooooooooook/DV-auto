@@ -12,6 +12,8 @@ import {
 import {
   fetchMainFutureSeminars,
   fetchSeminarDetail,
+  attendSeminarApi,
+  type AttendSeminarApiResult,
   parseSeminarDateTime,
   checkIsAdvancedSurvey,
   checkIsPointExcluded,
@@ -1305,13 +1307,59 @@ export async function performAutoEnter(
 }
 
 /**
- * 입장 상태 확인 및 자동 입장 실행 (첫 성공 시 텔레그램 스크린샷 알림 전송)
+ * 1차 API 실패 시 관리자 알림 및 로그에 첨부할 디버깅 정보 포맷팅
  */
+export function formatApiDebugInfo(apiRes?: AttendSeminarApiResult, apiErr?: unknown): string {
+  const lines: string[] = [];
+  if (apiErr) {
+    lines.push(`• 예외: ${apiErr instanceof Error ? apiErr.message : String(apiErr)}`);
+  }
+  if (apiRes) {
+    if (apiRes.errorMessage) lines.push(`• 에러 메시지: ${apiRes.errorMessage}`);
+    lines.push(`• 세션 만료 여부: ${apiRes.isAuthExpired ? '만료됨(True)' : '정상(False)'}`);
+    lines.push(`• 입장이력 확인: ${apiRes.hasEntryHistory ? '확인됨' : '미확인/실패'}`);
+    if (apiRes.debugInfo) {
+      if (apiRes.debugInfo.attendStatusCode !== undefined) {
+        lines.push(`• Attend HTTP 상태: ${apiRes.debugInfo.attendStatusCode}`);
+      }
+      if (apiRes.debugInfo.attendResponse) {
+        const attendStr =
+          typeof apiRes.debugInfo.attendResponse === 'string'
+            ? apiRes.debugInfo.attendResponse
+            : JSON.stringify(apiRes.debugInfo.attendResponse);
+        lines.push(`• Attend 응답: ${attendStr.slice(0, 300)}`);
+      }
+      if (apiRes.debugInfo.uasSessionResponse) {
+        const sessionStr =
+          typeof apiRes.debugInfo.uasSessionResponse === 'string'
+            ? apiRes.debugInfo.uasSessionResponse
+            : JSON.stringify(apiRes.debugInfo.uasSessionResponse);
+        lines.push(`• UAS Session: ${sessionStr.slice(0, 200)}`);
+      }
+      if (apiRes.debugInfo.uasActivityResponse) {
+        const actStr =
+          typeof apiRes.debugInfo.uasActivityResponse === 'string'
+            ? apiRes.debugInfo.uasActivityResponse
+            : JSON.stringify(apiRes.debugInfo.uasActivityResponse);
+        lines.push(`• UAS Activity: ${actStr.slice(0, 200)}`);
+      }
+      if (apiRes.debugInfo.postDetailResponse) {
+        const detailObj = apiRes.debugInfo.postDetailResponse as Record<string, unknown>;
+        const member = (detailObj?.seminarDetail as Record<string, unknown>)?.seminarMember || detailObj?.seminarMember;
+        lines.push(`• SeminarMember: ${JSON.stringify(member || 'null')}`);
+      }
+    }
+  }
+  return lines.length > 0 ? lines.join('\n') : '• 세부 정보 없음';
+}
+
 /**
- * 입장 상태 확인 및 자동 입장 실행 (첫 성공 시 텔레그램 스크린샷 알림 전송)
+ * 입장 상태 확인 및 자동 입장 실행
+ * 1차: 순수 HTTP API(attendSeminarApi) 호출 및 입장이력(hasEntryHistory) 검증
+ * 2차 폴백: API 실패 또는 입장이력 미확인 시 Playwright 브라우저 자동화(performAutoEnter) 실행 (디버깅 정보 첨부)
  */
 export async function checkAndPerformAutoEnter(
-  context: BrowserContext,
+  context: BrowserContext | null | undefined,
   seminarId: string | null,
   seminarUrl: string,
   name: string,
@@ -1324,28 +1372,76 @@ export async function checkAndPerformAutoEnter(
   }
 
   const targetUrl = seminarId ? `${SEMINAR_DETAIL_PAGE}${seminarId}` : seminarUrl;
-  const screenshotKey = seminarId || `url_${Date.now()}`;
-  const didEnter = await performAutoEnter(context, seminarId, name, targetUrl, screenshotKey);
+  let lastApiRes: AttendSeminarApiResult | undefined;
+  let lastApiErr: unknown | undefined;
+  let didAttemptApi = false;
 
-  // 첫 성공 시에만 관리자 알림 전송 (중복 방지)
-  if (didEnter) {
-    const entryMessage = `🟢세미나 입장 완료\n${name}\n${targetUrl}`;
-    const screenshotPath = path.join(process.cwd(), `seminar_entry_${screenshotKey}.png`);
+  // ── 1. 1차: 순수 HTTP API 입장 시도
+  if (seminarId) {
+    didAttemptApi = true;
+    console.log(`[monitor_seminars] 1차 API 자동 입장 시도: ${seminarId} (${name})`);
     try {
-      const page = await context.newPage();
-      await ensureLoggedIn({ page, context });
-      await safeGoto(page, targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
-      await page.screenshot({ path: screenshotPath, fullPage: false });
-      await sendTelegram(entryMessage, screenshotPath);
-      await page.close().catch(() => {});
-    } catch (e) {
-      console.error(`[monitor_seminars] Entry notification send failed for ${seminarId}`, e);
-    } finally {
-      await fs.unlink(screenshotPath).catch(() => {});
+      lastApiRes = await attendSeminarApi(seminarId);
+      if (lastApiRes.success && lastApiRes.hasEntryHistory) {
+        console.log(`[monitor_seminars] 1차 API 자동 입장 성공 및 입장이력 확인됨: ${seminarId} (${name})`);
+        const entryMessage = `🟢세미나 입장 완료 (API)\n${name}\n${targetUrl}`;
+        await sendTelegram(entryMessage).catch((e) => {
+          console.error(`[monitor_seminars] API 입장 완료 알림 발송 실패 (${seminarId}):`, e);
+        });
+        return true;
+      } else {
+        console.warn(
+          `[monitor_seminars] 1차 API 자동 입장 미완료 (success=${lastApiRes.success}, hasEntryHistory=${lastApiRes.hasEntryHistory}, err=${lastApiRes.errorMessage || '없음'}). Playwright 브라우저로 폴백합니다.`,
+        );
+      }
+    } catch (apiErr) {
+      lastApiErr = apiErr;
+      console.warn(
+        `[monitor_seminars] 1차 API 자동 입장 중 예외 발생 (${seminarId}). Playwright 브라우저로 폴백합니다:`,
+        apiErr,
+      );
     }
   }
 
-  return didEnter;
+  // ── 2. 2차: Playwright 브라우저 자동화 폴백 (Fallback)
+  console.log(`[monitor_seminars] 2차 Playwright 브라우저 자동 입장 폴백 실행: ${seminarId || targetUrl} (${name})`);
+  const screenshotKey = seminarId || `url_${Date.now()}`;
+
+  const runPlaywrightAutoEnter = async (ctx: BrowserContext): Promise<boolean> => {
+    const didEnter = await performAutoEnter(ctx, seminarId, name, targetUrl, screenshotKey);
+    if (didEnter) {
+      let entryMessage = `🟢세미나 입장 완료 (Playwright)\n${name}\n${targetUrl}`;
+      if (didAttemptApi) {
+        const debugSummary = formatApiDebugInfo(lastApiRes, lastApiErr);
+        entryMessage += `\n\n🔍 [1차 API 실패 디버깅 정보]\n${debugSummary}`;
+      }
+
+      const screenshotPath = path.join(process.cwd(), `seminar_entry_${screenshotKey}.png`);
+      try {
+        const page = await ctx.newPage();
+        await ensureLoggedIn({ page, context: ctx });
+        await safeGoto(page, targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+        await page.screenshot({ path: screenshotPath, fullPage: false });
+        await sendTelegram(entryMessage, screenshotPath);
+        await page.close().catch(() => {});
+      } catch (e) {
+        console.error(`[monitor_seminars] Playwright 입장 알림 발송 실패 (${seminarId})`, e);
+      } finally {
+        await fs.unlink(screenshotPath).catch(() => {});
+      }
+    }
+    return didEnter;
+  };
+
+  if (context) {
+    return await runPlaywrightAutoEnter(context);
+  } else {
+    let didEnter = false;
+    await withBrowserContext(undefined, async (ctx) => {
+      didEnter = await runPlaywrightAutoEnter(ctx);
+    });
+    return didEnter;
+  }
 }
 
 export type MonitorSeminarsOptions = {
@@ -1524,23 +1620,40 @@ async function monitorSeminars(
           startNotified = true;
         }
 
-        // 온디맨드 자동 입장
+        // 공지채널 알림은 입장 시도 전에 먼저 전송
+        if (currentStatus === '입장가능' && !isEnded && !startNotified) {
+          startNotified = true;
+          const preNoticeItem: MonitoredSeminarItem = {
+            ...info,
+            url: targetUrl,
+            status: currentStatus,
+            isEnded,
+            endedAt,
+            surveyEndDt,
+            surveyStartDt,
+            surveyMinutesLeft,
+            quizResultMessage,
+            startNotified: true,
+            endNotified,
+          };
+          await sendSeminarLiveStartNotice(preNoticeItem).catch(() => {});
+        }
+
+        // 온디맨드 자동 입장 (1차 API 시도 -> 실패 시 2차 Playwright 폴백)
         if (isAutoResume && hasEntryHistory) {
           console.log(
             `[${periodName}] [isAutoResume] 세미나(${info.seminarId}) 입장이력이 확인되어 자동입장 생략: ${info.name}`,
           );
           info.autoEnterDone = true;
         } else {
-          await withBrowserContext(providedContext, async (ctx) => {
-            info.autoEnterDone = await checkAndPerformAutoEnter(
-              ctx,
-              info.seminarId,
-              targetUrl,
-              info.name,
-              '입장가능',
-              info.autoEnterDone,
-            );
-          });
+          info.autoEnterDone = await checkAndPerformAutoEnter(
+            providedContext,
+            info.seminarId,
+            targetUrl,
+            info.name,
+            '입장가능',
+            info.autoEnterDone,
+          );
         }
       }
 
@@ -1832,29 +1945,25 @@ async function monitorSeminars(
               await sendSeminarLiveStartNotice(currentSeminar).catch(() => {});
             }
 
-            // 자동 입장 시도
-            await withBrowserContext(providedContext, async (ctx) => {
-              currentSeminar.autoEnterDone = await checkAndPerformAutoEnter(
-                ctx,
-                seminarId,
-                targetUrl,
-                name,
-                '입장가능',
-                currentSeminar.autoEnterDone,
-              );
-            });
+            // 자동 입장 시도 (1차 API 시도 -> 실패 시 2차 Playwright 폴백)
+            currentSeminar.autoEnterDone = await checkAndPerformAutoEnter(
+              providedContext,
+              seminarId,
+              targetUrl,
+              name,
+              '입장가능',
+              currentSeminar.autoEnterDone,
+            );
           } else if (!currentSeminar.autoEnterDone) {
             // 이미 입장가능 상태이나 아직 입장이 완료되지 않은 경우 재시도
-            await withBrowserContext(providedContext, async (ctx) => {
-              currentSeminar.autoEnterDone = await checkAndPerformAutoEnter(
-                ctx,
-                seminarId,
-                targetUrl,
-                name,
-                '입장가능',
-                currentSeminar.autoEnterDone,
-              );
-            });
+            currentSeminar.autoEnterDone = await checkAndPerformAutoEnter(
+              providedContext,
+              seminarId,
+              targetUrl,
+              name,
+              '입장가능',
+              currentSeminar.autoEnterDone,
+            );
           }
         }
       }
