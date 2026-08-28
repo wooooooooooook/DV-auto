@@ -27,15 +27,32 @@ describe('monitor_seminars_closing (설문 가능 시간 및 마감 알림)', ()
     };
     expect(getSeminarSurveyEndTime(itemWithEndedAt)).toBe(endedAt + 60 * 60 * 1000);
 
-    // 2. endDt나 time만 있고 endedAt이 없는 경우 null 반환
-    expect(getSeminarSurveyEndTime({ endDt: '2026-08-27 13:00:00' })).toBe(null);
-    expect(getSeminarSurveyEndTime({ time: '12:00~13:00' })).toBe(null);
+    // 3. surveyEndDt(서버 설문 마감 시각)가 있는 경우
+    const surveyEndDt = '2026-08-28 14:41:57.0';
+    const parsedSurveyEnd = new Date('2026-08-28T14:41:57+09:00').getTime();
+    expect(getSeminarSurveyEndTime({ surveyEndDt })).toBe(parsedSurveyEnd);
 
-    // 3. 정보가 전혀 없는 경우 null 반환
+    // 4. surveyMinutesLeft(서버 잔여 시간)가 있는 경우
+    const now = Date.now();
+    expect(getSeminarSurveyEndTime({ surveyMinutesLeft: 38 }, now)).toBe(now + 38 * 60 * 1000);
+
+    // 5. 정보가 전혀 없는 경우 null 반환
     expect(getSeminarSurveyEndTime({})).toBe(null);
   });
 
-  it('10분 단위 잔여 시간 계산(getSurveyRemainingMinutes) 검증', () => {
+  it('10분 단위 잔여 시간 계산(getSurveyRemainingMinutes) 검증 (서버 surveyEndDt / surveyMinutesLeft 우선)', () => {
+    const now = new Date('2026-08-28T14:03:00+09:00').getTime();
+
+    // 1. 서버 surveyEndDt 기준 ("2026-08-28 14:41:57.0" -> 14:03 기준 약 38분 남음 -> 40분)
+    expect(getSurveyRemainingMinutes({ surveyEndDt: '2026-08-28 14:41:57.0' }, now)).toBe(40);
+
+    // 2. 서버 surveyMinutesLeft 기준 (38분 -> 40분, 18분 -> 20분, 8분 -> 10분)
+    expect(getSurveyRemainingMinutes({ surveyMinutesLeft: 38 }, now)).toBe(40);
+    expect(getSurveyRemainingMinutes({ surveyMinutesLeft: 18 }, now)).toBe(20);
+    expect(getSurveyRemainingMinutes({ surveyMinutesLeft: 8 }, now)).toBe(10);
+    expect(getSurveyRemainingMinutes({ surveyMinutesLeft: 0 }, now)).toBe(0);
+
+    // 3. endedAt 기준
     const endMs = new Date('2026-08-27T13:00:00+09:00').getTime(); // 종료 감지 시각
     const seminar = {
       endedAt: endMs, // 마감 시각 = 14:00 (endMs + 60분)

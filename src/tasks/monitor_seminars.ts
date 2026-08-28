@@ -18,6 +18,7 @@ import {
   ProcessState,
   SurveyState,
   type FutureSeminarApiItem,
+  type SeminarSurveyInfo,
 } from '../modules/seminar_api';
 import { processSeminarQuiz } from './seminar_quiz';
 import * as seminarRepo from '../services/seminar_repository';
@@ -56,6 +57,9 @@ export interface MonitoredSeminarItem {
   isEnded?: boolean;
   endedAt?: number;
   surveyEndTime?: number;
+  surveyEndDt?: string | null;
+  surveyStartDt?: string | null;
+  surveyMinutesLeft?: number | null;
   quizResultMessage?: string | null;
   processState?: number;
   cancelProcessState?: number;
@@ -70,90 +74,99 @@ export interface MonitoredSeminarItem {
 export type SeminarInfo = MonitoredSeminarItem;
 
 /**
- * 세미나 정보로부터 실제 종료 시각 timestamp(ms)를 파싱합니다.
+ * 설문 마감/시작 시각 문자열(예: "2026-08-28 14:41:57.0")을 파싱하여 timestamp(ms)를 반환합니다.
  */
-export function parseSeminarEndTimestamp(seminar: {
-  startDt?: string;
-  endDt?: string;
-  date?: string;
-  time?: string;
-}): number | null {
-  if (seminar.endDt) {
-    try {
-      const clean = seminar.endDt.trim().replace('T', ' ');
-      const iso = clean.includes('+') || clean.endsWith('Z') ? clean : `${clean.replace(' ', 'T')}+09:00`;
-      const ts = new Date(iso).getTime();
-      if (!Number.isNaN(ts)) return ts;
-    } catch {
-      /* ignore */
-    }
+export function parseSurveyEndTimestamp(surveyDt?: string | null): number | null {
+  if (!surveyDt) return null;
+  try {
+    const clean = surveyDt.trim().replace('T', ' ');
+    const iso = clean.includes('+') || clean.endsWith('Z') ? clean : `${clean.replace(' ', 'T')}+09:00`;
+    const ts = new Date(iso).getTime();
+    if (!Number.isNaN(ts)) return ts;
+  } catch {
+    /* ignore */
   }
-
-  if (seminar.date && seminar.time) {
-    const endHM = seminar.time.split('~')[1]?.trim();
-    if (endHM && endHM.includes(':')) {
-      try {
-        const dtStr = `${seminar.date}T${endHM}:00+09:00`;
-        const ts = new Date(dtStr).getTime();
-        if (!Number.isNaN(ts)) return ts;
-      } catch {
-        /* ignore */
-      }
-    }
-  }
-
-  if (seminar.startDt) {
-    try {
-      const clean = seminar.startDt.trim().replace('T', ' ');
-      const iso = clean.includes('+') || clean.endsWith('Z') ? clean : `${clean.replace(' ', 'T')}+09:00`;
-      const ts = new Date(iso).getTime();
-      if (!Number.isNaN(ts)) return ts + 60 * 60 * 1000; // 1시간 뒤 추정
-    } catch {
-      /* ignore */
-    }
-  }
-
   return null;
 }
 
 /**
  * 종료된 세미나의 실제 endedAt(종료 감지 timestamp)을 산출합니다.
- * - 이미 완료/마감되었거나 과거 시간대인 경우 endDt/time 기반 실제 종료 timestamp 반환
- * - 실시간 라이브 중 방금 종료 감지된 경우 Date.now() 반환
+ * - 이미 endedAt이 존재하는 경우 기존 값 유지 (덮어씌우지 않음)
+ * - 서버의 survey.startDt(실제 오픈 시각) 또는 survey.endDt(실제 마감 시각 - 60분) 파싱값 우선 반영
+ * - 설문이 공식 마감(surveyState === SurveyState.SURVEY_CLOSED: 3)된 경우 마감 시각 반환
+ * - 실시간 종료 감지 또는 종료 상태로 확인된 시점: 감지 시점(nowMs) 반환
  */
 export function resolveSeminarEndedAt(
-  seminar: { startDt?: string; endDt?: string; date?: string; time?: string },
+  seminar: {
+    endedAt?: number;
+    surveyEndTime?: number;
+    surveyEndDt?: string | null;
+    surveyStartDt?: string | null;
+    surveyMinutesLeft?: number | null;
+  },
   surveyState?: number,
   seminarCompleted?: number,
   nowMs = Date.now(),
 ): number {
-  const parsedEndMs = parseSeminarEndTimestamp(seminar);
+  // 0. 이미 endedAt이 존재하는 경우 덮어씌우지 않고 기존 값 유지
+  if (seminar.endedAt) {
+    return seminar.endedAt;
+  }
 
-  // 1. 파싱된 종료 시각이 존재하는 경우
-  if (parsedEndMs) {
-    // 종료 시각이 현재 시각 이전인 경우: 실제 종료 시각(parsedEndMs) 반영
-    // (봇의 개별 설문 참여 여부(surveyState 2)와 무관하게 세미나 자체의 종료 시각 기준으로 60분 계산)
-    if (nowMs >= parsedEndMs) {
-      return parsedEndMs;
+  // 1. 서버 API에서 내려준 설문 오픈 시각(surveyStartDt) 파싱값 우선
+  const parsedSurveyStart = parseSurveyEndTimestamp(seminar.surveyStartDt);
+  if (parsedSurveyStart && nowMs >= parsedSurveyStart) {
+    return parsedSurveyStart;
+  }
+
+  // 2. 서버 API에서 내려준 설문 마감 시각(surveyEndDt) 기준 시작 시각 추정
+  const parsedSurveyEnd = parseSurveyEndTimestamp(seminar.surveyEndDt);
+  if (parsedSurveyEnd) {
+    const estimatedStart = parsedSurveyEnd - 60 * 60 * 1000;
+    if (nowMs >= estimatedStart) {
+      return estimatedStart;
     }
-    // 예정 종료 시각보다 일찍 실시간 종료된 경우 현재 시각 반환
-    return nowMs;
   }
 
-  // 2. 파싱된 종료 시각이 없고 설문이 공식 마감(SURVEY_CLOSED: 3)된 경우
+  // 3. 설문이 공식 마감(SURVEY_CLOSED: 3)된 경우 마감 시각(60분 이상 지난 과거 시각) 반환
   if (surveyState === SurveyState.SURVEY_CLOSED) {
-    return nowMs - 2 * 60 * 60 * 1000; // 확실히 60분 이상 지난 마감 시각 반환
+    return nowMs - 2 * 60 * 60 * 1000;
   }
 
-  // 3. 설문 진행 중이거나 실시간 종료된 경우
+  // 4. 실시간 종료 감지 또는 새로 확인된 종료 세미나: 현재 감지 시각 반환
   return nowMs;
 }
 
 /**
- * 세미나의 설문 마감 시각(종료 감지 시각 + 60분)을 구합니다.
- * - endedAt(종료 감지 시각)이 유효한 경우: endedAt + 60분 (3600000ms)
+ * 세미나의 설문 마감 시각을 구합니다.
+ * 1순위: 세미나 객체의 surveyEndTime
+ * 2순위: 서버 API의 실제 설문 마감 시각(surveyEndDt) 파싱값
+ * 3순위: 서버 API의 설문 잔여 시간(surveyMinutesLeft > 0) 기준 산출
+ * 4순위: endedAt(종료 감지 시각) + 60분 (3600000ms)
  */
-export function getSeminarSurveyEndTime(seminar: { endedAt?: number }): number | null {
+export function getSeminarSurveyEndTime(
+  seminar: {
+    endedAt?: number;
+    surveyEndTime?: number;
+    surveyEndDt?: string | null;
+    surveyMinutesLeft?: number | null;
+  },
+  nowMs = Date.now(),
+): number | null {
+  if (seminar.surveyEndTime) {
+    return seminar.surveyEndTime;
+  }
+
+  const parsedSurveyEnd = parseSurveyEndTimestamp(seminar.surveyEndDt);
+  if (parsedSurveyEnd) {
+    return parsedSurveyEnd;
+  }
+
+  if (typeof seminar.surveyMinutesLeft === 'number' && Number.isFinite(seminar.surveyMinutesLeft)) {
+    if (seminar.surveyMinutesLeft <= 0) return nowMs;
+    return nowMs + seminar.surveyMinutesLeft * 60 * 1000;
+  }
+
   if (seminar.endedAt) {
     return seminar.endedAt + 60 * 60 * 1000;
   }
@@ -164,10 +177,17 @@ export function getSeminarSurveyEndTime(seminar: { endedAt?: number }): number |
  * 설문 마감까지 남은 시간(분)을 10분 단위로 계산합니다.
  * 예: 45~54분 -> 50분, 15~24분 -> 20분, 5~14분 -> 10분
  * 60분 초과 시 최대 60분으로 clamp, 0분 이하 시 0분 반환.
- * endedAt을 알 수 없는 경우 null 반환.
  */
-export function getSurveyRemainingMinutes(seminar: { endedAt?: number }, nowMs = Date.now()): number | null {
-  const surveyEndTime = getSeminarSurveyEndTime(seminar);
+export function getSurveyRemainingMinutes(
+  seminar: {
+    endedAt?: number;
+    surveyEndTime?: number;
+    surveyEndDt?: string | null;
+    surveyMinutesLeft?: number | null;
+  },
+  nowMs = Date.now(),
+): number | null {
+  const surveyEndTime = getSeminarSurveyEndTime(seminar, nowMs);
   if (!surveyEndTime) return null;
   const diffMs = surveyEndTime - nowMs;
   if (diffMs <= 0) return 0;
@@ -933,6 +953,10 @@ export async function checkSeminarEndStatusFromApi(seminarId: string): Promise<{
   surveyState?: number;
   isPointExcluded: boolean;
   hasEntryHistory: boolean;
+  survey?: SeminarSurveyInfo | null;
+  surveyMinutesLeft?: number | null;
+  surveyEndDt?: string | null;
+  surveyStartDt?: string | null;
 }> {
   const detailRes = await fetchSeminarDetail(seminarId);
   if (!detailRes.success) {
@@ -944,8 +968,9 @@ export async function checkSeminarEndStatusFromApi(seminarId: string): Promise<{
     };
   }
 
-  const raw = detailRes.rawResponse;
-  const detail = raw?.seminarDetail;
+  const raw = detailRes.rawResponse as Record<string, unknown> | undefined;
+  const detail = raw?.seminarDetail as Record<string, unknown> | undefined;
+  const survey = (detail?.survey ?? raw?.survey ?? detailRes.survey ?? null) as SeminarSurveyInfo | null;
   const surveyState = detailRes.surveyState;
   const processState = detail?.processState !== undefined ? Number(detail.processState) : undefined;
   const seminarCompleted = detail?.seminarCompleted !== undefined ? Number(detail.seminarCompleted) : undefined;
@@ -964,12 +989,24 @@ export async function checkSeminarEndStatusFromApi(seminarId: string): Promise<{
     processState === ProcessState.PROCESS_COMPLETED ||
     seminarCompleted === 1;
 
+  const rawMinutesLeft = survey?.surveyMinutesLeft;
+  const surveyMinutesLeft =
+    typeof rawMinutesLeft === 'number'
+      ? rawMinutesLeft
+      : rawMinutesLeft !== undefined && rawMinutesLeft !== null && !Number.isNaN(Number(rawMinutesLeft))
+        ? Number(rawMinutesLeft)
+        : null;
+
   return {
     isEnded,
     isSurveyOpen,
     surveyState,
     isPointExcluded: detailRes.isPointExcluded,
     hasEntryHistory: detailRes.hasEntryHistory ?? false,
+    survey,
+    surveyMinutesLeft,
+    surveyEndDt: survey?.endDt || null,
+    surveyStartDt: survey?.startDt || null,
   };
 }
 
@@ -1406,11 +1443,18 @@ async function monitorSeminars(
       let initialIsEnded = info.status === '종료';
 
       let initialSurveyState: number | undefined;
+      let surveyEndDt: string | null = null;
+      let surveyStartDt: string | null = null;
+      let surveyMinutesLeft: number | null = null;
+
       if (info.seminarId) {
         const detailCheck = await checkSeminarEndStatusFromApi(info.seminarId);
         isPointExcluded = detailCheck.isPointExcluded;
         hasEntryHistory = detailCheck.hasEntryHistory;
         initialSurveyState = detailCheck.surveyState;
+        surveyEndDt = detailCheck.surveyEndDt ?? null;
+        surveyStartDt = detailCheck.surveyStartDt ?? null;
+        surveyMinutesLeft = detailCheck.surveyMinutesLeft ?? null;
         info.isSurveyPointExcluded = isPointExcluded;
         if (detailCheck.isEnded) {
           initialIsEnded = true;
@@ -1427,7 +1471,15 @@ async function monitorSeminars(
       // 상태 초기화
       let currentStatus: SeminarStatus = initialIsEnded ? '종료' : info.status;
       const isEnded = initialIsEnded;
-      const endedAt = isEnded ? resolveSeminarEndedAt(info, initialSurveyState, info.seminarCompleted) : undefined;
+      const seminarItemForEndCheck = {
+        ...info,
+        surveyEndDt,
+        surveyStartDt,
+        surveyMinutesLeft,
+      };
+      const endedAt = isEnded
+        ? resolveSeminarEndedAt(seminarItemForEndCheck, initialSurveyState, info.seminarCompleted)
+        : undefined;
       let quizResultMessage: string | null = null;
       let startNotified = false;
       const endNotified = isEnded;
@@ -1464,7 +1516,7 @@ async function monitorSeminars(
         info.processState === ProcessState.PROCESS_STARTED ||
         isSeminarStartedByTime(info.startDt);
 
-      if (isReadyToEnter && !isEnded) {
+      if (isReadyToEnter && currentStatus !== '종료') {
         currentStatus = '입장가능';
         info.isEntryStarted = true;
 
@@ -1498,6 +1550,9 @@ async function monitorSeminars(
         status: currentStatus,
         isEnded,
         endedAt,
+        surveyEndDt,
+        surveyStartDt,
+        surveyMinutesLeft,
         quizResultMessage,
         startNotified,
         endNotified,
@@ -1623,11 +1678,18 @@ async function monitorSeminars(
           let isPointExcluded = info.isSurveyPointExcluded ?? false;
           let initialIsEnded = info.status === '종료';
           let dynamicSurveyState: number | undefined;
+          let loopSurveyEndDt: string | null = null;
+          let loopSurveyStartDt: string | null = null;
+          let loopSurveyMinutesLeft: number | null = null;
+
           if (info.seminarId) {
             const detailCheck = await checkSeminarEndStatusFromApi(info.seminarId);
             isPointExcluded = detailCheck.isPointExcluded;
             info.isSurveyPointExcluded = isPointExcluded;
             dynamicSurveyState = detailCheck.surveyState;
+            loopSurveyEndDt = detailCheck.surveyEndDt ?? null;
+            loopSurveyStartDt = detailCheck.surveyStartDt ?? null;
+            loopSurveyMinutesLeft = detailCheck.surveyMinutesLeft ?? null;
             if (detailCheck.isEnded) {
               initialIsEnded = true;
             }
@@ -1637,14 +1699,24 @@ async function monitorSeminars(
             continue;
           }
 
+          const seminarItemForLoopCheck = {
+            ...info,
+            surveyEndDt: loopSurveyEndDt,
+            surveyStartDt: loopSurveyStartDt,
+            surveyMinutesLeft: loopSurveyMinutesLeft,
+          };
+
           monitoredSeminarsMap.set(url, {
             ...info,
             url: targetUrl,
             status: initialIsEnded ? '종료' : info.status || '대기',
             isEnded: initialIsEnded,
             endedAt: initialIsEnded
-              ? resolveSeminarEndedAt(info, dynamicSurveyState, info.seminarCompleted)
+              ? resolveSeminarEndedAt(seminarItemForLoopCheck, dynamicSurveyState, info.seminarCompleted)
               : undefined,
+            surveyEndDt: loopSurveyEndDt,
+            surveyStartDt: loopSurveyStartDt,
+            surveyMinutesLeft: loopSurveyMinutesLeft,
             quizResultMessage: null,
             startNotified: false,
             endNotified: initialIsEnded,
@@ -1684,6 +1756,9 @@ async function monitorSeminars(
 
         let isSurveyOpen = false;
         let isDetailPointExcluded = currentSeminar.isSurveyPointExcluded;
+        let realtimeSurveyEndDt: string | null = null;
+        let realtimeSurveyStartDt: string | null = null;
+        let realtimeSurveyMinutesLeft: number | null = null;
 
         // 2) 활성 세미나 상세 API(checkSeminarEndStatusFromApi)로 실시간 설문 오픈(surveyState===1) 및 종료 상태 확인
         if (seminarId && !isEnded) {
@@ -1691,6 +1766,9 @@ async function monitorSeminars(
           if (endCheck.isEnded) {
             isEnded = true;
             isSurveyOpen = endCheck.isSurveyOpen;
+            realtimeSurveyEndDt = endCheck.surveyEndDt ?? null;
+            realtimeSurveyStartDt = endCheck.surveyStartDt ?? null;
+            realtimeSurveyMinutesLeft = endCheck.surveyMinutesLeft ?? null;
           }
           if (endCheck.isPointExcluded !== undefined) {
             isDetailPointExcluded = endCheck.isPointExcluded;
@@ -1721,6 +1799,9 @@ async function monitorSeminars(
 
           currentSeminar.status = '종료';
           currentSeminar.isEnded = true;
+          if (realtimeSurveyEndDt) currentSeminar.surveyEndDt = realtimeSurveyEndDt;
+          if (realtimeSurveyStartDt) currentSeminar.surveyStartDt = realtimeSurveyStartDt;
+          if (realtimeSurveyMinutesLeft !== null) currentSeminar.surveyMinutesLeft = realtimeSurveyMinutesLeft;
           currentSeminar.endedAt = currentSeminar.endedAt || Date.now();
           currentSeminar.quizResultMessage = quizResultMessage;
           hasStateChanged = true;

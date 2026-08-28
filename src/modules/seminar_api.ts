@@ -34,6 +34,9 @@ export interface SeminarSurveyInfo {
   surveyId?: number | string | null;
   hasQuiz?: number | string | null;
   useTy?: number | string | null;
+  startDt?: string | null;
+  endDt?: string | null;
+  surveyMinutesLeft?: number | null;
   [key: string]: unknown;
 }
 

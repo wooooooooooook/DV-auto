@@ -257,10 +257,10 @@ describe('monitor_seminars_all_cases (앱 재시작 및 공지방 상태 기반 
     fetchSeminarDetailSpy.mockResolvedValue({
       success: true,
       seminarId: '903',
-      surveyState: 2, // 이미 설문 마감/완료 상태
+      surveyState: 3, // 공식 설문 마감 상태 (SURVEY_CLOSED)
       isPointExcluded: false,
       hasEntryHistory: true,
-      rawResponse: { surveyState: 2, seminarDetail: { processState: 8, seminarCompleted: 1 } },
+      rawResponse: { surveyState: 3, seminarDetail: { processState: 8, seminarCompleted: 1 } },
     });
 
     const editChannelMessageSpy = vi.spyOn(channelRepo, 'editChannelMessage');
@@ -273,46 +273,33 @@ describe('monitor_seminars_all_cases (앱 재시작 및 공지방 상태 기반 
     });
 
     expect(result).toBe(true);
-    // endDt로부터 1시간 이상 경과했으므로 "60분 남음"이 아니라 즉시 모두종료 메시지로 update
+    // 설문 공식 마감(surveyState 3) 세미나이므로 즉시 모두종료 메시지로 update
     expect(editChannelMessageSpy).toHaveBeenCalledWith(
       802,
       expect.stringContaining('🏁 점심세미나가 모두 종료되었습니다.'),
     );
   });
 
-  it('resolveSeminarEndedAt 및 parseSeminarEndTimestamp 단위 동작 검증', async () => {
-    const { parseSeminarEndTimestamp, resolveSeminarEndedAt, getSurveyRemainingMinutes } =
-      await import('../src/tasks/monitor_seminars');
+  it('resolveSeminarEndedAt 단위 동작 검증', async () => {
+    const { resolveSeminarEndedAt, getSurveyRemainingMinutes } = await import('../src/tasks/monitor_seminars');
 
     const now = Date.now();
-    const twoHoursAgo = now - 2 * 60 * 60 * 1000;
-    const iso2hAgo = new Date(twoHoursAgo).toISOString();
 
-    // 1. endDt가 2시간 전인 경우
-    const parsedTs = parseSeminarEndTimestamp({ endDt: iso2hAgo });
-    expect(parsedTs).toBe(new Date(iso2hAgo).getTime());
+    // 1. surveyState가 3(SURVEY_CLOSED)인 경우 마감 시각(60분 초과 과거) 산출 -> 0분 남음
+    const closedEndedAt = resolveSeminarEndedAt({}, 3, 1, now);
+    expect(getSurveyRemainingMinutes({ endedAt: closedEndedAt }, now)).toBe(0);
 
-    // 2. 2시간 전에 끝난 세미나의 endedAt 및 잔여 시간 계산 (0분 반환 확인)
-    const resolvedEndedAt = resolveSeminarEndedAt({ endDt: iso2hAgo }, 1, 0, now);
-    expect(resolvedEndedAt).toBe(parsedTs);
-
-    const remainingMinutes = getSurveyRemainingMinutes({ endedAt: resolvedEndedAt }, now);
-    expect(remainingMinutes).toBe(0);
-
-    // 3. 방금 막 끝난 세미나(endDt 없음, surveyState 1)의 경우 현재 시각 반환 (60분 반환 확인)
+    // 2. 방금 막 종료 감지된 세미나의 경우 현재 시각 반환 -> 60분 남음
     const freshEndedAt = resolveSeminarEndedAt({}, 1, 0, now);
     expect(freshEndedAt).toBe(now);
 
     const freshRemainingMinutes = getSurveyRemainingMinutes({ endedAt: freshEndedAt }, now);
     expect(freshRemainingMinutes).toBe(60);
 
-    // 4. 종료된 지 20분 경과한 세미나(봇이 이미 설문 참여 완료하여 surveyState 2)의 경우 40분 남음 유지 확인
-    const twentyMinsAgo = now - 20 * 60 * 1000;
-    const iso20mAgo = new Date(twentyMinsAgo).toISOString();
-    const resolved20mEndedAt = resolveSeminarEndedAt({ endDt: iso20mAgo }, 2, 1, now);
-    expect(resolved20mEndedAt).toBe(new Date(iso20mAgo).getTime());
-
-    const remaining20mMinutes = getSurveyRemainingMinutes({ endedAt: resolved20mEndedAt }, now);
-    expect(remaining20mMinutes).toBe(40);
+    // 3. 이미 기록된 endedAt이 존재하는 경우 어떤 상태값과도 무관하게 기존 endedAt 보존
+    const customEndedAt = now - 20 * 60 * 1000;
+    const resolvedExistingEndedAt = resolveSeminarEndedAt({ endedAt: customEndedAt }, 2, 1, now);
+    expect(resolvedExistingEndedAt).toBe(customEndedAt);
+    expect(getSurveyRemainingMinutes({ endedAt: resolvedExistingEndedAt }, now)).toBe(40);
   });
 });
