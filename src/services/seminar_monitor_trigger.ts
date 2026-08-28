@@ -107,8 +107,10 @@ export function getSeminarPeriod(seminar: SeminarListItem | RawSeminarData): 'ì 
 export function isTaskRunning(taskName: string, ttlMs = 6 * 60 * 60 * 1000): boolean {
   const key = `lock:${taskName}`;
   const now = Date.now();
-  const current = storage.get<{ ts?: number }>(key);
-  return !!(current && current.ts && now - current.ts < ttlMs);
+  const current = storage.get<{ owner?: number; ts?: number }>(key);
+  if (!current || !current.ts || now - current.ts >= ttlMs) return false;
+  if (current.owner && !storage.isPidAlive(current.owner)) return false;
+  return true;
 }
 
 /**

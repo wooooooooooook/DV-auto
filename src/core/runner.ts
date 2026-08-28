@@ -7,8 +7,14 @@ import type { Task, TaskContext, TaskResult } from '../types';
 function acquireLock(name: string, ttlMs = 60 * 1000): boolean {
   const key = `lock:${name}`;
   const now = Date.now();
-  const current = storage.get<{ ts?: number }>(key);
-  if (current && current.ts && now - current.ts < ttlMs) return false;
+  const current = storage.get<{ owner?: number; ts?: number }>(key);
+  if (current && current.ts && now - current.ts < ttlMs) {
+    // owner 프로세스가 존재할 경우 실제 생존 여부 확인 (죽은 PID면 Stale Lock으로 간주하여 재획득 허용)
+    const isOwnerAlive = current.owner ? storage.isPidAlive(current.owner) : true;
+    if (isOwnerAlive) {
+      return false;
+    }
+  }
   storage.set(key, { owner: process.pid, ts: now });
   return true;
 }

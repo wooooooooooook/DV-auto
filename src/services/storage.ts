@@ -799,4 +799,45 @@ function clear(): void {
   }
 }
 
+/**
+ * 주어진 PID의 프로세스가 현재 OS 상에서 살아있는지 확인합니다.
+ */
+export function isPidAlive(pid?: number): boolean {
+  if (!pid || typeof pid !== 'number' || Number.isNaN(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err: unknown) {
+    return !!(err && typeof err === 'object' && 'code' in err && (err as { code: string }).code === 'EPERM');
+  }
+}
+
+/**
+ * DB에 남아있는 고아(Stale) Lock 키들을 정리합니다.
+ * - 현재 PID와 다르면서 해당 PID가 이미 종료된 경우 정리
+ * - 손상된 JSON 데이터인 경우 정리
+ */
+export function clearStaleLocks(currentPid: number = process.pid): number {
+  const db = getDb();
+  const rows = db.prepare("SELECT key, value FROM kv_store WHERE key LIKE 'lock:%'").all() as Array<{
+    key: string;
+    value: string;
+  }>;
+  let cleared = 0;
+  const deleteStmt = db.prepare('DELETE FROM kv_store WHERE key = ?');
+  for (const row of rows) {
+    try {
+      const parsed = JSON.parse(row.value) as { owner?: number; ts?: number };
+      if (parsed.owner !== currentPid && !isPidAlive(parsed.owner)) {
+        deleteStmt.run(row.key);
+        cleared++;
+      }
+    } catch {
+      deleteStmt.run(row.key);
+      cleared++;
+    }
+  }
+  return cleared;
+}
+
 export { get, set, deleteKey, getAll, clear };

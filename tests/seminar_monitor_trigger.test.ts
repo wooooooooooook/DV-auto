@@ -39,6 +39,7 @@ describe('seminar_monitor_trigger (10분 주기 모니터링 트리거 및 상�
           totalCount: '100',
           nightTime: false,
           isPointExcluded: true,
+          isAdvancedSurvey: false,
           processState: ProcessState.PROCESS_ENTER,
         },
         nowMs,
@@ -57,6 +58,7 @@ describe('seminar_monitor_trigger (10분 주기 모니터링 트리거 및 상�
           currentCount: '10',
           totalCount: '100',
           nightTime: false,
+          isAdvancedSurvey: false,
           processState: ProcessState.PROCESS_END,
         },
         nowMs,
@@ -74,6 +76,7 @@ describe('seminar_monitor_trigger (10분 주기 모니터링 트리거 및 상�
           currentCount: '10',
           totalCount: '100',
           nightTime: false,
+          isAdvancedSurvey: false,
           seminarCompleted: 1,
         },
         nowMs,
@@ -92,6 +95,7 @@ describe('seminar_monitor_trigger (10분 주기 모니터링 트리거 및 상�
           currentCount: '10',
           totalCount: '100',
           nightTime: false,
+          isAdvancedSurvey: false,
           processState: ProcessState.PROCESS_ENTER,
         },
         nowMs,
@@ -109,6 +113,7 @@ describe('seminar_monitor_trigger (10분 주기 모니터링 트리거 및 상�
           currentCount: '10',
           totalCount: '100',
           nightTime: false,
+          isAdvancedSurvey: false,
           processState: ProcessState.PROCESS_STARTED,
         },
         nowMs,
@@ -127,6 +132,7 @@ describe('seminar_monitor_trigger (10분 주기 모니터링 트리거 및 상�
           currentCount: '10',
           totalCount: '100',
           nightTime: false,
+          isAdvancedSurvey: false,
           processState: ProcessState.PROCESS_CANCEL, // 신청완료 상태
         },
         nowMs,
@@ -145,6 +151,7 @@ describe('seminar_monitor_trigger (10분 주기 모니터링 트리거 및 상�
           currentCount: '10',
           totalCount: '100',
           nightTime: false,
+          isAdvancedSurvey: false,
           processState: ProcessState.PROCESS_CANCEL,
         },
         nowMs,
@@ -167,6 +174,7 @@ describe('seminar_monitor_trigger (10분 주기 모니터링 트리거 및 상�
           currentCount: '10',
           totalCount: '100',
           nightTime: false,
+          isAdvancedSurvey: false,
           processState: ProcessState.PROCESS_END,
         },
         nowMs,
@@ -186,6 +194,7 @@ describe('seminar_monitor_trigger (10분 주기 모니터링 트리거 및 상�
           totalCount: '100',
           nightTime: false,
           isPointExcluded: true,
+          isAdvancedSurvey: false,
           processState: ProcessState.PROCESS_END,
         },
         nowMs,
@@ -203,6 +212,7 @@ describe('seminar_monitor_trigger (10분 주기 모니터링 트리거 및 상�
         currentCount: '0',
         totalCount: '0',
         nightTime: false,
+        isAdvancedSurvey: false,
       }),
     ).toBe('점심');
 
@@ -215,6 +225,7 @@ describe('seminar_monitor_trigger (10분 주기 모니터링 트리거 및 상�
         currentCount: '0',
         totalCount: '0',
         nightTime: true,
+        isAdvancedSurvey: false,
       }),
     ).toBe('저녁');
   });
@@ -249,6 +260,7 @@ describe('seminar_monitor_trigger (10분 주기 모니터링 트리거 및 상�
         currentCount: '10',
         totalCount: '100',
         nightTime: false,
+        isAdvancedSurvey: false,
         processState: ProcessState.PROCESS_ENTER, // 입장가능
       },
       {
@@ -260,6 +272,7 @@ describe('seminar_monitor_trigger (10분 주기 모니터링 트리거 및 상�
         currentCount: '10',
         totalCount: '100',
         nightTime: true,
+        isAdvancedSurvey: false,
         processState: ProcessState.PROCESS_CANCEL, // 아직 미시작
       },
     ];
@@ -295,6 +308,7 @@ describe('seminar_monitor_trigger (10분 주기 모니터링 트리거 및 상�
         currentCount: '10',
         totalCount: '100',
         nightTime: false,
+        isAdvancedSurvey: false,
         processState: ProcessState.PROCESS_END,
       },
     ];
@@ -308,7 +322,7 @@ describe('seminar_monitor_trigger (10분 주기 모니터링 트리거 및 상�
 
     // 2. 이미 태스크가 락(실행 중)인 경우
     storage.clear();
-    storage.set('lock:monitor_lunch_seminars', { owner: 12345, ts: Date.now() });
+    storage.set('lock:monitor_lunch_seminars', { owner: process.pid, ts: Date.now() });
     expect(isTaskRunning('monitor_lunch_seminars')).toBe(true);
 
     const resRunning = await checkAndTriggerSeminarMonitors(mockSeminars, {

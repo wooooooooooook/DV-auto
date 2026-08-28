@@ -532,6 +532,12 @@ function setupGracefulShutdown(): void {
 
 setupGracefulShutdown();
 
+// 앱 시작 시 이전 비정상 종료 등으로 남은 Stale Lock 정리
+const clearedLocks = storage.clearStaleLocks();
+if (clearedLocks > 0) {
+  logger.info(`앱 초기화: 이전 세션의 잔류 Lock ${clearedLocks}개를 정리했습니다.`);
+}
+
 // 봇을 먼저 초기화하여 task 및 autoResume 중 editChannelMessage와 알림이 정상 동작하도록 보장
 telegram.launch();
 
