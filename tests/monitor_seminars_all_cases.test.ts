@@ -305,5 +305,14 @@ describe('monitor_seminars_all_cases (앱 재시작 및 공지방 상태 기반 
 
     const freshRemainingMinutes = getSurveyRemainingMinutes({ endedAt: freshEndedAt }, now);
     expect(freshRemainingMinutes).toBe(60);
+
+    // 4. 종료된 지 20분 경과한 세미나(봇이 이미 설문 참여 완료하여 surveyState 2)의 경우 40분 남음 유지 확인
+    const twentyMinsAgo = now - 20 * 60 * 1000;
+    const iso20mAgo = new Date(twentyMinsAgo).toISOString();
+    const resolved20mEndedAt = resolveSeminarEndedAt({ endDt: iso20mAgo }, 2, 1, now);
+    expect(resolved20mEndedAt).toBe(new Date(iso20mAgo).getTime());
+
+    const remaining20mMinutes = getSurveyRemainingMinutes({ endedAt: resolved20mEndedAt }, now);
+    expect(remaining20mMinutes).toBe(40);
   });
 });

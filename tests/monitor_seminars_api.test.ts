@@ -9,9 +9,20 @@ import {
 import * as seminarApiModule from '../src/modules/seminar_api';
 import * as utilsModule from '../src/modules/utils';
 import * as seminarQuizModule from '../src/tasks/seminar_quiz';
-import { describe, it, vi } from 'vitest';
+import * as storage from '../src/services/storage';
+import { describe, it, vi, beforeEach, afterEach } from 'vitest';
 
 describe('monitor_seminars API 기반 모니터링 기능 단위/통합 테스트', () => {
+  beforeEach(() => {
+    storage.setDatabasePath(':memory:');
+    storage.clear();
+  });
+
+  afterEach(() => {
+    storage.closeDatabase();
+    vi.restoreAllMocks();
+  });
+
   it('시간대 및 상태 필터링, 종료 상태 확인 종합 테스트', async () => {
     console.log('===========================================================');
     console.log('  monitor_seminars API 기반 모니터링 기능 단위/통합 테스트');

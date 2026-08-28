@@ -129,24 +129,20 @@ export function resolveSeminarEndedAt(
 ): number {
   const parsedEndMs = parseSeminarEndTimestamp(seminar);
 
-  // 1. 이미 설문이 마감/완료되었거나(surveyState 2), 세미나 완료(seminarCompleted 1)인 경우
-  if (surveyState === SurveyState.SURVEY_COMPLETED || seminarCompleted === 1) {
-    if (parsedEndMs && nowMs - parsedEndMs >= 60 * 60 * 1000) {
-      return parsedEndMs;
-    }
-    return nowMs - 2 * 60 * 60 * 1000; // 확실히 60분 이상 지난 마감 시각 반환
-  }
-
-  // 2. 파싱된 종료 시각이 존재하는 경우
+  // 1. 파싱된 종료 시각이 존재하는 경우
   if (parsedEndMs) {
-    // 종료 시각으로부터 이미 60분이 넘게 지났다면 이미 설문 마감된 세미나
-    if (nowMs - parsedEndMs >= 60 * 60 * 1000) {
-      return parsedEndMs;
-    }
-    // 종료 시각이 현재 시각 이전인 경우 실제 종료 시각 반영
+    // 종료 시각이 현재 시각 이전인 경우: 실제 종료 시각(parsedEndMs) 반영
+    // (봇의 개별 설문 참여 여부(surveyState 2)와 무관하게 세미나 자체의 종료 시각 기준으로 60분 계산)
     if (nowMs >= parsedEndMs) {
       return parsedEndMs;
     }
+    // 예정 종료 시각보다 일찍 실시간 종료된 경우 현재 시각 반환
+    return nowMs;
+  }
+
+  // 2. 파싱된 종료 시각이 없고 설문이 공식 마감(SURVEY_CLOSED: 3)된 경우
+  if (surveyState === SurveyState.SURVEY_CLOSED) {
+    return nowMs - 2 * 60 * 60 * 1000; // 확실히 60분 이상 지난 마감 시각 반환
   }
 
   // 3. 설문 진행 중이거나 실시간 종료된 경우
