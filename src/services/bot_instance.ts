@@ -207,6 +207,21 @@ function setBot(name: BotName, instance: Telegraf | null): void {
                   } else {
                     alertMessage = '설문 마감 10분전 알림이 꺼졌습니다.';
                   }
+                } else if (topic === 'new_seminar_point_excluded' || topic === 'new_seminar_include_point_excluded') {
+                  if (updatedSub.newSeminarIncludePointExcluded) {
+                    alertMessage = '🎁 포인트가 미지급되는 세미나도 신규 알림에 포함하여 수신합니다.';
+                  } else {
+                    alertMessage = '🎁 포인트가 미지급되는 세미나는 신규 알림에서 제외(미수신)합니다.';
+                  }
+                  await ctx.answerCbQuery(alertMessage, { show_alert: showAlert }).catch(() => {});
+                  const { text, replyMarkup } = subService.buildNewSeminarMenu(chatId);
+                  await ctx
+                    .editMessageText(text, {
+                      parse_mode: 'HTML',
+                      reply_markup: replyMarkup,
+                    })
+                    .catch(() => {});
+                  return;
                 }
 
                 await ctx.answerCbQuery(alertMessage, { show_alert: showAlert }).catch(() => {});

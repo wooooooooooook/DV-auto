@@ -9,6 +9,8 @@ export type SubscriptionTopic =
   | 'today_links'
   | 'intermd_quiz'
   | 'new_seminar'
+  | 'new_seminar_point_excluded'
+  | 'new_seminar_include_point_excluded'
   | 'seminar_changes'
   | 'seminar_live'
   | 'survey_closing_20'
@@ -41,6 +43,7 @@ export interface SubscriptionRecord {
   todayLinksTime: string;
   todayLinksSentDate: string | null;
   newSeminar: NewSeminarFilter;
+  newSeminarIncludePointExcluded: boolean;
   intermdQuiz: boolean;
   seminarChanges: boolean;
   seminarLive: boolean;
@@ -61,6 +64,7 @@ interface SubscriptionRow {
   today_links_time?: string;
   today_links_sent_date?: string | null;
   new_seminar?: string;
+  new_seminar_include_point_excluded?: number;
   intermd_quiz?: number;
   seminar_changes?: number;
   seminar_live?: number;
@@ -88,9 +92,13 @@ export function parseCapacityNumbers(item: { currentCount?: string; totalCount?:
 
 export function matchesNewSeminarFilter(
   filter: NewSeminarFilter,
-  seminar: { currentCount?: string; totalCount?: string },
+  seminar: { currentCount?: string; totalCount?: string; isPointExcluded?: boolean },
+  includePointExcluded: boolean = false,
 ): boolean {
   if (filter === 'off') return false;
+  if (seminar.isPointExcluded === true && !includePointExcluded) {
+    return false;
+  }
   if (filter === 'all') return true;
 
   const { total, remaining } = parseCapacityNumbers(seminar);
@@ -118,6 +126,7 @@ export function getSubscription(chatId: number): SubscriptionRecord {
       todayLinksTime: '09:00',
       todayLinksSentDate: null,
       newSeminar: 'off',
+      newSeminarIncludePointExcluded: false,
       intermdQuiz: false,
       seminarChanges: false,
       seminarLive: false,
@@ -135,6 +144,7 @@ export function getSubscription(chatId: number): SubscriptionRecord {
     todayLinksTime: row.today_links_time || '09:00',
     todayLinksSentDate: row.today_links_sent_date || null,
     newSeminar: (row.new_seminar as NewSeminarFilter) || 'off',
+    newSeminarIncludePointExcluded: row.new_seminar_include_point_excluded === 1,
     intermdQuiz: row.intermd_quiz === 1,
     seminarChanges: row.seminar_changes === 1,
     seminarLive: row.seminar_live === 1,
@@ -167,12 +177,12 @@ export function updateSubscription(
     `
     INSERT INTO subscriptions (
       chat_id, today_links, today_links_time, today_links_sent_date,
-      new_seminar, intermd_quiz, seminar_changes, seminar_live,
+      new_seminar, new_seminar_include_point_excluded, intermd_quiz, seminar_changes, seminar_live,
       survey_closing_20, survey_closing_10, point_conversion,
       created_at, updated_at
     ) VALUES (
       @chatId, @todayLinks, @todayLinksTime, @todayLinksSentDate,
-      @newSeminar, @intermdQuiz, @seminarChanges, @seminarLive,
+      @newSeminar, @newSeminarIncludePointExcluded, @intermdQuiz, @seminarChanges, @seminarLive,
       @surveyClosing20, @surveyClosing10, @pointConversion,
       @createdAt, @updatedAt
     )
@@ -181,6 +191,7 @@ export function updateSubscription(
       today_links_time = excluded.today_links_time,
       today_links_sent_date = excluded.today_links_sent_date,
       new_seminar = excluded.new_seminar,
+      new_seminar_include_point_excluded = excluded.new_seminar_include_point_excluded,
       intermd_quiz = excluded.intermd_quiz,
       seminar_changes = excluded.seminar_changes,
       seminar_live = excluded.seminar_live,
@@ -195,6 +206,7 @@ export function updateSubscription(
     todayLinksTime: next.todayLinksTime,
     todayLinksSentDate: next.todayLinksSentDate,
     newSeminar: next.newSeminar,
+    newSeminarIncludePointExcluded: next.newSeminarIncludePointExcluded ? 1 : 0,
     intermdQuiz: next.intermdQuiz ? 1 : 0,
     seminarChanges: next.seminarChanges ? 1 : 0,
     seminarLive: next.seminarLive ? 1 : 0,
@@ -213,6 +225,8 @@ export function toggleTopic(
   topic:
     | 'today_links'
     | 'intermd_quiz'
+    | 'new_seminar_point_excluded'
+    | 'new_seminar_include_point_excluded'
     | 'seminar_changes'
     | 'seminar_live'
     | 'survey_closing_20'
@@ -225,6 +239,9 @@ export function toggleTopic(
       return updateSubscription(chatId, { todayLinks: !current.todayLinks });
     case 'intermd_quiz':
       return updateSubscription(chatId, { intermdQuiz: !current.intermdQuiz });
+    case 'new_seminar_point_excluded':
+    case 'new_seminar_include_point_excluded':
+      return updateSubscription(chatId, { newSeminarIncludePointExcluded: !current.newSeminarIncludePointExcluded });
     case 'seminar_changes':
       return updateSubscription(chatId, { seminarChanges: !current.seminarChanges });
     case 'seminar_live':
@@ -236,6 +253,11 @@ export function toggleTopic(
     case 'point_conversion':
       return updateSubscription(chatId, { pointConversion: !current.pointConversion });
   }
+}
+
+export function toggleNewSeminarIncludePointExcluded(chatId: number): SubscriptionRecord {
+  const current = getSubscription(chatId);
+  return updateSubscription(chatId, { newSeminarIncludePointExcluded: !current.newSeminarIncludePointExcluded });
 }
 
 export function setNewSeminarFilter(chatId: number, filter: NewSeminarFilter): SubscriptionRecord {
@@ -471,8 +493,9 @@ export async function sendNewSeminarToSubscribers(
   for (const row of rows) {
     const chatId = row.chat_id;
     const filter = (row.new_seminar as NewSeminarFilter) || 'all';
+    const includePointExcluded = row.new_seminar_include_point_excluded === 1;
 
-    const matchedSeminars = targetSeminars.filter((s) => matchesNewSeminarFilter(filter, s));
+    const matchedSeminars = targetSeminars.filter((s) => matchesNewSeminarFilter(filter, s, includePointExcluded));
     if (matchedSeminars.length === 0) {
       continue;
     }
@@ -732,6 +755,11 @@ export function getNewSeminarFilterLabel(filter: NewSeminarFilter): string {
 export function buildMainMenu(chatId: number): { text: string; replyMarkup: InlineKeyboardMarkup } {
   const sub = getSubscription(chatId);
 
+  const newSeminarStatusText =
+    sub.newSeminar === 'off'
+      ? '🔴 OFF'
+      : `🟢 ${getNewSeminarFilterLabel(sub.newSeminar)}${sub.newSeminarIncludePointExcluded ? ' (포인트 미지급 포함)' : ' (포인트 미지급 제외)'}`;
+
   const text = [
     '🔔 <b>공지봇 맞춤 알림 구독 설정</b>',
     '',
@@ -743,7 +771,7 @@ export function buildMainMenu(chatId: number): { text: string; replyMarkup: Inli
     '',
     '📋 <b>[구독 현황]</b>',
     `• 🔗 <b>오늘의 링크</b>: ${sub.todayLinks ? `🟢 ON (수신 시간: ${sub.todayLinksTime})` : '🔴 OFF'}`,
-    `• 🆕 <b>신규 세미나</b>: ${sub.newSeminar === 'off' ? '🔴 OFF' : `🟢 ${getNewSeminarFilterLabel(sub.newSeminar)}`}`,
+    `• 🆕 <b>신규 세미나</b>: ${newSeminarStatusText}`,
     `• ❓ <b>인터엠디 퀴즈</b>: ${sub.intermdQuiz ? '🟢 ON' : '🔴 OFF'}`,
     `• 🔄 <b>세미나 정보 변경/심화</b>: ${sub.seminarChanges ? '🟢 ON' : '🔴 OFF'}`,
     `• 🔴 <b>세미나 라이브/퀴즈</b>: ${sub.seminarLive ? '🟢 ON' : '🔴 OFF'}`,
@@ -866,7 +894,8 @@ export function buildNewSeminarMenu(chatId: number): { text: string; replyMarkup
     '🆕 <b>신규 세미나 등록 알림 설정</b>',
     '',
     '새로운 세미나가 등록/오픈되었을 때의 알림 수신 조건을 선택하세요.',
-    `• 현재 설정: <b>${getNewSeminarFilterLabel(sub.newSeminar)}</b>`,
+    `• 현재 수신 조건: <b>${getNewSeminarFilterLabel(sub.newSeminar)}</b>`,
+    `• 포인트 미지급 세미나 수신: <b>${sub.newSeminarIncludePointExcluded ? '🟢 포함 (알림 받음)' : '🔴 제외 (알림 안 받음)'}</b>`,
     '',
     '원하시는 알림 옵션을 선택해주세요:',
   ].join('\n');
@@ -888,6 +917,14 @@ export function buildNewSeminarMenu(chatId: number): { text: string; replyMarkup
       },
     ];
   });
+
+  // 포인트 미지급 세미나 수신 여부 토글 버튼
+  keyboardRows.push([
+    {
+      text: `🎁 포인트 미지급 세미나도 수신: ${sub.newSeminarIncludePointExcluded ? 'ON 🟢' : 'OFF 🔴'}`,
+      callback_data: 'sub:toggle:new_seminar_point_excluded',
+    },
+  ]);
 
   keyboardRows.push([{ text: '◀ 메인 설정으로 돌아가기', callback_data: 'sub:menu:main' }]);
 

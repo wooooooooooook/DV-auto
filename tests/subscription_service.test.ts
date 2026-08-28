@@ -43,6 +43,7 @@ describe('subscription_service', () => {
     expect(defaultSub.todayLinks).toBe(false);
     expect(defaultSub.todayLinksTime).toBe('09:00');
     expect(defaultSub.newSeminar).toBe('off');
+    expect(defaultSub.newSeminarIncludePointExcluded).toBe(false);
     expect(defaultSub.intermdQuiz).toBe(false);
     expect(defaultSub.seminarChanges).toBe(false);
     expect(defaultSub.seminarLive).toBe(false);
@@ -54,6 +55,7 @@ describe('subscription_service', () => {
       todayLinks: true,
       todayLinksTime: '08:00',
       newSeminar: 'limit_5000',
+      newSeminarIncludePointExcluded: true,
       surveyClosing20: true,
       surveyClosing10: true,
       pointConversion: true,
@@ -62,6 +64,7 @@ describe('subscription_service', () => {
     expect(updated.todayLinks).toBe(true);
     expect(updated.todayLinksTime).toBe('08:00');
     expect(updated.newSeminar).toBe('limit_5000');
+    expect(updated.newSeminarIncludePointExcluded).toBe(true);
     expect(updated.surveyClosing20).toBe(true);
     expect(updated.surveyClosing10).toBe(true);
     expect(updated.pointConversion).toBe(true);
@@ -70,6 +73,7 @@ describe('subscription_service', () => {
     expect(fetched.todayLinks).toBe(true);
     expect(fetched.todayLinksTime).toBe('08:00');
     expect(fetched.newSeminar).toBe('limit_5000');
+    expect(fetched.newSeminarIncludePointExcluded).toBe(true);
     expect(fetched.surveyClosing20).toBe(true);
     expect(fetched.surveyClosing10).toBe(true);
     expect(fetched.pointConversion).toBe(true);
@@ -83,6 +87,12 @@ describe('subscription_service', () => {
 
     toggleTopic(100, 'intermd_quiz');
     expect(getSubscription(100).intermdQuiz).toBe(false);
+
+    toggleTopic(100, 'new_seminar_point_excluded');
+    expect(getSubscription(100).newSeminarIncludePointExcluded).toBe(true);
+
+    toggleTopic(100, 'new_seminar_point_excluded');
+    expect(getSubscription(100).newSeminarIncludePointExcluded).toBe(false);
 
     toggleTopic(100, 'today_links');
     expect(getSubscription(100).todayLinks).toBe(true);
@@ -137,6 +147,26 @@ describe('subscription_service', () => {
 
     // off 테스트
     expect(matchesNewSeminarFilter('off', { totalCount: '500', currentCount: '0' })).toBe(false);
+
+    // 포인트 미지급(isPointExcluded) 필터링 테스트
+    // 1) includePointExcluded=false (기본) -> isPointExcluded === true는 제외
+    expect(
+      matchesNewSeminarFilter('all', { totalCount: '5000', currentCount: '0', isPointExcluded: true }, false),
+    ).toBe(false);
+    expect(
+      matchesNewSeminarFilter('limit_5000', { totalCount: '5000', currentCount: '0', isPointExcluded: true }, false),
+    ).toBe(false);
+
+    // 2) includePointExcluded=true -> isPointExcluded === true여도 조건에 맞으면 포함
+    expect(matchesNewSeminarFilter('all', { totalCount: '5000', currentCount: '0', isPointExcluded: true }, true)).toBe(
+      true,
+    );
+    expect(
+      matchesNewSeminarFilter('limit_5000', { totalCount: '5000', currentCount: '0', isPointExcluded: true }, true),
+    ).toBe(true);
+    expect(
+      matchesNewSeminarFilter('limit_3000', { totalCount: '5000', currentCount: '0', isPointExcluded: true }, true),
+    ).toBe(false); // 정원 초과로 제외
   });
 
   it('전체 켜기 및 전체 끄기가 올바르게 동작해야 한다', () => {
@@ -199,6 +229,7 @@ describe('subscription_service', () => {
       todayLinks: true,
       todayLinksTime: '00:02',
       newSeminar: 'urgent_1000',
+      newSeminarIncludePointExcluded: false,
     });
 
     const mainUI = buildMainMenu(700);
@@ -208,6 +239,7 @@ describe('subscription_service', () => {
     expect(mainUI.text).toContain('설문 진행 여부와 관계없이 알림이 전송됩니다');
     expect(mainUI.text).toContain('00:02');
     expect(mainUI.text).toContain('마감 임박');
+    expect(mainUI.text).toContain('포인트 미지급 제외');
     expect(mainUI.replyMarkup.inline_keyboard.length).toBeGreaterThan(5);
 
     const timeUI = buildTodayLinksTimeMenu(700);
@@ -216,7 +248,25 @@ describe('subscription_service', () => {
 
     const newSemUI = buildNewSeminarMenu(700);
     expect(newSemUI.text).toContain('신규 세미나 등록 알림 설정');
-    expect(newSemUI.replyMarkup.inline_keyboard.length).toBe(6);
+    expect(newSemUI.text).toContain('포인트 미지급 세미나 수신: <b>🔴 제외 (알림 안 받음)</b>');
+    expect(newSemUI.replyMarkup.inline_keyboard.length).toBe(7);
+    expect(
+      newSemUI.replyMarkup.inline_keyboard.some((row) =>
+        row.some(
+          (btn) =>
+            btn.text.includes('포인트 미지급 세미나도 수신') &&
+            btn.callback_data === 'sub:toggle:new_seminar_point_excluded',
+        ),
+      ),
+    ).toBe(true);
+
+    // 포인트 미지급 포함으로 변경 후 검증
+    updateSubscription(700, { newSeminarIncludePointExcluded: true });
+    const newSemUI2 = buildNewSeminarMenu(700);
+    expect(newSemUI2.text).toContain('포인트 미지급 세미나 수신: <b>🟢 포함 (알림 받음)</b>');
+    expect(newSemUI2.replyMarkup.inline_keyboard.some((row) => row.some((btn) => btn.text.includes('ON 🟢')))).toBe(
+      true,
+    );
   });
 
   it('레거시 intermd_quiz 및 seminar_subscribers 래퍼 함수가 호환되어야 한다', () => {
@@ -351,5 +401,62 @@ describe('subscription_service', () => {
     expect(sentMessages[0].text).not.toContain('오늘 추가된 세미나 모음');
     expect(sentMessages[1].chatId).toBe(999);
     expect(sentMessages[1].text).toContain('세미나 B');
+  });
+
+  it('포인트 미지급 세미나 발송 시 newSeminarIncludePointExcluded 설정에 따라 필터링되어야 한다', async () => {
+    const { setBot } = await import('../src/services/bot_instance');
+    const { sendNewSeminarToSubscribers } = await import('../src/services/subscription_service');
+
+    const sentMessages: Array<{ chatId: number; text: string }> = [];
+    const mockBot = {
+      command: () => {},
+      action: () => {},
+      telegram: {
+        sendMessage: async (chatId: number, text: string) => {
+          sentMessages.push({ chatId, text });
+          return { message_id: 999 };
+        },
+      },
+    };
+    setBot('notice', mockBot as unknown as Parameters<typeof setBot>[1]);
+
+    // 1001번 유저: 포인트 미지급 포함 (true)
+    updateSubscription(1001, { newSeminar: 'all', newSeminarIncludePointExcluded: true });
+    // 1002번 유저: 포인트 미지급 제외 (false)
+    updateSubscription(1002, { newSeminar: 'all', newSeminarIncludePointExcluded: false });
+
+    const newSeminars: SeminarListItem[] = [
+      {
+        seminarId: '2001',
+        name: '일반 세미나',
+        url: 'https://m.doctorville.co.kr/cme/seminar/2001',
+        totalCount: '5000',
+        currentCount: '0',
+        isPointExcluded: false,
+      },
+      {
+        seminarId: '2002',
+        name: '포인트 미지급 세미나',
+        url: 'https://m.doctorville.co.kr/cme/seminar/2002',
+        totalCount: '5000',
+        currentCount: '0',
+        isPointExcluded: true,
+      },
+    ];
+
+    await sendNewSeminarToSubscribers(newSeminars);
+
+    const user1001Messages = sentMessages.filter((m) => m.chatId === 1001);
+    const user1002Messages = sentMessages.filter((m) => m.chatId === 1002);
+
+    // 1001번 유저는 2개 모두 수신 (일반 + 포인트 미지급)
+    expect(user1001Messages.length).toBe(2);
+    expect(user1001Messages[0].text).toContain('일반 세미나');
+    expect(user1001Messages[1].text).toContain('포인트 미지급 세미나');
+    expect(user1001Messages[1].text).toContain('[포인트미지급]');
+
+    // 1002번 유저는 일반 세미나 1개만 수신
+    expect(user1002Messages.length).toBe(1);
+    expect(user1002Messages[0].text).toContain('일반 세미나');
   });
 });

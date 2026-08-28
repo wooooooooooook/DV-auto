@@ -105,6 +105,7 @@ function initDatabase(db: Database.Database): void {
       today_links_time TEXT DEFAULT '09:00',
       today_links_sent_date TEXT,
       new_seminar TEXT DEFAULT 'off',
+      new_seminar_include_point_excluded INTEGER DEFAULT 0,
       intermd_quiz INTEGER DEFAULT 0,
       seminar_changes INTEGER DEFAULT 0,
       seminar_live INTEGER DEFAULT 0,
@@ -150,6 +151,9 @@ function initDatabase(db: Database.Database): void {
     }
     if (!colNames.includes('new_seminar')) {
       db.exec(`ALTER TABLE subscriptions ADD COLUMN new_seminar TEXT DEFAULT 'off';`);
+    }
+    if (!colNames.includes('new_seminar_include_point_excluded')) {
+      db.exec(`ALTER TABLE subscriptions ADD COLUMN new_seminar_include_point_excluded INTEGER DEFAULT 0;`);
     }
     if (!colNames.includes('seminar_live')) {
       db.exec(`ALTER TABLE subscriptions ADD COLUMN seminar_live INTEGER DEFAULT 0;`);
