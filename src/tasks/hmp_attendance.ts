@@ -1,6 +1,5 @@
 import type { TaskContext, TaskResult } from '../types';
 import { HmpClient, type HmpAttendanceWorkflowResult } from '../modules/hmp_api';
-import { sendTelegram } from '../modules/utils';
 import * as logger from '../services/logger';
 
 export function formatHmpAttendanceMessage(result: HmpAttendanceWorkflowResult): string {
@@ -57,12 +56,6 @@ export async function run(_ctx?: TaskContext): Promise<TaskResult> {
 
     logger.info('[HMP] 출석체크 결과:\n' + message);
 
-    try {
-      await sendTelegram(message);
-    } catch (telegramErr) {
-      logger.error('[HMP] 텔레그램 메시지 발송 실패:', telegramErr);
-    }
-
     return {
       success: result.success && result.attendance.status !== 'FAILED',
       message,
@@ -72,11 +65,6 @@ export async function run(_ctx?: TaskContext): Promise<TaskResult> {
     logger.error('[HMP] 태스크 실행 중 예외 발생:', error);
 
     const failMessage = `❌ [HMP 출석체크 오류]\n⚠️ ${msg}`;
-    try {
-      await sendTelegram(failMessage);
-    } catch (telegramErr) {
-      logger.error('[HMP] 텔레그램 실패 메시지 발송 실패:', telegramErr);
-    }
 
     return {
       success: false,

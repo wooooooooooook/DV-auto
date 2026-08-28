@@ -1,6 +1,5 @@
 import type { TaskContext, TaskResult } from '../types';
 import { KeymediClient, type KeymediAttendanceWorkflowResult } from '../modules/keymedi_api';
-import { sendTelegram } from '../modules/utils';
 import * as logger from '../services/logger';
 
 export function formatKeymediAttendanceMessage(result: KeymediAttendanceWorkflowResult): string {
@@ -106,11 +105,6 @@ export async function run(ctx?: TaskContext): Promise<TaskResult> {
     const result = await client.executeAttendanceAndPoints(uid, password);
     const message = formatKeymediAttendanceMessage(result);
 
-    // 텔레그램 관리자봇으로 전송
-    await sendTelegram(message).catch((err) => {
-      logger.error('Failed to send Telegram message for keymedi_attendance:', err);
-    });
-
     return {
       success: result.success && result.attendance.status !== 'FAILED',
       message,
@@ -119,8 +113,6 @@ export async function run(ctx?: TaskContext): Promise<TaskResult> {
     const errorMsg = err instanceof Error ? err.message : String(err);
     logger.error('keymedi_attendance task error:', err);
     const failMessage = `❌ [키메디 출석체크 오류]\n사유: ${errorMsg}`;
-
-    await sendTelegram(failMessage).catch(() => {});
 
     return {
       success: false,

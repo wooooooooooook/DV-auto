@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { KeymediClient, type KeymediAttendanceWorkflowResult } from '../src/modules/keymedi_api';
 import { formatKeymediAttendanceMessage, run as runKeymediAttendance } from '../src/tasks/keymedi_attendance';
-import * as utils from '../src/modules/utils';
 
 describe('Keymedi Attendance & Points & Surveys & Votes Tests', () => {
   beforeEach(() => {
@@ -211,32 +210,30 @@ describe('Keymedi Attendance & Points & Surveys & Votes Tests', () => {
     expect(result.votes?.availableVotes[0].title).toBe('테스트 투표');
   });
 
-  it('runKeymediAttendance task 실행 및 sendTelegram 호출 검증', async () => {
-    const sendTelegramSpy = vi.spyOn(utils, 'sendTelegram').mockResolvedValue(true);
-
+  it('runKeymediAttendance task 실행 및 결과 반환 검증', async () => {
     vi.spyOn(KeymediClient.prototype, 'executeAttendanceAndPoints').mockResolvedValue({
       success: true,
       member: { idx: 123, uid: 'nubiz', name: '김영욱' },
-      attendance: {
-        status: 'SUCCESS',
-        point: 100,
-        message: '출석 성공 (+100P)',
-      },
+      attendance: { status: 'SUCCESS', point: 100, message: '출석 성공 (+100P)' },
       calendar: {
         current_date: '2026-08-28',
         count_attendance: 2,
-        attendance: [],
+        attendance: [
+          { point: 100, day: 27, accumulate: 1 },
+          { point: 100, day: 28, accumulate: 2 },
+        ],
       },
       surveys: {
         topInfo: { possible_cnt: 1, acquire_point: 50, bookmark_cnt: 0, success_cnt: 0 },
         availableSurveys: [
           {
             idx: 282,
-            title: 'Mounjaro 얼마나 활용하고 계신가요?',
+            title: '테스트 설문',
             gift_point: 50,
-            vote_status: 'open',
+            vote_status: 'NOT_VOTE',
             people_closed_status: false,
-            end_at: '2026-12-31 23:59:00',
+            medical_part: '내과',
+            end_at: '2026-09-30 23:59:59',
           },
         ],
       },
@@ -254,7 +251,5 @@ describe('Keymedi Attendance & Points & Surveys & Votes Tests', () => {
     expect(taskResult.message).toContain('📝 참여가능 설문: 1건 (최대 50P)');
     expect(taskResult.message).toContain('https://www.keymedi.com/survey/list/282');
     expect(taskResult.message).toContain('🗳️ 참여가능 투표: 없음 (0건)');
-    expect(sendTelegramSpy).toHaveBeenCalledTimes(1);
-    expect(sendTelegramSpy).toHaveBeenCalledWith(expect.stringContaining('김영욱 (nubiz)'));
   });
 });

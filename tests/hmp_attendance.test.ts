@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { HmpClient, type HmpAttendanceWorkflowResult } from '../src/modules/hmp_api';
 import { formatHmpAttendanceMessage, run as runHmpAttendance } from '../src/tasks/hmp_attendance';
-import * as utils from '../src/modules/utils';
 
 describe('HMP Attendance & Capsules Workflow Tests', () => {
   beforeEach(() => {
@@ -146,9 +145,7 @@ describe('HMP Attendance & Capsules Workflow Tests', () => {
     expect(result.userInfo?.capsules).toBe(5010);
   });
 
-  it('run 태스크 실행 시 텔레그램 전송 연동 검증', async () => {
-    const sendTelegramSpy = vi.spyOn(utils, 'sendTelegram').mockResolvedValue(true as unknown as never);
-
+  it('run 태스크 실행 시 정상 결과 반환 검증', async () => {
     vi.spyOn(HmpClient.prototype, 'runAttendanceWorkflow').mockResolvedValue({
       success: true,
       userInfo: {
@@ -170,6 +167,5 @@ describe('HMP Attendance & Capsules Workflow Tests', () => {
     expect(taskResult.success).toBe(true);
     expect(taskResult.message).toContain('💊 [HMP 출석체크 & 캡슐 현황]');
     expect(taskResult.message).toContain('테스터 [전문의]');
-    expect(sendTelegramSpy).toHaveBeenCalledTimes(1);
   });
 });
