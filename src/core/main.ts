@@ -23,6 +23,7 @@ import * as runSeminarQuizTaskModule from '../tasks/run_seminar_quiz';
 import * as seminarDetailTaskModule from '../tasks/seminar_detail';
 import * as intermdQuizTaskModule from '../tasks/intermd_quiz';
 import * as keymediAttendanceTaskModule from '../tasks/keymedi_attendance';
+import * as hmpAttendanceTaskModule from '../tasks/hmp_attendance';
 import { sendOrUpdateTodayLinksNotification } from '../services/broadcast_today_links';
 import { sendToTopicSubscribers, sendHourlyTodayLinksToSubscribers } from '../services/subscription_service';
 import { shouldResumeSeminarMonitor } from '../services/channel_message_repository';
@@ -34,7 +35,8 @@ const HEADLESS = (process.env.HEADLESS || 'true').toLowerCase() === 'true';
 const TIMEZONE = process.env.SCHEDULE_TZ || 'Asia/Seoul';
 const DAILY_ROUTINE_CRON = process.env.DAILY_CRON || '1 0 * * *';
 const INTERMD_QUIZ_CRON = process.env.INTERMD_QUIZ_CRON || '1 8 * * *';
-const KEYMEDI_ATTENDANCE_CRON = process.env.KEYMEDI_ATTENDANCE_CRON || '5 0 * * *';
+const KEYMEDI_ATTENDANCE_CRON = process.env.KEYMEDI_ATTENDANCE_CRON || '5 7 * * *';
+const HMP_ATTENDANCE_CRON = process.env.HMP_ATTENDANCE_CRON || '7 7 * * *';
 const BROADCAST_TODAY_LINKS_CRON = '0 9 * * *';
 const HOURLY_TODAY_LINKS_EARLY_CRON = '2 0 * * *';
 const HOURLY_TODAY_LINKS_CRON = '0 1-12 * * *';
@@ -478,6 +480,17 @@ const keymediAttendanceTask: Task = {
 };
 taskRegistry.registerTask(keymediAttendanceTask);
 scheduler.scheduleTaskCron(keymediAttendanceTask);
+
+const hmpAttendanceTask: Task = {
+  name: 'hmp_attendance',
+  schedule: HMP_ATTENDANCE_CRON,
+  timezone: TIMEZONE,
+  run: async (ctx) => {
+    return await hmpAttendanceTaskModule.run(ctx);
+  },
+};
+taskRegistry.registerTask(hmpAttendanceTask);
+scheduler.scheduleTaskCron(hmpAttendanceTask);
 
 process.stdin.resume();
 function checkAndResumeTasks(): void {

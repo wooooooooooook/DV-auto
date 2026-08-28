@@ -266,6 +266,27 @@
   - 파라미터: `banner_location: "survey_pc"`, `banner_type: "survey_vote"`, `page`, `per_page`
   - 응답: 투표 목록 (`idx`, `title`, `gift_point`, `vote_status`, `medical_part`, `end_at` 등)
 
+### 5.6 HMP API (`https://www.hmp.co.kr`)
+- **인증 방식**: 세션 쿠키 기반 (`JSESSIONID`, `WMONID`, `MEM_ID`, `MEM_GBN`, `userId` 등)
+- **로그인 폼 세션 발급 (`/login/loginForm.hm`)**:
+  - `GET https://www.hmp.co.kr/login/loginForm.hm`
+  - 초기 세션 쿠키 획득
+- **로그인 인증 처리 (`/login/loginProcess.hm`)**:
+  - `POST https://www.hmp.co.kr/login/loginProcess.hm` (Form `x-www-form-urlencoded`)
+  - 파라미터: `memId`, `passwd`, `systemNm: "prod"`, `searchFlag: "id"`
+  - 리다이렉트(`302 Found`) 및 회원 인증 쿠키 발급
+- **사용자 정보 및 보유 캡슐 조회 (`/ajax/main/userInfo.hm`)**:
+  - `POST https://www.hmp.co.kr/ajax/main/userInfo.hm`
+  - 헤더: `X-Requested-With: XMLHttpRequest`
+  - 응답: `knowCommUserInfo` (닉네임, 등급 등), `myBnftValList` (`bnftGbn === "POINT"`의 `remanPnt`가 보유 캡슐 수량)
+- **출석체크 파라미터 조회 (`/event/attendanceRouletteMain.hm`)**:
+  - `GET https://www.hmp.co.kr/event/attendanceRouletteMain.hm?attendMain=Y`
+  - HTML 파싱: `cntntCd`, `cntntSeq`, `pointTitle`, `capsule10`, `loginCount`, 당일 수령 여부
+- **출석체크 캡슐 받기 실행 (`/ajax/event/capsuleHist.hm`)**:
+  - `POST https://www.hmp.co.kr/ajax/event/capsuleHist.hm` (Form `x-www-form-urlencoded`)
+  - 파라미터: `cntntCd`, `cntntSeq`, `pointTitle`, `bizGbn`, `seq`
+  - 응답: 성공 시 `{ "code": "800" }` (+10 캡슐 적립), 이미 완료 시 `{ "message": "1." }`
+
 ---
 
 ## 6. 주요 상태 코드 및 Enum 정리
