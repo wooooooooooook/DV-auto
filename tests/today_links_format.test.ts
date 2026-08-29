@@ -131,6 +131,21 @@ function testTodayLinksFormatWithUserExample() {
     `D-Day(당일) 검증 실패: ${dday0Message}`,
   );
 
+  // 5-3. 포인트 전환 예정일이 없는 경우 (미정) 문구 검증
+  const unplannedInput: TodayLinksFormatInput = {
+    ...mockInput,
+    pointConversionInfo: {
+      available: false,
+      availablePlannedAt: undefined,
+      meridiem: undefined,
+    },
+  };
+  const { message: unplannedMessage } = formatTodayLinksBroadcast(unplannedInput);
+  assert(
+    unplannedMessage.includes('💳 <b>다음 네이버페이포인트 전환가능일:</b> 미정'),
+    `전환 예정일 미정 검증 실패: ${unplannedMessage}`,
+  );
+
   // 6. 하단 봇 안내 인용구
   assert(
     message.includes(

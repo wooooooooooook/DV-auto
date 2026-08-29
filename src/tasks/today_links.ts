@@ -900,7 +900,7 @@ function formatPointConversionMessage(info: PointConversionInfo | null, todayIso
     const dday = getPointConversionDdayLabel(info.availablePlannedAt, todayIsoOverride);
     return `💳 <b>다음 네이버페이포인트 전환가능일:</b> ${escapeHtml(plannedParts.join(' '))}${dday}`;
   }
-  return '';
+  return '💳 <b>다음 네이버페이포인트 전환가능일:</b> 미정';
 }
 
 export type TodayLinksFormatInput = {
