@@ -21,10 +21,13 @@ import * as seminarRepo from '../services/seminar_repository';
 import {
   editChannelMessage,
   getSeminarStatusChannelMessage,
+  getChannelMessageById,
   publishAndReplaceChannelNotice,
   getRecentChannelMessages,
   updateChannelMessageStatus,
+  getChannelCommentsByParentMessageId,
 } from '../services/channel_message_repository';
+import * as logger from '../services/logger';
 import { sendToTopicSubscribers, type SubscriptionTopic } from '../services/subscription_service';
 
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
@@ -242,6 +245,95 @@ export function extractQuizSummaryOnly(quizMessage?: string | null): string | nu
     .filter((l) => l.length > 0);
   if (lines.length === 0) return null;
   return lines[0];
+}
+
+/**
+ * 기존 공지 메시지 본문과 현재 세미나 목록을 비교하여,
+ * 세미나의 시작(대기 -> 입장가능) 또는 종료(입장가능/대기 -> 종료), 신규 세미나 추가 등
+ * 주요 상태 전이(State Transition)가 발생했는지 판별합니다.
+ * (단순 설문 시간 갱신이나 댓글 추가 등은 상태 전이 없음(false)으로 판정)
+ */
+export function hasSeminarStatusTransition(prevText: string, currentSeminars: MonitoredSeminarItem[]): boolean {
+  if (!prevText || !prevText.trim()) {
+    return true;
+  }
+  if (currentSeminars.length === 0) {
+    return false;
+  }
+
+  const lines = prevText.split('\n');
+
+  for (const seminar of currentSeminars) {
+    const seminarId = seminar.seminarId ? String(seminar.seminarId).trim() : null;
+    const truncatedName = seminar.name.length > 20 ? seminar.name.slice(0, 20) : seminar.name;
+    const shortName = seminar.name.length > 10 ? seminar.name.slice(0, 10) : seminar.name;
+
+    // prevText에서 해당 세미나 라인 찾기
+    let matchedLineIndex = -1;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (
+        (seminarId && line.includes(`/seminar/${seminarId}`)) ||
+        line.includes(truncatedName) ||
+        line.includes(shortName)
+      ) {
+        matchedLineIndex = i;
+        break;
+      }
+    }
+
+    if (matchedLineIndex === -1) {
+      // 기존 메시지에 없던 신규 세미나 감지됨 -> 상태 전이 발생
+      return true;
+    }
+
+    // 상태 표시 라인(🔴, 🟢, ⏳ 등 이모지나 키워드가 포함된 라인) 탐색
+    let statusLine = lines[matchedLineIndex];
+    if (
+      !statusLine.includes('🔴') &&
+      !statusLine.includes('🟢') &&
+      !statusLine.includes('⏳') &&
+      !statusLine.includes('종료') &&
+      !statusLine.includes('입장가능') &&
+      !statusLine.includes('대기')
+    ) {
+      // 매칭된 줄이 URL인 경우 바로 윗줄이 상태 표시 라인일 수 있음
+      if (matchedLineIndex > 0) {
+        const prevLine = lines[matchedLineIndex - 1];
+        if (
+          prevLine.includes('🔴') ||
+          prevLine.includes('🟢') ||
+          prevLine.includes('⏳') ||
+          prevLine.includes('종료') ||
+          prevLine.includes('입장가능') ||
+          prevLine.includes('대기')
+        ) {
+          statusLine = prevLine;
+        }
+      }
+    }
+
+    let prevStatus: SeminarStatus | 'unknown' = 'unknown';
+    if (statusLine.includes('🔴') || statusLine.includes('종료')) {
+      prevStatus = '종료';
+    } else if (statusLine.includes('🟢') || statusLine.includes('입장가능')) {
+      prevStatus = '입장가능';
+    } else if (statusLine.includes('⏳') || statusLine.includes('대기')) {
+      prevStatus = '대기';
+    }
+
+    if (prevStatus === 'unknown') {
+      return true;
+    }
+
+    // 현재 세미나 상태와 이전 상태 비교
+    if (seminar.status !== prevStatus) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /**
@@ -1761,20 +1853,48 @@ async function monitorSeminars(
     let lastStatusNoticeText: string | null = null;
 
     if (hasInitialActiveOrEnded) {
-      const targetStatusText = buildSeminarStatusMessage(periodName, seminarList, isAllInitiallyCompleted).text;
-
-      // resume 시 기존 공지 메시지가 존재하는 경우: 인플레이스 수정(edit)을 우선 시도하여 불필요한 채널 푸시 알림 방지
       if (isAutoResume && lastStatusNoticeMessageId) {
-        const editRes = await editChannelMessage(lastStatusNoticeMessageId, targetStatusText);
-        if (editRes.success) {
-          lastStatusNoticeText = targetStatusText;
+        const existingMsg =
+          getChannelMessageById(lastStatusNoticeMessageId) || getSeminarStatusChannelMessage(periodName, todayIsoDate);
+        const attachedComments = getChannelCommentsByParentMessageId(lastStatusNoticeMessageId).map((r) => ({
+          userName: r.userName,
+          text: r.text,
+        }));
+        const targetStatusText = buildSeminarStatusMessage(
+          periodName,
+          seminarList,
+          isAllInitiallyCompleted,
+          attachedComments,
+        ).text;
+
+        const hasTransition =
+          !isAllInitiallyCompleted && existingMsg?.text
+            ? hasSeminarStatusTransition(existingMsg.text, seminarList)
+            : false;
+
+        if (!hasTransition) {
+          logger.info(
+            `[${periodName}] [isAutoResume] 세미나 상태 전이가 없거나 이미 완료되었으므로 기존 메시지(ID: ${lastStatusNoticeMessageId}) 인플레이스 수정(Edit)만 수행합니다.`,
+          );
+          const editRes = await editChannelMessage(lastStatusNoticeMessageId, targetStatusText);
+          if (editRes.success) {
+            lastStatusNoticeText = targetStatusText;
+          } else {
+            logger.warn(
+              `[${periodName}] [isAutoResume] 기존 메시지 수정 실패 (재발송 방지를 위해 기존 ID 유지): ${editRes.message}`,
+            );
+            lastStatusNoticeText = targetStatusText;
+          }
         } else {
+          // 모니터링 진행 중 세미나 시작/종료 등 상태 전이가 발생한 경우에만 새 공지 발행
+          logger.info(`[${periodName}] [isAutoResume] 세미나 상태 전이 감지됨 -> 새 공지 메시지 발행`);
           lastStatusNoticeMessageId = await publishSeminarStatusNotice(
             periodName,
             seminarList,
             lastStatusNoticeMessageId,
             isAllInitiallyCompleted,
             isAutoResume,
+            attachedComments,
           );
           lastStatusNoticeText = targetStatusText;
         }
@@ -1786,7 +1906,18 @@ async function monitorSeminars(
           isAllInitiallyCompleted,
           isAutoResume,
         );
-        lastStatusNoticeText = targetStatusText;
+        const attachedComments = lastStatusNoticeMessageId
+          ? getChannelCommentsByParentMessageId(lastStatusNoticeMessageId).map((r) => ({
+              userName: r.userName,
+              text: r.text,
+            }))
+          : [];
+        lastStatusNoticeText = buildSeminarStatusMessage(
+          periodName,
+          seminarList,
+          isAllInitiallyCompleted,
+          attachedComments,
+        ).text;
       }
     }
 
@@ -2199,11 +2330,18 @@ async function monitorSeminars(
       });
       const isAllCompleted = isAllSeminarsEnded && (!waitForSurveyClose || isAllSurveysClosed);
 
+      const attachedComments = lastStatusNoticeMessageId
+        ? getChannelCommentsByParentMessageId(lastStatusNoticeMessageId).map((r) => ({
+            userName: r.userName,
+            text: r.text,
+          }))
+        : [];
+
       const currentStatusText = buildSeminarStatusMessage(
         periodName,
         currentList,
         isAllCompleted,
-        undefined,
+        attachedComments,
         currentNowMs,
       ).text;
 
@@ -2215,6 +2353,7 @@ async function monitorSeminars(
           lastStatusNoticeMessageId,
           isAllCompleted,
           isAutoResume,
+          attachedComments,
         );
         lastStatusNoticeText = currentStatusText;
 
@@ -2229,12 +2368,8 @@ async function monitorSeminars(
           if (editRes.success) {
             lastStatusNoticeText = currentStatusText;
           } else {
-            lastStatusNoticeMessageId = await publishSeminarStatusNotice(
-              periodName,
-              currentList,
-              lastStatusNoticeMessageId,
-              isAllCompleted,
-              isAutoResume,
+            logger.warn(
+              `[${periodName}] 채널 메시지(ID: ${lastStatusNoticeMessageId}) 인플레이스 수정 실패 (재발송 없이 유지): ${editRes.message}`,
             );
             lastStatusNoticeText = currentStatusText;
           }
@@ -2245,6 +2380,7 @@ async function monitorSeminars(
             lastStatusNoticeMessageId,
             isAllCompleted,
             isAutoResume,
+            attachedComments,
           );
           lastStatusNoticeText = currentStatusText;
         }

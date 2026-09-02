@@ -131,6 +131,9 @@ describe('monitor_seminars_all_cases (앱 재시작 및 공지방 상태 기반 
       close: async () => {},
     } as unknown as BrowserContext;
 
+    const editChannelMessageSpy = vi.spyOn(channelRepo, 'editChannelMessage');
+    editChannelMessageSpy.mockResolvedValue({ success: true, message: 'edited' });
+
     // autoResume으로 실행 (점심 시간대 11시 ~ 15시)
     const result = await monitorSeminars('점심', 11, 15, {
       isAutoResume: true,
@@ -141,7 +144,12 @@ describe('monitor_seminars_all_cases (앱 재시작 및 공지방 상태 기반 
 
     expect(result).toBe(true);
     expect(processSeminarQuizSpy).toHaveBeenCalled();
-    expect(channelMessages.some((m) => m.includes('정답 : 2번 O'))).toBe(true);
+    expect(
+      channelMessages.some((m) => m.includes('정답 : 2번 O')) ||
+        editChannelMessageSpy.mock.calls.some(
+          (call) => typeof call[1] === 'string' && call[1].includes('정답 : 2번 O'),
+        ),
+    ).toBe(true);
   });
 
   it('Case 6: 다운타임 중 모든 세미나 및 설문이 마감된 상태에서 재개 시 즉시 모두종료 공지 전송 후 정상 종료 검증', async () => {
@@ -234,7 +242,7 @@ describe('monitor_seminars_all_cases (앱 재시작 및 공지방 상태 기반 
       channelId: 'notice_chan',
       messageId: 802,
       date: todayStr,
-      text: '🔔 점심세미나\n\n🟢 입장가능 | 12:30 고혈압 세미나',
+      text: '🔔 점심세미나\n\n🔴 종료 | 12:30 고혈압 세미나',
       status: 'sent',
     });
 

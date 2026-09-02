@@ -3,6 +3,7 @@ import { describe, it, vi, beforeEach } from 'vitest';
 import {
   buildSeminarStatusMessage,
   publishSeminarStatusNotice,
+  hasSeminarStatusTransition,
   type MonitoredSeminarItem,
 } from '../src/tasks/monitor_seminars';
 import * as utilsModule from '../src/modules/utils';
@@ -255,5 +256,116 @@ describe('세미나 모니터링 통합 메시지 (삭제/재발송) 단위 테�
       888,
       '세미나 종료 시 기존 메시지 ID 888이 삭제되고 새 메시지가 발송되어야 함',
     );
+  });
+
+  describe('hasSeminarStatusTransition 상태 전이 판별 테스트', () => {
+    it('동일한 종료 상태에서 댓글/설문시간만 달라진 경우 상태 전이 없음(false)을 반환해야 함', () => {
+      const prevText = `🔔 저녁세미나
+
+🔴 종료 | 18:30~20:00 BEYOND Web Symposium
+https://m.doctorville.co.kr/cme/seminar/5612
+(설문 마감 약 40분 남음)
+
+🔴 종료 | 18:30~20:00 [EZcare WEEK] 개원가의 눈
+https://m.doctorville.co.kr/cme/seminar/5638
+(설문 마감 약 60분 남음)
+
+💬 [이전 댓글]
+• 영욱: 테스트 댓글입니다.`;
+
+      const currentSeminars: MonitoredSeminarItem[] = [
+        {
+          seminarId: '5612',
+          name: 'BEYOND Web Symposium',
+          url: 'https://m.doctorville.co.kr/cme/seminar/5612',
+          status: '종료',
+        },
+        {
+          seminarId: '5638',
+          name: '[EZcare WEEK] 개원가의 눈',
+          url: 'https://m.doctorville.co.kr/cme/seminar/5638',
+          status: '종료',
+        },
+      ];
+
+      const result = hasSeminarStatusTransition(prevText, currentSeminars);
+      assert.strictEqual(result, false, '세미나 상태가 둘 다 여전히 종료이므로 상태 전이가 없어야 함');
+    });
+
+    it('대기에서 입장가능으로 변경된 경우 상태 전이 있음(true)을 반환해야 함', () => {
+      const prevText = `🔔 저녁세미나
+
+⏳ 대기 | 18:30~20:00 BEYOND Web Symposium
+https://m.doctorville.co.kr/cme/seminar/5612`;
+
+      const currentSeminars: MonitoredSeminarItem[] = [
+        {
+          seminarId: '5612',
+          name: 'BEYOND Web Symposium',
+          url: 'https://m.doctorville.co.kr/cme/seminar/5612',
+          status: '입장가능',
+        },
+      ];
+
+      const result = hasSeminarStatusTransition(prevText, currentSeminars);
+      assert.strictEqual(result, true, '대기 -> 입장가능 변경 감지');
+    });
+
+    it('입장가능에서 종료로 변경된 경우 상태 전이 있음(true)을 반환해야 함', () => {
+      const prevText = `🔔 저녁세미나
+
+🟢 입장가능 | 18:30~20:00 BEYOND Web Symposium
+https://m.doctorville.co.kr/cme/seminar/5612`;
+
+      const currentSeminars: MonitoredSeminarItem[] = [
+        {
+          seminarId: '5612',
+          name: 'BEYOND Web Symposium',
+          url: 'https://m.doctorville.co.kr/cme/seminar/5612',
+          status: '종료',
+        },
+      ];
+
+      const result = hasSeminarStatusTransition(prevText, currentSeminars);
+      assert.strictEqual(result, true, '입장가능 -> 종료 변경 감지');
+    });
+
+    it('이전에 없던 신규 세미나가 추가된 경우 상태 전이 있음(true)을 반환해야 함', () => {
+      const prevText = `🔔 저녁세미나
+
+🔴 종료 | 18:30~20:00 BEYOND Web Symposium
+https://m.doctorville.co.kr/cme/seminar/5612`;
+
+      const currentSeminars: MonitoredSeminarItem[] = [
+        {
+          seminarId: '5612',
+          name: 'BEYOND Web Symposium',
+          url: 'https://m.doctorville.co.kr/cme/seminar/5612',
+          status: '종료',
+        },
+        {
+          seminarId: '9999',
+          name: '새로운 세미나',
+          url: 'https://m.doctorville.co.kr/cme/seminar/9999',
+          status: '종료',
+        },
+      ];
+
+      const result = hasSeminarStatusTransition(prevText, currentSeminars);
+      assert.strictEqual(result, true, '신규 세미나 추가 감지');
+    });
+
+    it('이전 텍스트가 빈 문자열이거나 없는 경우 상태 전이 있음(true)을 반환해야 함', () => {
+      const currentSeminars: MonitoredSeminarItem[] = [
+        {
+          seminarId: '5612',
+          name: 'BEYOND Web Symposium',
+          url: 'https://m.doctorville.co.kr/cme/seminar/5612',
+          status: '종료',
+        },
+      ];
+
+      assert.strictEqual(hasSeminarStatusTransition('', currentSeminars), true);
+    });
   });
 });
