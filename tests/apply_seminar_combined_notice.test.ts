@@ -78,7 +78,7 @@ describe('신규 세미나 모음 통합 공지 (삭제/재발송) 단위 테스
         '━ ✨ 방금 추가됨 ━━━━━\n2. [2026-08-28 19:00] [포인트미지급] [심화설문] 이번에새롭게추가된매우긴제목의심화설문세... (5/50)',
       ),
     );
-    assert.ok(text.includes('https://m.doctorville.co.kr/cme/seminar/102\n━━━━━━━━━━━━━━━━━━━━━'));
+    assert.ok(text.includes('https://m.doctorville.co.kr/cme/seminar/102\n━━━━━━━━━━━━━━━━'));
 
     // 4. 이전 댓글 섹션 검증
     assert.ok(text.includes('💬 [이전 댓글]'));
@@ -497,7 +497,7 @@ https://m.doctorville.co.kr/cme/seminar/101
 ━ ✨ 방금 추가됨 ━━━━━
 2. [2026-08-28 19:00] 신규 세미나 (5/50)
 https://m.doctorville.co.kr/cme/seminar/102
-━━━━━━━━━━━━━━━━━━━━━`;
+━━━━━━━━━━━━━━━━`;
     assert.deepStrictEqual(extractHighlightedSeminarIds(singleMsg), ['102']);
 
     // 3. 복수 강조 항목
@@ -506,12 +506,12 @@ https://m.doctorville.co.kr/cme/seminar/102
 ━ ✨ 방금 추가됨 ━━━━━
 1. [2026-08-27 13:00] 첫번째 신규 세미나 (15/100)
 https://m.doctorville.co.kr/cme/seminar/201
-━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━
 
 ━ ✨ 방금 추가됨 ━━━━━
 2. [2026-08-28 19:00] 두번째 신규 세미나 (5/50)
 https://m.doctorville.co.kr/cme/seminar/202
-━━━━━━━━━━━━━━━━━━━━━`;
+━━━━━━━━━━━━━━━━`;
     assert.deepStrictEqual(extractHighlightedSeminarIds(multiMsg), ['201', '202']);
   });
 
@@ -597,7 +597,7 @@ https://m.doctorville.co.kr/cme/seminar/202
     // - 102번 세미나의 "━ ✨ 방금 추가됨 ━━━━━" 강조 표시가 그대로 유지됨
     assert.ok(
       editedNewText.includes(
-        '━ ✨ 방금 추가됨 ━━━━━\n2. [2026-08-27 19:00] 102번 세미나 (신규 강조) (40/50)\nhttps://m.doctorville.co.kr/cme/seminar/102\n━━━━━━━━━━━━━━━━━━━━━',
+        '━ ✨ 방금 추가됨 ━━━━━\n2. [2026-08-27 19:00] 102번 세미나 (신규 강조) (40/50)\nhttps://m.doctorville.co.kr/cme/seminar/102\n━━━━━━━━━━━━━━━━',
       ),
     );
 

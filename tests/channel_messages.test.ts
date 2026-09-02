@@ -302,7 +302,7 @@ https://m.doctorville.co.kr/cme/seminar/103
 ━ ✨ 방금 추가됨 ━━━━━
 1. [2026-08-29 13:00] 방금 추가된 세미나 (0/50)
 https://m.doctorville.co.kr/cme/seminar/201
-━━━━━━━━━━━━━━━━━━━━━`;
+━━━━━━━━━━━━━━━━`;
 
     recordChannelMessage({
       channelId: mockChannelId,

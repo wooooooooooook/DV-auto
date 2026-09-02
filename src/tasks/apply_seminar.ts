@@ -427,7 +427,7 @@ export function buildNewSeminarsNoticeMessage(
     const itemText = `${i + 1}. ${prefix}${truncatedName}${capacityInfo}\n${item.url}`;
 
     if (isHighlighted) {
-      formattedItems.push(`━ ✨ 방금 추가됨 ━━━━━\n${itemText}\n━━━━━━━━━━━━━━━━━━━━━`);
+      formattedItems.push(`━ ✨ 방금 추가됨 ━━━━━\n${itemText}\n━━━━━━━━━━━━━━━━`);
     } else {
       formattedItems.push(itemText);
     }
@@ -493,7 +493,7 @@ export async function publishNewSeminarsNotice(
 export function extractHighlightedSeminarIds(messageText?: string | null): string[] {
   if (!messageText) return [];
   const highlightedIds: string[] = [];
-  const regex = /━ ✨ 방금 추가됨 ━━━━━([\s\S]*?)━━━━━━━━━━━━━━━━━━━━━/g;
+  const regex = /━ ✨ 방금 추가됨 ━━━━━([\s\S]*?)━━━━━━━━━━━━━━━━/g;
   let match: RegExpExecArray | null;
   while ((match = regex.exec(messageText)) !== null) {
     const blockContent = match[1];
