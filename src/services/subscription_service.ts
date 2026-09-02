@@ -737,6 +737,89 @@ export async function sendHourlyTodayLinksToSubscribers(
 
 // --- UI Rendering Helpers ---
 
+export interface SubscriptionStats {
+  totalUsers: number;
+  todayLinks: number;
+  todayLinksByTime: Record<string, number>;
+  newSeminar: number;
+  newSeminarByFilter: Record<NewSeminarFilter, number>;
+  newSeminarIncludePointExcluded: number;
+  intermdQuiz: number;
+  seminarChanges: number;
+  seminarLive: number;
+  surveyClosing20: number;
+  surveyClosing10: number;
+  pointConversion: number;
+}
+
+export function getSubscriptionStats(): SubscriptionStats {
+  const db = getDatabase();
+  const baseRow = db
+    .prepare(
+      `
+    SELECT
+      COUNT(*) as totalUsers,
+      SUM(CASE WHEN today_links = 1 THEN 1 ELSE 0 END) as todayLinks,
+      SUM(CASE WHEN new_seminar != 'off' THEN 1 ELSE 0 END) as newSeminar,
+      SUM(CASE WHEN new_seminar = 'all' THEN 1 ELSE 0 END) as newSeminarAll,
+      SUM(CASE WHEN new_seminar = 'limit_5000' THEN 1 ELSE 0 END) as newSeminarLimit5000,
+      SUM(CASE WHEN new_seminar = 'limit_3000' THEN 1 ELSE 0 END) as newSeminarLimit3000,
+      SUM(CASE WHEN new_seminar = 'urgent_1000' THEN 1 ELSE 0 END) as newSeminarUrgent1000,
+      SUM(CASE WHEN new_seminar = 'off' THEN 1 ELSE 0 END) as newSeminarOff,
+      SUM(CASE WHEN new_seminar_include_point_excluded = 1 THEN 1 ELSE 0 END) as newSeminarIncludePointExcluded,
+      SUM(CASE WHEN intermd_quiz = 1 THEN 1 ELSE 0 END) as intermdQuiz,
+      SUM(CASE WHEN seminar_changes = 1 THEN 1 ELSE 0 END) as seminarChanges,
+      SUM(CASE WHEN seminar_live = 1 THEN 1 ELSE 0 END) as seminarLive,
+      SUM(CASE WHEN survey_closing_20 = 1 THEN 1 ELSE 0 END) as surveyClosing20,
+      SUM(CASE WHEN survey_closing_10 = 1 THEN 1 ELSE 0 END) as surveyClosing10,
+      SUM(CASE WHEN point_conversion = 1 THEN 1 ELSE 0 END) as pointConversion
+    FROM subscriptions
+  `,
+    )
+    .get() as Record<string, number> | undefined;
+
+  const timeRows = db
+    .prepare(
+      `
+    SELECT today_links_time, COUNT(*) as count
+    FROM subscriptions
+    WHERE today_links = 1
+    GROUP BY today_links_time
+  `,
+    )
+    .all() as Array<{ today_links_time: string; count: number }>;
+
+  const todayLinksByTime: Record<string, number> = {};
+  for (const row of timeRows) {
+    if (row.today_links_time) {
+      todayLinksByTime[row.today_links_time] = row.count;
+    }
+  }
+
+  const safeNum = (n?: number | null) => (typeof n === 'number' && !Number.isNaN(n) ? n : 0);
+
+  return {
+    totalUsers: safeNum(baseRow?.totalUsers),
+    todayLinks: safeNum(baseRow?.todayLinks),
+    todayLinksByTime,
+    newSeminar: safeNum(baseRow?.newSeminar),
+    newSeminarByFilter: {
+      all: safeNum(baseRow?.newSeminarAll),
+      limit_5000: safeNum(baseRow?.newSeminarLimit5000),
+      limit_3000: safeNum(baseRow?.newSeminarLimit3000),
+      urgent_1000: safeNum(baseRow?.newSeminarUrgent1000),
+      off: safeNum(baseRow?.newSeminarOff),
+    },
+    newSeminarIncludePointExcluded: safeNum(baseRow?.newSeminarIncludePointExcluded),
+    intermdQuiz: safeNum(baseRow?.intermdQuiz),
+    seminarChanges: safeNum(baseRow?.seminarChanges),
+    seminarLive: safeNum(baseRow?.seminarLive),
+    surveyClosing20: safeNum(baseRow?.surveyClosing20),
+    surveyClosing10: safeNum(baseRow?.surveyClosing10),
+    pointConversion: safeNum(baseRow?.pointConversion),
+  };
+}
+
 export function getNewSeminarFilterLabel(filter: NewSeminarFilter): string {
   switch (filter) {
     case 'all':
@@ -754,6 +837,7 @@ export function getNewSeminarFilterLabel(filter: NewSeminarFilter): string {
 
 export function buildMainMenu(chatId: number): { text: string; replyMarkup: InlineKeyboardMarkup } {
   const sub = getSubscription(chatId);
+  const stats = getSubscriptionStats();
 
   const newSeminarStatusText =
     sub.newSeminar === 'off'
@@ -769,21 +853,21 @@ export function buildMainMenu(chatId: number): { text: string; replyMarkup: Inli
     '💡 <i>일부 알림(세미나 라이브/퀴즈/링크 등)은 전체 공지채널과 중복될 수 있습니다. 중복 알림이 불편하신 경우 <b>공지채널을 음소거</b>하거나 <b>채널 나가기</b> 후 공지봇 알림만 받아보시는 것을 권장합니다.</i>',
     '⚠️ <i>설문 마감 알림(20분전/10분전)은 개인의 설문 진행 여부와 관계없이 알림이 전송됩니다. 이미 설문을 완료하셨더라도 알림이 발송될 수 있으니 참고해 주세요.</i>',
     '',
-    '📋 <b>[구독 현황]</b>',
-    `• 🔗 <b>오늘의 링크</b>: ${sub.todayLinks ? `🟢 ON (수신 시간: ${sub.todayLinksTime})` : '🔴 OFF'}`,
-    `• 🆕 <b>신규 세미나</b>: ${newSeminarStatusText}`,
-    `• ❓ <b>인터엠디 퀴즈</b>: ${sub.intermdQuiz ? '🟢 ON' : '🔴 OFF'}`,
-    `• 🔄 <b>세미나 정보 변경/심화</b>: ${sub.seminarChanges ? '🟢 ON' : '🔴 OFF'}`,
-    `• 🔴 <b>세미나 라이브/퀴즈</b>: ${sub.seminarLive ? '🟢 ON' : '🔴 OFF'}`,
-    `• ⏳ <b>설문 마감 20분전</b>: ${sub.surveyClosing20 ? '🟢 ON' : '🔴 OFF'}`,
-    `• ⏳ <b>설문 마감 10분전</b>: ${sub.surveyClosing10 ? '🟢 ON' : '🔴 OFF'}`,
-    `• 💰 <b>네페 포인트 전환</b>: ${sub.pointConversion ? '🟢 ON' : '🔴 OFF'}`,
+    '📋 <b>[구독 현황]</b> <i>(👥 항목별 현재 구독자 수)</i>',
+    `• 🔗 <b>오늘의 링크</b>: ${sub.todayLinks ? `🟢 ON (수신 시간: ${sub.todayLinksTime})` : '🔴 OFF'} <i>(👥 ${stats.todayLinks}명 구독)</i>`,
+    `• 🆕 <b>신규 세미나</b>: ${newSeminarStatusText} <i>(👥 ${stats.newSeminar}명 구독)</i>`,
+    `• ❓ <b>인터엠디 퀴즈</b>: ${sub.intermdQuiz ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.intermdQuiz}명 구독)</i>`,
+    `• 🔄 <b>세미나 정보 변경/심화</b>: ${sub.seminarChanges ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.seminarChanges}명 구독)</i>`,
+    `• 🔴 <b>세미나 라이브/퀴즈</b>: ${sub.seminarLive ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.seminarLive}명 구독)</i>`,
+    `• ⏳ <b>설문 마감 20분전</b>: ${sub.surveyClosing20 ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.surveyClosing20}명 구독)</i>`,
+    `• ⏳ <b>설문 마감 10분전</b>: ${sub.surveyClosing10 ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.surveyClosing10}명 구독)</i>`,
+    `• 💰 <b>네페 포인트 전환</b>: ${sub.pointConversion ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.pointConversion}명 구독)</i>`,
   ].join('\n');
 
   const inlineKeyboard = [
     [
       {
-        text: `🔗 오늘의 링크: ${sub.todayLinks ? 'ON 🟢' : 'OFF 🔴'}`,
+        text: `🔗 오늘의 링크 (👥 ${stats.todayLinks}명): ${sub.todayLinks ? 'ON 🟢' : 'OFF 🔴'}`,
         callback_data: 'sub:toggle:today_links',
       },
     ],
@@ -795,43 +879,43 @@ export function buildMainMenu(chatId: number): { text: string; replyMarkup: Inli
     ],
     [
       {
-        text: `🆕 신규 세미나: ${sub.newSeminar === 'off' ? 'OFF 🔴' : getNewSeminarFilterLabel(sub.newSeminar)} ⚙️`,
+        text: `🆕 신규 세미나 (👥 ${stats.newSeminar}명): ${sub.newSeminar === 'off' ? 'OFF 🔴' : getNewSeminarFilterLabel(sub.newSeminar)} ⚙️`,
         callback_data: 'sub:menu:new_seminar',
       },
     ],
     [
       {
-        text: `❓ 인터엠디 퀴즈: ${sub.intermdQuiz ? 'ON 🟢' : 'OFF 🔴'}`,
+        text: `❓ 인터엠디 퀴즈 (👥 ${stats.intermdQuiz}명): ${sub.intermdQuiz ? 'ON 🟢' : 'OFF 🔴'}`,
         callback_data: 'sub:toggle:intermd_quiz',
       },
     ],
     [
       {
-        text: `🔄 세미나 정보 변경: ${sub.seminarChanges ? 'ON 🟢' : 'OFF 🔴'}`,
+        text: `🔄 세미나 정보 변경 (👥 ${stats.seminarChanges}명): ${sub.seminarChanges ? 'ON 🟢' : 'OFF 🔴'}`,
         callback_data: 'sub:toggle:seminar_changes',
       },
     ],
     [
       {
-        text: `🔴 세미나 라이브/퀴즈: ${sub.seminarLive ? 'ON 🟢' : 'OFF 🔴'}`,
+        text: `🔴 세미나 라이브/퀴즈 (👥 ${stats.seminarLive}명): ${sub.seminarLive ? 'ON 🟢' : 'OFF 🔴'}`,
         callback_data: 'sub:toggle:seminar_live',
       },
     ],
     [
       {
-        text: `⏳ 설문 마감 20분전: ${sub.surveyClosing20 ? 'ON 🟢' : 'OFF 🔴'}`,
+        text: `⏳ 설문 마감 20분전 (👥 ${stats.surveyClosing20}명): ${sub.surveyClosing20 ? 'ON 🟢' : 'OFF 🔴'}`,
         callback_data: 'sub:toggle:survey_closing_20',
       },
     ],
     [
       {
-        text: `⏳ 설문 마감 10분전: ${sub.surveyClosing10 ? 'ON 🟢' : 'OFF 🔴'}`,
+        text: `⏳ 설문 마감 10분전 (👥 ${stats.surveyClosing10}명): ${sub.surveyClosing10 ? 'ON 🟢' : 'OFF 🔴'}`,
         callback_data: 'sub:toggle:survey_closing_10',
       },
     ],
     [
       {
-        text: `💰 네페 포인트 전환: ${sub.pointConversion ? 'ON 🟢' : 'OFF 🔴'}`,
+        text: `💰 네페 포인트 전환 (👥 ${stats.pointConversion}명): ${sub.pointConversion ? 'ON 🟢' : 'OFF 🔴'}`,
         callback_data: 'sub:toggle:point_conversion',
       },
     ],
@@ -852,12 +936,14 @@ export function buildMainMenu(chatId: number): { text: string; replyMarkup: Inli
 
 export function buildTodayLinksTimeMenu(chatId: number): { text: string; replyMarkup: InlineKeyboardMarkup } {
   const sub = getSubscription(chatId);
+  const stats = getSubscriptionStats();
 
   const text = [
     '⏰ <b>오늘의 링크 알림 수신 시간 설정</b>',
     '',
     '매일 희망하시는 시간에 오늘의 세미나/퀴즈 링크 모음을 전송해 드립니다.',
     `• 현재 설정된 시간: <b>${sub.todayLinksTime}</b> (${sub.todayLinks ? '🟢 구독 중' : '🔴 구독 OFF'})`,
+    '💡 <i>각 시간 버튼의 (👥 N명)은 해당 시간대를 선택한 구독자 수입니다.</i>',
     '',
     '희망하시는 수신 시간을 아래에서 선택해주세요:',
   ].join('\n');
@@ -865,8 +951,9 @@ export function buildTodayLinksTimeMenu(chatId: number): { text: string; replyMa
   const buttons: Array<{ text: string; callback_data: string }> = [];
   for (const time of TODAY_LINKS_AVAILABLE_TIMES) {
     const isSelected = sub.todayLinksTime === time;
+    const count = stats.todayLinksByTime[time] || 0;
     buttons.push({
-      text: `${time} ${isSelected ? '✅' : ''}`.trim(),
+      text: `${time} (👥 ${count}명)${isSelected ? ' ✅' : ''}`.trim(),
       callback_data: `sub:set_time:${time}`,
     });
   }
@@ -889,13 +976,15 @@ export function buildTodayLinksTimeMenu(chatId: number): { text: string; replyMa
 
 export function buildNewSeminarMenu(chatId: number): { text: string; replyMarkup: InlineKeyboardMarkup } {
   const sub = getSubscription(chatId);
+  const stats = getSubscriptionStats();
 
   const text = [
     '🆕 <b>신규 세미나 등록 알림 설정</b>',
     '',
     '새로운 세미나가 등록/오픈되었을 때의 알림 수신 조건을 선택하세요.',
     `• 현재 수신 조건: <b>${getNewSeminarFilterLabel(sub.newSeminar)}</b>`,
-    `• 포인트 미지급 세미나 수신: <b>${sub.newSeminarIncludePointExcluded ? '🟢 포함 (알림 받음)' : '🔴 제외 (알림 안 받음)'}</b>`,
+    `• 포인트 미지급 세미나 수신: <b>${sub.newSeminarIncludePointExcluded ? '🟢 포함 (알림 받음)' : '🔴 제외 (알림 안 받음)'}</b> <i>(👥 ${stats.newSeminarIncludePointExcluded}명 수신)</i>`,
+    '💡 <i>각 조건 버튼의 (👥 N명)은 해당 조건을 선택한 구독자 수입니다.</i>',
     '',
     '원하시는 알림 옵션을 선택해주세요:',
   ].join('\n');
@@ -910,9 +999,10 @@ export function buildNewSeminarMenu(chatId: number): { text: string; replyMarkup
 
   const keyboardRows = options.map((opt) => {
     const isSelected = sub.newSeminar === opt.filter;
+    const count = stats.newSeminarByFilter[opt.filter] || 0;
     return [
       {
-        text: `${opt.label} ${isSelected ? '✅' : ''}`.trim(),
+        text: `${opt.label} (👥 ${count}명)${isSelected ? ' ✅' : ''}`.trim(),
         callback_data: `sub:set_new_seminar:${opt.filter}`,
       },
     ];
@@ -921,7 +1011,7 @@ export function buildNewSeminarMenu(chatId: number): { text: string; replyMarkup
   // 포인트 미지급 세미나 수신 여부 토글 버튼
   keyboardRows.push([
     {
-      text: `🎁 포인트 미지급 세미나도 수신: ${sub.newSeminarIncludePointExcluded ? 'ON 🟢' : 'OFF 🔴'}`,
+      text: `🎁 포인트 미지급 세미나도 수신 (👥 ${stats.newSeminarIncludePointExcluded}명): ${sub.newSeminarIncludePointExcluded ? 'ON 🟢' : 'OFF 🔴'}`,
       callback_data: 'sub:toggle:new_seminar_point_excluded',
     },
   ]);

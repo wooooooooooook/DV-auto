@@ -12,6 +12,7 @@ import {
   getTodayLinksSubscribersForTime,
   markTodayLinksSent,
   getSubscribersForTopic,
+  getSubscriptionStats,
   buildMainMenu,
   buildTodayLinksTimeMenu,
   buildNewSeminarMenu,
@@ -224,7 +225,70 @@ describe('subscription_service', () => {
     expect(getSubscribersForTopic('survey_closing_10')).toEqual([602, 603]);
   });
 
-  it('UI 마크업 생성 헬퍼가 버튼과 텍스트를 정상 반환해야 한다', () => {
+  it('getSubscriptionStats 함수가 각 항목 및 시간대/조건별 구독자 수를 정확히 집계해야 한다', () => {
+    // 1. 초기 상태 (0명)
+    let stats = getSubscriptionStats();
+    expect(stats.totalUsers).toBe(0);
+    expect(stats.todayLinks).toBe(0);
+    expect(stats.newSeminar).toBe(0);
+    expect(stats.intermdQuiz).toBe(0);
+
+    // 2. 유저별 다양한 설정 적용
+    updateSubscription(1001, {
+      todayLinks: true,
+      todayLinksTime: '08:00',
+      newSeminar: 'all',
+      newSeminarIncludePointExcluded: true,
+      intermdQuiz: true,
+      seminarChanges: true,
+    });
+
+    updateSubscription(1002, {
+      todayLinks: true,
+      todayLinksTime: '08:00',
+      newSeminar: 'limit_5000',
+      newSeminarIncludePointExcluded: false,
+      seminarLive: true,
+      surveyClosing20: true,
+    });
+
+    updateSubscription(1003, {
+      todayLinks: true,
+      todayLinksTime: '09:00',
+      newSeminar: 'limit_3000',
+      newSeminarIncludePointExcluded: true,
+      surveyClosing10: true,
+      pointConversion: true,
+    });
+
+    updateSubscription(1004, {
+      todayLinks: false,
+      newSeminar: 'urgent_1000',
+      intermdQuiz: true,
+      pointConversion: true,
+    });
+
+    stats = getSubscriptionStats();
+    expect(stats.totalUsers).toBe(4);
+    expect(stats.todayLinks).toBe(3);
+    expect(stats.todayLinksByTime['08:00']).toBe(2);
+    expect(stats.todayLinksByTime['09:00']).toBe(1);
+    expect(stats.newSeminar).toBe(4);
+    expect(stats.newSeminarByFilter.all).toBe(1);
+    expect(stats.newSeminarByFilter.limit_5000).toBe(1);
+    expect(stats.newSeminarByFilter.limit_3000).toBe(1);
+    expect(stats.newSeminarByFilter.urgent_1000).toBe(1);
+    expect(stats.newSeminarByFilter.off).toBe(0);
+    expect(stats.newSeminarIncludePointExcluded).toBe(2);
+    expect(stats.intermdQuiz).toBe(2);
+    expect(stats.seminarChanges).toBe(1);
+    expect(stats.seminarLive).toBe(1);
+    expect(stats.surveyClosing20).toBe(1);
+    expect(stats.surveyClosing10).toBe(1);
+    expect(stats.pointConversion).toBe(2);
+  });
+
+  it('UI 마크업 생성 헬퍼가 버튼과 텍스트에 구독자 수를 포함하여 정상 반환해야 한다', () => {
     updateSubscription(700, {
       todayLinks: true,
       todayLinksTime: '00:02',
@@ -237,25 +301,46 @@ describe('subscription_service', () => {
     expect(mainUI.text).toContain('음소거');
     expect(mainUI.text).toContain('채널 나가기');
     expect(mainUI.text).toContain('설문 진행 여부와 관계없이 알림이 전송됩니다');
+    expect(mainUI.text).toContain('📋 <b>[구독 현황]</b> <i>(👥 항목별 현재 구독자 수)</i>');
     expect(mainUI.text).toContain('00:02');
     expect(mainUI.text).toContain('마감 임박');
     expect(mainUI.text).toContain('포인트 미지급 제외');
+    expect(mainUI.text).toContain('(👥 1명 구독)');
     expect(mainUI.replyMarkup.inline_keyboard.length).toBeGreaterThan(5);
+    expect(
+      mainUI.replyMarkup.inline_keyboard.some((row) =>
+        row.some((btn) => btn.text.includes('🔗 오늘의 링크 (👥 1명): ON 🟢')),
+      ),
+    ).toBe(true);
 
     const timeUI = buildTodayLinksTimeMenu(700);
     expect(timeUI.text).toContain('수신 시간 설정');
+    expect(timeUI.text).toContain('💡 <i>각 시간 버튼의 (👥 N명)은 해당 시간대를 선택한 구독자 수입니다.</i>');
     expect(timeUI.replyMarkup.inline_keyboard.length).toBeGreaterThan(3);
+    expect(
+      timeUI.replyMarkup.inline_keyboard.some((row) => row.some((btn) => btn.text.includes('00:02 (👥 1명) ✅'))),
+    ).toBe(true);
 
     const newSemUI = buildNewSeminarMenu(700);
     expect(newSemUI.text).toContain('신규 세미나 등록 알림 설정');
-    expect(newSemUI.text).toContain('포인트 미지급 세미나 수신: <b>🔴 제외 (알림 안 받음)</b>');
+    expect(newSemUI.text).toContain('포인트 미지급 세미나 수신: <b>🔴 제외 (알림 안 받음)</b> <i>(👥 0명 수신)</i>');
+    expect(newSemUI.text).toContain('💡 <i>각 조건 버튼의 (👥 N명)은 해당 조건을 선택한 구독자 수입니다.</i>');
     expect(newSemUI.replyMarkup.inline_keyboard.length).toBe(7);
     expect(
       newSemUI.replyMarkup.inline_keyboard.some((row) =>
         row.some(
           (btn) =>
-            btn.text.includes('포인트 미지급 세미나도 수신') &&
+            btn.text.includes('포인트 미지급 세미나도 수신 (👥 0명)') &&
             btn.callback_data === 'sub:toggle:new_seminar_point_excluded',
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      newSemUI.replyMarkup.inline_keyboard.some((row) =>
+        row.some(
+          (btn) =>
+            btn.text.includes('⚡ 마감 임박 (잔여 1,000명 이하만) (👥 1명) ✅') &&
+            btn.callback_data === 'sub:set_new_seminar:urgent_1000',
         ),
       ),
     ).toBe(true);
@@ -263,10 +348,12 @@ describe('subscription_service', () => {
     // 포인트 미지급 포함으로 변경 후 검증
     updateSubscription(700, { newSeminarIncludePointExcluded: true });
     const newSemUI2 = buildNewSeminarMenu(700);
-    expect(newSemUI2.text).toContain('포인트 미지급 세미나 수신: <b>🟢 포함 (알림 받음)</b>');
-    expect(newSemUI2.replyMarkup.inline_keyboard.some((row) => row.some((btn) => btn.text.includes('ON 🟢')))).toBe(
-      true,
-    );
+    expect(newSemUI2.text).toContain('포인트 미지급 세미나 수신: <b>🟢 포함 (알림 받음)</b> <i>(👥 1명 수신)</i>');
+    expect(
+      newSemUI2.replyMarkup.inline_keyboard.some((row) =>
+        row.some((btn) => btn.text.includes('포인트 미지급 세미나도 수신 (👥 1명): ON 🟢')),
+      ),
+    ).toBe(true);
   });
 
   it('레거시 intermd_quiz 및 seminar_subscribers 래퍼 함수가 호환되어야 한다', () => {
