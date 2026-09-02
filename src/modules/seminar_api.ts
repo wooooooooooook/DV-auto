@@ -146,6 +146,8 @@ export type FetchSeminarDetailResult =
       hasEntryHistory: boolean;
       isAuthExpired?: false;
       errorMessage?: undefined;
+      statusCode?: number;
+      isNotFound?: boolean;
       rawResponse: SeminarDetailApiResponse;
     }
   | {
@@ -155,6 +157,8 @@ export type FetchSeminarDetailResult =
       hasEntryHistory?: undefined;
       isAuthExpired: boolean;
       errorMessage: string;
+      statusCode?: number;
+      isNotFound?: boolean;
       rawResponse?: unknown;
     };
 
@@ -468,11 +472,16 @@ export async function fetchSeminarDetail(
     }
 
     if (res.status !== 200 || !res.body) {
+      const isNotFound = res.status === 404;
       return {
         success: false,
         seminarId: sid,
         isAuthExpired: false,
-        errorMessage: `HTTP GET ${url} 실패 (상태 코드: ${res.status}, ${res.statusText})`,
+        statusCode: res.status,
+        isNotFound,
+        errorMessage: isNotFound
+          ? '세미나 정보를 찾을 수 없습니다. (HTTP 404)'
+          : `HTTP GET ${url} 실패 (상태 코드: ${res.status}, ${res.statusText})`,
       };
     }
 
@@ -484,6 +493,7 @@ export async function fetchSeminarDetail(
         success: false,
         seminarId: sid,
         isAuthExpired: false,
+        statusCode: res.status,
         errorMessage: `세미나 상세 API 응답 JSON 파싱 실패: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`,
         rawResponse: res.body,
       };
@@ -494,7 +504,27 @@ export async function fetchSeminarDetail(
         success: false,
         seminarId: sid,
         isAuthExpired: true,
+        statusCode: 401,
         errorMessage: parsed.message || '로그인이 필요합니다.',
+        rawResponse: parsed,
+      };
+    }
+
+    const isNotFound =
+      parsed.code === 404 ||
+      parsed.code === '404' ||
+      !parsed.seminarDetail ||
+      (typeof parsed.message === 'string' &&
+        (parsed.message.includes('세미나 정보를 찾을 수 없습니다') || parsed.message.includes('찾을 수 없습니다')));
+
+    if (isNotFound) {
+      return {
+        success: false,
+        seminarId: sid,
+        isAuthExpired: false,
+        statusCode: 404,
+        isNotFound: true,
+        errorMessage: parsed.message || '세미나 정보를 찾을 수 없습니다.',
         rawResponse: parsed,
       };
     }
@@ -519,6 +549,8 @@ export async function fetchSeminarDetail(
       surveyState,
       isPointExcluded,
       hasEntryHistory,
+      statusCode: res.status,
+      isNotFound: false,
       rawResponse: parsed,
     };
   } catch (err) {

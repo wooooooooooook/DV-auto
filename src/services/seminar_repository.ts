@@ -318,6 +318,14 @@ export function markSeminarUrgentNotified(seminarId: string): void {
 }
 
 /**
+ * 특정 세미나를 비공개/삭제 상태(is_closed = 1)로 마킹합니다.
+ */
+export function markSeminarClosed(seminarId: string): void {
+  const db = getDatabase();
+  db.prepare('UPDATE seminars SET is_closed = 1, updated_at = ? WHERE seminar_id = ?').run(Date.now(), seminarId);
+}
+
+/**
  * 60일(retentionDays) 이상 지난 만료된 세미나를 삭제합니다.
  */
 export function deleteExpiredSeminars(referenceDate: string, retentionDays: number = 60): number {
