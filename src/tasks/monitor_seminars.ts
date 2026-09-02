@@ -543,7 +543,12 @@ export const activeMonitors = new Set<Map<string, MonitoredSeminarItem>>();
 export function formatQuizAnswerInput(rawAnswer: string): string {
   const trimmed = rawAnswer.trim();
   if (!trimmed) return '';
-  if (trimmed.startsWith('퀴즈 정답') || trimmed.startsWith('퀴즈정답')) {
+  if (
+    trimmed.startsWith('퀴즈 정답') ||
+    trimmed.startsWith('퀴즈정답') ||
+    /^\[.+?\]\s*(?:퀴즈\s*)?정답/i.test(trimmed) ||
+    /^정답\s*[:\s]/i.test(trimmed)
+  ) {
     return trimmed;
   }
   return `퀴즈 정답 ${trimmed}`;
@@ -667,20 +672,17 @@ export async function setSeminarQuizAnswer(
   // 1. 활성 모니터링 맵 업데이트 (실행 중인 모니터링이 있는 경우)
   const isLiveUpdated = updateActiveSeminarQuiz(cleanSeminarId, formattedAnswer);
 
-  // 2. 공지방(채널) 메시지 검색
+  // 2. 공지방(채널) 메시지 검색 (getRecentChannelMessages는 이미 최신순 DESC 정렬)
   const recentMessages = getRecentChannelMessages(50).filter((m) => m.status !== 'deleted' && m.text);
 
-  // seminarId가 포함된 가장 최근의 세미나 현황 메시지 검색 (뒤에서부터)
-  const targetMsg = recentMessages
-    .slice()
-    .reverse()
-    .find(
-      (m) =>
-        m.text &&
-        (m.text.includes(`/seminar/${cleanSeminarId}`) ||
-          m.text.includes(`seminar_id=${cleanSeminarId}`) ||
-          m.text.includes(cleanSeminarId)),
-    );
+  // seminarId가 포함된 가장 최근의 세미나 현황 메시지 검색 (최신순에서 첫 번째 매칭)
+  const targetMsg = recentMessages.find(
+    (m) =>
+      m.text &&
+      (m.text.includes(`/seminar/${cleanSeminarId}`) ||
+        m.text.includes(`seminar_id=${cleanSeminarId}`) ||
+        m.text.includes(cleanSeminarId)),
+  );
 
   if (!targetMsg) {
     return {

@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import * as channelRepo from '../src/services/channel_message_repository';
 import {
   formatQuizAnswerInput,
   updateSeminarQuizInMessageText,
@@ -23,6 +24,14 @@ describe('formatQuizAnswerInput', () => {
     expect(formatQuizAnswerInput('퀴즈 정답 112')).toBe('퀴즈 정답 112');
     expect(formatQuizAnswerInput('퀴즈정답 123')).toBe('퀴즈정답 123');
     expect(formatQuizAnswerInput('퀴즈 정답: 1번 O, 2번 X')).toBe('퀴즈 정답: 1번 O, 2번 X');
+  });
+
+  it('대괄호 마커([퀴즈], [OX] 등) 또는 "정답 :" 접두사가 있는 경우 중복 접두사 방지', () => {
+    expect(formatQuizAnswerInput('[퀴즈] 정답 112')).toBe('[퀴즈] 정답 112');
+    expect(formatQuizAnswerInput('[OX] 정답 12')).toBe('[OX] 정답 12');
+    expect(formatQuizAnswerInput('[주관식] 정답 아스피린')).toBe('[주관식] 정답 아스피린');
+    expect(formatQuizAnswerInput('정답 : 1번 O, 2번 X')).toBe('정답 : 1번 O, 2번 X');
+    expect(formatQuizAnswerInput('정답: 2번')).toBe('정답: 2번');
   });
 
   it('공백 문자열 처리', () => {
@@ -197,5 +206,68 @@ describe('setSeminarQuizAnswer 통합 동작', () => {
     const res2 = await setSeminarQuizAnswer('12345', '   ');
     expect(res2.success).toBe(false);
     expect(res2.message).toContain('퀴즈 정답');
+  });
+
+  it('다수의 공지 메시지 중 가장 최신 메시지(DESC 정렬 첫 번째 항목)를 찾아 즉시 수정', async () => {
+    const oldText = [
+      '🔔 점심세미나',
+      '',
+      '🔴 종료 | 12:30 세미나',
+      'https://m.doctorville.co.kr/cme/seminar/5612',
+      '(설문 마감 약 40분 남음)',
+    ].join('\n');
+
+    const latestText = [
+      '🔔 저녁세미나',
+      '',
+      '🔴 종료 | 18:30 세미나',
+      'https://m.doctorville.co.kr/cme/seminar/5612',
+      '(설문 마감 약 30분 남음)',
+    ].join('\n');
+
+    const mockMessages: channelRepo.ChannelMessageRecord[] = [
+      {
+        id: 2,
+        messageId: 2489,
+        channelId: '-1001234567890',
+        date: '2026-09-02',
+        status: 'sent',
+        text: latestText,
+        mediaType: 'text',
+        createdAt: '2026-09-02T19:00:00.000Z',
+      },
+      {
+        id: 1,
+        messageId: 2488,
+        channelId: '-1001234567890',
+        date: '2026-09-02',
+        status: 'sent',
+        text: oldText,
+        mediaType: 'text',
+        createdAt: '2026-09-02T13:00:00.000Z',
+      },
+    ];
+
+    const getRecentSpy = vi.spyOn(channelRepo, 'getRecentChannelMessages').mockReturnValue(mockMessages);
+    const editSpy = vi.spyOn(channelRepo, 'editChannelMessage').mockResolvedValue({
+      success: true,
+      message: '메시지 수정 완료',
+    });
+    const updateStatusSpy = vi.spyOn(channelRepo, 'updateChannelMessageStatus').mockImplementation(() => {});
+
+    const res = await setSeminarQuizAnswer('5612', '234');
+
+    expect(res.success).toBe(true);
+    expect(res.channelMessageId).toBe(2489); // 과거 메시지 2488이 아닌 최신 메시지 2489가 수정되어야 함!
+    expect(editSpy).toHaveBeenCalledWith(
+      2489,
+      expect.stringContaining('퀴즈 정답 234'),
+      expect.objectContaining({ channelId: '-1001234567890' }),
+    );
+    expect(updateStatusSpy).toHaveBeenCalledWith(2489, 'edited', expect.any(String), '-1001234567890');
+
+    getRecentSpy.mockRestore();
+    editSpy.mockRestore();
+    updateStatusSpy.mockRestore();
   });
 });

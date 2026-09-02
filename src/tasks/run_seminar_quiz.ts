@@ -1,6 +1,7 @@
 import type { BrowserContext, Page } from 'playwright';
 import type { PlaywrightRunArgs, TaskContext, TaskResult } from '../types';
 import { ensureLoggedIn, safeGoto } from '../modules/utils';
+import { extractQuizSummaryOnly, setSeminarQuizAnswer } from './monitor_seminars';
 import { processSeminarQuiz } from './seminar_quiz';
 
 /**
@@ -90,9 +91,26 @@ async function run({ page }: PlaywrightRunArgs, options?: Record<string, unknown
     await quizPage.waitForTimeout(5000);
 
     const quizResult = await processSeminarQuiz(quizPage, seminarId, isAdvancedSurvey);
+
+    let channelSyncNotice = '';
+    if (quizResult.success && quizResult.hasQuizResult && quizResult.message) {
+      const quizSummary = extractQuizSummaryOnly(quizResult.message) || quizResult.message;
+      try {
+        const syncRes = await setSeminarQuizAnswer(seminarId, quizSummary);
+        if (syncRes.success) {
+          channelSyncNotice = `\n\n${syncRes.message}`;
+        } else {
+          channelSyncNotice = `\n\n⚠️ 공지 메시지 정답 등록 실패: ${syncRes.message}`;
+        }
+      } catch (syncErr) {
+        const syncMsg = syncErr instanceof Error ? syncErr.message : String(syncErr);
+        channelSyncNotice = `\n\n⚠️ 공지 메시지 동기화 오류: ${syncMsg}`;
+      }
+    }
+
     return {
       success: quizResult.success,
-      message: `[수동세미나 ${seminarId}${isAdvancedSurvey ? ' (심화)' : ''}] ${quizResult.message || '완료'}`,
+      message: `[수동세미나 ${seminarId}${isAdvancedSurvey ? ' (심화)' : ''}] ${quizResult.message || '완료'}${channelSyncNotice}`,
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
