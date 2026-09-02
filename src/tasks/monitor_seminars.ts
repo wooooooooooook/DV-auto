@@ -247,9 +247,73 @@ export function extractQuizSummaryOnly(quizMessage?: string | null): string | nu
   return lines[0];
 }
 
+interface ParsedPrevSeminar {
+  status: SeminarStatus;
+  seminarId: string | null;
+  url: string | null;
+  title: string | null;
+}
+
+const STATUS_PREFIX_REGEX = /^(?:(🔴)\s*종료|(🟢)\s*입장가능|(⏳)\s*대기)/;
+
+/**
+ * 기존 공지 메시지 본문에서 세미나 항목별 상태, seminarId, url, 제목을 정규식으로 파싱합니다.
+ */
+export function parsePrevNoticeSeminars(prevText: string): ParsedPrevSeminar[] {
+  if (!prevText || !prevText.trim()) return [];
+
+  const results: ParsedPrevSeminar[] = [];
+  const lines = prevText.split('\n');
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    const match = line.match(STATUS_PREFIX_REGEX);
+    if (!match) continue;
+
+    let status: SeminarStatus = '대기';
+    if (match[1]) {
+      status = '종료';
+    } else if (match[2]) {
+      status = '입장가능';
+    } else if (match[3]) {
+      status = '대기';
+    }
+
+    // 상태 라인에서 title 추출 (예: "🔴 종료 | 18:30~20:00 제목")
+    let title: string | null = null;
+    const pipeIdx = line.indexOf('|');
+    if (pipeIdx !== -1) {
+      title = line.slice(pipeIdx + 1).trim();
+    }
+
+    // 바로 다음 줄(들)에서 URL / seminarId 탐색
+    let seminarId: string | null = null;
+    let url: string | null = null;
+
+    for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+      const nextLine = lines[j].trim();
+      if (STATUS_PREFIX_REGEX.test(nextLine) || nextLine.startsWith('💬') || nextLine.startsWith('━')) {
+        break;
+      }
+      if (nextLine.startsWith('http://') || nextLine.startsWith('https://')) {
+        url = nextLine;
+        const idMatch = nextLine.match(/\/seminar\/(\d+)/);
+        if (idMatch) {
+          seminarId = idMatch[1];
+        }
+        break;
+      }
+    }
+
+    results.push({ status, seminarId, url, title });
+  }
+
+  return results;
+}
+
 /**
  * 기존 공지 메시지 본문과 현재 세미나 목록을 비교하여,
- * 세미나의 시작(대기 -> 입장가능) 또는 종료(입장가능/대기 -> 종료), 신규 세미나 추가 등
+ * 세미나의 시작(대기 -> 입장가능) 또는 종료(입장가능/대기 -> 종료), 신규 세미나 추가, 세미나 삭제 등
  * 주요 상태 전이(State Transition)가 발생했는지 판별합니다.
  * (단순 설문 시간 갱신이나 댓글 추가 등은 상태 전이 없음(false)으로 판정)
  */
@@ -257,78 +321,40 @@ export function hasSeminarStatusTransition(prevText: string, currentSeminars: Mo
   if (!prevText || !prevText.trim()) {
     return true;
   }
-  if (currentSeminars.length === 0) {
-    return false;
+
+  const prevSeminars = parsePrevNoticeSeminars(prevText);
+
+  // 1. 세미나 개수가 다르면 (신규 추가 또는 취소/삭제로 목록에서 사라진 경우) -> 상태 전이 발생
+  if (prevSeminars.length !== currentSeminars.length) {
+    return true;
   }
 
-  const lines = prevText.split('\n');
+  // 2. 현재 세미나 목록의 각 세미나와 이전 세미나 목록 매칭 및 상태 비교
+  for (const current of currentSeminars) {
+    const currentId = current.seminarId ? String(current.seminarId).trim() : null;
 
-  for (const seminar of currentSeminars) {
-    const seminarId = seminar.seminarId ? String(seminar.seminarId).trim() : null;
-    const truncatedName = seminar.name.length > 20 ? seminar.name.slice(0, 20) : seminar.name;
-    const shortName = seminar.name.length > 10 ? seminar.name.slice(0, 10) : seminar.name;
+    let matched: ParsedPrevSeminar | undefined;
 
-    // prevText에서 해당 세미나 라인 찾기
-    let matchedLineIndex = -1;
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      if (
-        (seminarId && line.includes(`/seminar/${seminarId}`)) ||
-        line.includes(truncatedName) ||
-        line.includes(shortName)
-      ) {
-        matchedLineIndex = i;
-        break;
-      }
+    if (currentId) {
+      // seminarId 존재 시 ID 매칭만 사용
+      matched = prevSeminars.find((p) => p.seminarId === currentId);
+    } else {
+      // seminarId가 없는 경우에만 URL 또는 제목으로 매칭
+      matched = prevSeminars.find((p) => {
+        if (current.url && p.url && p.url === current.url) return true;
+        const truncatedName = current.name.length > 20 ? current.name.slice(0, 20) : current.name;
+        if (p.title && (p.title.includes(truncatedName) || current.name.includes(p.title))) return true;
+        return false;
+      });
     }
 
-    if (matchedLineIndex === -1) {
-      // 기존 메시지에 없던 신규 세미나 감지됨 -> 상태 전이 발생
+    if (!matched) {
+      // 이전 공지에 없던 세미나 -> 상태 전이 발생
       return true;
     }
 
-    // 상태 표시 라인(🔴, 🟢, ⏳ 등 이모지나 키워드가 포함된 라인) 탐색
-    let statusLine = lines[matchedLineIndex];
-    if (
-      !statusLine.includes('🔴') &&
-      !statusLine.includes('🟢') &&
-      !statusLine.includes('⏳') &&
-      !statusLine.includes('종료') &&
-      !statusLine.includes('입장가능') &&
-      !statusLine.includes('대기')
-    ) {
-      // 매칭된 줄이 URL인 경우 바로 윗줄이 상태 표시 라인일 수 있음
-      if (matchedLineIndex > 0) {
-        const prevLine = lines[matchedLineIndex - 1];
-        if (
-          prevLine.includes('🔴') ||
-          prevLine.includes('🟢') ||
-          prevLine.includes('⏳') ||
-          prevLine.includes('종료') ||
-          prevLine.includes('입장가능') ||
-          prevLine.includes('대기')
-        ) {
-          statusLine = prevLine;
-        }
-      }
-    }
-
-    let prevStatus: SeminarStatus | 'unknown' = 'unknown';
-    if (statusLine.includes('🔴') || statusLine.includes('종료')) {
-      prevStatus = '종료';
-    } else if (statusLine.includes('🟢') || statusLine.includes('입장가능')) {
-      prevStatus = '입장가능';
-    } else if (statusLine.includes('⏳') || statusLine.includes('대기')) {
-      prevStatus = '대기';
-    }
-
-    if (prevStatus === 'unknown') {
-      return true;
-    }
-
-    // 현재 세미나 상태와 이전 상태 비교
-    if (seminar.status !== prevStatus) {
+    // 상태 비교 (대기 -> 입장가능, 입장가능 -> 종료 등)
+    if (matched.status !== current.status) {
       return true;
     }
   }
