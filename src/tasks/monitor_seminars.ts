@@ -21,10 +21,13 @@ import * as seminarRepo from '../services/seminar_repository';
 import {
   editChannelMessage,
   getSeminarStatusChannelMessage,
+  getChannelMessageById,
   publishAndReplaceChannelNotice,
   getRecentChannelMessages,
   updateChannelMessageStatus,
+  getChannelCommentsByParentMessageId,
 } from '../services/channel_message_repository';
+import * as logger from '../services/logger';
 import { sendToTopicSubscribers, type SubscriptionTopic } from '../services/subscription_service';
 
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
@@ -242,6 +245,121 @@ export function extractQuizSummaryOnly(quizMessage?: string | null): string | nu
     .filter((l) => l.length > 0);
   if (lines.length === 0) return null;
   return lines[0];
+}
+
+interface ParsedPrevSeminar {
+  status: SeminarStatus;
+  seminarId: string | null;
+  url: string | null;
+  title: string | null;
+}
+
+const STATUS_PREFIX_REGEX = /^(?:(🔴)\s*종료|(🟢)\s*입장가능|(⏳)\s*대기)/;
+
+/**
+ * 기존 공지 메시지 본문에서 세미나 항목별 상태, seminarId, url, 제목을 정규식으로 파싱합니다.
+ */
+export function parsePrevNoticeSeminars(prevText: string): ParsedPrevSeminar[] {
+  if (!prevText || !prevText.trim()) return [];
+
+  const results: ParsedPrevSeminar[] = [];
+  const lines = prevText.split('\n');
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    const match = line.match(STATUS_PREFIX_REGEX);
+    if (!match) continue;
+
+    let status: SeminarStatus = '대기';
+    if (match[1]) {
+      status = '종료';
+    } else if (match[2]) {
+      status = '입장가능';
+    } else if (match[3]) {
+      status = '대기';
+    }
+
+    // 상태 라인에서 title 추출 (예: "🔴 종료 | 18:30~20:00 제목")
+    let title: string | null = null;
+    const pipeIdx = line.indexOf('|');
+    if (pipeIdx !== -1) {
+      title = line.slice(pipeIdx + 1).trim();
+    }
+
+    // 바로 다음 줄(들)에서 URL / seminarId 탐색
+    let seminarId: string | null = null;
+    let url: string | null = null;
+
+    for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+      const nextLine = lines[j].trim();
+      if (STATUS_PREFIX_REGEX.test(nextLine) || nextLine.startsWith('💬') || nextLine.startsWith('━')) {
+        break;
+      }
+      if (nextLine.startsWith('http://') || nextLine.startsWith('https://')) {
+        url = nextLine;
+        const idMatch = nextLine.match(/\/seminar\/(\d+)/);
+        if (idMatch) {
+          seminarId = idMatch[1];
+        }
+        break;
+      }
+    }
+
+    results.push({ status, seminarId, url, title });
+  }
+
+  return results;
+}
+
+/**
+ * 기존 공지 메시지 본문과 현재 세미나 목록을 비교하여,
+ * 세미나의 시작(대기 -> 입장가능) 또는 종료(입장가능/대기 -> 종료), 신규 세미나 추가 등
+ * 주요 상태 전이(State Transition)가 발생했는지 판별합니다.
+ * - 신규 세미나 추가 또는 세미나 상태(시작/종료) 변화 시: true (새 공지 발행)
+ * - 단순 설문 시간 갱신, 댓글 추가, 세미나 취소/삭제 시: false (기존 메시지 edit)
+ * - currentSeminars가 빈 배열인 경우: false
+ */
+export function hasSeminarStatusTransition(prevText: string, currentSeminars: MonitoredSeminarItem[]): boolean {
+  if (!prevText || !prevText.trim()) {
+    return true;
+  }
+  if (currentSeminars.length === 0) {
+    return false;
+  }
+
+  const prevSeminars = parsePrevNoticeSeminars(prevText);
+
+  // 현재 세미나 목록의 각 세미나와 이전 세미나 목록 매칭 및 상태 비교
+  for (const current of currentSeminars) {
+    const currentId = current.seminarId ? String(current.seminarId).trim() : null;
+
+    let matched: ParsedPrevSeminar | undefined;
+
+    if (currentId) {
+      // seminarId 존재 시 ID 매칭만 사용
+      matched = prevSeminars.find((p) => p.seminarId === currentId);
+    } else {
+      // seminarId가 없는 경우에만 URL 또는 제목으로 매칭
+      matched = prevSeminars.find((p) => {
+        if (current.url && p.url && p.url === current.url) return true;
+        const truncatedName = current.name.length > 20 ? current.name.slice(0, 20) : current.name;
+        if (p.title && (p.title.includes(truncatedName) || current.name.includes(p.title))) return true;
+        return false;
+      });
+    }
+
+    if (!matched) {
+      // 이전 공지에 없던 세미나 -> 상태 전이 발생
+      return true;
+    }
+
+    // 상태 비교 (대기 -> 입장가능, 입장가능 -> 종료 등)
+    if (matched.status !== current.status) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /**
@@ -1761,20 +1879,48 @@ async function monitorSeminars(
     let lastStatusNoticeText: string | null = null;
 
     if (hasInitialActiveOrEnded) {
-      const targetStatusText = buildSeminarStatusMessage(periodName, seminarList, isAllInitiallyCompleted).text;
-
-      // resume 시 기존 공지 메시지가 존재하는 경우: 인플레이스 수정(edit)을 우선 시도하여 불필요한 채널 푸시 알림 방지
       if (isAutoResume && lastStatusNoticeMessageId) {
-        const editRes = await editChannelMessage(lastStatusNoticeMessageId, targetStatusText);
-        if (editRes.success) {
-          lastStatusNoticeText = targetStatusText;
+        const existingMsg =
+          getChannelMessageById(lastStatusNoticeMessageId) || getSeminarStatusChannelMessage(periodName, todayIsoDate);
+        const attachedComments = getChannelCommentsByParentMessageId(lastStatusNoticeMessageId).map((r) => ({
+          userName: r.userName,
+          text: r.text,
+        }));
+        const targetStatusText = buildSeminarStatusMessage(
+          periodName,
+          seminarList,
+          isAllInitiallyCompleted,
+          attachedComments,
+        ).text;
+
+        const hasTransition =
+          !isAllInitiallyCompleted && existingMsg?.text
+            ? hasSeminarStatusTransition(existingMsg.text, seminarList)
+            : false;
+
+        if (!hasTransition) {
+          logger.info(
+            `[${periodName}] [isAutoResume] 세미나 상태 전이가 없거나 이미 완료되었으므로 기존 메시지(ID: ${lastStatusNoticeMessageId}) 인플레이스 수정(Edit)만 수행합니다.`,
+          );
+          const editRes = await editChannelMessage(lastStatusNoticeMessageId, targetStatusText);
+          if (editRes.success) {
+            lastStatusNoticeText = targetStatusText;
+          } else {
+            logger.warn(
+              `[${periodName}] [isAutoResume] 기존 메시지 수정 실패 (재발송 방지를 위해 기존 ID 유지): ${editRes.message}`,
+            );
+            lastStatusNoticeText = targetStatusText;
+          }
         } else {
+          // 모니터링 진행 중 세미나 시작/종료 등 상태 전이가 발생한 경우에만 새 공지 발행
+          logger.info(`[${periodName}] [isAutoResume] 세미나 상태 전이 감지됨 -> 새 공지 메시지 발행`);
           lastStatusNoticeMessageId = await publishSeminarStatusNotice(
             periodName,
             seminarList,
             lastStatusNoticeMessageId,
             isAllInitiallyCompleted,
             isAutoResume,
+            attachedComments,
           );
           lastStatusNoticeText = targetStatusText;
         }
@@ -1786,7 +1932,18 @@ async function monitorSeminars(
           isAllInitiallyCompleted,
           isAutoResume,
         );
-        lastStatusNoticeText = targetStatusText;
+        const attachedComments = lastStatusNoticeMessageId
+          ? getChannelCommentsByParentMessageId(lastStatusNoticeMessageId).map((r) => ({
+              userName: r.userName,
+              text: r.text,
+            }))
+          : [];
+        lastStatusNoticeText = buildSeminarStatusMessage(
+          periodName,
+          seminarList,
+          isAllInitiallyCompleted,
+          attachedComments,
+        ).text;
       }
     }
 
@@ -2199,11 +2356,18 @@ async function monitorSeminars(
       });
       const isAllCompleted = isAllSeminarsEnded && (!waitForSurveyClose || isAllSurveysClosed);
 
+      const attachedComments = lastStatusNoticeMessageId
+        ? getChannelCommentsByParentMessageId(lastStatusNoticeMessageId).map((r) => ({
+            userName: r.userName,
+            text: r.text,
+          }))
+        : [];
+
       const currentStatusText = buildSeminarStatusMessage(
         periodName,
         currentList,
         isAllCompleted,
-        undefined,
+        attachedComments,
         currentNowMs,
       ).text;
 
@@ -2215,6 +2379,7 @@ async function monitorSeminars(
           lastStatusNoticeMessageId,
           isAllCompleted,
           isAutoResume,
+          attachedComments,
         );
         lastStatusNoticeText = currentStatusText;
 
@@ -2229,12 +2394,8 @@ async function monitorSeminars(
           if (editRes.success) {
             lastStatusNoticeText = currentStatusText;
           } else {
-            lastStatusNoticeMessageId = await publishSeminarStatusNotice(
-              periodName,
-              currentList,
-              lastStatusNoticeMessageId,
-              isAllCompleted,
-              isAutoResume,
+            logger.warn(
+              `[${periodName}] 채널 메시지(ID: ${lastStatusNoticeMessageId}) 인플레이스 수정 실패 (재발송 없이 유지): ${editRes.message}`,
             );
             lastStatusNoticeText = currentStatusText;
           }
@@ -2245,6 +2406,7 @@ async function monitorSeminars(
             lastStatusNoticeMessageId,
             isAllCompleted,
             isAutoResume,
+            attachedComments,
           );
           lastStatusNoticeText = currentStatusText;
         }
