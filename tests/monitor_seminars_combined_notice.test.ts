@@ -356,7 +356,7 @@ https://m.doctorville.co.kr/cme/seminar/5612`;
       assert.strictEqual(result, true, '신규 세미나 추가 감지');
     });
 
-    it('기존 메시지에 있던 세미나가 삭제/취소되어 현재 목록에서 사라진 경우 상태 전이 있음(true)을 반환해야 함', () => {
+    it('기존 메시지에 있던 세미나가 삭제/취소되어 현재 목록에서 사라진 경우 상태 전이 없음(false)을 반환하고 기존 메시지 수정(edit) 대상이어야 함', () => {
       const prevText = `🔔 저녁세미나
 
 🔴 종료 | 18:30~20:00 BEYOND Web Symposium
@@ -365,7 +365,7 @@ https://m.doctorville.co.kr/cme/seminar/5612
 🔴 종료 | 18:30~20:00 [EZcare WEEK] 개원가의 눈
 https://m.doctorville.co.kr/cme/seminar/5638`;
 
-      // 5638번 세미나가 취소/삭제되어 현재 목록에서 빠진 상태
+      // 5638번 세미나가 취소/삭제되어 현재 목록에서 빠진 상태 (5612번만 남음)
       const currentSeminars: MonitoredSeminarItem[] = [
         {
           seminarId: '5612',
@@ -378,9 +378,19 @@ https://m.doctorville.co.kr/cme/seminar/5638`;
       const result = hasSeminarStatusTransition(prevText, currentSeminars);
       assert.strictEqual(
         result,
-        true,
-        '세미나가 삭제되어 목록에서 줄어들었으므로 상태 전이(공지 갱신 필요)로 판정해야 함',
+        false,
+        '세미나가 삭제된 경우 재발송하지 않고 false를 반환하여 기존 메시지 edit으로 반영해야 함',
       );
+    });
+
+    it('currentSeminars가 빈 배열인 경우 신규 전이로 판단하지 않고 false를 반환해야 함', () => {
+      const prevText = `🔔 저녁세미나
+
+🔴 종료 | 18:30~20:00 BEYOND Web Symposium
+https://m.doctorville.co.kr/cme/seminar/5612`;
+
+      const result = hasSeminarStatusTransition(prevText, []);
+      assert.strictEqual(result, false, '현재 세미나 목록이 빈 배열이면 false 반환');
     });
 
     it('동일한 prefix 제목을 가진 세미나 2개가 있을 때 seminarId로 각각 정확히 독립 매칭되는지 검증', () => {

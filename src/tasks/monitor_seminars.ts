@@ -313,23 +313,23 @@ export function parsePrevNoticeSeminars(prevText: string): ParsedPrevSeminar[] {
 
 /**
  * 기존 공지 메시지 본문과 현재 세미나 목록을 비교하여,
- * 세미나의 시작(대기 -> 입장가능) 또는 종료(입장가능/대기 -> 종료), 신규 세미나 추가, 세미나 삭제 등
+ * 세미나의 시작(대기 -> 입장가능) 또는 종료(입장가능/대기 -> 종료), 신규 세미나 추가 등
  * 주요 상태 전이(State Transition)가 발생했는지 판별합니다.
- * (단순 설문 시간 갱신이나 댓글 추가 등은 상태 전이 없음(false)으로 판정)
+ * - 신규 세미나 추가 또는 세미나 상태(시작/종료) 변화 시: true (새 공지 발행)
+ * - 단순 설문 시간 갱신, 댓글 추가, 세미나 취소/삭제 시: false (기존 메시지 edit)
+ * - currentSeminars가 빈 배열인 경우: false
  */
 export function hasSeminarStatusTransition(prevText: string, currentSeminars: MonitoredSeminarItem[]): boolean {
   if (!prevText || !prevText.trim()) {
     return true;
   }
+  if (currentSeminars.length === 0) {
+    return false;
+  }
 
   const prevSeminars = parsePrevNoticeSeminars(prevText);
 
-  // 1. 세미나 개수가 다르면 (신규 추가 또는 취소/삭제로 목록에서 사라진 경우) -> 상태 전이 발생
-  if (prevSeminars.length !== currentSeminars.length) {
-    return true;
-  }
-
-  // 2. 현재 세미나 목록의 각 세미나와 이전 세미나 목록 매칭 및 상태 비교
+  // 현재 세미나 목록의 각 세미나와 이전 세미나 목록 매칭 및 상태 비교
   for (const current of currentSeminars) {
     const currentId = current.seminarId ? String(current.seminarId).trim() : null;
 
