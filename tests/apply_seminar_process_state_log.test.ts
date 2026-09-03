@@ -2,14 +2,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   formatProcessStateDistribution,
   logProcessStateDistribution,
-  runHttpOnly,
-  applySeminarExtraTask,
+  syncSeminars,
+  syncSeminarsTask,
 } from '../src/tasks/apply_seminar';
 import { ProcessState } from '../src/modules/seminar_api';
 import * as seminarApiModule from '../src/modules/seminar_api';
 import * as checkSeminarPointModule from '../src/tasks/check_seminar_point';
 
-describe('apply_seminar_extra processState 상태 분포 로그 테스트', () => {
+describe('sync_seminars processState 상태 분포 로그 테스트', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
   });
@@ -54,21 +54,21 @@ describe('apply_seminar_extra processState 상태 분포 로그 테스트', () =
 
       const result = formatProcessStateDistribution(seminars);
       expect(result).toBe(
-        '[apply_seminar_extra] processState: total=23 ENTER=2 APPLY=3 CANCEL=1 PREPARING=5 EXCESS=0 STARTED=4 END=6 COMPLETED=2 unknown=0',
+        '[sync_seminars] processState: total=23 ENTER=2 APPLY=3 CANCEL=1 PREPARING=5 EXCESS=0 STARTED=4 END=6 COMPLETED=2 unknown=0',
       );
     });
 
-    it('label이 지정된 경우 [apply_seminar_extra] processState (label): 형식으로 포맷팅한다', () => {
+    it('label이 지정된 경우 [sync_seminars] processState (label): 형식으로 포맷팅한다', () => {
       const seminars = [{ processState: ProcessState.PROCESS_ENTER }, { processState: ProcessState.PROCESS_APPLY }];
 
       const totalResult = formatProcessStateDistribution(seminars, 'total');
       expect(totalResult).toBe(
-        '[apply_seminar_extra] processState (total): total=2 ENTER=1 APPLY=1 CANCEL=0 PREPARING=0 EXCESS=0 STARTED=0 END=0 COMPLETED=0 unknown=0',
+        '[sync_seminars] processState (total): total=2 ENTER=1 APPLY=1 CANCEL=0 PREPARING=0 EXCESS=0 STARTED=0 END=0 COMPLETED=0 unknown=0',
       );
 
       const futureResult = formatProcessStateDistribution(seminars, 'future');
       expect(futureResult).toBe(
-        '[apply_seminar_extra] processState (future): total=2 ENTER=1 APPLY=1 CANCEL=0 PREPARING=0 EXCESS=0 STARTED=0 END=0 COMPLETED=0 unknown=0',
+        '[sync_seminars] processState (future): total=2 ENTER=1 APPLY=1 CANCEL=0 PREPARING=0 EXCESS=0 STARTED=0 END=0 COMPLETED=0 unknown=0',
       );
     });
 
@@ -84,7 +84,7 @@ describe('apply_seminar_extra processState 상태 분포 로그 테스트', () =
 
       const result = formatProcessStateDistribution(seminars);
       expect(result).toBe(
-        '[apply_seminar_extra] processState: total=6 ENTER=1 APPLY=0 CANCEL=0 PREPARING=0 EXCESS=0 STARTED=0 END=0 COMPLETED=0 unknown=5',
+        '[sync_seminars] processState: total=6 ENTER=1 APPLY=0 CANCEL=0 PREPARING=0 EXCESS=0 STARTED=0 END=0 COMPLETED=0 unknown=5',
       );
     });
 
@@ -97,14 +97,14 @@ describe('apply_seminar_extra processState 상태 분포 로그 테스트', () =
 
       const result = formatProcessStateDistribution(seminars);
       expect(result).toBe(
-        '[apply_seminar_extra] processState: total=3 ENTER=1 APPLY=1 CANCEL=1 PREPARING=0 EXCESS=0 STARTED=0 END=0 COMPLETED=0 unknown=0',
+        '[sync_seminars] processState: total=3 ENTER=1 APPLY=1 CANCEL=1 PREPARING=0 EXCESS=0 STARTED=0 END=0 COMPLETED=0 unknown=0',
       );
     });
 
     it('빈 세미나 목록인 경우 모든 카운트가 0으로 포맷팅된다', () => {
       const result = formatProcessStateDistribution([]);
       expect(result).toBe(
-        '[apply_seminar_extra] processState: total=0 ENTER=0 APPLY=0 CANCEL=0 PREPARING=0 EXCESS=0 STARTED=0 END=0 COMPLETED=0 unknown=0',
+        '[sync_seminars] processState: total=0 ENTER=0 APPLY=0 CANCEL=0 PREPARING=0 EXCESS=0 STARTED=0 END=0 COMPLETED=0 unknown=0',
       );
     });
   });
@@ -120,7 +120,7 @@ describe('apply_seminar_extra processState 상태 분포 로그 테스트', () =
 
       expect(consoleLogSpy).toHaveBeenCalledTimes(1);
       expect(consoleLogSpy).toHaveBeenCalledWith(
-        '[apply_seminar_extra] processState: total=2 ENTER=1 APPLY=0 CANCEL=1 PREPARING=0 EXCESS=0 STARTED=0 END=0 COMPLETED=0 unknown=0',
+        '[sync_seminars] processState: total=2 ENTER=1 APPLY=0 CANCEL=1 PREPARING=0 EXCESS=0 STARTED=0 END=0 COMPLETED=0 unknown=0',
       );
     });
 
@@ -142,24 +142,24 @@ describe('apply_seminar_extra processState 상태 분포 로그 테스트', () =
       expect(consoleLogSpy).toHaveBeenCalledTimes(2);
       expect(consoleLogSpy).toHaveBeenNthCalledWith(
         1,
-        '[apply_seminar_extra] processState (total): total=3 ENTER=1 APPLY=0 CANCEL=1 PREPARING=0 EXCESS=0 STARTED=0 END=0 COMPLETED=1 unknown=0',
+        '[sync_seminars] processState (total): total=3 ENTER=1 APPLY=0 CANCEL=1 PREPARING=0 EXCESS=0 STARTED=0 END=0 COMPLETED=1 unknown=0',
       );
       expect(consoleLogSpy).toHaveBeenNthCalledWith(
         2,
-        '[apply_seminar_extra] processState (future): total=2 ENTER=1 APPLY=1 CANCEL=0 PREPARING=0 EXCESS=0 STARTED=0 END=0 COMPLETED=0 unknown=0',
+        '[sync_seminars] processState (future): total=2 ENTER=1 APPLY=1 CANCEL=0 PREPARING=0 EXCESS=0 STARTED=0 END=0 COMPLETED=0 unknown=0',
       );
     });
   });
 
-  describe('runHttpOnly 실행 흐름', () => {
-    it('일반적인 runHttpOnly 실행 시 total과 future 세미나 목록에 대해 상태 분포 로그가 각각 1줄씩 출력된다', async () => {
+  describe('syncSeminars 실행 흐름', () => {
+    it('일반적인 syncSeminars 실행 시 total과 future 세미나 목록에 대해 상태 분포 로그가 각각 1줄씩 출력된다', async () => {
       const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
       vi.spyOn(checkSeminarPointModule, 'searchSeminarPoints').mockResolvedValue({
         success: true,
         points: new Map(),
       });
 
-      // 신청 완료 상태 (PROCESS_CANCEL)로만 구성되어 run()으로 위임되지 않음
+      // 신청 완료 상태 (PROCESS_CANCEL)로만 구성되어 applySeminars()로 위임되지 않음
       vi.spyOn(seminarApiModule, 'fetchMainFutureSeminars').mockResolvedValue({
         success: true,
         items: [
@@ -188,23 +188,23 @@ describe('apply_seminar_extra processState 상태 분포 로그 테스트', () =
         ],
       });
 
-      const res = await runHttpOnly({ silentIfNoNew: true, forceEnrich: false });
+      const res = await syncSeminars({ silentIfNoNew: true, forceEnrich: false });
       expect(res.success).toBe(true);
 
-      // [apply_seminar_extra] processState: 로그가 total, future 각각 1번씩 총 2번 호출되었는지 확인
+      // [sync_seminars] processState: 로그가 total, future 각각 1번씩 총 2번 호출되었는지 확인
       const processStateLogs = consoleLogSpy.mock.calls.filter((call) =>
-        String(call[0]).startsWith('[apply_seminar_extra] processState'),
+        String(call[0]).startsWith('[sync_seminars] processState'),
       );
       expect(processStateLogs.length).toBe(2);
       expect(processStateLogs[0][0]).toMatch(
-        /^\[apply_seminar_extra\] processState \(total\): total=\d+ ENTER=\d+ APPLY=\d+ CANCEL=\d+ PREPARING=\d+ EXCESS=\d+ STARTED=\d+ END=\d+ COMPLETED=\d+ unknown=\d+$/,
+        /^\[sync_seminars\] processState \(total\): total=\d+ ENTER=\d+ APPLY=\d+ CANCEL=\d+ PREPARING=\d+ EXCESS=\d+ STARTED=\d+ END=\d+ COMPLETED=\d+ unknown=\d+$/,
       );
       expect(processStateLogs[1][0]).toMatch(
-        /^\[apply_seminar_extra\] processState \(future\): total=\d+ ENTER=\d+ APPLY=\d+ CANCEL=\d+ PREPARING=\d+ EXCESS=\d+ STARTED=\d+ END=\d+ COMPLETED=\d+ unknown=\d+$/,
+        /^\[sync_seminars\] processState \(future\): total=\d+ ENTER=\d+ APPLY=\d+ CANCEL=\d+ PREPARING=\d+ EXCESS=\d+ STARTED=\d+ END=\d+ COMPLETED=\d+ unknown=\d+$/,
       );
     });
 
-    it('applySeminarExtraTask.run 실행 시에도 동일하게 total과 future 로그가 각각 1줄씩 출력된다', async () => {
+    it('syncSeminarsTask.run 실행 시에도 동일하게 total과 future 로그가 각각 1줄씩 출력된다', async () => {
       const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
       vi.spyOn(checkSeminarPointModule, 'searchSeminarPoints').mockResolvedValue({
         success: true,
@@ -228,22 +228,22 @@ describe('apply_seminar_extra processState 상태 분포 로그 테스트', () =
         ],
       });
 
-      const res = await applySeminarExtraTask.run({});
+      const res = await syncSeminarsTask.run({});
       expect(res.success).toBe(true);
 
       const processStateLogs = consoleLogSpy.mock.calls.filter((call) =>
-        String(call[0]).startsWith('[apply_seminar_extra] processState'),
+        String(call[0]).startsWith('[sync_seminars] processState'),
       );
       expect(processStateLogs.length).toBe(2);
       expect(processStateLogs[0][0]).toMatch(
-        /^\[apply_seminar_extra\] processState \(total\): total=\d+ ENTER=\d+ APPLY=\d+ CANCEL=\d+ PREPARING=\d+ EXCESS=\d+ STARTED=\d+ END=\d+ COMPLETED=\d+ unknown=\d+$/,
+        /^\[sync_seminars\] processState \(total\): total=\d+ ENTER=\d+ APPLY=\d+ CANCEL=\d+ PREPARING=\d+ EXCESS=\d+ STARTED=\d+ END=\d+ COMPLETED=\d+ unknown=\d+$/,
       );
       expect(processStateLogs[1][0]).toMatch(
-        /^\[apply_seminar_extra\] processState \(future\): total=\d+ ENTER=\d+ APPLY=\d+ CANCEL=\d+ PREPARING=\d+ EXCESS=\d+ STARTED=\d+ END=\d+ COMPLETED=\d+ unknown=\d+$/,
+        /^\[sync_seminars\] processState \(future\): total=\d+ ENTER=\d+ APPLY=\d+ CANCEL=\d+ PREPARING=\d+ EXCESS=\d+ STARTED=\d+ END=\d+ COMPLETED=\d+ unknown=\d+$/,
       );
     });
 
-    it('신청 대상(PROCESS_APPLY)이 있어 run()으로 위임되는 경우에도 상태 분포 로그가 total과 future 각각 1줄씩 출력된다', async () => {
+    it('신청 대상(PROCESS_APPLY)이 있어 applySeminars()로 위임되는 경우에도 상태 분포 로그가 total과 future 각각 1줄씩 출력된다', async () => {
       const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
       vi.spyOn(checkSeminarPointModule, 'searchSeminarPoints').mockResolvedValue({
         success: true,
@@ -271,18 +271,18 @@ describe('apply_seminar_extra processState 상태 분포 로그 테스트', () =
         ],
       });
 
-      const res = await runHttpOnly({ silentIfNoNew: true, forceEnrich: false });
+      const res = await syncSeminars({ silentIfNoNew: true, forceEnrich: false });
       expect(res.success).toBe(true);
 
       const processStateLogs = consoleLogSpy.mock.calls.filter((call) =>
-        String(call[0]).startsWith('[apply_seminar_extra] processState'),
+        String(call[0]).startsWith('[sync_seminars] processState'),
       );
       expect(processStateLogs.length).toBe(2);
       expect(processStateLogs[0][0]).toMatch(
-        /^\[apply_seminar_extra\] processState \(total\): total=\d+ ENTER=\d+ APPLY=\d+ CANCEL=\d+ PREPARING=\d+ EXCESS=\d+ STARTED=\d+ END=\d+ COMPLETED=\d+ unknown=\d+$/,
+        /^\[sync_seminars\] processState \(total\): total=\d+ ENTER=\d+ APPLY=\d+ CANCEL=\d+ PREPARING=\d+ EXCESS=\d+ STARTED=\d+ END=\d+ COMPLETED=\d+ unknown=\d+$/,
       );
       expect(processStateLogs[1][0]).toMatch(
-        /^\[apply_seminar_extra\] processState \(future\): total=\d+ ENTER=\d+ APPLY=\d+ CANCEL=\d+ PREPARING=\d+ EXCESS=\d+ STARTED=\d+ END=\d+ COMPLETED=\d+ unknown=\d+$/,
+        /^\[sync_seminars\] processState \(future\): total=\d+ ENTER=\d+ APPLY=\d+ CANCEL=\d+ PREPARING=\d+ EXCESS=\d+ STARTED=\d+ END=\d+ COMPLETED=\d+ unknown=\d+$/,
       );
     });
   });

@@ -41,7 +41,7 @@ const HMP_ATTENDANCE_CRON = process.env.HMP_ATTENDANCE_CRON || '7 7 * * *';
 const BROADCAST_TODAY_LINKS_CRON = '0 9 * * *';
 const HOURLY_TODAY_LINKS_EARLY_CRON = '2 0 * * *';
 const HOURLY_TODAY_LINKS_CRON = '0 1-12 * * *';
-const APPLY_SEMINAR_EXTRA_CRON = '*/10 6-23 * * *';
+const SYNC_SEMINARS_CRON = '*/10 6-23 * * *';
 const POINT_CONVERSION_STATE_KEY = 'point_conversion:last_available';
 let isFastPolling = false;
 let fastPollingInterval: NodeJS.Timeout | null = null;
@@ -143,17 +143,17 @@ const scheduledTask: Task = {
 
       // 2. 세미나 신청 & 목록 수집 (100% HTTP 우선, 실패 시 내부 온디맨드 브라우저)
       try {
-        logger.info('daily_routine: Running apply_seminar task (HTTP 우선).');
-        const applyRes = await applySeminarTask.run();
+        logger.info('daily_routine: Running apply_seminars task (HTTP 우선).');
+        const applyRes = await applySeminarTask.applySeminars();
         if (applyRes?.message) {
           await utils
             .sendTelegram(applyRes.message, null, applyRes.options ?? {})
-            .catch((e) => logger.error('Failed to send Telegram message for apply_seminar:', e));
+            .catch((e) => logger.error('Failed to send Telegram message for apply_seminars:', e));
         }
       } catch (err) {
-        logger.error('Error during apply_seminar task:', err);
+        logger.error('Error during apply_seminars task:', err);
         const message = err instanceof Error ? err.message : String(err);
-        await utils.sendTelegram(`daily_routine 중 apply_seminar 작업 실패: ${message}`).catch(() => {});
+        await utils.sendTelegram(`daily_routine 중 apply_seminars 작업 실패: ${message}`).catch(() => {});
       }
 
       // 3. 오늘의 퀴즈 (온디맨드 브라우저 론치 후 퀴즈 풀이 및 퀴즈 정보 캐싱)
@@ -206,9 +206,9 @@ const scheduledTask: Task = {
 scheduler.scheduleTaskCron(scheduledTask);
 taskRegistry.registerTask(scheduledTask);
 
-const applySeminarExtraTask: Task = {
-  name: 'apply_seminar_extra',
-  schedule: APPLY_SEMINAR_EXTRA_CRON,
+const syncSeminarsTask: Task = {
+  name: 'sync_seminars',
+  schedule: SYNC_SEMINARS_CRON,
   timezone: TIMEZONE,
   options: {
     notifyNewSeminarsToChannel: true,
@@ -217,7 +217,7 @@ const applySeminarExtraTask: Task = {
     checkAdvancedPointStatus: true,
   },
   run: async (_ctx, options) => {
-    return await applySeminarTask.runHttpOnly({
+    return await applySeminarTask.syncSeminars({
       notifyNewSeminarsToChannel: true,
       notifyNewSeminarsToTelegram: true,
       silentIfNoNew: true,
@@ -226,8 +226,8 @@ const applySeminarExtraTask: Task = {
     });
   },
 };
-taskRegistry.registerTask(applySeminarExtraTask);
-scheduler.scheduleTaskCron(applySeminarExtraTask);
+taskRegistry.registerTask(syncSeminarsTask);
+scheduler.scheduleTaskCron(syncSeminarsTask);
 const POINT_CONVERSION_CHECK_CRON = '0 9-16 * * *';
 const pointConversionCheckTask: Task = {
   name: 'point_conversion_check',
@@ -239,18 +239,18 @@ const pointConversionCheckTask: Task = {
 };
 taskRegistry.registerTask(pointConversionCheckTask);
 scheduler.scheduleTaskCron(pointConversionCheckTask);
-const applySeminarTaskStandalone: Task = {
-  name: 'apply_seminar',
+const applySeminarsTaskStandalone: Task = {
+  name: 'apply_seminars',
   options: { notifyNewSeminarsToChannel: true, notifyNewSeminarsToTelegram: true },
   run: async (ctx, options) => {
-    return await applySeminarTask.run(ctx, {
+    return await applySeminarTask.applySeminars(ctx, {
       notifyNewSeminarsToChannel: true,
       notifyNewSeminarsToTelegram: true,
       ...options,
     });
   },
 };
-taskRegistry.registerTask(applySeminarTaskStandalone);
+taskRegistry.registerTask(applySeminarsTaskStandalone);
 const todayQuizTask: Task = {
   name: 'today_quiz',
   run: async () => {
@@ -343,9 +343,9 @@ const monitorLunchSeminarsTask: Task = {
   lockTtlMs: 6 * 60 * 60 * 1000,
   run: async (ctx) => {
     await applySeminarTask
-      .run()
+      .applySeminars()
       .catch((err) =>
-        logger.warn('monitor_lunch_seminars: apply_seminar 선실행 실패, 모니터링은 계속 진행합니다', err),
+        logger.warn('monitor_lunch_seminars: apply_seminars 선실행 실패, 모니터링은 계속 진행합니다', err),
       );
     return await monitorLunchSeminars.run({ isAutoResume: ctx.isAutoResume });
   },
@@ -357,9 +357,9 @@ const monitorDinnerSeminarsTask: Task = {
   lockTtlMs: 6 * 60 * 60 * 1000,
   run: async (ctx) => {
     await applySeminarTask
-      .run()
+      .applySeminars()
       .catch((err) =>
-        logger.warn('monitor_dinner_seminars: apply_seminar 선실행 실패, 모니터링은 계속 진행합니다', err),
+        logger.warn('monitor_dinner_seminars: apply_seminars 선실행 실패, 모니터링은 계속 진행합니다', err),
       );
     return await monitorDinnerSeminars.run({ isAutoResume: ctx.isAutoResume });
   },
@@ -554,4 +554,4 @@ refreshPastUncompletedSeminars(3, 250).catch((err) =>
 
 checkAndNotifyPointConversion().catch((err) => logger.error('Startup point-conversion check failed:', err));
 checkAndResumeTasks();
-runTask(applySeminarExtraTask).catch((err) => logger.error('Startup apply_seminar_extra check failed:', err));
+runTask(syncSeminarsTask).catch((err) => logger.error('Startup sync_seminars check failed:', err));

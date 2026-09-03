@@ -4,9 +4,9 @@ import {
   formatSeminarChangeNotification,
   refreshSeminarPointStatus,
   buildNewSeminarsNoticeMessage,
-  run as runApplySeminar,
-  runHttpOnly,
-  applySeminarExtraTask,
+  applySeminars as runApplySeminar,
+  syncSeminars,
+  syncSeminarsTask,
   type SeminarListItem,
   type SeminarInfoChange,
   type SeminarPointChange,
@@ -285,8 +285,8 @@ describe('apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스�
       );
       console.log('  ✓ [Pass] 여러 변경사항 단일 메시지 포맷팅 및 url 포함 성공\n');
 
-      // 10 & 11. apply_seminar_extra 실행 시 변경 알림은 adminbot으로만 전송되고 notice channel에는 전송되지 않는지 모킹 E2E 검증
-      console.log('--- Case 10 & 11: apply_seminar 실행 및 apply_seminar_extra 알림 분리 테스트 ---');
+      // 10 & 11. sync_seminars 실행 시 변경 알림은 adminbot으로만 전송되고 notice channel에는 전송되지 않는지 모킹 E2E 검증
+      console.log('--- Case 10 & 11: apply_seminars 실행 및 sync_seminars 알림 분리 테스트 ---');
 
       vi.spyOn(utilsModule, 'ensureLoggedIn').mockResolvedValue(true as never);
       vi.spyOn(utilsModule, 'safeGoto').mockResolvedValue(undefined as never);
@@ -372,7 +372,7 @@ describe('apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스�
       const mockPage = createMockPage() as unknown as PlaywrightRunArgs['page'];
       const mockContext = {} as PlaywrightRunArgs['context'];
 
-      // apply_seminar_extra 모드로 실행 (notifyNewSeminarsToTelegram: false, notifyNewSeminarsToChannel: false)
+      // sync_seminars 모드로 실행 (notifyNewSeminarsToTelegram: false, notifyNewSeminarsToChannel: false)
       await runApplySeminar(
         { page: mockPage, context: mockContext },
         { notifyNewSeminarsToTelegram: false, notifyNewSeminarsToChannel: false, silentIfNoNew: true },
@@ -385,12 +385,10 @@ describe('apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스�
       assert(changeMsg.message.includes('시간: 20:00 → 21:00'));
       assert.strictEqual(sentChannelMessages.length, 0, 'notice channel에는 변경 알림이 전송되면 안 됨');
 
-      console.log(
-        '  ✓ [Pass] apply_seminar_extra 실행 시 변경 알림은 adminbot으로만 전송되고 notice channel 전송 없음\n',
-      );
+      console.log('  ✓ [Pass] sync_seminars 실행 시 변경 알림은 adminbot으로만 전송되고 notice channel 전송 없음\n');
 
-      // 12. apply_seminar_extra 실행 시 아무런 변경(신규/정보/포인트)이 없을 때 메시지를 보내지 않고 silent=true 검증
-      console.log('--- Case 12: apply_seminar_extra 아무 작업도 하지 않았을 때 메시지 미전송 검증 ---');
+      // 12. sync_seminars 실행 시 아무런 변경(신규/정보/포인트)이 없을 때 메시지를 보내지 않고 silent=true 검증
+      console.log('--- Case 12: sync_seminars 아무 작업도 하지 않았을 때 메시지 미전송 검증 ---');
       mockPointHistory.clear();
       sentTelegramMessages.length = 0;
       sentChannelMessages.length = 0;
@@ -413,16 +411,16 @@ describe('apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스�
       ];
       seminarRepo.setAllSeminars(currentStoredList);
 
-      // 1) runHttpOnly() 직접 실행 (옵션 미지정/기본값)
-      const directResult = await runHttpOnly();
+      // 1) syncSeminars() 직접 실행 (옵션 미지정/기본값)
+      const directResult = await syncSeminars();
       assert.strictEqual(directResult.success, true);
       assert.strictEqual(directResult.silent, true, '신규 세미나가 없을 때 directResult.silent가 true여야 함');
       assert.strictEqual(sentTelegramMessages.length, 0, '아무 변경이 없을 때 직접 전송된 텔레그램 메시지가 없어야 함');
       assert.strictEqual(sentChannelMessages.length, 0, '아무 변경이 없을 때 채널 전송 메시지가 없어야 함');
 
-      // 2) runner.runTask(applySeminarExtraTask, { notifyAdminOnSuccess: true }) 스케줄러 환경 실행
+      // 2) runner.runTask(syncSeminarsTask, { notifyAdminOnSuccess: true }) 스케줄러 환경 실행
       sentTelegramMessages.length = 0;
-      const runnerResult = await runner.runTask(applySeminarExtraTask, { notifyAdminOnSuccess: true });
+      const runnerResult = await runner.runTask(syncSeminarsTask, { notifyAdminOnSuccess: true });
       assert.ok(typeof runnerResult === 'object' && runnerResult !== null);
       assert.strictEqual((runnerResult as { silent?: boolean }).silent, true);
       assert.strictEqual(
@@ -431,7 +429,7 @@ describe('apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스�
         'runner 실행 시 silent=true이므로 adminbot 완료 알림 메시지도 전송되지 않아야 함',
       );
 
-      console.log('  ✓ [Pass] apply_seminar_extra 실행 시 아무런 변경이 없으면 텔레그램 메시지를 일체 전송하지 않음\n');
+      console.log('  ✓ [Pass] sync_seminars 실행 시 아무런 변경이 없으면 텔레그램 메시지를 일체 전송하지 않음\n');
 
       // 13. 신규 세미나가 처음에 isPointExcluded: undefined로 등록된 후, 1시간 뒤 상세 조회로 isPointExcluded: false가 확인되어도 변경 감지 오탐 알림이 발생하지 않는지 검증
       console.log('--- Case 13: 신규 세미나 등록 후 포인트미지급 false 확인 시 변경 감지 오탐 방지 검증 ---');
@@ -516,7 +514,7 @@ describe('apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스�
       seminarRepo.setAllSeminars([]);
 
       // 신규 세미나 등록 실행 (forceEnrich=false 평소 루틴)
-      const newNoPointResult = await runHttpOnly({ forceEnrich: false });
+      const newNoPointResult = await syncSeminars({ forceEnrich: false });
       assert.strictEqual(newNoPointResult.success, true);
 
       // 저장소에 등록된 600번 세미나 확인

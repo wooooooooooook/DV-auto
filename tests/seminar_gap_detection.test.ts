@@ -10,7 +10,7 @@ import * as subscriptionService from '../src/services/subscription_service';
 import {
   discoverMissingGapSeminars,
   buildNewSeminarsNoticeMessage,
-  runHttpOnly,
+  syncSeminars,
   CHECKED_GAP_SEMINAR_IDS_KEY,
   LAST_ENRICH_TIMESTAMP_KEY,
   type SeminarListItem,
@@ -206,7 +206,7 @@ describe('세미나 ID 불연속(Gap) 탐색 및 비공개 세미나 발굴/알�
     expect(singleMsg.text).toContain('<b>개원의를 위한 고혈압 처방 팁</b>');
   });
 
-  it('4. runHttpOnly E2E: 불연속 갭으로 비공개 세미나 발굴 시 신규 세미나 알림 발송 및 DB 저장 검증', async () => {
+  it('4. syncSeminars E2E: 불연속 갭으로 비공개 세미나 발굴 시 신규 세미나 알림 발송 및 DB 저장 검증', async () => {
     // DB에 기존 5650번 저장
     seminarRepo.upsertSeminar({
       seminarId: '5650',
@@ -306,7 +306,7 @@ describe('세미나 ID 불연속(Gap) 탐색 및 비공개 세미나 발굴/알�
     // 1시간 미경과 설정
     storage.set(LAST_ENRICH_TIMESTAMP_KEY, Date.now() - 10 * 60 * 1000);
 
-    const result = await runHttpOnly({
+    const result = await syncSeminars({
       notifyNewSeminarsToChannel: true,
       notifyNewSeminarsToTelegram: false,
       silentIfNoNew: true,

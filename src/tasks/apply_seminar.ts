@@ -178,7 +178,7 @@ export function formatProcessStateDistribution(
     }
   }
 
-  const prefix = label ? `[apply_seminar_extra] processState (${label}):` : `[apply_seminar_extra] processState:`;
+  const prefix = label ? `[sync_seminars] processState (${label}):` : `[sync_seminars] processState:`;
   return `${prefix} total=${seminars.length} ENTER=${counts.ENTER} APPLY=${counts.APPLY} CANCEL=${counts.CANCEL} PREPARING=${counts.PREPARING} EXCESS=${counts.EXCESS} STARTED=${counts.STARTED} END=${counts.END} COMPLETED=${counts.COMPLETED} unknown=${counts.unknown}`;
 }
 
@@ -1041,6 +1041,8 @@ export async function refreshSeminarPointStatus(
 }
 
 export type ApplySeminarOptions = {
+  context?: import('playwright').BrowserContext;
+  taskContext?: TaskContext;
   checkAdvancedPointStatus?: boolean;
   notifyNewSeminarsToChannel?: boolean;
   notifyNewSeminarsToTelegram?: boolean;
@@ -1049,15 +1051,26 @@ export type ApplySeminarOptions = {
   _checkAdvancedPointStatus?: boolean;
 };
 
-async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Promise<TaskResult> {
-  const { notifyNewSeminarsToChannel = true, notifyNewSeminarsToTelegram: _notifyNewSeminarsToTelegram = true } =
-    options;
+export type SyncSeminarsResult = TaskResult & {
+  currentSeminars?: RawSeminarData[];
+  normalizedCurrentSeminars?: SeminarListItem[];
+  finalSeminars?: SeminarListItem[];
+  newlyAdded?: SeminarListItem[];
+  hasApplyTarget?: boolean;
+};
 
-  let currentSeminars: RawSeminarData[] = [];
-  let normalizedCurrentSeminars: SeminarListItem[] = [];
-  const referenceDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+export async function syncSeminars(options: ApplySeminarOptions = {}): Promise<SyncSeminarsResult> {
+  const {
+    notifyNewSeminarsToChannel = true,
+    notifyNewSeminarsToTelegram: _notifyNewSeminarsToTelegram = true,
+    silentIfNoNew = true,
+  } = options;
 
   try {
+    let currentSeminars: RawSeminarData[] = [];
+    let normalizedCurrentSeminars: SeminarListItem[] = [];
+    const referenceDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+
     const apiRes = await fetchMainFutureSeminars();
     if (!apiRes.success) {
       if (apiRes.isAuthExpired) {
@@ -1069,127 +1082,203 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
     }
     currentSeminars = apiRes.items.map(convertApiItemToRawSeminar);
     normalizedCurrentSeminars = apiRes.items.map((item) => convertApiItemToSeminarListItem(item, referenceDate));
+
+    const storedSeminars = migrateLegacySeminarStorage(referenceDate);
+
+    // 최근 세미나 ID 불연속(Gap) 탐색으로 정원 100명 이상 비공개 세미나 발굴
+    const { gapSeminars, isAuthExpired: gapAuthExpired } = await discoverMissingGapSeminars(
+      normalizedCurrentSeminars,
+      storedSeminars,
+      referenceDate,
+    );
+    if (gapAuthExpired) {
+      const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
+      await sendTelegram(msg).catch(() => {});
+      return { success: false, message: msg };
+    }
+    if (gapSeminars.length > 0) {
+      normalizedCurrentSeminars.push(...gapSeminars);
+      currentSeminars.push(...gapSeminars.map(convertSeminarListItemToRawSeminar));
+    }
+
+    // 예정된 비공개 세미나(DB 저장분)는 메인 API에 노출되지 않으므로 매 실행마다 detail API로 최신 상태 갱신
+    const currentIdSet = new Set(
+      normalizedCurrentSeminars.map((s) => s.seminarId || getSeminarIdFromUrl(s.url)).filter(Boolean),
+    );
+    const pendingPrivateSeminars = storedSeminars.filter((s) => {
+      if (!s.isClosed && s.hiddenYn !== 'Y') return false;
+      const sid = s.seminarId || getSeminarIdFromUrl(s.url);
+      if (!sid || currentIdSet.has(sid)) return false;
+      // 이미 종료된 세미나는 제외
+      const ps = s.processState;
+      if (ps === ProcessState.PROCESS_END || ps === ProcessState.PROCESS_COMPLETED) return false;
+      if (s.seminarCompleted === 1) return false;
+      return true;
+    });
+
+    if (pendingPrivateSeminars.length > 0) {
+      const { seminars: refreshedPrivate, isAuthExpired: privateAuthExpired } =
+        await enrichSeminarsWithDetail(pendingPrivateSeminars);
+      if (privateAuthExpired) {
+        const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
+        await sendTelegram(msg).catch(() => {});
+        return { success: false, message: msg };
+      }
+      normalizedCurrentSeminars.push(...refreshedPrivate);
+      currentSeminars.push(...refreshedPrivate.map(convertSeminarListItemToRawSeminar));
+    }
+
+    // 1시간에 1번(또는 forceEnrich=true)만 전체 세미나 상세(detail) API를 조회하여 최신 메타데이터 갱신
+    // 단, 저장소에 없는 신규 세미나가 처음 발견된 경우 해당 신규 세미나는 즉시 enrich하여 포인트미지급 등 메타데이터 보강
+    const storedIdSet = new Set(storedSeminars.map((s) => s.seminarId || getSeminarIdFromUrl(s.url)).filter(Boolean));
+    const gapIdSet = new Set(gapSeminars.map((s) => s.seminarId || getSeminarIdFromUrl(s.url)).filter(Boolean));
+    const newlyDiscovered = normalizedCurrentSeminars.filter((s) => {
+      const sid = s.seminarId || getSeminarIdFromUrl(s.url);
+      return sid && !storedIdSet.has(sid) && !gapIdSet.has(sid);
+    });
+
+    let enrichedSeminars = normalizedCurrentSeminars;
+    if (shouldRunEnrich(options.forceEnrich)) {
+      const { seminars: resSeminars, isAuthExpired: detailAuthExpired } =
+        await enrichSeminarsWithDetail(normalizedCurrentSeminars);
+      if (detailAuthExpired) {
+        const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
+        await sendTelegram(msg).catch(() => {});
+        return { success: false, message: msg };
+      }
+      enrichedSeminars = resSeminars;
+      recordEnrichTime();
+    } else if (newlyDiscovered.length > 0) {
+      const { seminars: resNewlyEnriched, isAuthExpired: detailAuthExpired } =
+        await enrichSeminarsWithDetail(newlyDiscovered);
+      if (detailAuthExpired) {
+        const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
+        await sendTelegram(msg).catch(() => {});
+        return { success: false, message: msg };
+      }
+      const newlyMap = new Map(resNewlyEnriched.map((s) => [s.seminarId || getSeminarIdFromUrl(s.url), s]));
+      enrichedSeminars = normalizedCurrentSeminars.map((s) => {
+        const sid = s.seminarId || getSeminarIdFromUrl(s.url);
+        return (sid ? newlyMap.get(sid) : undefined) || s;
+      });
+    }
+
+    const { seminars, newlyAdded, infoChanges } = refreshStoredSeminarList(
+      enrichedSeminars,
+      storedSeminars,
+      referenceDate,
+    );
+
+    if (seminars.length > 0) {
+      seminarRepo.upsertSeminars(seminars);
+    }
+
+    if (notifyNewSeminarsToChannel) {
+      await syncNewSeminarsNotice(referenceDate, newlyAdded);
+    }
+
+    if (newlyAdded.length > 0) {
+      await sendNewSeminarToSubscribers(
+        newlyAdded,
+        newlyAdded.map((s) => s.seminarId || getSeminarIdFromUrl(s.url)).filter(Boolean) as string[],
+      ).catch(() => {});
+    }
+
+    // 마감 임박(잔여 1,000명 이하) 진입 세미나 감지 및 알림 발송
+    const newUrgentSeminars: SeminarListItem[] = [];
+    for (const s of enrichedSeminars) {
+      const sid = s.seminarId || getSeminarIdFromUrl(s.url);
+      if (!sid) continue;
+      const { total, remaining } = parseCapacityNumbers(s);
+      if (total > 0 && remaining <= 1000) {
+        const stored = storedSeminars.find((item) => (item.seminarId || getSeminarIdFromUrl(item.url)) === sid);
+        if (!stored?.urgentNotified) {
+          newUrgentSeminars.push(s);
+        }
+      }
+    }
+
+    if (newUrgentSeminars.length > 0) {
+      await sendUrgentSeminarsToSubscribers(newUrgentSeminars).catch(() => {});
+      for (const u of newUrgentSeminars) {
+        const sid = u.seminarId || getSeminarIdFromUrl(u.url);
+        if (sid) {
+          seminarRepo.markSeminarUrgentNotified(sid);
+        }
+      }
+    }
+
+    const finalSeminars = seminarRepo.getAllSeminars();
+    const pointStatusResult = await refreshSeminarPointStatus(options.context, finalSeminars);
+    const pointChanges = pointStatusResult.pointChanges;
+
+    const changeNotificationText = formatSeminarChangeNotification(infoChanges, pointChanges);
+    if (changeNotificationText) {
+      await sendTelegram(changeNotificationText).catch(() => {});
+      await sendSeminarChangesToSubscribers(changeNotificationText).catch(() => {});
+    }
+
+    // 10분 실행 1회당 processState 상태 분포 출력 (total 및 future 목록 분리 로깅)
+    logProcessStateDistribution(finalSeminars, enrichedSeminars);
+
+    const hasApplyTarget = currentSeminars.some(
+      (s) => !isAppliedSeminar(s.processState) && s.processState === ProcessState.PROCESS_APPLY,
+    );
+
+    const syncResult: SyncSeminarsResult = {
+      success: true,
+      currentSeminars,
+      normalizedCurrentSeminars: enrichedSeminars,
+      finalSeminars,
+      newlyAdded,
+      hasApplyTarget,
+    };
+
+    const totalSeminarsAvailable = currentSeminars.length;
+    const message = `🔄 세미나 목록 갱신 완료 (${totalSeminarsAvailable}개)`;
+
+    await checkAndTriggerSeminarMonitors(finalSeminars, { targetDate: referenceDate }).catch((err) => {
+      logger.error('checkAndTriggerSeminarMonitors error in syncSeminars:', err);
+    });
+
+    syncResult.message = message;
+    if (silentIfNoNew && newlyAdded.length === 0) syncResult.silent = true;
+    return syncResult;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error('apply_seminar HTTP pre-check error:', message);
-    await sendTelegram(`❗ 세미나 신청 작업 오류: ${message}`).catch(() => {});
-    return { success: false, message: `세미나 신청 작업 오류: ${message}` };
+    console.error('sync_seminars HTTP error:', message);
+    await sendTelegram(`❗ 세미나 목록 갱신 작업 오류: ${message}`).catch(() => {});
+    return { success: false, message: `세미나 목록 갱신 작업 오류: ${message}` };
+  }
+}
+
+export async function applySeminars(
+  ctx: TaskContext = {},
+  options: ApplySeminarOptions = {},
+  syncedData?: SyncSeminarsResult,
+): Promise<TaskResult> {
+  // 이미 syncSeminars()를 거쳐 넘어온 데이터가 없으면 1회 동기화 실행
+  const sync =
+    syncedData ||
+    (await syncSeminars({
+      ...options,
+      notifyNewSeminarsToTelegram: false,
+      context: ctx.context,
+    }));
+
+  if (!sync.success) {
+    return sync;
   }
 
-  const storedSeminars = migrateLegacySeminarStorage(referenceDate);
+  const currentSeminars = sync.currentSeminars || [];
+  const newlyAdded = sync.newlyAdded || [];
+  const referenceDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
 
-  // 최근 세미나 ID 불연속(Gap) 탐색으로 정원 100명 이상 비공개 세미나 발굴
-  const { gapSeminars, isAuthExpired: gapAuthExpired } = await discoverMissingGapSeminars(
-    normalizedCurrentSeminars,
-    storedSeminars,
-    referenceDate,
-  );
-  if (gapAuthExpired) {
-    const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
-    await sendTelegram(msg).catch(() => {});
-    return { success: false, message: msg };
-  }
-  if (gapSeminars.length > 0) {
-    normalizedCurrentSeminars.push(...gapSeminars);
-    currentSeminars.push(...gapSeminars.map(convertSeminarListItemToRawSeminar));
-  }
-
-  // 1시간에 1번(또는 forceEnrich=true)만 전체 세미나 상세(detail) API를 조회하여 최신 메타데이터 갱신
-  // 단, 저장소에 없는 신규 세미나가 처음 발견된 경우 해당 신규 세미나는 즉시 enrich하여 포인트미지급 등 메타데이터 보강
-  const storedIdSet = new Set(storedSeminars.map((s) => s.seminarId || getSeminarIdFromUrl(s.url)).filter(Boolean));
-  const gapIdSet = new Set(gapSeminars.map((s) => s.seminarId || getSeminarIdFromUrl(s.url)).filter(Boolean));
-  const newlyDiscovered = normalizedCurrentSeminars.filter((s) => {
-    const sid = s.seminarId || getSeminarIdFromUrl(s.url);
-    return sid && !storedIdSet.has(sid) && !gapIdSet.has(sid);
-  });
-
-  let enrichedSeminars = normalizedCurrentSeminars;
-  if (shouldRunEnrich(options.forceEnrich)) {
-    const { seminars: resSeminars, isAuthExpired: detailAuthExpired } =
-      await enrichSeminarsWithDetail(normalizedCurrentSeminars);
-    if (detailAuthExpired) {
-      const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
-      await sendTelegram(msg).catch(() => {});
-      return { success: false, message: msg };
-    }
-    enrichedSeminars = resSeminars;
-    recordEnrichTime();
-  } else if (newlyDiscovered.length > 0) {
-    const { seminars: resNewlyEnriched, isAuthExpired: detailAuthExpired } =
-      await enrichSeminarsWithDetail(newlyDiscovered);
-    if (detailAuthExpired) {
-      const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
-      await sendTelegram(msg).catch(() => {});
-      return { success: false, message: msg };
-    }
-    const newlyMap = new Map(resNewlyEnriched.map((s) => [s.seminarId || getSeminarIdFromUrl(s.url), s]));
-    enrichedSeminars = normalizedCurrentSeminars.map((s) => {
-      const sid = s.seminarId || getSeminarIdFromUrl(s.url);
-      return (sid ? newlyMap.get(sid) : undefined) || s;
-    });
-  }
-
-  const { seminars, newlyAdded, infoChanges } = refreshStoredSeminarList(
-    enrichedSeminars,
-    storedSeminars,
-    referenceDate,
-  );
-
-  if (seminars.length > 0) {
-    seminarRepo.upsertSeminars(seminars);
-  }
-
-  if (notifyNewSeminarsToChannel) {
-    await syncNewSeminarsNotice(referenceDate, newlyAdded);
-  }
-
-  if (newlyAdded.length > 0) {
-    await sendNewSeminarToSubscribers(
-      newlyAdded,
-      newlyAdded.map((s) => s.seminarId || getSeminarIdFromUrl(s.url)).filter(Boolean) as string[],
-    ).catch(() => {});
-  }
-
-  // 마감 임박(잔여 1,000명 이하) 진입 세미나 감지 및 알림 발송
-  const newUrgentSeminars: SeminarListItem[] = [];
-  for (const s of enrichedSeminars) {
-    const sid = s.seminarId || getSeminarIdFromUrl(s.url);
-    if (!sid) continue;
-    const { total, remaining } = parseCapacityNumbers(s);
-    if (total > 0 && remaining <= 1000) {
-      const stored = storedSeminars.find((item) => (item.seminarId || getSeminarIdFromUrl(item.url)) === sid);
-      if (!stored?.urgentNotified) {
-        newUrgentSeminars.push(s);
-      }
-    }
-  }
-
-  if (newUrgentSeminars.length > 0) {
-    await sendUrgentSeminarsToSubscribers(newUrgentSeminars).catch(() => {});
-    for (const u of newUrgentSeminars) {
-      const sid = u.seminarId || getSeminarIdFromUrl(u.url);
-      if (sid) {
-        seminarRepo.markSeminarUrgentNotified(sid);
-      }
-    }
-  }
-
-  const finalSeminars = seminarRepo.getAllSeminars();
-  const pointStatusResult = await refreshSeminarPointStatus(ctx.context, finalSeminars);
-  const pointChanges = pointStatusResult.pointChanges;
-
-  const changeNotificationText = formatSeminarChangeNotification(infoChanges, pointChanges);
-  if (changeNotificationText) {
-    await sendTelegram(changeNotificationText).catch(() => {});
-    await sendSeminarChangesToSubscribers(changeNotificationText).catch(() => {});
-  }
-
-  // API processState 기반: 미신청 && PROCESS_APPLY 세미나만 Playwright 대상
+  // API processState 기반: 미신청 && PROCESS_APPLY 세미나만 신청 대상
   const applyTargets = currentSeminars.filter(
     (s) => !isAppliedSeminar(s.processState) && s.processState === ProcessState.PROCESS_APPLY,
   );
   const hasApplyTarget = applyTargets.length > 0;
-
   const totalSeminarsAvailable = currentSeminars.length;
 
   if (!hasApplyTarget) {
@@ -1370,8 +1459,8 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
 
     message += `\n${SEMINAR_DETAIL_PAGE}`;
 
-    await checkAndTriggerSeminarMonitors(seminars, { targetDate: referenceDate }).catch((err) => {
-      logger.error('checkAndTriggerSeminarMonitors error in run:', err);
+    await checkAndTriggerSeminarMonitors(sync.finalSeminars || [], { targetDate: referenceDate }).catch((err) => {
+      logger.error('checkAndTriggerSeminarMonitors error in applySeminars:', err);
     });
 
     const result: TaskResult = {
@@ -1392,11 +1481,13 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
   }
 }
 
-export { run };
-export const applySeminarTask = { name: 'apply_seminar', description: '세미나 신청 및 목록 저장', run, runHttpOnly };
-export const applySeminarTaskStandalone = { name: 'apply_seminar', description: '세미나 신청 및 목록 저장', run };
-export const applySeminarExtraTask = {
-  name: 'apply_seminar_extra',
+export const applySeminarsTask = {
+  name: 'apply_seminars',
+  description: '세미나 신청 및 목록 저장',
+  run: applySeminars,
+};
+export const syncSeminarsTask = {
+  name: 'sync_seminars',
   description: '세미나 목록 갱신 및 심화 세미나 포인트 확인',
   schedule: '*/10 6-23 * * *',
   options: {
@@ -1405,202 +1496,21 @@ export const applySeminarExtraTask = {
     silentIfNoNew: true,
     checkAdvancedPointStatus: true,
   },
-  run: (_args: unknown, options?: ApplySeminarOptions) =>
-    runHttpOnly({
+  run: async (ctx: TaskContext = {}, options?: ApplySeminarOptions) => {
+    const opts = {
       notifyNewSeminarsToTelegram: false,
       notifyNewSeminarsToChannel: true,
       silentIfNoNew: true,
       checkAdvancedPointStatus: true,
       ...options,
-    }),
+    };
+    const syncResult = await syncSeminars(opts);
+    if (!syncResult.success) {
+      return syncResult;
+    }
+    if (syncResult.hasApplyTarget) {
+      return applySeminars(ctx, { ...opts, notifyNewSeminarsToTelegram: false, silentIfNoNew: true }, syncResult);
+    }
+    return syncResult;
+  },
 };
-
-export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<TaskResult> {
-  const {
-    notifyNewSeminarsToChannel = true,
-    notifyNewSeminarsToTelegram: _notifyNewSeminarsToTelegram = true,
-    silentIfNoNew = true,
-  } = options;
-
-  try {
-    let currentSeminars: RawSeminarData[] = [];
-    let normalizedCurrentSeminars: SeminarListItem[] = [];
-    const referenceDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
-
-    const apiRes = await fetchMainFutureSeminars();
-    if (!apiRes.success) {
-      if (apiRes.isAuthExpired) {
-        const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
-        await sendTelegram(msg).catch(() => {});
-        return { success: false, message: msg };
-      }
-      throw new Error(apiRes.errorMessage || 'fetchMainFutureSeminars 실패');
-    }
-    currentSeminars = apiRes.items.map(convertApiItemToRawSeminar);
-    normalizedCurrentSeminars = apiRes.items.map((item) => convertApiItemToSeminarListItem(item, referenceDate));
-
-    const storedSeminars = migrateLegacySeminarStorage(referenceDate);
-
-    // 최근 세미나 ID 불연속(Gap) 탐색으로 정원 100명 이상 비공개 세미나 발굴
-    const { gapSeminars, isAuthExpired: gapAuthExpired } = await discoverMissingGapSeminars(
-      normalizedCurrentSeminars,
-      storedSeminars,
-      referenceDate,
-    );
-    if (gapAuthExpired) {
-      const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
-      await sendTelegram(msg).catch(() => {});
-      return { success: false, message: msg };
-    }
-    if (gapSeminars.length > 0) {
-      normalizedCurrentSeminars.push(...gapSeminars);
-      currentSeminars.push(...gapSeminars.map(convertSeminarListItemToRawSeminar));
-    }
-
-    // 예정된 비공개 세미나(DB 저장분)는 메인 API에 노출되지 않으므로 매 실행마다 detail API로 최신 상태 갱신
-    const currentIdSet = new Set(
-      normalizedCurrentSeminars.map((s) => s.seminarId || getSeminarIdFromUrl(s.url)).filter(Boolean),
-    );
-    const pendingPrivateSeminars = storedSeminars.filter((s) => {
-      if (!s.isClosed && s.hiddenYn !== 'Y') return false;
-      const sid = s.seminarId || getSeminarIdFromUrl(s.url);
-      if (!sid || currentIdSet.has(sid)) return false;
-      // 이미 종료된 세미나는 제외
-      const ps = s.processState;
-      if (ps === ProcessState.PROCESS_END || ps === ProcessState.PROCESS_COMPLETED) return false;
-      if (s.seminarCompleted === 1) return false;
-      return true;
-    });
-
-    if (pendingPrivateSeminars.length > 0) {
-      const { seminars: refreshedPrivate, isAuthExpired: privateAuthExpired } =
-        await enrichSeminarsWithDetail(pendingPrivateSeminars);
-      if (privateAuthExpired) {
-        const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
-        await sendTelegram(msg).catch(() => {});
-        return { success: false, message: msg };
-      }
-      normalizedCurrentSeminars.push(...refreshedPrivate);
-      currentSeminars.push(...refreshedPrivate.map(convertSeminarListItemToRawSeminar));
-    }
-
-    // 1시간에 1번(또는 forceEnrich=true)만 전체 세미나 상세(detail) API를 조회하여 최신 메타데이터 갱신
-    // 단, 저장소에 없는 신규 세미나가 처음 발견된 경우 해당 신규 세미나는 즉시 enrich하여 포인트미지급 등 메타데이터 보강
-    const storedIdSet = new Set(storedSeminars.map((s) => s.seminarId || getSeminarIdFromUrl(s.url)).filter(Boolean));
-    const gapIdSet = new Set(gapSeminars.map((s) => s.seminarId || getSeminarIdFromUrl(s.url)).filter(Boolean));
-    const newlyDiscovered = normalizedCurrentSeminars.filter((s) => {
-      const sid = s.seminarId || getSeminarIdFromUrl(s.url);
-      return sid && !storedIdSet.has(sid) && !gapIdSet.has(sid);
-    });
-
-    let enrichedSeminars = normalizedCurrentSeminars;
-    if (shouldRunEnrich(options.forceEnrich)) {
-      const { seminars: resSeminars, isAuthExpired: detailAuthExpired } =
-        await enrichSeminarsWithDetail(normalizedCurrentSeminars);
-      if (detailAuthExpired) {
-        const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
-        await sendTelegram(msg).catch(() => {});
-        return { success: false, message: msg };
-      }
-      enrichedSeminars = resSeminars;
-      recordEnrichTime();
-    } else if (newlyDiscovered.length > 0) {
-      const { seminars: resNewlyEnriched, isAuthExpired: detailAuthExpired } =
-        await enrichSeminarsWithDetail(newlyDiscovered);
-      if (detailAuthExpired) {
-        const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
-        await sendTelegram(msg).catch(() => {});
-        return { success: false, message: msg };
-      }
-      const newlyMap = new Map(resNewlyEnriched.map((s) => [s.seminarId || getSeminarIdFromUrl(s.url), s]));
-      enrichedSeminars = normalizedCurrentSeminars.map((s) => {
-        const sid = s.seminarId || getSeminarIdFromUrl(s.url);
-        return (sid ? newlyMap.get(sid) : undefined) || s;
-      });
-    }
-
-    const { seminars, newlyAdded, infoChanges } = refreshStoredSeminarList(
-      enrichedSeminars,
-      storedSeminars,
-      referenceDate,
-    );
-
-    if (seminars.length > 0) {
-      seminarRepo.upsertSeminars(seminars);
-    }
-
-    if (notifyNewSeminarsToChannel) {
-      await syncNewSeminarsNotice(referenceDate, newlyAdded);
-    }
-
-    if (newlyAdded.length > 0) {
-      await sendNewSeminarToSubscribers(
-        newlyAdded,
-        newlyAdded.map((s) => s.seminarId || getSeminarIdFromUrl(s.url)).filter(Boolean) as string[],
-      ).catch(() => {});
-    }
-
-    // 마감 임박(잔여 1,000명 이하) 진입 세미나 감지 및 알림 발송
-    const newUrgentSeminars: SeminarListItem[] = [];
-    for (const s of enrichedSeminars) {
-      const sid = s.seminarId || getSeminarIdFromUrl(s.url);
-      if (!sid) continue;
-      const { total, remaining } = parseCapacityNumbers(s);
-      if (total > 0 && remaining <= 1000) {
-        const stored = storedSeminars.find((item) => (item.seminarId || getSeminarIdFromUrl(item.url)) === sid);
-        if (!stored?.urgentNotified) {
-          newUrgentSeminars.push(s);
-        }
-      }
-    }
-
-    if (newUrgentSeminars.length > 0) {
-      await sendUrgentSeminarsToSubscribers(newUrgentSeminars).catch(() => {});
-      for (const u of newUrgentSeminars) {
-        const sid = u.seminarId || getSeminarIdFromUrl(u.url);
-        if (sid) {
-          seminarRepo.markSeminarUrgentNotified(sid);
-        }
-      }
-    }
-
-    const finalSeminars = seminarRepo.getAllSeminars();
-    const pointStatusResult = await refreshSeminarPointStatus(undefined, finalSeminars);
-    const pointChanges = pointStatusResult.pointChanges;
-
-    const changeNotificationText = formatSeminarChangeNotification(infoChanges, pointChanges);
-    if (changeNotificationText) {
-      await sendTelegram(changeNotificationText).catch(() => {});
-      await sendSeminarChangesToSubscribers(changeNotificationText).catch(() => {});
-    }
-
-    // 10분 실행 1회당 processState 상태 분포 출력 (total 및 future 목록 분리 로깅)
-    logProcessStateDistribution(finalSeminars, enrichedSeminars);
-
-    // 신청 가능한 세미나가 있으면 Playwright 전체 실행으로 위임 (processState 기반)
-    const hasApplyTarget = currentSeminars.some(
-      (s) => !isAppliedSeminar(s.processState) && s.processState === ProcessState.PROCESS_APPLY,
-    );
-    if (hasApplyTarget) {
-      // run()은 자체적으로 저장소 갱신·알림·포인트 동기화를 모두 수행하므로
-      // 여기까지 한 작업은 버리고 run() 결과만 반환
-      return run({}, { ...options, notifyNewSeminarsToTelegram: false, silentIfNoNew: true });
-    }
-
-    const totalSeminarsAvailable = currentSeminars.length;
-    const message = `🔄 세미나 목록 갱신 완료 (${totalSeminarsAvailable}개)`;
-
-    await checkAndTriggerSeminarMonitors(finalSeminars, { targetDate: referenceDate }).catch((err) => {
-      logger.error('checkAndTriggerSeminarMonitors error in runHttpOnly:', err);
-    });
-
-    const result: TaskResult = { success: true, message };
-    if (silentIfNoNew && newlyAdded.length === 0) result.silent = true;
-    return result;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error('apply_seminar_extra HTTP error:', message);
-    await sendTelegram(`❗ 세미나 목록 갱신 작업 오류: ${message}`).catch(() => {});
-    return { success: false, message: `세미나 목록 갱신 작업 오류: ${message}` };
-  }
-}

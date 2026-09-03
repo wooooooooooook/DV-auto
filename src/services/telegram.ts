@@ -630,11 +630,11 @@ if (adminBot) {
   });
 
   adminBot.command('apply_seminar_now', async (ctx) => {
-    logger.info('User requested to run apply_seminar now', { from: ctx.from?.username });
-    const task = taskRegistry.getByName('apply_seminar');
+    logger.info('User requested to run apply_seminars now', { from: ctx.from?.username });
+    const task = taskRegistry.getByName('apply_seminars');
     if (!task) {
-      logger.error('apply_seminar task not found, cannot run');
-      return replyWithSplit(ctx, 'apply_seminar task not found!');
+      logger.error('apply_seminars task not found, cannot run');
+      return replyWithSplit(ctx, 'apply_seminars task not found!');
     }
 
     try {
@@ -657,18 +657,54 @@ if (adminBot) {
           } else if (typeof result === 'string') {
             await replyWithSplit(ctx, result);
           } else if (result === true) {
-            await replyWithSplit(ctx, 'apply_seminar finished successfully.');
+            await replyWithSplit(ctx, 'apply_seminars finished successfully.');
           } else {
-            await replyWithSplit(ctx, 'apply_seminar finished successfully.');
+            await replyWithSplit(ctx, 'apply_seminars finished successfully.');
           }
         })
         .catch((e) => {
           const message = e instanceof Error ? e.message : String(e);
-          replyWithSplit(ctx, `apply_seminar failed: ${message}`);
+          replyWithSplit(ctx, `apply_seminars failed: ${message}`);
         });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      replyWithSplit(ctx, `Failed to start apply_seminar: ${message}`);
+      replyWithSplit(ctx, `Failed to start apply_seminars: ${message}`);
+    }
+  });
+
+  adminBot.command('sync_seminars_now', async (ctx) => {
+    logger.info('User requested to run sync_seminars now', { from: ctx.from?.username });
+    const task = taskRegistry.getByName('sync_seminars');
+    if (!task) {
+      logger.error('sync_seminars task not found, cannot run');
+      return replyWithSplit(ctx, 'sync_seminars task not found!');
+    }
+
+    try {
+      runner
+        .runTask(task)
+        .then(async (result) => {
+          if (result && typeof result === 'object' && (result as { message?: string }).message) {
+            await replyWithSplit(
+              ctx,
+              (result as { message: string }).message,
+              (result as { options?: Record<string, unknown> }).options as Parameters<Context['reply']>[1],
+            );
+          } else if (typeof result === 'string') {
+            await replyWithSplit(ctx, result);
+          } else if (result === true) {
+            await replyWithSplit(ctx, 'sync_seminars finished successfully.');
+          } else {
+            await replyWithSplit(ctx, 'sync_seminars finished successfully.');
+          }
+        })
+        .catch((e) => {
+          const message = e instanceof Error ? e.message : String(e);
+          replyWithSplit(ctx, `sync_seminars failed: ${message}`);
+        });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      replyWithSplit(ctx, `Failed to start sync_seminars: ${message}`);
     }
   });
 
@@ -1746,7 +1782,8 @@ if (adminBot) {
 - /run_routine_now: 즉시 daily_routine 작업을 실행합니다.
 - /today_links [날짜]: 오늘의 세미나/퀴즈/출석 링크를 가져옵니다. (날짜 지정 가능: 예 /today_links 8/20, /today_links 내일)
 - /broadcast_today_links: 즉시 오늘의 링크를 채널에 공지합니다.
-- /apply_seminar_now: 즉시 세미나 신청 작업(apply_seminar)을 실행합니다.
+- /apply_seminar_now: 즉시 세미나 신청 작업(apply_seminars)을 실행합니다.
+- /sync_seminars_now: 즉시 세미나 목록/포인트 동기화 작업(sync_seminars)을 실행합니다.
 - /run_quiz_now: 즉시 오늘의 퀴즈 작업(today_quiz)을 실행합니다.
 - /run_intermd_quiz_now: 즉시 인터엠디 오늘의 퀴즈 작업(intermd_quiz)을 실행합니다.
 - /run_keymedi_attendance_now: 즉시 키메디 출석체크 & 포인트 확인(keymedi_attendance)을 실행합니다.
@@ -1780,7 +1817,7 @@ if (adminBot) {
 - /update_app: pnpm update:app 명령어를 실행합니다. (서버 권한 필요, 재시작으로 응답 중단 가능)
 - /inspect <url> <selector> [waitUntil]: 지정한 URL에서 셀렉터에 해당하는 요소를 검사하고 스크린샷을 전송합니다.
 
-명령어 사용 예: /inspect https://example.com "div.article" networkidle`;
+사용 예: /inspect https://example.com "div.article" networkidle`;
     replyWithSplit(ctx, message);
   });
 }
@@ -1827,7 +1864,8 @@ export const adminCommands = [
   { command: 'run_routine_now', description: '즉시 daily_routine 실행' },
   { command: 'today_links', description: '세미나/퀴즈 링크 모음 [날짜 지정 가능]' },
   { command: 'broadcast_today_links', description: '오늘의 링크 채널 공지' },
-  { command: 'apply_seminar_now', description: '즉시 세미나 신청(apply_seminar) 실행' },
+  { command: 'apply_seminar_now', description: '즉시 세미나 신청(apply_seminars) 실행' },
+  { command: 'sync_seminars_now', description: '즉시 세미나 동기화(sync_seminars) 실행' },
   { command: 'run_quiz_now', description: '즉시 오늘의 퀴즈(today_quiz) 실행' },
   { command: 'run_intermd_quiz_now', description: '즉시 인터엠디 오늘의 퀴즈(intermd_quiz) 실행' },
   { command: 'run_keymedi_attendance_now', description: '즉시 키메디 출석체크(keymedi_attendance) 실행' },

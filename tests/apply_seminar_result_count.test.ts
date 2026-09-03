@@ -1,6 +1,5 @@
 import assert from 'node:assert';
-import { isAppliedSeminar } from '../src/tasks/apply_seminar';
-import { run as runApplySeminar } from '../src/tasks/apply_seminar';
+import { isAppliedSeminar, applySeminars as runApplySeminar } from '../src/tasks/apply_seminar';
 import * as seminarApiModule from '../src/modules/seminar_api';
 import * as utilsModule from '../src/modules/utils';
 import * as checkSeminarPointModule from '../src/tasks/check_seminar_point';

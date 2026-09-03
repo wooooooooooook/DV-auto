@@ -5,7 +5,7 @@ import {
   enrichSeminarsWithDetail,
   shouldRunEnrich,
   recordEnrichTime,
-  runHttpOnly,
+  syncSeminars,
   LAST_ENRICH_TIMESTAMP_KEY,
   type SeminarListItem,
 } from '../src/tasks/apply_seminar';
@@ -162,8 +162,8 @@ describe('닥터빌 API 과다 호출 방지 및 라이브 모니터링 최적�
     );
   });
 
-  it('3. runHttpOnly: 10분 루틴에서는 detail API 미호출, 1시간 경과 시에만 detail 호출 검증', async () => {
-    console.log('--- [Test 3] runHttpOnly detail API 호출 조건부 제어 검증 ---');
+  it('3. syncSeminars: 10분 루틴에서는 detail API 미호출, 1시간 경과 시에만 detail 호출 검증', async () => {
+    console.log('--- [Test 3] syncSeminars detail API 호출 조건부 제어 검증 ---');
 
     let detailApiCallCount = 0;
     vi.spyOn(seminarApiModule, 'fetchSeminarDetail').mockImplementation(async (id: number | string) => {
@@ -226,13 +226,13 @@ describe('닥터빌 API 과다 호출 방지 및 라이브 모니터링 최적�
     // Case A: 10분 전 실행 기록 있음 (1시간 미경과) -> detail API 호출 0회
     storage.set(LAST_ENRICH_TIMESTAMP_KEY, Date.now() - 10 * 60 * 1000);
     detailApiCallCount = 0;
-    const resA = await runHttpOnly({ notifyNewSeminarsToTelegram: false, notifyNewSeminarsToChannel: false });
+    const resA = await syncSeminars({ notifyNewSeminarsToTelegram: false, notifyNewSeminarsToChannel: false });
     assert.strictEqual(resA.success, true);
     assert.strictEqual(detailApiCallCount, 0, '1시간 미경과 시에는 fetchSeminarDetail을 호출하지 않아야 함');
 
     // Case B: forceEnrich: true 지정 시 -> detail API 호출 1회
     detailApiCallCount = 0;
-    const resB = await runHttpOnly({
+    const resB = await syncSeminars({
       notifyNewSeminarsToTelegram: false,
       notifyNewSeminarsToChannel: false,
       forceEnrich: true,
@@ -243,12 +243,12 @@ describe('닥터빌 API 과다 호출 방지 및 라이브 모니터링 최적�
     // Case C: 61분 전 기록 (1시간 경과) -> detail API 호출 1회 및 타임스탬프 갱신
     storage.set(LAST_ENRICH_TIMESTAMP_KEY, Date.now() - 61 * 60 * 1000);
     detailApiCallCount = 0;
-    const resC = await runHttpOnly({ notifyNewSeminarsToTelegram: false, notifyNewSeminarsToChannel: false });
+    const resC = await syncSeminars({ notifyNewSeminarsToTelegram: false, notifyNewSeminarsToChannel: false });
     assert.strictEqual(resC.success, true);
     assert.strictEqual(detailApiCallCount, 1, '1시간 경과 시 fetchSeminarDetail을 호출해야 함');
     assert.strictEqual(shouldRunEnrich(), false, '실행 후 타임스탬프가 갱신되어 shouldRunEnrich가 false여야 함');
 
-    console.log('  ✓ [Pass] runHttpOnly 평소 detail 미호출 및 1시간 주기 정상 enrich 검증 완료\n');
+    console.log('  ✓ [Pass] syncSeminars 평소 detail 미호출 및 1시간 주기 정상 enrich 검증 완료\n');
   });
 
   it('4. monitorSeminars: 메인 API 미반영 시에도 상세 API(surveyState/processState)를 통한 실시간 종료 감지 검증', async () => {

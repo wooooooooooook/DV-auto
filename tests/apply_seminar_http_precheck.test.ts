@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import { chromium } from 'playwright';
-import { run as runApplySeminar } from '../src/tasks/apply_seminar';
+import { applySeminars as runApplySeminar } from '../src/tasks/apply_seminar';
 import * as seminarApiModule from '../src/modules/seminar_api';
 import * as utilsModule from '../src/modules/utils';
 import * as checkSeminarPointModule from '../src/tasks/check_seminar_point';
@@ -384,13 +384,13 @@ describe('apply_seminar HTTP pre-check 및 조건부 Playwright 실행 테스트
     }
   });
 
-  it('runHttpOnly: 비공개 세미나 갱신 및 채널 공지 검증', async () => {
+  it('syncSeminars: 비공개 세미나 갱신 및 채널 공지 검증', async () => {
     console.log('===========================================================');
-    console.log('  runHttpOnly: 예정된 비공개 세미나 detail API 갱신 검증');
+    console.log('  syncSeminars: 예정된 비공개 세미나 detail API 갱신 검증');
     console.log('===========================================================\n');
 
     const applyModule = await import('../src/tasks/apply_seminar');
-    const { runHttpOnly } = applyModule;
+    const { syncSeminars } = applyModule;
     const channelRepoModule = await import('../src/services/channel_message_repository');
 
     // shouldRunEnrich=false 강제 → 공개 세미나 enrich는 건너뜀
@@ -494,7 +494,7 @@ describe('apply_seminar HTTP pre-check 및 조건부 Playwright 실행 테스트
     });
 
     try {
-      const result = await runHttpOnly({ notifyNewSeminarsToChannel: true, silentIfNoNew: false });
+      const result = await syncSeminars({ notifyNewSeminarsToChannel: true, silentIfNoNew: false });
       assert.strictEqual(result.success, true);
 
       // 예정된 비공개 세미나(5700)는 detail API로 갱신되어야 함
@@ -507,7 +507,7 @@ describe('apply_seminar HTTP pre-check 및 조건부 Playwright 실행 테스트
       assert.ok(publishedText.includes('[심혈관질환]'), '채널 공지에 [심혈관질환] 태그가 포함되어야 함');
 
       console.log('  ✓ 비공개 세미나 갱신 및 채널 공지 검증');
-      console.log('🎉 runHttpOnly 비공개 세미나 갱신 테스트 완료!\n');
+      console.log('🎉 syncSeminars 비공개 세미나 갱신 테스트 완료!\n');
     } finally {
       vi.restoreAllMocks();
     }

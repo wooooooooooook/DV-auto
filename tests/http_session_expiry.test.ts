@@ -6,7 +6,7 @@ import { chromium } from 'playwright';
 import * as httpClientModule from '../src/modules/http_client';
 import * as utilsModule from '../src/modules/utils';
 import * as checkSeminarPointModule from '../src/tasks/check_seminar_point';
-import { applySeminarExtraTask } from '../src/tasks/apply_seminar';
+import { syncSeminarsTask } from '../src/tasks/apply_seminar';
 import * as seminarRepo from '../src/services/seminar_repository';
 import { describe, it, vi } from 'vitest';
 
@@ -178,7 +178,7 @@ describe('HTTP Session Expiry & Error Classification Tests', () => {
         },
       );
 
-      const taskResult = await applySeminarExtraTask.run({}, { notifyNewSeminarsToTelegram: false, forceEnrich: true });
+      const taskResult = await syncSeminarsTask.run({}, { notifyNewSeminarsToTelegram: false, forceEnrich: true });
 
       // Assertions for Mid-Task Session Expiry:
       // 1) Task result is failure
@@ -195,7 +195,7 @@ describe('HTTP Session Expiry & Error Classification Tests', () => {
       assert.strictEqual(
         ensureLoggedInCalledCount,
         0,
-        'runHttpOnly 작업은 Playwright ensureLoggedIn()을 호출하지 않고 순수 HTTP로만 동작해야 함',
+        'syncSeminars 작업은 Playwright ensureLoggedIn()을 호출하지 않고 순수 HTTP로만 동작해야 함',
       );
 
       // 3) Playwright browser was NOT launched
@@ -263,7 +263,7 @@ describe('HTTP Session Expiry & Error Classification Tests', () => {
       );
 
       vi.spyOn(utilsModule, 'ensureLoggedIn').mockResolvedValue(true as never);
-      const successTaskResult = await applySeminarExtraTask.run(
+      const successTaskResult = await syncSeminarsTask.run(
         {},
         { notifyNewSeminarsToTelegram: false, forceEnrich: true },
       );
