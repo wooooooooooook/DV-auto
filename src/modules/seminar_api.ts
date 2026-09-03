@@ -510,12 +510,24 @@ export async function fetchSeminarDetail(
       };
     }
 
+    const hasValidDetail = Boolean(
+      parsed &&
+      typeof parsed === 'object' &&
+      Object.keys(parsed).length > 0 &&
+      parsed.seminarDetail &&
+      typeof parsed.seminarDetail === 'object' &&
+      Object.keys(parsed.seminarDetail).length > 0,
+    );
+
     const isNotFound =
       parsed.code === 404 ||
       parsed.code === '404' ||
-      !parsed.seminarDetail ||
+      !hasValidDetail ||
       (typeof parsed.message === 'string' &&
-        (parsed.message.includes('세미나 정보를 찾을 수 없습니다') || parsed.message.includes('찾을 수 없습니다')));
+        (parsed.message.includes('세미나 정보를 찾을 수 없습니다') ||
+          parsed.message.includes('찾을 수 없습니다') ||
+          parsed.message.includes('삭제된') ||
+          parsed.message.includes('존재하지 않는')));
 
     if (isNotFound) {
       return {

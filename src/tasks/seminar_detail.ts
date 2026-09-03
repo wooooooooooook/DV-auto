@@ -278,8 +278,13 @@ export async function fetchSeminarDetail(
   try {
     const url = `${SEMINAR_DETAIL_API}${seminarId}`;
     const response = await httpGetJson<SeminarDetailResponse>(url);
+    const hasValidDetail = Boolean(
+      response.seminarDetail &&
+      typeof response.seminarDetail === 'object' &&
+      Object.keys(response.seminarDetail).length > 0,
+    );
 
-    if (!response.seminarDetail) {
+    if (!hasValidDetail) {
       return { success: false, error: '세미나 정보를 찾을 수 없습니다.' };
     }
 

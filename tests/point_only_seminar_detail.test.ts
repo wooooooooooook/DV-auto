@@ -8,6 +8,8 @@ import { describe, it, vi } from 'vitest';
 
 describe('Point-Only 세미나 발견 시 세미나 상세 API 연동 테스트', () => {
   it('포인트 테이블 세미나 상세 API 연동 종합 테스트', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-25T12:00:00+09:00'));
     console.log('===========================================================');
     console.log('  Point-Only 세미나 발견 시 세미나 상세 API 연동 테스트');
     console.log('===========================================================\n');
@@ -214,6 +216,7 @@ describe('Point-Only 세미나 발견 시 세미나 상세 API 연동 테스트'
 
       console.log('🎉 Point-Only 세미나 detail API 연동 테스트 모두 성공!\n');
     } finally {
+      vi.useRealTimers();
       vi.restoreAllMocks();
       if (originalStoredList !== undefined) {
         seminarRepo.setAllSeminars(originalStoredList);

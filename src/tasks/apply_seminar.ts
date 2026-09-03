@@ -35,8 +35,13 @@ const SEMINAR_RETENTION_DAYS = 60;
 
 export type { SeminarListItem, SeminarPointStatus } from '../services/seminar_repository';
 import type { SeminarListItem } from '../services/seminar_repository';
-import { enrichSeminarsWithDetail } from '../services/seminar_sync_service';
-export { enrichSeminarsWithDetail };
+import {
+  enrichSeminarsWithDetail,
+  refreshPastUncompletedSeminars,
+  isPastSeminar,
+  isUncompletedSeminar,
+} from '../services/seminar_sync_service';
+export { enrichSeminarsWithDetail, refreshPastUncompletedSeminars, isPastSeminar, isUncompletedSeminar };
 
 export const mergeSeminar = seminarRepo.mergeSeminarRecord;
 
@@ -1083,7 +1088,7 @@ export async function syncSeminars(options: ApplySeminarOptions = {}): Promise<S
     currentSeminars = apiRes.items.map(convertApiItemToRawSeminar);
     normalizedCurrentSeminars = apiRes.items.map((item) => convertApiItemToSeminarListItem(item, referenceDate));
 
-    const storedSeminars = migrateLegacySeminarStorage(referenceDate);
+    let storedSeminars = migrateLegacySeminarStorage(referenceDate);
 
     // 최근 세미나 ID 불연속(Gap) 탐색으로 정원 100명 이상 비공개 세미나 발굴
     const { gapSeminars, isAuthExpired: gapAuthExpired } = await discoverMissingGapSeminars(
@@ -1116,9 +1121,18 @@ export async function syncSeminars(options: ApplySeminarOptions = {}): Promise<S
       return true;
     });
 
+    let enrichedSeminars = normalizedCurrentSeminars;
+    const allDeletedSeminarIds: string[] = [];
+
     if (pendingPrivateSeminars.length > 0) {
-      const { seminars: refreshedPrivate, isAuthExpired: privateAuthExpired } =
-        await enrichSeminarsWithDetail(pendingPrivateSeminars);
+      const {
+        seminars: refreshedPrivate,
+        isAuthExpired: privateAuthExpired,
+        deletedSeminarIds: privateDeletedIds,
+      } = await enrichSeminarsWithDetail(pendingPrivateSeminars);
+      if (privateDeletedIds && privateDeletedIds.length > 0) {
+        allDeletedSeminarIds.push(...privateDeletedIds);
+      }
       if (privateAuthExpired) {
         const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
         await sendTelegram(msg).catch(() => {});
@@ -1137,30 +1151,84 @@ export async function syncSeminars(options: ApplySeminarOptions = {}): Promise<S
       return sid && !storedIdSet.has(sid) && !gapIdSet.has(sid);
     });
 
-    let enrichedSeminars = normalizedCurrentSeminars;
     if (shouldRunEnrich(options.forceEnrich)) {
-      const { seminars: resSeminars, isAuthExpired: detailAuthExpired } =
-        await enrichSeminarsWithDetail(normalizedCurrentSeminars);
+      const nowMs = Date.now();
+      const pastUncompleted = storedSeminars.filter((s) => isPastSeminar(s, nowMs) && isUncompletedSeminar(s));
+      const targetsToEnrich = [...normalizedCurrentSeminars];
+      const targetIdSet = new Set(
+        targetsToEnrich.map((s) => s.seminarId || getSeminarIdFromUrl(s.url)).filter(Boolean),
+      );
+      for (const p of pastUncompleted) {
+        const pid = p.seminarId || getSeminarIdFromUrl(p.url);
+        if (pid && !targetIdSet.has(pid)) {
+          targetsToEnrich.push(p);
+          targetIdSet.add(pid);
+        }
+      }
+
+      const {
+        seminars: resSeminars,
+        isAuthExpired: detailAuthExpired,
+        deletedSeminarIds,
+      } = await enrichSeminarsWithDetail(targetsToEnrich);
+      if (deletedSeminarIds && deletedSeminarIds.length > 0) {
+        allDeletedSeminarIds.push(...deletedSeminarIds);
+      }
       if (detailAuthExpired) {
         const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
         await sendTelegram(msg).catch(() => {});
         return { success: false, message: msg };
       }
-      enrichedSeminars = resSeminars;
+
+      const currentEnrichedIdSet = new Set(
+        normalizedCurrentSeminars.map((s) => s.seminarId || getSeminarIdFromUrl(s.url)).filter(Boolean),
+      );
+      const pastUpdated = resSeminars.filter((s) => {
+        const sid = s.seminarId || getSeminarIdFromUrl(s.url);
+        return sid && !currentEnrichedIdSet.has(sid);
+      });
+      if (pastUpdated.length > 0) {
+        seminarRepo.upsertSeminars(pastUpdated);
+      }
+
+      enrichedSeminars = resSeminars.filter((s) => {
+        const sid = s.seminarId || getSeminarIdFromUrl(s.url);
+        return sid && currentEnrichedIdSet.has(sid);
+      });
       recordEnrichTime();
     } else if (newlyDiscovered.length > 0) {
-      const { seminars: resNewlyEnriched, isAuthExpired: detailAuthExpired } =
-        await enrichSeminarsWithDetail(newlyDiscovered);
+      const {
+        seminars: resNewlyEnriched,
+        isAuthExpired: detailAuthExpired,
+        deletedSeminarIds,
+      } = await enrichSeminarsWithDetail(newlyDiscovered);
+      if (deletedSeminarIds && deletedSeminarIds.length > 0) {
+        allDeletedSeminarIds.push(...deletedSeminarIds);
+      }
       if (detailAuthExpired) {
         const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
         await sendTelegram(msg).catch(() => {});
         return { success: false, message: msg };
       }
       const newlyMap = new Map(resNewlyEnriched.map((s) => [s.seminarId || getSeminarIdFromUrl(s.url), s]));
-      enrichedSeminars = normalizedCurrentSeminars.map((s) => {
-        const sid = s.seminarId || getSeminarIdFromUrl(s.url);
-        return (sid ? newlyMap.get(sid) : undefined) || s;
-      });
+      enrichedSeminars = normalizedCurrentSeminars
+        .filter((s) => {
+          const sid = s.seminarId || getSeminarIdFromUrl(s.url);
+          return !sid || !deletedSeminarIds.includes(sid);
+        })
+        .map((s) => {
+          const sid = s.seminarId || getSeminarIdFromUrl(s.url);
+          return (sid ? newlyMap.get(sid) : undefined) || s;
+        });
+    }
+
+    if (allDeletedSeminarIds.length > 0) {
+      const deletedSet = new Set(allDeletedSeminarIds);
+      seminarRepo.deleteSeminars(allDeletedSeminarIds);
+      storedSeminars = storedSeminars.filter((s) => !deletedSet.has(s.seminarId || getSeminarIdFromUrl(s.url) || ''));
+      enrichedSeminars = enrichedSeminars.filter(
+        (s) => !deletedSet.has(s.seminarId || getSeminarIdFromUrl(s.url) || ''),
+      );
     }
 
     const { seminars, newlyAdded, infoChanges } = refreshStoredSeminarList(

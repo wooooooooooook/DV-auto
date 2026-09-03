@@ -12,9 +12,10 @@ export async function enrichSeminarsWithDetail(
   seminars: SeminarListItem[],
   concurrency = 2,
   delayMs = 150,
-): Promise<{ seminars: SeminarListItem[]; isAuthExpired: boolean }> {
+): Promise<{ seminars: SeminarListItem[]; isAuthExpired: boolean; deletedSeminarIds: string[] }> {
   let isAuthExpired = false;
   const enriched: SeminarListItem[] = [];
+  const deletedSeminarIds: string[] = [];
 
   for (let i = 0; i < seminars.length; i += concurrency) {
     if (isAuthExpired) break;
@@ -31,6 +32,11 @@ export async function enrichSeminarsWithDetail(
           if (detailRes.isAuthExpired) {
             isAuthExpired = true;
             return item;
+          }
+
+          if (detailRes.isNotFound) {
+            deletedSeminarIds.push(seminarId);
+            return null;
           }
 
           if (detailRes.success && detailRes.rawResponse?.seminarDetail) {
@@ -76,18 +82,23 @@ export async function enrichSeminarsWithDetail(
       }),
     );
 
-    enriched.push(...chunkResults);
+    for (const res of chunkResults) {
+      if (res !== null) {
+        enriched.push(res);
+      }
+    }
 
     if (i + concurrency < seminars.length && delayMs > 0 && !isAuthExpired) {
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
   }
 
-  if (enriched.length < seminars.length) {
-    enriched.push(...seminars.slice(enriched.length));
+  const processedCount = enriched.length + deletedSeminarIds.length;
+  if (processedCount < seminars.length && !isAuthExpired) {
+    enriched.push(...seminars.slice(processedCount));
   }
 
-  return { seminars: enriched, isAuthExpired };
+  return { seminars: enriched, isAuthExpired, deletedSeminarIds };
 }
 
 /**
@@ -209,7 +220,18 @@ export async function syncSeminarsDetailToDb(
   logger.info(
     `syncSeminarsDetailToDb: ${validItems.length}개 세미나 detail API 조회 및 DB 갱신 시작 (동시: ${concurrency}, 간격: ${delayMs}ms)`,
   );
-  const { seminars: enriched } = await enrichSeminarsWithDetail(validItems, concurrency, delayMs);
+  const { seminars: enriched, deletedSeminarIds = [] } = await enrichSeminarsWithDetail(
+    validItems,
+    concurrency,
+    delayMs,
+  );
+
+  if (deletedSeminarIds.length > 0) {
+    seminarRepo.deleteSeminars(deletedSeminarIds);
+    logger.info(
+      `syncSeminarsDetailToDb: 삭제된 세미나 ${deletedSeminarIds.length}건 DB에서 삭제 처리 (ID: ${deletedSeminarIds.join(', ')})`,
+    );
+  }
 
   if (enriched.length > 0) {
     seminarRepo.upsertSeminars(enriched);
@@ -247,7 +269,7 @@ export async function refreshPastUncompletedSeminars(
     logger.info(`[startup] 지나간 미완료 세미나 상태 갱신 완료: ${enriched.length}건 DB 업데이트 성공.`);
 
     return {
-      total: allSeminars.length,
+      total: seminarRepo.getAllSeminars().length,
       targetCount: targets.length,
       updatedCount: enriched.length,
     };

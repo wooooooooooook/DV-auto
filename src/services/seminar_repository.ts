@@ -318,6 +318,36 @@ export function markSeminarUrgentNotified(seminarId: string): void {
 }
 
 /**
+ * 특정 세미나를 DB에서 완전히 삭제합니다.
+ */
+export function deleteSeminar(seminarId: string): boolean {
+  if (!seminarId) return false;
+  const db = getDatabase();
+  const info = db.prepare('DELETE FROM seminars WHERE seminar_id = ?').run(seminarId);
+  return info.changes > 0;
+}
+
+/**
+ * 여러 세미나를 DB에서 일괄 삭제합니다.
+ */
+export function deleteSeminars(seminarIds: string[]): number {
+  if (!seminarIds || seminarIds.length === 0) return 0;
+  const db = getDatabase();
+  let deletedCount = 0;
+  const deleteTx = db.transaction(() => {
+    const stmt = db.prepare('DELETE FROM seminars WHERE seminar_id = ?');
+    for (const sid of seminarIds) {
+      if (sid) {
+        const info = stmt.run(sid);
+        deletedCount += info.changes;
+      }
+    }
+  });
+  deleteTx();
+  return deletedCount;
+}
+
+/**
  * 특정 세미나를 비공개/삭제 상태(is_closed = 1)로 마킹합니다.
  */
 export function markSeminarClosed(seminarId: string): void {
