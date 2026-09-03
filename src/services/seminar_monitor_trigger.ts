@@ -133,14 +133,22 @@ export async function checkAndTriggerSeminarMonitors(
   const isLunchNoticeCompleted = isSeminarNoticeCompleted('점심', targetDate);
   const isLunchRunning = isTaskRunning('monitor_lunch_seminars');
 
-  if (hasActiveOrEndedLunch && !isLunchNoticeCompleted && !isLunchRunning) {
-    const lunchTask = taskRegistry.getByName('monitor_lunch_seminars');
-    if (lunchTask) {
-      logger.info('입장 가능/진행 중인 점심 세미나 감지됨 -> monitor_lunch_seminars 태스크를 시작합니다.');
-      triggeredLunch = true;
-      runTask(lunchTask).catch((err) => {
-        logger.error('monitor_lunch_seminars 비동기 트리거 실패:', err);
-      });
+  if (lunchSeminars.length > 0) {
+    if (hasActiveOrEndedLunch && !isLunchNoticeCompleted && !isLunchRunning) {
+      const lunchTask = taskRegistry.getByName('monitor_lunch_seminars');
+      if (lunchTask) {
+        logger.info(
+          `[점심세미나 트리거] 입장 가능/진행 중인 세미나 감지 -> monitor_lunch_seminars 시작 (세미나: ${lunchSeminars.length}건, activeOrEnded: true, noticeCompleted: false, running: false)`,
+        );
+        triggeredLunch = true;
+        runTask(lunchTask).catch((err) => {
+          logger.error('monitor_lunch_seminars 비동기 트리거 실패:', err);
+        });
+      }
+    } else if (hasActiveOrEndedLunch) {
+      logger.info(
+        `[점심세미나 트리거 스킵] 입장 가능 세미나가 있으나 트리거 조건 미충족 (activeOrEnded: true, noticeCompleted: ${isLunchNoticeCompleted}, running: ${isLunchRunning})`,
+      );
     }
   }
 
@@ -150,14 +158,22 @@ export async function checkAndTriggerSeminarMonitors(
   const isDinnerNoticeCompleted = isSeminarNoticeCompleted('저녁', targetDate);
   const isDinnerRunning = isTaskRunning('monitor_dinner_seminars');
 
-  if (hasActiveOrEndedDinner && !isDinnerNoticeCompleted && !isDinnerRunning) {
-    const dinnerTask = taskRegistry.getByName('monitor_dinner_seminars');
-    if (dinnerTask) {
-      logger.info('입장 가능/진행 중인 저녁 세미나 감지됨 -> monitor_dinner_seminars 태스크를 시작합니다.');
-      triggeredDinner = true;
-      runTask(dinnerTask).catch((err) => {
-        logger.error('monitor_dinner_seminars 비동기 트리거 실패:', err);
-      });
+  if (dinnerSeminars.length > 0) {
+    if (hasActiveOrEndedDinner && !isDinnerNoticeCompleted && !isDinnerRunning) {
+      const dinnerTask = taskRegistry.getByName('monitor_dinner_seminars');
+      if (dinnerTask) {
+        logger.info(
+          `[저녁세미나 트리거] 입장 가능/진행 중인 세미나 감지 -> monitor_dinner_seminars 시작 (세미나: ${dinnerSeminars.length}건, activeOrEnded: true, noticeCompleted: false, running: false)`,
+        );
+        triggeredDinner = true;
+        runTask(dinnerTask).catch((err) => {
+          logger.error('monitor_dinner_seminars 비동기 트리거 실패:', err);
+        });
+      }
+    } else if (hasActiveOrEndedDinner) {
+      logger.info(
+        `[저녁세미나 트리거 스킵] 입장 가능 세미나가 있으나 트리거 조건 미충족 (activeOrEnded: true, noticeCompleted: ${isDinnerNoticeCompleted}, running: ${isDinnerRunning})`,
+      );
     }
   }
 
