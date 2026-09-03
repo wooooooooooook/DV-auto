@@ -1111,7 +1111,6 @@ export type ApplySeminarOptions = {
   silentIfNoNew?: boolean;
   forceEnrich?: boolean;
   _checkAdvancedPointStatus?: boolean;
-  logProcessState?: boolean;
 };
 
 async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Promise<TaskResult> {
@@ -1435,10 +1434,6 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
 
     message += `\n${SEMINAR_DETAIL_PAGE}`;
 
-    if (options.logProcessState) {
-      logProcessStateDistribution(seminars);
-    }
-
     await checkAndTriggerSeminarMonitors(seminars, { targetDate: referenceDate }).catch((err) => {
       logger.error('checkAndTriggerSeminarMonitors error in run:', err);
     });
@@ -1643,6 +1638,9 @@ export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<Ta
       await sendSeminarChangesToSubscribers(changeNotificationText).catch(() => {});
     }
 
+    // 10분 실행 1회당 processState 상태 분포 1줄 출력 (위임 여부와 무관하게 최신 finalSeminars 기준 집계)
+    logProcessStateDistribution(finalSeminars);
+
     // 신청 가능한 세미나가 있으면 Playwright 전체 실행으로 위임 (processState 기반)
     const hasApplyTarget = currentSeminars.some(
       (s) => !isAppliedSeminar(s.processState) && s.processState === ProcessState.PROCESS_APPLY,
@@ -1650,13 +1648,12 @@ export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<Ta
     if (hasApplyTarget) {
       // run()은 자체적으로 저장소 갱신·알림·포인트 동기화를 모두 수행하므로
       // 여기까지 한 작업은 버리고 run() 결과만 반환
-      return run({}, { ...options, notifyNewSeminarsToTelegram: false, silentIfNoNew: true, logProcessState: true });
+      return run({}, { ...options, notifyNewSeminarsToTelegram: false, silentIfNoNew: true });
     }
 
     const totalSeminarsAvailable = currentSeminars.length;
     const message = `🔄 세미나 목록 갱신 완료 (${totalSeminarsAvailable}개)`;
 
-    logProcessStateDistribution(finalSeminars);
     await checkAndTriggerSeminarMonitors(finalSeminars, { targetDate: referenceDate }).catch((err) => {
       logger.error('checkAndTriggerSeminarMonitors error in runHttpOnly:', err);
     });
