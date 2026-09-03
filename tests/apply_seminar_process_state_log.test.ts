@@ -15,7 +15,7 @@ describe('apply_seminar_extra processState 상태 분포 로그 테스트', () =
   });
 
   describe('formatProcessStateDistribution', () => {
-    it('요구사항 예시와 동일한 분포를 올바른 형식의 문자열로 포맷팅한다', () => {
+    it('요구사항 예시와 동일한 분포를 올바른 형식의 문자열로 포맷팅한다 (label 없음)', () => {
       const seminars = [
         // ENTER 2개 (1)
         { processState: ProcessState.PROCESS_ENTER },
@@ -58,6 +58,20 @@ describe('apply_seminar_extra processState 상태 분포 로그 테스트', () =
       );
     });
 
+    it('label이 지정된 경우 [apply_seminar_extra] processState (label): 형식으로 포맷팅한다', () => {
+      const seminars = [{ processState: ProcessState.PROCESS_ENTER }, { processState: ProcessState.PROCESS_APPLY }];
+
+      const totalResult = formatProcessStateDistribution(seminars, 'total');
+      expect(totalResult).toBe(
+        '[apply_seminar_extra] processState (total): total=2 ENTER=1 APPLY=1 CANCEL=0 PREPARING=0 EXCESS=0 STARTED=0 END=0 COMPLETED=0 unknown=0',
+      );
+
+      const futureResult = formatProcessStateDistribution(seminars, 'future');
+      expect(futureResult).toBe(
+        '[apply_seminar_extra] processState (future): total=2 ENTER=1 APPLY=1 CANCEL=0 PREPARING=0 EXCESS=0 STARTED=0 END=0 COMPLETED=0 unknown=0',
+      );
+    });
+
     it('undefined, null, 알 수 없는 숫자 및 잘못된 문자열은 unknown으로 집계한다', () => {
       const seminars = [
         { processState: undefined },
@@ -96,7 +110,7 @@ describe('apply_seminar_extra processState 상태 분포 로그 테스트', () =
   });
 
   describe('logProcessStateDistribution', () => {
-    it('console.log를 통해 정확한 포맷으로 1회 출력한다', () => {
+    it('단일 목록 전달 시 console.log를 통해 정확한 포맷으로 1회 출력한다', () => {
       const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
       logProcessStateDistribution([
@@ -109,10 +123,36 @@ describe('apply_seminar_extra processState 상태 분포 로그 테스트', () =
         '[apply_seminar_extra] processState: total=2 ENTER=1 APPLY=0 CANCEL=1 PREPARING=0 EXCESS=0 STARTED=0 END=0 COMPLETED=0 unknown=0',
       );
     });
+
+    it('total과 future 목록 전달 시 console.log를 통해 각각 (total), (future) 태그와 함께 2회 출력한다', () => {
+      const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      const totalSeminars = [
+        { processState: ProcessState.PROCESS_ENTER },
+        { processState: ProcessState.PROCESS_CANCEL },
+        { processState: ProcessState.PROCESS_COMPLETED },
+      ];
+      const futureSeminars = [
+        { processState: ProcessState.PROCESS_ENTER },
+        { processState: ProcessState.PROCESS_APPLY },
+      ];
+
+      logProcessStateDistribution(totalSeminars, futureSeminars);
+
+      expect(consoleLogSpy).toHaveBeenCalledTimes(2);
+      expect(consoleLogSpy).toHaveBeenNthCalledWith(
+        1,
+        '[apply_seminar_extra] processState (total): total=3 ENTER=1 APPLY=0 CANCEL=1 PREPARING=0 EXCESS=0 STARTED=0 END=0 COMPLETED=1 unknown=0',
+      );
+      expect(consoleLogSpy).toHaveBeenNthCalledWith(
+        2,
+        '[apply_seminar_extra] processState (future): total=2 ENTER=1 APPLY=1 CANCEL=0 PREPARING=0 EXCESS=0 STARTED=0 END=0 COMPLETED=0 unknown=0',
+      );
+    });
   });
 
   describe('runHttpOnly 실행 흐름', () => {
-    it('일반적인 runHttpOnly 실행 시 최신 세미나 목록에 대해 상태 분포 로그가 정확히 1줄 출력된다', async () => {
+    it('일반적인 runHttpOnly 실행 시 total과 future 세미나 목록에 대해 상태 분포 로그가 각각 1줄씩 출력된다', async () => {
       const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
       vi.spyOn(checkSeminarPointModule, 'searchSeminarPoints').mockResolvedValue({
         success: true,
@@ -151,17 +191,20 @@ describe('apply_seminar_extra processState 상태 분포 로그 테스트', () =
       const res = await runHttpOnly({ silentIfNoNew: true, forceEnrich: false });
       expect(res.success).toBe(true);
 
-      // [apply_seminar_extra] processState: 로그가 정확히 1번 호출되었는지 확인
+      // [apply_seminar_extra] processState: 로그가 total, future 각각 1번씩 총 2번 호출되었는지 확인
       const processStateLogs = consoleLogSpy.mock.calls.filter((call) =>
-        String(call[0]).startsWith('[apply_seminar_extra] processState:'),
+        String(call[0]).startsWith('[apply_seminar_extra] processState'),
       );
-      expect(processStateLogs.length).toBe(1);
+      expect(processStateLogs.length).toBe(2);
       expect(processStateLogs[0][0]).toMatch(
-        /^\[apply_seminar_extra\] processState: total=\d+ ENTER=\d+ APPLY=\d+ CANCEL=\d+ PREPARING=\d+ EXCESS=\d+ STARTED=\d+ END=\d+ COMPLETED=\d+ unknown=\d+$/,
+        /^\[apply_seminar_extra\] processState \(total\): total=\d+ ENTER=\d+ APPLY=\d+ CANCEL=\d+ PREPARING=\d+ EXCESS=\d+ STARTED=\d+ END=\d+ COMPLETED=\d+ unknown=\d+$/,
+      );
+      expect(processStateLogs[1][0]).toMatch(
+        /^\[apply_seminar_extra\] processState \(future\): total=\d+ ENTER=\d+ APPLY=\d+ CANCEL=\d+ PREPARING=\d+ EXCESS=\d+ STARTED=\d+ END=\d+ COMPLETED=\d+ unknown=\d+$/,
       );
     });
 
-    it('applySeminarExtraTask.run 실행 시에도 동일하게 1회 출력된다', async () => {
+    it('applySeminarExtraTask.run 실행 시에도 동일하게 total과 future 로그가 각각 1줄씩 출력된다', async () => {
       const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
       vi.spyOn(checkSeminarPointModule, 'searchSeminarPoints').mockResolvedValue({
         success: true,
@@ -189,15 +232,18 @@ describe('apply_seminar_extra processState 상태 분포 로그 테스트', () =
       expect(res.success).toBe(true);
 
       const processStateLogs = consoleLogSpy.mock.calls.filter((call) =>
-        String(call[0]).startsWith('[apply_seminar_extra] processState:'),
+        String(call[0]).startsWith('[apply_seminar_extra] processState'),
       );
-      expect(processStateLogs.length).toBe(1);
+      expect(processStateLogs.length).toBe(2);
       expect(processStateLogs[0][0]).toMatch(
-        /^\[apply_seminar_extra\] processState: total=\d+ ENTER=\d+ APPLY=\d+ CANCEL=\d+ PREPARING=\d+ EXCESS=\d+ STARTED=\d+ END=\d+ COMPLETED=\d+ unknown=\d+$/,
+        /^\[apply_seminar_extra\] processState \(total\): total=\d+ ENTER=\d+ APPLY=\d+ CANCEL=\d+ PREPARING=\d+ EXCESS=\d+ STARTED=\d+ END=\d+ COMPLETED=\d+ unknown=\d+$/,
+      );
+      expect(processStateLogs[1][0]).toMatch(
+        /^\[apply_seminar_extra\] processState \(future\): total=\d+ ENTER=\d+ APPLY=\d+ CANCEL=\d+ PREPARING=\d+ EXCESS=\d+ STARTED=\d+ END=\d+ COMPLETED=\d+ unknown=\d+$/,
       );
     });
 
-    it('신청 대상(PROCESS_APPLY)이 있어 run()으로 위임되는 경우에도 상태 분포 로그가 정확히 1줄 출력된다', async () => {
+    it('신청 대상(PROCESS_APPLY)이 있어 run()으로 위임되는 경우에도 상태 분포 로그가 total과 future 각각 1줄씩 출력된다', async () => {
       const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
       vi.spyOn(checkSeminarPointModule, 'searchSeminarPoints').mockResolvedValue({
         success: true,
@@ -229,11 +275,14 @@ describe('apply_seminar_extra processState 상태 분포 로그 테스트', () =
       expect(res.success).toBe(true);
 
       const processStateLogs = consoleLogSpy.mock.calls.filter((call) =>
-        String(call[0]).startsWith('[apply_seminar_extra] processState:'),
+        String(call[0]).startsWith('[apply_seminar_extra] processState'),
       );
-      expect(processStateLogs.length).toBe(1);
+      expect(processStateLogs.length).toBe(2);
       expect(processStateLogs[0][0]).toMatch(
-        /^\[apply_seminar_extra\] processState: total=\d+ ENTER=\d+ APPLY=\d+ CANCEL=\d+ PREPARING=\d+ EXCESS=\d+ STARTED=\d+ END=\d+ COMPLETED=\d+ unknown=\d+$/,
+        /^\[apply_seminar_extra\] processState \(total\): total=\d+ ENTER=\d+ APPLY=\d+ CANCEL=\d+ PREPARING=\d+ EXCESS=\d+ STARTED=\d+ END=\d+ COMPLETED=\d+ unknown=\d+$/,
+      );
+      expect(processStateLogs[1][0]).toMatch(
+        /^\[apply_seminar_extra\] processState \(future\): total=\d+ ENTER=\d+ APPLY=\d+ CANCEL=\d+ PREPARING=\d+ EXCESS=\d+ STARTED=\d+ END=\d+ COMPLETED=\d+ unknown=\d+$/,
       );
     });
   });

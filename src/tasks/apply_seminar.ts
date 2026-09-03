@@ -129,7 +129,10 @@ export function isAppliedSeminar(processState?: number): boolean {
 /**
  * 세미나 목록의 processState 상태 분포 문자열 생성
  */
-export function formatProcessStateDistribution(seminars: Array<{ processState?: number | string | null }>): string {
+export function formatProcessStateDistribution(
+  seminars: Array<{ processState?: number | string | null }>,
+  label?: string,
+): string {
   const counts = {
     ENTER: 0,
     APPLY: 0,
@@ -175,14 +178,31 @@ export function formatProcessStateDistribution(seminars: Array<{ processState?: 
     }
   }
 
-  return `[apply_seminar_extra] processState: total=${seminars.length} ENTER=${counts.ENTER} APPLY=${counts.APPLY} CANCEL=${counts.CANCEL} PREPARING=${counts.PREPARING} EXCESS=${counts.EXCESS} STARTED=${counts.STARTED} END=${counts.END} COMPLETED=${counts.COMPLETED} unknown=${counts.unknown}`;
+  const prefix = label ? `[apply_seminar_extra] processState (${label}):` : `[apply_seminar_extra] processState:`;
+  return `${prefix} total=${seminars.length} ENTER=${counts.ENTER} APPLY=${counts.APPLY} CANCEL=${counts.CANCEL} PREPARING=${counts.PREPARING} EXCESS=${counts.EXCESS} STARTED=${counts.STARTED} END=${counts.END} COMPLETED=${counts.COMPLETED} unknown=${counts.unknown}`;
 }
 
 /**
- * 세미나 목록의 processState 상태 분포를 1줄 로그로 출력
+ * 세미나 목록의 processState 상태 분포를 로그로 출력 (단일 목록 또는 total/future 분리 지원)
  */
-export function logProcessStateDistribution(seminars: Array<{ processState?: number | string | null }>): void {
-  console.log(formatProcessStateDistribution(seminars));
+export function logProcessStateDistribution(
+  seminars: Array<{ processState?: number | string | null }>,
+  label?: string,
+): void;
+export function logProcessStateDistribution(
+  totalSeminars: Array<{ processState?: number | string | null }>,
+  futureSeminars: Array<{ processState?: number | string | null }>,
+): void;
+export function logProcessStateDistribution(
+  seminars: Array<{ processState?: number | string | null }>,
+  labelOrFuture?: string | Array<{ processState?: number | string | null }>,
+): void {
+  if (Array.isArray(labelOrFuture)) {
+    console.log(formatProcessStateDistribution(seminars, 'total'));
+    console.log(formatProcessStateDistribution(labelOrFuture, 'future'));
+  } else {
+    console.log(formatProcessStateDistribution(seminars, labelOrFuture));
+  }
 }
 
 const BOOLEAN_FIELDS = new Set<keyof SeminarListItem>(['isPointExcluded', 'isAdvancedSurvey', 'isClosed']);
@@ -1554,8 +1574,8 @@ export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<Ta
       await sendSeminarChangesToSubscribers(changeNotificationText).catch(() => {});
     }
 
-    // 10분 실행 1회당 processState 상태 분포 1줄 출력 (위임 여부와 무관하게 최신 finalSeminars 기준 집계)
-    logProcessStateDistribution(finalSeminars);
+    // 10분 실행 1회당 processState 상태 분포 출력 (total 및 future 목록 분리 로깅)
+    logProcessStateDistribution(finalSeminars, enrichedSeminars);
 
     // 신청 가능한 세미나가 있으면 Playwright 전체 실행으로 위임 (processState 기반)
     const hasApplyTarget = currentSeminars.some(
