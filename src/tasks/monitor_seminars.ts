@@ -18,6 +18,7 @@ import {
 } from '../modules/seminar_api';
 import { processSeminarQuiz } from './seminar_quiz';
 import * as seminarRepo from '../services/seminar_repository';
+import { syncSeminarsDetailToDb } from '../services/seminar_sync_service';
 import {
   editChannelMessage,
   getSeminarStatusChannelMessage,
@@ -1994,6 +1995,9 @@ async function monitorSeminars(
 
     if (isAllInitiallyCompleted) {
       console.log(`[${periodName}] 모든 세미나 및 설문이 이미 종료 상태이므로 모니터링을 종료합니다.`);
+      await syncSeminarsDetailToDb(Array.from(monitoredSeminarsMap.values()), 3, 250).catch((err) =>
+        logger.error(`[${periodName}] 세미나 초기 종료 후 detail 동기화 실패:`, err),
+      );
       return true;
     }
 
@@ -2405,6 +2409,9 @@ async function monitorSeminars(
 
         if (isAllCompleted) {
           console.log(`[${periodName}] 모든 세미나 및 설문이 종료되었습니다. 모니터링을 완료합니다.`);
+          await syncSeminarsDetailToDb(currentList, 3, 250).catch((err) =>
+            logger.error(`[${periodName}] 세미나 종료 후 detail 동기화 실패:`, err),
+          );
           break;
         }
       } else if (lastStatusNoticeText !== currentStatusText) {
@@ -2433,6 +2440,9 @@ async function monitorSeminars(
 
         if (isAllCompleted) {
           console.log(`[${periodName}] 모든 세미나 및 설문이 종료되었습니다. 모니터링을 완료합니다.`);
+          await syncSeminarsDetailToDb(currentList, 3, 250).catch((err) =>
+            logger.error(`[${periodName}] 세미나 종료 후 detail 동기화 실패:`, err),
+          );
           break;
         }
       }

@@ -27,6 +27,7 @@ import * as hmpAttendanceTaskModule from '../tasks/hmp_attendance';
 import { sendOrUpdateTodayLinksNotification } from '../services/broadcast_today_links';
 import { sendToTopicSubscribers, sendHourlyTodayLinksToSubscribers } from '../services/subscription_service';
 import { shouldResumeSeminarMonitor } from '../services/channel_message_repository';
+import { refreshPastUncompletedSeminars } from '../services/seminar_sync_service';
 import type { Task } from '../types';
 
 dns.setDefaultResultOrder('ipv4first');
@@ -545,6 +546,11 @@ const nowStr = new Date().toLocaleString('ko-KR', { timeZone: TIMEZONE });
 utils
   .sendTelegram(`🚀 앱이 온라인 상태입니다. (${nowStr})`)
   .catch((err) => logger.error('Failed to send startup notification:', err));
+
+// 앱 시작 시 지나간 세미나 중 미완료 상태인 세미나들을 동시 3개, 250ms 간격으로 detail API 동기화
+refreshPastUncompletedSeminars(3, 250).catch((err) =>
+  logger.error('Startup refreshPastUncompletedSeminars failed:', err),
+);
 
 checkAndNotifyPointConversion().catch((err) => logger.error('Startup point-conversion check failed:', err));
 checkAndResumeTasks();
