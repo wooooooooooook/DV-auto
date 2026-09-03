@@ -1,14 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import * as syncService from '../src/services/seminar_sync_service';
 import {
   isPastSeminar,
   isUncompletedSeminar,
   syncSeminarsDetailToDb,
   refreshPastUncompletedSeminars,
+  enrichSeminarsWithDetail,
 } from '../src/services/seminar_sync_service';
 import { ProcessState } from '../src/modules/seminar_api';
 import * as seminarRepo from '../src/services/seminar_repository';
 import type { SeminarListItem } from '../src/services/seminar_repository';
-import * as applySeminarModule from '../src/tasks/apply_seminar';
+import * as seminarApiModule from '../src/modules/seminar_api';
 
 describe('seminar_sync_service', () => {
   beforeEach(() => {
@@ -70,43 +72,72 @@ describe('seminar_sync_service', () => {
     });
   });
 
-  describe('syncSeminarsDetailToDb', () => {
-    it('기본 동시성 3, 딜레이 250ms로 enrichSeminarsWithDetail을 호출하고 DB에 upsert한다', async () => {
-      const mockEnriched = [
+  describe('enrichSeminarsWithDetail', () => {
+    it('detail API를 호출하여 최신 메타데이터로 enrich한다', async () => {
+      vi.spyOn(seminarApiModule, 'fetchSeminarDetail').mockResolvedValue({
+        success: true,
+        surveyState: 2,
+        isPointExcluded: false,
+        rawResponse: {
+          seminarDetail: {
+            seminarNm: '테스트 세미나 상세',
+            applyCnt: 50,
+            maxPeopleCnt: 500,
+            processState: ProcessState.PROCESS_COMPLETED,
+            seminarCompleted: 1,
+            hiddenYn: 'N',
+          },
+        },
+      });
+
+      const input = [
         {
           seminarId: '5001',
-          name: '종료된 세미나',
+          name: '이전 이름',
           url: 'https://m.doctorville.co.kr/cme/seminar/5001',
-          time: '18:30 ~ 20:00',
-          currentCount: '100',
-          totalCount: '1000',
-          nightTime: true,
+          time: '',
+          currentCount: '10',
+          totalCount: '100',
+          nightTime: false,
           isAdvancedSurvey: false,
-          processState: ProcessState.PROCESS_COMPLETED,
-          seminarCompleted: 1,
-        },
+        } as SeminarListItem,
       ];
 
-      const enrichSpy = vi.spyOn(applySeminarModule, 'enrichSeminarsWithDetail').mockResolvedValue({
-        seminars: mockEnriched as SeminarListItem[],
-        isAuthExpired: false,
+      const res = await enrichSeminarsWithDetail(input, 1, 0);
+      expect(res.seminars.length).toBe(1);
+      expect(res.seminars[0].name).toBe('테스트 세미나 상세');
+      expect(res.seminars[0].processState).toBe(ProcessState.PROCESS_COMPLETED);
+      expect(res.seminars[0].seminarCompleted).toBe(1);
+    });
+  });
+
+  describe('syncSeminarsDetailToDb', () => {
+    it('기본 동시성 3, 딜레이 250ms로 enrichSeminarsWithDetail을 호출하고 DB에 upsert한다', async () => {
+      const fetchSpy = vi.spyOn(seminarApiModule, 'fetchSeminarDetail').mockResolvedValue({
+        success: true,
+        surveyState: 2,
+        isPointExcluded: false,
+        rawResponse: {
+          seminarDetail: {
+            seminarNm: '종료된 세미나',
+            processState: ProcessState.PROCESS_COMPLETED,
+            seminarCompleted: 1,
+          },
+        },
       });
-      const upsertSpy = vi.spyOn(seminarRepo, 'upsertSeminars').mockReturnValue(mockEnriched as SeminarListItem[]);
+      const upsertSpy = vi.spyOn(seminarRepo, 'upsertSeminars').mockImplementation((list) => list);
 
       const input = [{ seminarId: '5001' }];
       const res = await syncSeminarsDetailToDb(input, 3, 250);
 
-      expect(enrichSpy).toHaveBeenCalledWith(
-        expect.arrayContaining([expect.objectContaining({ seminarId: '5001' })]),
-        3,
-        250,
-      );
-      expect(upsertSpy).toHaveBeenCalledWith(mockEnriched);
-      expect(res).toEqual(mockEnriched);
+      expect(fetchSpy).toHaveBeenCalledWith('5001');
+      expect(upsertSpy).toHaveBeenCalledTimes(1);
+      expect(res[0].processState).toBe(ProcessState.PROCESS_COMPLETED);
+      expect(res[0].seminarCompleted).toBe(1);
     });
 
     it('seminarId가 없는 빈 목록이면 호출하지 않고 빈 배열을 반환한다', async () => {
-      const enrichSpy = vi.spyOn(applySeminarModule, 'enrichSeminarsWithDetail');
+      const enrichSpy = vi.spyOn(syncService, 'enrichSeminarsWithDetail');
       const upsertSpy = vi.spyOn(seminarRepo, 'upsertSeminars');
 
       const res = await syncSeminarsDetailToDb([{ seminarId: '' }, { seminarId: null }]);
@@ -135,22 +166,17 @@ describe('seminar_sync_service', () => {
 
       vi.spyOn(seminarRepo, 'getAllSeminars').mockReturnValue(mockAll as SeminarListItem[]);
 
-      const enrichSpy = vi.spyOn(applySeminarModule, 'enrichSeminarsWithDetail').mockResolvedValue({
-        seminars: [
-          {
-            seminarId: '101',
-            name: '업데이트된 세미나',
-            url: '',
-            time: '',
-            currentCount: '',
-            totalCount: '',
-            nightTime: false,
-            isAdvancedSurvey: false,
+      const fetchSpy = vi.spyOn(seminarApiModule, 'fetchSeminarDetail').mockResolvedValue({
+        success: true,
+        surveyState: 2,
+        isPointExcluded: false,
+        rawResponse: {
+          seminarDetail: {
+            seminarNm: '업데이트된 세미나',
             processState: ProcessState.PROCESS_COMPLETED,
             seminarCompleted: 1,
           },
-        ] as SeminarListItem[],
-        isAuthExpired: false,
+        },
       });
       const upsertSpy = vi.spyOn(seminarRepo, 'upsertSeminars').mockReturnValue([]);
 
@@ -160,11 +186,7 @@ describe('seminar_sync_service', () => {
       expect(result.targetCount).toBe(1);
       expect(result.updatedCount).toBe(1);
 
-      expect(enrichSpy).toHaveBeenCalledWith(
-        expect.arrayContaining([expect.objectContaining({ seminarId: '101' })]),
-        3,
-        250,
-      );
+      expect(fetchSpy).toHaveBeenCalledWith('101');
       expect(upsertSpy).toHaveBeenCalledTimes(1);
     });
 
@@ -179,7 +201,7 @@ describe('seminar_sync_service', () => {
         },
       ];
       vi.spyOn(seminarRepo, 'getAllSeminars').mockReturnValue(mockAll as SeminarListItem[]);
-      const enrichSpy = vi.spyOn(applySeminarModule, 'enrichSeminarsWithDetail');
+      const enrichSpy = vi.spyOn(syncService, 'enrichSeminarsWithDetail');
 
       const result = await refreshPastUncompletedSeminars(3, 250);
 

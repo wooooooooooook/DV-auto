@@ -35,6 +35,8 @@ const SEMINAR_RETENTION_DAYS = 60;
 
 export type { SeminarListItem, SeminarPointStatus } from '../services/seminar_repository';
 import type { SeminarListItem } from '../services/seminar_repository';
+import { enrichSeminarsWithDetail } from '../services/seminar_sync_service';
+export { enrichSeminarsWithDetail };
 
 export const mergeSeminar = seminarRepo.mergeSeminarRecord;
 
@@ -685,92 +687,6 @@ export function shouldRunEnrich(forceEnrich?: boolean): boolean {
 
 export function recordEnrichTime(): void {
   storage.set(LAST_ENRICH_TIMESTAMP_KEY, Date.now());
-}
-
-/**
- * 모든 세미나의 상세(detail) API를 조회하여 isPointExcluded 및 최신 메타데이터 갱신
- * - 과부하 방지를 위해 Concurrency 2 및 요청 간 150ms 딜레이 적용
- */
-export async function enrichSeminarsWithDetail(
-  seminars: SeminarListItem[],
-  concurrency = 2,
-  delayMs = 150,
-): Promise<{ seminars: SeminarListItem[]; isAuthExpired: boolean }> {
-  let isAuthExpired = false;
-  const enriched: SeminarListItem[] = [];
-
-  for (let i = 0; i < seminars.length; i += concurrency) {
-    if (isAuthExpired) break;
-    const chunk = seminars.slice(i, i + concurrency);
-
-    const chunkResults = await Promise.all(
-      chunk.map(async (item) => {
-        if (isAuthExpired) return item;
-        const seminarId = item.seminarId || getSeminarIdFromUrl(item.url);
-        if (!seminarId) return item;
-
-        try {
-          const detailRes = await fetchSeminarDetail(seminarId);
-          if (detailRes.isAuthExpired) {
-            isAuthExpired = true;
-            return item;
-          }
-
-          if (detailRes.success && detailRes.rawResponse?.seminarDetail) {
-            const d = detailRes.rawResponse.seminarDetail;
-            const isPointExcluded = detailRes.isPointExcluded ?? checkIsPointExcluded(d.intro);
-            const isAdvancedSurvey = checkIsAdvancedSurvey(d.useDepthSurvey);
-            const processStateNum = d.processState !== undefined ? Number(d.processState) : item.processState;
-            const cancelProcessStateNum =
-              d.cancelProcessState !== undefined ? Number(d.cancelProcessState) : item.cancelProcessState;
-            const seminarCompletedNum =
-              d.seminarCompleted !== undefined
-                ? typeof d.seminarCompleted === 'boolean'
-                  ? d.seminarCompleted
-                    ? 1
-                    : 0
-                  : Number(d.seminarCompleted)
-                : item.seminarCompleted;
-            const hiddenYn = typeof d.hiddenYn === 'string' ? d.hiddenYn : item.hiddenYn;
-            const isClosed = hiddenYn === 'Y' || hiddenYn === 'y' || item.isClosed;
-            const diseaseCategoryNm =
-              typeof d.diseaseCategoryNm === 'string' ? d.diseaseCategoryNm : item.diseaseCategoryNm;
-
-            return {
-              ...item,
-              name: typeof d.seminarNm === 'string' && d.seminarNm ? d.seminarNm : item.name,
-              currentCount: d.applyCnt !== undefined && d.applyCnt !== null ? String(d.applyCnt) : item.currentCount,
-              totalCount:
-                d.maxPeopleCnt !== undefined && d.maxPeopleCnt !== null ? String(d.maxPeopleCnt) : item.totalCount,
-              isAdvancedSurvey,
-              isPointExcluded,
-              processState: processStateNum,
-              cancelProcessState: cancelProcessStateNum,
-              seminarCompleted: seminarCompletedNum,
-              isClosed,
-              hiddenYn,
-              diseaseCategoryNm,
-            };
-          }
-        } catch (err) {
-          logger.warn(`enrichSeminarsWithDetail: ID ${seminarId} 상세 조회 실패`, err);
-        }
-        return item;
-      }),
-    );
-
-    enriched.push(...chunkResults);
-
-    if (i + concurrency < seminars.length && delayMs > 0 && !isAuthExpired) {
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-    }
-  }
-
-  if (enriched.length < seminars.length) {
-    enriched.push(...seminars.slice(enriched.length));
-  }
-
-  return { seminars: enriched, isAuthExpired };
 }
 
 export function convertSeminarListItemToRawSeminar(item: SeminarListItem): RawSeminarData {
