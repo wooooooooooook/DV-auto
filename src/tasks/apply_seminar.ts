@@ -124,6 +124,65 @@ export function isAppliedSeminar(processState?: number): boolean {
   ).includes(processState);
 }
 
+/**
+ * 세미나 목록의 processState 상태 분포 문자열 생성
+ */
+export function formatProcessStateDistribution(seminars: Array<{ processState?: number | string | null }>): string {
+  const counts = {
+    ENTER: 0,
+    APPLY: 0,
+    CANCEL: 0,
+    PREPARING: 0,
+    EXCESS: 0,
+    STARTED: 0,
+    END: 0,
+    COMPLETED: 0,
+    unknown: 0,
+  };
+
+  for (const s of seminars) {
+    const ps = s.processState !== undefined && s.processState !== null ? Number(s.processState) : undefined;
+    switch (ps) {
+      case ProcessState.PROCESS_ENTER:
+        counts.ENTER++;
+        break;
+      case ProcessState.PROCESS_APPLY:
+        counts.APPLY++;
+        break;
+      case ProcessState.PROCESS_CANCEL:
+        counts.CANCEL++;
+        break;
+      case ProcessState.PROCESS_PREPARING:
+        counts.PREPARING++;
+        break;
+      case ProcessState.PROCESS_EXCESS:
+        counts.EXCESS++;
+        break;
+      case ProcessState.PROCESS_STARTED:
+        counts.STARTED++;
+        break;
+      case ProcessState.PROCESS_END:
+        counts.END++;
+        break;
+      case ProcessState.PROCESS_COMPLETED:
+        counts.COMPLETED++;
+        break;
+      default:
+        counts.unknown++;
+        break;
+    }
+  }
+
+  return `[apply_seminar_extra] processState: total=${seminars.length} ENTER=${counts.ENTER} APPLY=${counts.APPLY} CANCEL=${counts.CANCEL} PREPARING=${counts.PREPARING} EXCESS=${counts.EXCESS} STARTED=${counts.STARTED} END=${counts.END} COMPLETED=${counts.COMPLETED} unknown=${counts.unknown}`;
+}
+
+/**
+ * 세미나 목록의 processState 상태 분포를 1줄 로그로 출력
+ */
+export function logProcessStateDistribution(seminars: Array<{ processState?: number | string | null }>): void {
+  console.log(formatProcessStateDistribution(seminars));
+}
+
 const BOOLEAN_FIELDS = new Set<keyof SeminarListItem>(['isPointExcluded', 'isAdvancedSurvey', 'isClosed']);
 
 export function getSeminarInfoChanges(existing: SeminarListItem, incoming: SeminarListItem): SeminarFieldChange[] {
@@ -1052,6 +1111,7 @@ export type ApplySeminarOptions = {
   silentIfNoNew?: boolean;
   forceEnrich?: boolean;
   _checkAdvancedPointStatus?: boolean;
+  logProcessState?: boolean;
 };
 
 async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Promise<TaskResult> {
@@ -1375,6 +1435,10 @@ async function run(ctx: TaskContext = {}, options: ApplySeminarOptions = {}): Pr
 
     message += `\n${SEMINAR_DETAIL_PAGE}`;
 
+    if (options.logProcessState) {
+      logProcessStateDistribution(seminars);
+    }
+
     await checkAndTriggerSeminarMonitors(seminars, { targetDate: referenceDate }).catch((err) => {
       logger.error('checkAndTriggerSeminarMonitors error in run:', err);
     });
@@ -1586,12 +1650,13 @@ export async function runHttpOnly(options: ApplySeminarOptions = {}): Promise<Ta
     if (hasApplyTarget) {
       // run()은 자체적으로 저장소 갱신·알림·포인트 동기화를 모두 수행하므로
       // 여기까지 한 작업은 버리고 run() 결과만 반환
-      return run({}, { ...options, notifyNewSeminarsToTelegram: false, silentIfNoNew: true });
+      return run({}, { ...options, notifyNewSeminarsToTelegram: false, silentIfNoNew: true, logProcessState: true });
     }
 
     const totalSeminarsAvailable = currentSeminars.length;
     const message = `🔄 세미나 목록 갱신 완료 (${totalSeminarsAvailable}개)`;
 
+    logProcessStateDistribution(finalSeminars);
     await checkAndTriggerSeminarMonitors(finalSeminars, { targetDate: referenceDate }).catch((err) => {
       logger.error('checkAndTriggerSeminarMonitors error in runHttpOnly:', err);
     });
