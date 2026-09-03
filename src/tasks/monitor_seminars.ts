@@ -1595,6 +1595,50 @@ export async function checkAndPerformAutoEnter(
   }
 }
 
+export interface AutoEnterOptions {
+  context?: BrowserContext;
+  isAutoResume?: boolean;
+  periodName?: string;
+}
+
+/**
+ * 입장 가능한 세미나들에 대해 온디맨드 자동 입장을 일괄 수행합니다.
+ * - 이미 입장이 완료된 세미나(autoEnterDone === true) 또는 종료된 세미나는 제외
+ * - autoResume 시 입장이력이 확인된 경우(hasEntryHistory === true) 자동입장 생략 및 완료 처리
+ * - 실패 시 autoEnterDone === false로 남아 다음 폴링 주기에서 재시도(Retry) 가능
+ */
+export async function performAutoEnterForActiveSeminars(
+  seminars: Iterable<MonitoredSeminarItem>,
+  options: AutoEnterOptions = {},
+): Promise<void> {
+  const { context, isAutoResume, periodName = '세미나' } = options;
+  for (const seminar of seminars) {
+    if (seminar.status === '입장가능' && !seminar.isEnded && !seminar.autoEnterDone) {
+      if (isAutoResume && seminar.hasEntryHistory) {
+        console.log(
+          `[${periodName}] [isAutoResume] 세미나(${seminar.seminarId}) 입장이력이 확인되어 자동입장 생략: ${seminar.name}`,
+        );
+        seminar.autoEnterDone = true;
+        continue;
+      }
+
+      try {
+        seminar.autoEnterDone = await checkAndPerformAutoEnter(
+          context,
+          seminar.seminarId,
+          seminar.url,
+          seminar.name,
+          '입장가능',
+          seminar.autoEnterDone,
+        );
+      } catch (err) {
+        console.error(`[${periodName}] 자동입장 처리 중 오류 발생 (${seminar.name}):`, err);
+        seminar.autoEnterDone = false;
+      }
+    }
+  }
+}
+
 export type MonitorSeminarsOptions = {
   isAutoResume?: boolean;
   context?: BrowserContext;
@@ -1810,11 +1854,13 @@ async function monitorSeminars(
       ).catch(() => {});
     }
 
-    // 토픽 구독자 알림 선발송
+    // 토픽 구독자 알림 선발송 (실패하더라도 공지채널 발송 및 자동입장은 중단 없이 계속 진행)
     for (const item of monitoredSeminarsMap.values()) {
       if (item.status === '입장가능' && !item.isEnded && !item.startNotified) {
         item.startNotified = true;
-        await sendSeminarLiveStartNotice(item).catch(() => {});
+        await sendSeminarLiveStartNotice(item).catch((err) => {
+          logger.warn(`[${periodName}] 토픽 구독자 입장 알림 발송 실패 (무시됨): ${item.name}`, err);
+        });
       }
     }
 
@@ -1892,25 +1938,11 @@ async function monitorSeminars(
     }
 
     // 공지채널 메시지 선발송 완료 후, 입장 가능 세미나에 대해 온디맨드 자동 입장(Playwright 폴백 포함) 실행
-    for (const item of monitoredSeminarsMap.values()) {
-      if (item.status === '입장가능' && !item.isEnded && !item.autoEnterDone) {
-        if (isAutoResume && item.hasEntryHistory) {
-          console.log(
-            `[${periodName}] [isAutoResume] 세미나(${item.seminarId}) 입장이력이 확인되어 자동입장 생략: ${item.name}`,
-          );
-          item.autoEnterDone = true;
-        } else {
-          item.autoEnterDone = await checkAndPerformAutoEnter(
-            providedContext,
-            item.seminarId,
-            item.url,
-            item.name,
-            '입장가능',
-            item.autoEnterDone,
-          );
-        }
-      }
-    }
+    await performAutoEnterForActiveSeminars(monitoredSeminarsMap.values(), {
+      context: providedContext,
+      isAutoResume,
+      periodName,
+    });
 
     // 종료된 세미나 중 설문 진행 중인 세미나에 대한 온디맨드 퀴즈 처리 (공지 메시지 발송 후 실행)
     for (const item of monitoredSeminarsMap.values()) {
@@ -2156,7 +2188,9 @@ async function monitorSeminars(
               startNotified: true,
               endNotified: false,
             };
-            await sendSeminarLiveStartNotice(preNoticeItem).catch(() => {});
+            await sendSeminarLiveStartNotice(preNoticeItem).catch((err) => {
+              logger.warn(`[${periodName}] 토픽 구독자 입장 알림 발송 실패 (무시됨): ${info.name}`, err);
+            });
           }
 
           const seminarItemForLoopCheck = {
@@ -2291,7 +2325,9 @@ async function monitorSeminars(
 
             if (!currentSeminar.startNotified) {
               currentSeminar.startNotified = true;
-              await sendSeminarLiveStartNotice(currentSeminar).catch(() => {});
+              await sendSeminarLiveStartNotice(currentSeminar).catch((err) => {
+                logger.warn(`[${periodName}] 토픽 구독자 입장 알림 발송 실패 (무시됨): ${name}`, err);
+              });
             }
           }
         }
@@ -2402,18 +2438,11 @@ async function monitorSeminars(
       }
 
       // ── F. 공지채널 발송/수정 완료 후, 입장 가능 세미나에 대해 온디맨드 자동 입장(Playwright 폴백 포함) 실행
-      for (const seminar of monitoredSeminarsMap.values()) {
-        if (seminar.status === '입장가능' && !seminar.autoEnterDone && !seminar.isEnded) {
-          seminar.autoEnterDone = await checkAndPerformAutoEnter(
-            providedContext,
-            seminar.seminarId,
-            seminar.url,
-            seminar.name,
-            '입장가능',
-            seminar.autoEnterDone,
-          );
-        }
-      }
+      await performAutoEnterForActiveSeminars(monitoredSeminarsMap.values(), {
+        context: providedContext,
+        isAutoResume: false,
+        periodName,
+      });
     }
 
     await sendTelegram(`[${periodName}] 세미나 감시를 종료합니다.`);

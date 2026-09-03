@@ -340,4 +340,205 @@ describe('monitor_seminars 공지채널 메시지 선발송 및 Playwright 입�
     expect(firstPlaywrightIndex).toBeGreaterThanOrEqual(0);
     expect(firstNoticeIndex).toBeLessThan(firstPlaywrightIndex);
   });
+
+  it('performAutoEnterForActiveSeminars 헬퍼: autoResume 이력 스킵 및 retry 동작 검증', async () => {
+    const { performAutoEnterForActiveSeminars } = await import('../src/tasks/monitor_seminars');
+    const seminarApi = await import('../src/modules/seminar_api');
+
+    let apiCallCount = 0;
+    vi.spyOn(seminarApi, 'attendSeminarApi').mockImplementation(async () => {
+      apiCallCount++;
+      if (apiCallCount === 1) {
+        // 첫 시도 실패
+        return { success: false, hasEntryHistory: false, errorMessage: 'temporary fail' };
+      }
+      // 재시도 성공
+      return { success: true, hasEntryHistory: true, rawResponse: {} };
+    });
+
+    const seminars = [
+      {
+        seminarId: '9001',
+        url: 'https://m.doctorville.co.kr/cme/seminar/9001',
+        name: 'autoResume 세미나',
+        status: '입장가능' as const,
+        hasEntryHistory: true,
+        autoEnterDone: false,
+      },
+      {
+        seminarId: '9002',
+        url: 'https://m.doctorville.co.kr/cme/seminar/9002',
+        name: '일반 입장 세미나',
+        status: '입장가능' as const,
+        hasEntryHistory: false,
+        autoEnterDone: false,
+      },
+    ];
+
+    // 1회차 실행 (isAutoResume: true)
+    await performAutoEnterForActiveSeminars(seminars, { isAutoResume: true });
+
+    // 9001은 isAutoResume + hasEntryHistory 이므로 자동입장 API 호출 없이 완료 처리
+    expect(seminars[0].autoEnterDone).toBe(true);
+
+    // 9002는 1회차 실패로 autoEnterDone: false 유지 (다음 주기 retry 대상)
+    expect(seminars[1].autoEnterDone).toBe(false);
+    expect(apiCallCount).toBe(1);
+
+    // 2회차 실행 (Retry 주기)
+    await performAutoEnterForActiveSeminars(seminars, { isAutoResume: false });
+
+    // 9001은 이미 true이므로 추가 호출 없음
+    // 9002는 재시도하여 성공(true)으로 변경됨
+    expect(seminars[1].autoEnterDone).toBe(true);
+    expect(apiCallCount).toBe(2);
+  });
+
+  it('토픽 구독자 알림(sendSeminarLiveStartNotice)이 실패하더라도 공지채널 발송 및 자동입장이 정상 진행되어야 한다', async () => {
+    const fetchMainFutureSpy = vi.spyOn(seminarApiModule, 'fetchMainFutureSeminars');
+    const fetchSeminarDetailSpy = vi.spyOn(seminarApiModule, 'fetchSeminarDetail');
+    const sendNotificationToChannelSpy = vi.spyOn(utilsModule, 'sendNotificationToChannel');
+    const sendTelegramSpy = vi.spyOn(utilsModule, 'sendTelegram');
+    const ensureLoggedInSpy = vi.spyOn(utilsModule, 'ensureLoggedIn');
+    const safeGotoSpy = vi.spyOn(utilsModule, 'safeGoto');
+    const subscriptionService = await import('../src/services/subscription_service');
+
+    // 토픽 발송 강제 실패(에러 throw) 유도
+    vi.spyOn(subscriptionService, 'sendToTopicSubscribers').mockRejectedValue(
+      new Error('Telegram topic network error'),
+    );
+
+    let channelNoticeSent = false;
+    sendNotificationToChannelSpy.mockImplementation(async () => {
+      channelNoticeSent = true;
+      return 888;
+    });
+
+    sendTelegramSpy.mockResolvedValue(true);
+    ensureLoggedInSpy.mockResolvedValue(undefined as never);
+    safeGotoSpy.mockResolvedValue(undefined as never);
+
+    let autoEnterExecuted = false;
+    const mockPage = {
+      locator: (selector: string) => ({
+        first: () => ({
+          isVisible: async () => selector.includes('입장하기'),
+          click: async () => {},
+          isEnabled: async () => true,
+          count: async () => 1,
+          waitFor: async () => {},
+        }),
+        count: async () => 1,
+        waitFor: async () => {},
+      }),
+      getByRole: () => ({
+        first: () => ({
+          isVisible: async () => true,
+          click: async () => {},
+          waitFor: async () => {},
+        }),
+      }),
+      evaluate: async () => [],
+      on: () => {},
+      waitForEvent: async () => null,
+      waitForTimeout: async () => {},
+      waitForLoadState: async () => {},
+      screenshot: async () => {},
+      frames: () => [{ url: () => 'https://video.ibm.com/socialstream/123' }],
+      url: () => 'https://m.doctorville.co.kr/cme/seminar/attend?seminarId=8803',
+      close: async () => {},
+    } as unknown as Page;
+
+    const mockContext = {
+      newPage: async () => {
+        autoEnterExecuted = true;
+        return mockPage;
+      },
+      waitForEvent: async () => null,
+      close: async () => {},
+    } as unknown as BrowserContext;
+
+    const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+    const currentHour = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' })).getHours();
+
+    let step = 0;
+    fetchMainFutureSpy.mockImplementation(async () => {
+      step++;
+      if (step === 1) {
+        return {
+          success: true,
+          items: [
+            {
+              seminarId: 8803,
+              seminarNm: '알림 실패 격리 테스트 세미나',
+              startDt: `${todayStr} ${String(currentHour).padStart(2, '0')}:00:00`,
+              endDt: `${todayStr} ${String(currentHour + 1).padStart(2, '0')}:00:00`,
+              useSurvey: 'Y',
+              useDepthSurvey: 'N',
+              survey: { point: 1000 },
+              processState: 1, // 입장가능
+            },
+          ],
+          rawResponse: {},
+        };
+      }
+      return {
+        success: true,
+        items: [
+          {
+            seminarId: 8803,
+            seminarNm: '알림 실패 격리 테스트 세미나',
+            startDt: `${todayStr} ${String(currentHour).padStart(2, '0')}:00:00`,
+            endDt: `${todayStr} ${String(currentHour + 1).padStart(2, '0')}:00:00`,
+            useSurvey: 'Y',
+            useDepthSurvey: 'N',
+            survey: { point: 1000 },
+            processState: 7, // 방송 종료
+            seminarCompleted: 1,
+          },
+        ],
+        rawResponse: {},
+      };
+    });
+
+    fetchSeminarDetailSpy.mockImplementation(async (id: number | string) => {
+      if (step === 1) {
+        return {
+          success: true,
+          seminarId: String(id),
+          survey: { point: 1000 },
+          surveyState: 5,
+          isPointExcluded: false,
+          hasEntryHistory: false,
+          rawResponse: { surveyState: 5, seminarDetail: { processState: 1 } },
+        };
+      }
+      return {
+        success: true,
+        seminarId: String(id),
+        survey: { point: 1000 },
+        surveyState: 3,
+        isPointExcluded: false,
+        hasEntryHistory: true,
+        rawResponse: { surveyState: 3, seminarDetail: { processState: 7 } },
+      };
+    });
+
+    const seminarApi = await import('../src/modules/seminar_api');
+    vi.spyOn(seminarApi, 'attendSeminarApi').mockResolvedValue({
+      success: false,
+      hasEntryHistory: false,
+      errorMessage: 'API fallback test',
+    });
+
+    const result = await monitorSeminars('점심', currentHour, currentHour + 2, {
+      context: mockContext,
+      pollIntervalMs: 10,
+      waitForSurveyClose: false,
+    });
+
+    expect(result).toBe(true);
+    expect(channelNoticeSent).toBe(true);
+    expect(autoEnterExecuted).toBe(true);
+  });
 });
