@@ -233,4 +233,23 @@ describe('Stale Lock Recovery & PID Liveness & Heartbeat 검증', () => {
       vi.useRealTimers();
     }
   });
+
+  it('monitorSeminars는 taskContext.isLockLost가 true인 경우 루프를 즉시 종료해야 한다', async () => {
+    const { monitorSeminars } = await import('../src/tasks/monitor_seminars');
+    const dummyTaskContext: import('../src/types').TaskContext = {
+      isLockLost: true,
+      lockToken: 'lost-token',
+    };
+
+    const startTime = Date.now();
+    const result = await monitorSeminars('점심', 11, 15, {
+      pollIntervalMs: 1000,
+      taskContext: dummyTaskContext,
+    });
+
+    const elapsed = Date.now() - startTime;
+    // 락을 잃었으므로 1분 sleep이나 API 폴링 없이 즉시(수십 ms 내에) 종료되어야 함
+    expect(elapsed).toBeLessThan(1000);
+    expect(result).toBe(true);
+  });
 });

@@ -1,4 +1,5 @@
 import type { BrowserContext, Page } from 'playwright';
+import type { TaskContext } from '../types';
 import fs from 'fs/promises';
 import path from 'path';
 import { safeGoto, sendTelegram, ensureLoggedIn, loadCookies, sleep } from '../modules/utils';
@@ -1646,6 +1647,7 @@ export type MonitorSeminarsOptions = {
   page?: Page;
   pollIntervalMs?: number;
   waitForSurveyClose?: boolean;
+  taskContext?: TaskContext;
 };
 
 /**
@@ -2005,6 +2007,14 @@ async function monitorSeminars(
 
     // 2. API 모니터링 루프 (1분 폴링)
     while (true) {
+      // Lock 소유권 상실 감지 시 (다른 인스턴스가 락을 선점함) 좀비 워커/충돌 방지를 위해 즉시 조기 종료
+      if (options.taskContext?.isLockLost) {
+        console.warn(
+          `[${periodName}] 태스크 Lock 소유권 상실(새 인스턴스에 의한 선점) 감지됨 -> 모니터링 루프를 안전하게 조기 종료합니다.`,
+        );
+        break;
+      }
+
       loopIteration++;
       const currentTime = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
       if (currentTime.getHours() >= endHour) {
@@ -2041,6 +2051,14 @@ async function monitorSeminars(
       }
 
       await sleep(pollIntervalMs);
+
+      // sleep 후에도 Lock 소유권 상실 여부 재검사
+      if (options.taskContext?.isLockLost) {
+        console.warn(
+          `[${periodName}] 태스크 Lock 소유권 상실(새 인스턴스에 의한 선점) 감지됨 -> 모니터링 루프를 안전하게 조기 종료합니다.`,
+        );
+        break;
+      }
 
       // 메인 세미나 목록 API 호출
       const pollRes = await getTodaysSeminarsFromApi(startHour, endHour, todayIsoDate);

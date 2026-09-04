@@ -349,7 +349,7 @@ const monitorLunchSeminarsTask: Task = {
       .catch((err) =>
         logger.warn('monitor_lunch_seminars: apply_seminars 선실행 실패, 모니터링은 계속 진행합니다', err),
       );
-    return await monitorLunchSeminars.run({ isAutoResume: ctx.isAutoResume });
+    return await monitorLunchSeminars.run(ctx);
   },
 };
 taskRegistry.registerTask(monitorLunchSeminarsTask);
@@ -362,7 +362,7 @@ const monitorDinnerSeminarsTask: Task = {
       .catch((err) =>
         logger.warn('monitor_dinner_seminars: apply_seminars 선실행 실패, 모니터링은 계속 진행합니다', err),
       );
-    return await monitorDinnerSeminars.run({ isAutoResume: ctx.isAutoResume });
+    return await monitorDinnerSeminars.run(ctx);
   },
 };
 taskRegistry.registerTask(monitorDinnerSeminarsTask);
