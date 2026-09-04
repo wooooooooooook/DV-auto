@@ -316,4 +316,80 @@ describe('buildSeminarMonitorStatusMessage 세미나 모니터 현황 메시지 
       '개별 알림(마감)에는 상세 퀴즈 문항이 유지되어야 함',
     );
   });
+
+  it('세미나 목록이 시작시간 순(이른 시간 우선)으로 정렬되어 메시지가 생성되는지 검증', async () => {
+    const { buildSeminarMonitorStatusMessage, sortSeminarsByStartTime } = await import('../src/tasks/monitor_seminars');
+
+    const unsortedSeminars: SeminarInfo[] = [
+      {
+        seminarId: '300',
+        url: 'https://m.doctorville.co.kr/cme/seminar/300',
+        name: '세 번째 세미나',
+        status: '대기',
+        time: '19:30~20:30',
+        startDt: '2026-09-04 19:30:00',
+      },
+      {
+        seminarId: '100',
+        url: 'https://m.doctorville.co.kr/cme/seminar/100',
+        name: '첫 번째 세미나',
+        status: '입장가능',
+        time: '18:00~19:00',
+        startDt: '2026-09-04 18:00:00',
+      },
+      {
+        seminarId: '200',
+        url: 'https://m.doctorville.co.kr/cme/seminar/200',
+        name: '두 번째 세미나',
+        status: '입장가능',
+        time: '18:30~19:30',
+        startDt: '2026-09-04 18:30:00',
+      },
+    ];
+
+    // 1. sortSeminarsByStartTime 정렬 결과 검증
+    const sorted = sortSeminarsByStartTime(unsortedSeminars);
+    expect(sorted.map((s) => s.seminarId)).toEqual(['100', '200', '300']);
+
+    // 2. 메시지 본문에서 순서대로 출력되는지 검증
+    const message = buildSeminarMonitorStatusMessage('저녁', unsortedSeminars);
+    const idx100 = message.indexOf('18:00~19:00 첫 번째 세미나');
+    const idx200 = message.indexOf('18:30~19:30 두 번째 세미나');
+    const idx300 = message.indexOf('19:30~20:30 세 번째 세미나');
+
+    expect(idx100).toBeGreaterThan(-1);
+    expect(idx200).toBeGreaterThan(idx100);
+    expect(idx300).toBeGreaterThan(idx200);
+  });
+
+  it('startDt 없이 time 문자열만 있는 경우 및 시작시간이 같을 때 seminarId 순 정렬 검증', async () => {
+    const { sortSeminarsByStartTime } = await import('../src/tasks/monitor_seminars');
+
+    const sameTimeSeminars: SeminarInfo[] = [
+      {
+        seminarId: '5580',
+        url: 'https://m.doctorville.co.kr/cme/seminar/5580',
+        name: '세미나 B',
+        status: '대기',
+        time: '12:30~13:30',
+      },
+      {
+        seminarId: '5510',
+        url: 'https://m.doctorville.co.kr/cme/seminar/5510',
+        name: '세미나 A',
+        status: '대기',
+        time: '12:30~13:30',
+      },
+      {
+        seminarId: '5500',
+        url: 'https://m.doctorville.co.kr/cme/seminar/5500',
+        name: '이른 세미나',
+        status: '입장가능',
+        time: '12:00~13:00',
+      },
+    ];
+
+    const sorted = sortSeminarsByStartTime(sameTimeSeminars);
+    expect(sorted.map((s) => s.seminarId)).toEqual(['5500', '5510', '5580']);
+  });
 });

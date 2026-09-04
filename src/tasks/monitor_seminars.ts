@@ -366,7 +366,97 @@ export function hasSeminarStatusTransition(prevText: string, currentSeminars: Mo
 }
 
 /**
+ * 세미나의 시작 시간(startDt 또는 time) 파싱 정보 반환
+ */
+export function getSeminarStartTimeValue(s: { startDt?: string; time?: string }): {
+  date: string;
+  timeStr: string;
+  timestamp: number;
+} {
+  let date = '';
+  let timeStr = '';
+  let timestamp = Infinity;
+
+  if (s.startDt) {
+    const clean = s.startDt.trim().replace('T', ' ');
+    const parts = clean.split(' ');
+    date = parts[0] || '';
+    const fullTime = parts[1] || '';
+    timeStr = fullTime.slice(0, 5); // "HH:mm"
+    const iso = clean.includes('+') || clean.endsWith('Z') ? clean : `${clean.replace(' ', 'T')}+09:00`;
+    const ts = new Date(iso).getTime();
+    if (!Number.isNaN(ts)) {
+      timestamp = ts;
+    }
+  }
+
+  if (!timeStr && s.time) {
+    const startHM = s.time.split('~')[0]?.trim();
+    if (startHM && startHM.includes(':')) {
+      timeStr = startHM.slice(0, 5);
+    }
+  }
+
+  return { date, timeStr, timestamp };
+}
+
+/**
+ * 세미나 항목을 시작 시간 순(오름차순: 이른 시간 우선)으로 비교합니다.
+ * 1순위: startDt timestamp (유효한 경우)
+ * 2순위: time 문자열 ("HH:mm")
+ * 3순위: seminarId (숫자 오름차순)
+ * 4순위: name (사전순)
+ */
+export function compareSeminarsByStartTime(a: MonitoredSeminarItem, b: MonitoredSeminarItem): number {
+  const valA = getSeminarStartTimeValue(a);
+  const valB = getSeminarStartTimeValue(b);
+
+  // 1. timestamp가 둘 다 유효한 경우 timestamp로 비교
+  if (Number.isFinite(valA.timestamp) && Number.isFinite(valB.timestamp)) {
+    if (valA.timestamp !== valB.timestamp) {
+      return valA.timestamp - valB.timestamp;
+    }
+  } else if (Number.isFinite(valA.timestamp)) {
+    return -1;
+  } else if (Number.isFinite(valB.timestamp)) {
+    return 1;
+  }
+
+  // 2. timeStr("HH:mm") 비교
+  if (valA.timeStr && valB.timeStr && valA.timeStr !== valB.timeStr) {
+    return valA.timeStr.localeCompare(valB.timeStr);
+  } else if (valA.timeStr && !valB.timeStr) {
+    return -1;
+  } else if (!valA.timeStr && valB.timeStr) {
+    return 1;
+  }
+
+  // 3. seminarId 비교 (오름차순)
+  const idA = a.seminarId ? String(a.seminarId).trim() : '';
+  const idB = b.seminarId ? String(b.seminarId).trim() : '';
+  if (idA && idB && idA !== idB) {
+    const numA = parseInt(idA, 10);
+    const numB = parseInt(idB, 10);
+    if (!isNaN(numA) && !isNaN(numB)) {
+      return numA - numB;
+    }
+    return idA.localeCompare(idB);
+  }
+
+  // 4. name 비교
+  return (a.name || '').localeCompare(b.name || '');
+}
+
+/**
+ * 세미나 목록을 시작 시간 순(오름차순: 이른 시간 우선)으로 정렬합니다.
+ */
+export function sortSeminarsByStartTime(seminars: MonitoredSeminarItem[]): MonitoredSeminarItem[] {
+  return [...seminars].sort(compareSeminarsByStartTime);
+}
+
+/**
  * 세미나 현황 통합 메시지 및 인라인 키보드 생성 (댓글 섹션 포함)
+ * - 세미나 항목을 시작 시간 순(오름차순)으로 정렬하여 표시
  * - 제목의 **(볼드) 제거
  * - 시작종료시각을 제목 앞에 표시
  * - 제목은 20글자로 트렁케이션
@@ -388,10 +478,12 @@ export function buildSeminarStatusMessage(
     };
   }
 
+  const sortedList = sortSeminarsByStartTime(seminars);
+
   let text = `🔔 ${periodName}세미나\n\n`;
 
-  for (let i = 0; i < seminars.length; i++) {
-    const s = seminars[i];
+  for (let i = 0; i < sortedList.length; i++) {
+    const s = sortedList[i];
     const statusDisplay = getSeminarStatusDisplay(s);
 
     const timeStr = s.time ? `${s.time} ` : '';
@@ -419,7 +511,7 @@ export function buildSeminarStatusMessage(
       }
     }
 
-    if (i < seminars.length - 1) {
+    if (i < sortedList.length - 1) {
       text += '\n\n';
     }
   }
