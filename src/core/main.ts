@@ -16,6 +16,9 @@ import * as monitorLunchSeminars from '../tasks/monitor_lunch_seminars';
 import * as monitorDinnerSeminars from '../tasks/monitor_dinner_seminars';
 import * as naverpayPointExchangeTask from '../tasks/naverpay_point_exchange';
 import * as baeminPointExchangeTask from '../tasks/baemin_point_exchange';
+import * as kakaopayPointExchangeTask from '../tasks/kakaopay_point_exchange';
+import * as kakaopay5kPointExchangeTask from '../tasks/kakaopay5k_point_exchange';
+import * as kakaopay3kPointExchangeTask from '../tasks/kakaopay3k_point_exchange';
 import * as checkPointTaskModule from '../tasks/check_point';
 import * as checkSeminarPointTaskModule from '../tasks/check_seminar_point';
 import * as checkAdvancedSeminarsTaskModule from '../tasks/check_advanced_seminars';
@@ -396,6 +399,51 @@ const baeminPointExchange: Task = {
   },
 };
 taskRegistry.registerTask(baeminPointExchange);
+const kakaopayPointExchange: Task = {
+  name: '카카오페이포인트교환',
+  run: async (ctx) => {
+    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await utils.ensureLoggedIn({ page, context });
+      return await kakaopayPointExchangeTask.run({ page, context, maxIterations: ctx.maxIterations });
+    } finally {
+      await browser.close();
+    }
+  },
+};
+taskRegistry.registerTask(kakaopayPointExchange);
+const kakaopay5kPointExchange: Task = {
+  name: '카카오페이5k포인트교환',
+  run: async (ctx) => {
+    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await utils.ensureLoggedIn({ page, context });
+      return await kakaopay5kPointExchangeTask.run({ page, context, maxIterations: ctx.maxIterations });
+    } finally {
+      await browser.close();
+    }
+  },
+};
+taskRegistry.registerTask(kakaopay5kPointExchange);
+const kakaopay3kPointExchange: Task = {
+  name: '카카오페이3k포인트교환',
+  run: async (ctx) => {
+    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await utils.ensureLoggedIn({ page, context });
+      return await kakaopay3kPointExchangeTask.run({ page, context, maxIterations: ctx.maxIterations });
+    } finally {
+      await browser.close();
+    }
+  },
+};
+taskRegistry.registerTask(kakaopay3kPointExchange);
 const broadcastTodayLinksTask: Task = {
   name: 'broadcast_today_links_daily',
   schedule: BROADCAST_TODAY_LINKS_CRON,

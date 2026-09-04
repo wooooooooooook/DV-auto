@@ -1433,113 +1433,67 @@ if (adminBot) {
   // 세미나 상세 정보 조회
   adminBot.command('seminar_detail', createSeminarDetailHandler({ alwaysRefresh: true, showRawMessages: true }));
 
-  adminBot.command('naverpay_point_exchange', async (ctx) => {
-    logger.info('User requested to run naverpay_point_exchange now', { from: ctx.from?.username });
-    const task = taskRegistry.getByName('네이버페이포인트교환');
-    if (!task) {
-      logger.error('네이버페이포인트교환 task not found, cannot run');
-      return replyWithSplit(ctx, '네이버페이포인트교환 task not found!');
-    }
-
-    const messageText = ctx.message?.text || '';
-    const args = messageText.split(' ').slice(1);
-    let attempts = 10;
-    if (args.length > 0) {
-      const parsedAttempts = parseInt(args[0], 10);
-      if (!isNaN(parsedAttempts) && parsedAttempts > 0) {
-        attempts = parsedAttempts;
+  const createPointExchangeHandler = (taskName: string, defaultAttempts = 1) => {
+    return async (ctx: Context) => {
+      logger.info(`User requested to run ${taskName} now`, { from: ctx.from?.username });
+      const task = taskRegistry.getByName(taskName);
+      if (!task) {
+        logger.error(`${taskName} task not found, cannot run`);
+        return replyWithSplit(ctx, `${taskName} task not found!`);
       }
-    }
 
-    try {
-      await replyWithSplit(ctx, `네이버페이포인트교환 작업을 시작합니다... (${attempts}회 시도, 백그라운드 실행)`);
-      runner
-        .runTask(task, { maxIterations: attempts })
-        .then(async (result) => {
-          if (result && typeof result === 'object' && (result as { message?: string }).message) {
-            await replyWithSplit(
-              ctx,
-              (result as { message: string }).message,
-              (result as { options?: Record<string, unknown> }).options as Parameters<Context['reply']>[1],
-            );
-            if (
-              (result as { imagePath?: string }).imagePath &&
-              fsSync.existsSync((result as { imagePath: string }).imagePath)
-            ) {
-              await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
-            }
-          } else if (typeof result === 'string') {
-            await replyWithSplit(ctx, result);
-          } else if (result === true) {
-            await replyWithSplit(ctx, '네이버페이포인트교환 작업이 완료되었습니다.');
-          } else {
-            await replyWithSplit(ctx, '네이버페이포인트교환 작업이 완료되었습니다.');
-          }
-        })
-        .catch((e) => {
-          const message = e instanceof Error ? e.message : String(e);
-          replyWithSplit(ctx, `네이버페이포인트교환 실패: ${message}`);
-        });
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      replyWithSplit(ctx, `Failed to start 네이버페이포인트교환: ${message}`);
-    }
-  });
-
-  adminBot.command('baemin_point_exchange', async (ctx) => {
-    logger.info('User requested to run baemin_point_exchange now', { from: ctx.from?.username });
-    const task = taskRegistry.getByName('배민포인트교환');
-    if (!task) {
-      logger.error('배민포인트교환 task not found, cannot run');
-      return replyWithSplit(ctx, '배민포인트교환 task not found!');
-    }
-
-    const messageText = ctx.message?.text || '';
-    const args = messageText.split(' ').slice(1);
-    let attempts = 1;
-    if (args.length > 0) {
-      const parsedAttempts = parseInt(args[0], 10);
-      if (!isNaN(parsedAttempts) && parsedAttempts > 0) {
-        attempts = parsedAttempts;
+      const messageText = ctx.message && 'text' in ctx.message ? ctx.message.text : '';
+      const args = messageText.split(' ').slice(1);
+      let attempts = defaultAttempts;
+      if (args.length > 0) {
+        const parsedAttempts = parseInt(args[0], 10);
+        if (!isNaN(parsedAttempts) && parsedAttempts > 0) {
+          attempts = parsedAttempts;
+        }
       }
-    }
 
-    try {
-      await replyWithSplit(ctx, `배민포인트교환 작업을 시작합니다... (${attempts}회 시도, 백그라운드 실행)`);
-      runner
-        .runTask(task, { maxIterations: attempts })
-        .then(async (result) => {
-          if (result && typeof result === 'object' && (result as { message?: string }).message) {
-            await replyWithSplit(
-              ctx,
-              (result as { message: string }).message,
-              (result as { options?: Record<string, unknown> }).options as Parameters<Context['reply']>[1],
-            );
-            if (
-              (result as { imagePath?: string }).imagePath &&
-              fsSync.existsSync((result as { imagePath: string }).imagePath)
-            ) {
-              await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
+      try {
+        await replyWithSplit(ctx, `${taskName} 작업을 시작합니다... (${attempts}회 시도, 백그라운드 실행)`);
+        runner
+          .runTask(task, { maxIterations: attempts })
+          .then(async (result) => {
+            if (result && typeof result === 'object' && (result as { message?: string }).message) {
+              await replyWithSplit(
+                ctx,
+                (result as { message: string }).message,
+                (result as { options?: Record<string, unknown> }).options as Parameters<Context['reply']>[1],
+              );
+              if (
+                (result as { imagePath?: string }).imagePath &&
+                fsSync.existsSync((result as { imagePath: string }).imagePath)
+              ) {
+                await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
+                await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
+              }
+            } else if (typeof result === 'string') {
+              await replyWithSplit(ctx, result);
+            } else if (result === true) {
+              await replyWithSplit(ctx, `${taskName} 작업이 완료되었습니다.`);
+            } else {
+              await replyWithSplit(ctx, `${taskName} 작업이 완료되었습니다.`);
             }
-          } else if (typeof result === 'string') {
-            await replyWithSplit(ctx, result);
-          } else if (result === true) {
-            await replyWithSplit(ctx, '배민포인트교환 작업이 완료되었습니다.');
-          } else {
-            await replyWithSplit(ctx, '배민포인트교환 작업이 완료되었습니다.');
-          }
-        })
-        .catch((e) => {
-          const message = e instanceof Error ? e.message : String(e);
-          replyWithSplit(ctx, `배민포인트교환 실패: ${message}`);
-        });
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      replyWithSplit(ctx, `Failed to start 배민포인트교환: ${message}`);
-    }
-  });
+          })
+          .catch((e) => {
+            const message = e instanceof Error ? e.message : String(e);
+            replyWithSplit(ctx, `${taskName} 실패: ${message}`);
+          });
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        replyWithSplit(ctx, `Failed to start ${taskName}: ${message}`);
+      }
+    };
+  };
+
+  adminBot.command('naverpay_point_exchange', createPointExchangeHandler('네이버페이포인트교환', 10));
+  adminBot.command('baemin_point_exchange', createPointExchangeHandler('배민포인트교환', 1));
+  adminBot.command('kakaopay_point_exchange', createPointExchangeHandler('카카오페이포인트교환', 1));
+  adminBot.command('kakaopay5k_point_exchange', createPointExchangeHandler('카카오페이5k포인트교환', 1));
+  adminBot.command('kakaopay3k_point_exchange', createPointExchangeHandler('카카오페이3k포인트교환', 1));
 
   // ==========================================
   // 4. 시스템 & 관리 (System & Management)
@@ -1807,6 +1761,9 @@ if (adminBot) {
 - /check_advanced_seminars: 최근 2주 심화 세미나 포인트 일괄 확인 (방장 계정 기준)
 - /naverpay_point_exchange [횟수]: 네이버페이포인트교환 작업을 실행합니다. (기본값: 10)
 - /baemin_point_exchange [횟수]: 배민포인트교환 작업을 실행합니다. (기본값: 1)
+- /kakaopay_point_exchange [횟수]: 카카오페이 1만원권 포인트교환 작업을 실행합니다. (기본값: 1)
+- /kakaopay5k_point_exchange [횟수]: 카카오페이 5천원권 포인트교환 작업을 실행합니다. (기본값: 1)
+- /kakaopay3k_point_exchange [횟수]: 카카오페이 3천원권 포인트교환 작업을 실행합니다. (기본값: 1)
 
 📢 공지방 메시지 관리:
 - /channel_messages [날짜]: 공지방 전송 메시지 ID 목록 조회 (기본: 오늘)
@@ -1886,6 +1843,9 @@ export const adminCommands = [
   { command: 'check_advanced_seminars', description: '최근 2주 심화 세미나 포인트 일괄 확인 (방장 계정 기준)' },
   { command: 'naverpay_point_exchange', description: '네이버페이포인트교환 실행' },
   { command: 'baemin_point_exchange', description: '배민포인트교환 실행' },
+  { command: 'kakaopay_point_exchange', description: '카카오페이포인트교환 실행 (1만원)' },
+  { command: 'kakaopay5k_point_exchange', description: '카카오페이 5천원권 교환 실행' },
+  { command: 'kakaopay3k_point_exchange', description: '카카오페이 3천원권 교환 실행' },
   // 4. 시스템 & 관리
   { command: 'schedules', description: '스케줄된 작업 목록 확인' },
   { command: 'log', description: '최근 로그 확인' },

@@ -2,6 +2,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import type { PlaywrightRunArgs, TaskResult } from '../types';
 import { ensureLoggedIn, safeGoto, sendTelegram, sleep } from '../modules/utils';
+import { getProductPrice } from '../modules/point_exchange_utils';
 import { getPoint } from './check_point';
 
 const TARGET_URL = 'https://mcircle.bizmarketb2b.com/Goods/Content.aspx?guid=14152303&catecode=14592&eventuid=21006';
@@ -96,12 +97,17 @@ async function run({ page, context, maxIterations }: PlaywrightRunArgs): Promise
       await buyNowButton.click();
 
       await workPage.waitForSelector('#rcvName', { timeout: 10000 });
+      const productPrice = await getProductPrice(workPage, DEFAULT_POINT, 10000);
+      if (productPrice !== DEFAULT_POINT) {
+        console.log(`[baemin_point_exchange] 상품금액 추출 성공: ${productPrice}원`);
+      }
+
       await workPage.fill('#rcvName', name);
       await workPage.fill('#rcvMobile1', phone1);
       await workPage.fill('#rcvMobile2', phone2);
       await workPage.fill('#rcvMobile3', phone3);
       await workPage.fill('#orderMemo', String(iteration));
-      await workPage.fill('#point_etc1', DEFAULT_POINT);
+      await workPage.fill('#point_etc1', productPrice);
 
       const pointUseButton = workPage.locator('#chkMcircelPoint a').first();
       if (await pointUseButton.isVisible()) {
