@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import * as storage from '../src/services/storage';
 import {
   runTask,
@@ -180,5 +180,57 @@ describe('Stale Lock Recovery & PID Liveness & Heartbeat 검증', () => {
     // 실행 후 정상 종료 시 releaseLock 됨
     const currentLock = storage.get<TaskLockData>('lock:monitor_lunch_seminars');
     expect(currentLock).toBeNull();
+  });
+
+  it('runTask 실행 중 Lock 소유권을 상실하면 ctx.isLockLost가 true로 설정되어야 한다', async () => {
+    vi.useFakeTimers();
+    try {
+      let taskContextRef: import('../src/types').TaskContext | null = null;
+      let resolveTask: () => void;
+      const taskPromise = new Promise<void>((resolve) => {
+        resolveTask = resolve;
+      });
+
+      const testTask: Task = {
+        name: 'long_running_task',
+        run: async (ctx) => {
+          taskContextRef = ctx;
+          expect(ctx.lockToken).toBeTruthy();
+          expect(ctx.isLockLost).toBe(false);
+          await taskPromise;
+          return { success: true };
+        },
+      };
+
+      const runPromise = runTask(testTask, {});
+
+      // 1. Task가 시작되어 락을 잡은 상태 확인
+      expect(taskContextRef).not.toBeNull();
+      const originalToken = taskContextRef!.lockToken;
+      expect(originalToken).toBeTruthy();
+
+      // 2. 외부에서 락을 다른 토큰으로 교체 (소유권 상실 시뮬레이션)
+      storage.set('lock:long_running_task', {
+        owner: process.pid,
+        token: 'new-usurper-token',
+        ts: Date.now(),
+      });
+
+      // 3. 1분(HEARTBEAT_INTERVAL_MS) 시간 진행하여 하트비트 트리거
+      await vi.advanceTimersByTimeAsync(HEARTBEAT_INTERVAL_MS);
+
+      // 4. 하트비트 갱신 실패로 ctx.isLockLost가 true로 변경되었는지 확인
+      expect(taskContextRef!.isLockLost).toBe(true);
+
+      // 5. 태스크 종료 처리
+      resolveTask!();
+      await runPromise;
+
+      // 6. 태스크 종료 후에도 새로 획득된 usurper 토큰이 유지되는지 확인
+      const finalLock = storage.get<TaskLockData>('lock:long_running_task');
+      expect(finalLock?.token).toBe('new-usurper-token');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import Database from 'better-sqlite3';
+import type { TaskLockData } from '../types';
 
 const DEFAULT_STATE_FILE = path.join(process.cwd(), 'data', 'state.json');
 const DEFAULT_PROD_DB_PATH = path.join(process.cwd(), 'data', 'app.db');
@@ -831,7 +832,7 @@ export function clearStaleLocks(currentPid: number = process.pid): number {
   const deleteStmt = db.prepare('DELETE FROM kv_store WHERE key = ?');
   for (const row of rows) {
     try {
-      const parsed = JSON.parse(row.value) as { owner?: number; ts?: number };
+      const parsed = JSON.parse(row.value) as TaskLockData;
       if (parsed.owner !== currentPid && !isPidAlive(parsed.owner)) {
         deleteStmt.run(row.key);
         cleared++;

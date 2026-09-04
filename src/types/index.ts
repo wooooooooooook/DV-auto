@@ -1,5 +1,11 @@
 import type { BrowserContext, Page } from 'playwright';
 
+export interface TaskLockData {
+  owner: number;
+  token: string;
+  ts: number;
+}
+
 export interface TaskContext {
   page?: Page;
   context?: BrowserContext;
@@ -7,6 +13,8 @@ export interface TaskContext {
   maxIterations?: number;
   isAutoResume?: boolean;
   args?: Record<string, string>;
+  lockToken?: string;
+  isLockLost?: boolean;
 }
 
 export interface PlaywrightTaskContext extends TaskContext {

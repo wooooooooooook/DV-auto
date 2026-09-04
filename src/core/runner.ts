@@ -2,16 +2,12 @@ import crypto from 'crypto';
 import * as storage from '../services/storage';
 import * as logger from '../services/logger';
 import * as utils from '../modules/utils';
-import type { Task, TaskContext, TaskResult } from '../types';
+import type { Task, TaskContext, TaskResult, TaskLockData } from '../types';
 
 export const DEFAULT_LOCK_TTL_MS = 130 * 1000; // 2분 10초
 export const HEARTBEAT_INTERVAL_MS = 60 * 1000; // 1분
 
-export interface TaskLockData {
-  owner: number;
-  token: string;
-  ts: number;
-}
+export type { TaskLockData };
 
 // Acquire a simple process-level lock for a task (not distributed)
 // Returns token string if lock acquired successfully, otherwise null
@@ -69,11 +65,21 @@ async function runTask(task: Task, ctx: TaskContext = {}): Promise<TaskResult | 
     return false;
   }
 
-  // 장기 실행 태스크(예: 세미나 모니터링 등)를 위한 주기적 Lock 갱신 Heartbeat 타이머 (동일 인스턴스 token 검증)
-  const heartbeatTimer = setInterval(() => {
+  ctx.lockToken = lockToken;
+  ctx.isLockLost = false;
+
+  // 장기 실행 태스크(예: 세미나 모니터링 등)를 위한 주기적 Lock 갱신 Heartbeat 타이머
+  let heartbeatTimer: NodeJS.Timeout | null = setInterval(() => {
     const renewed = renewLock(name, lockToken);
     if (!renewed) {
-      logger.warn(`Heartbeat renewal skipped/failed for task ${name} (stale or overtaken token)`);
+      ctx.isLockLost = true;
+      logger.warn(
+        `[runner] Heartbeat renewal failed for task '${name}' (token: ${lockToken}). Lock ownership lost, stopping heartbeat.`,
+      );
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      }
     }
   }, HEARTBEAT_INTERVAL_MS);
   heartbeatTimer.unref();
@@ -115,8 +121,14 @@ async function runTask(task: Task, ctx: TaskContext = {}): Promise<TaskResult | 
     logger.error('runTask error', name, e && (typeof e === 'object' && 'stack' in e ? (e as Error).stack : e));
     throw e instanceof Error ? e : new Error(String(e));
   } finally {
-    clearInterval(heartbeatTimer);
-    releaseLock(name, lockToken);
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
+    const released = releaseLock(name, lockToken);
+    if (!released) {
+      logger.info(`[runner] Lock release skipped for task '${name}' (lock was overtaken or expired)`);
+    }
   }
 }
 
