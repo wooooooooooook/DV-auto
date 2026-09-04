@@ -322,7 +322,7 @@ describe('seminar_monitor_trigger (10분 주기 모니터링 트리거 및 상�
 
     // 2. 이미 태스크가 락(실행 중)인 경우
     storage.clear();
-    storage.set('lock:monitor_lunch_seminars', { owner: process.pid, ts: Date.now() });
+    storage.set('lock:monitor_lunch_seminars', { owner: process.pid, token: 'test-token', ts: Date.now() });
     expect(isTaskRunning('monitor_lunch_seminars')).toBe(true);
 
     const resRunning = await checkAndTriggerSeminarMonitors(mockSeminars, {

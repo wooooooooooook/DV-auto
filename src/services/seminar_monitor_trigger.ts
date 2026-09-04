@@ -4,7 +4,7 @@ import type { SeminarListItem } from './seminar_repository';
 import type { RawSeminarData } from '../tasks/apply_seminar';
 import { isSeminarNoticeCompleted } from './channel_message_repository';
 import * as taskRegistry from '../core/taskRegistry';
-import { runTask } from '../core/runner';
+import { runTask, DEFAULT_LOCK_TTL_MS } from '../core/runner';
 import * as logger from './logger';
 import * as storage from './storage';
 
@@ -104,7 +104,7 @@ export function getSeminarPeriod(seminar: SeminarListItem | RawSeminarData): '�
 /**
  * 특정 태스크가 현재 락 상태(실행 중)인지 확인합니다.
  */
-export function isTaskRunning(taskName: string, ttlMs = 6 * 60 * 60 * 1000): boolean {
+export function isTaskRunning(taskName: string, ttlMs = DEFAULT_LOCK_TTL_MS): boolean {
   const key = `lock:${taskName}`;
   const now = Date.now();
   const current = storage.get<{ owner?: number; ts?: number }>(key);

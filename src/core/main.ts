@@ -343,7 +343,6 @@ const runSeminarQuizTask: Task = {
 taskRegistry.registerTask(runSeminarQuizTask);
 const monitorLunchSeminarsTask: Task = {
   name: 'monitor_lunch_seminars',
-  lockTtlMs: 6 * 60 * 60 * 1000,
   run: async (ctx) => {
     await applySeminarTask
       .applySeminars()
@@ -357,7 +356,6 @@ taskRegistry.registerTask(monitorLunchSeminarsTask);
 
 const monitorDinnerSeminarsTask: Task = {
   name: 'monitor_dinner_seminars',
-  lockTtlMs: 6 * 60 * 60 * 1000,
   run: async (ctx) => {
     await applySeminarTask
       .applySeminars()
