@@ -1,3 +1,5 @@
+import fs from 'fs/promises';
+import path from 'path';
 import type { TaskContext, TaskResult } from '../types';
 import {
   loginDocple,
@@ -10,6 +12,8 @@ import {
   getDocpleQuizDetail,
   getDocpleMedicineDetail,
   formatDocpleQuizTelegramMessage,
+  submitDocpleQuiz,
+  matchDocpleQuizAnswersWithCheatsheet,
   authDocpleCommunityPassword,
   getDocpleCommunityPosts,
   recommendDocpleCommunityPost,
@@ -18,6 +22,17 @@ import {
 import { sendTelegram } from '../modules/utils';
 import * as logger from '../services/logger';
 
+const SEMINAR_QUIZ_CHEATSHEET_PATH = path.join(process.cwd(), 'data/seminar_quiz_cheatsheet.json');
+
+async function loadCheatsheet(): Promise<Record<string, string>> {
+  try {
+    const raw = await fs.readFile(SEMINAR_QUIZ_CHEATSHEET_PATH, 'utf8');
+    return JSON.parse(raw) as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
 export interface DocpleDailyWorkflowResult {
   success: boolean;
   message: string;
@@ -25,7 +40,7 @@ export interface DocpleDailyWorkflowResult {
   endCash: number;
   cashDiff: number;
   attendance: DocpleAttendanceResult;
-  quizList: Array<{ id: number | string; name: string; url: string }>;
+  quizList: Array<{ id: number | string; name: string; url: string; status?: string }>;
   recommendedPosts: Array<{
     tid: number;
     title: string;
@@ -68,7 +83,8 @@ export function formatDocpleDailyReport(res: DocpleDailyWorkflowResult): string 
   lines.push(`\n💊 e-디테일링 Quiz (${res.quizList.length}건):`);
   if (res.quizList.length > 0) {
     res.quizList.forEach((q, idx) => {
-      lines.push(`  ${idx + 1}. [${q.name}]\n     URL: ${q.url}`);
+      const statusText = q.status ? ` (${q.status})` : '';
+      lines.push(`  ${idx + 1}. [${q.name}]${statusText}\n     URL: ${q.url}`);
     });
   } else {
     lines.push('  • 진행 중인 퀴즈 대상 의약품이 없습니다.');
@@ -135,11 +151,13 @@ export async function executeDocpleDaily(
     attendanceRes = await checkDocpleAttendance(accessToken);
   }
 
-  // e-디테일링 퀴즈 상세 정보 및 관리자 텔레그램 발송
-  logger.info('Docple daily: Step 4. Extracting e-detailing quiz and sending details to admin bot...');
-  let quizList: Array<{ id: number | string; name: string; url: string }> = [];
+  // e-디테일링 퀴즈 처리 (족보 확인 -> 자동 제출 또는 텔레그램 알림)
+  logger.info('Docple daily: Step 4. Processing e-detailing quizzes with cheatsheet...');
+  const quizList: Array<{ id: number | string; name: string; url: string; status?: string }> = [];
   try {
+    const cheatsheet = await loadCheatsheet();
     const activeQuizzes = await getDocpleActiveQuizzes(accessToken);
+
     if (activeQuizzes.length > 0) {
       for (const q of activeQuizzes) {
         const medId = q.medicineId || 0;
@@ -148,30 +166,76 @@ export async function executeDocpleDaily(
           medId ? getDocpleMedicineDetail(accessToken, medId) : Promise.resolve(null),
         ]);
 
+        const medName = medDetail?.medicineName || q.quizName;
+        const quizUrl = `https://docple-plus.com/e-detailing/${medId || ''}`;
+
+        if (!quizDetail) {
+          quizList.push({ id: medId || q.quizId, name: medName, url: quizUrl });
+          continue;
+        }
+
+        // 1. 이미 퀴즈를 통과한 경우
+        if (quizDetail.hasPassedBefore) {
+          quizList.push({ id: medId || q.quizId, name: medName, url: quizUrl, status: '이미 참여 완료' });
+          continue;
+        }
+
+        // 2. 족보 매칭 시도
+        const matchResult = matchDocpleQuizAnswersWithCheatsheet(quizDetail, cheatsheet);
+        if (matchResult.isFullyMatched && quizDetail.canAttempt !== false) {
+          logger.info(`Docple daily: Submitting quiz ${q.quizId} using cheatsheet...`);
+          const submitRes = await submitDocpleQuiz(
+            accessToken,
+            q.quizId,
+            matchResult.answers.map((a) => ({
+              questionId: a.questionId,
+              selectedOptionId: a.selectedOptionId,
+            })),
+          );
+
+          if (submitRes.isPassed) {
+            const rewardMsg = submitRes.grantedCash ? ` (+${submitRes.grantedCash} 캐시)` : '';
+            quizList.push({
+              id: medId || q.quizId,
+              name: medName,
+              url: quizUrl,
+              status: `족보 자동 제출 완료${rewardMsg}`,
+            });
+
+            await sendTelegram(
+              `✅ [닥플 퀴즈 정답 자동 제출 완료]\n\n• 의약품: ${medName}\n• 결과: 정답${rewardMsg}\n• 제출 정답:\n${matchResult.answers.map((a, i) => `  Q${i + 1}: ${a.optionText}`).join('\n')}`,
+            ).catch((sendErr) => {
+              logger.warn('Failed to send quiz success message', sendErr);
+            });
+            continue;
+          }
+        }
+
+        // 3. 족보가 없거나 미매칭인 경우 관리자 봇으로 문제/보기/상세정보 안내 메시지 발송
         const quizMsg = formatDocpleQuizTelegramMessage({
-          quiz: quizDetail || q,
+          quiz: quizDetail,
           medicine: medDetail,
           medicineId: medId,
         });
 
-        // 관리자 봇으로 퀴즈 문제/보기/상세정보 별도 전송
         await sendTelegram(quizMsg).catch((sendErr) => {
           logger.warn('Failed to send Docple quiz message to admin bot', sendErr);
         });
 
         quizList.push({
           id: medId || q.quizId,
-          name: medDetail?.medicineName || q.quizName,
-          url: `https://docple-plus.com/e-detailing/${medId || ''}`,
+          name: medName,
+          url: quizUrl,
+          status: '정답 족보 필요 (텔레그램 답장 대기)',
         });
       }
     } else {
-      // fallback to medicine list quiz detection
       const medicines = await getDocpleEdetailingMedicines(accessToken, { size: 50 });
-      quizList = extractDocpleQuizUrls(medicines);
+      const extracted = extractDocpleQuizUrls(medicines);
+      quizList.push(...extracted);
     }
   } catch (err) {
-    const msg = `퀴즈 목록 조회 오류: ${err instanceof Error ? err.message : String(err)}`;
+    const msg = `퀴즈 처리 오류: ${err instanceof Error ? err.message : String(err)}`;
     logger.error('Docple daily quiz error', err);
     errors.push(msg);
   }

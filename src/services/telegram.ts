@@ -23,6 +23,13 @@ import {
 import { sendOrUpdateTodayLinksNotification } from './broadcast_today_links';
 import { extractSeminarIds } from '../tasks/seminar_detail';
 import { syncChannelSeminarStatusOnQuizRegister, setSeminarQuizAnswer } from '../tasks/monitor_seminars';
+import {
+  loginDocple,
+  getDocpleActiveQuizzes,
+  getDocpleQuizDetail,
+  submitDocpleQuiz,
+  matchDocpleQuizAnswersWithCheatsheet,
+} from '../modules/docple_api';
 
 const ADMIN_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const NOTICE_BOT_TOKEN = process.env.NOTICE_BOT_TOKEN;
@@ -157,32 +164,41 @@ async function saveQuizMapping(data: QuizMapping): Promise<void> {
   }
 }
 
-type ParsedQuizQuestion = { keyword: string; options: string[] };
+export type ParsedQuizQuestion = { keyword: string; options: string[] };
 
-function parseQuizQuestionsFromText(content: string): ParsedQuizQuestion[] {
+export function parseQuizQuestionsFromText(content: string): ParsedQuizQuestion[] {
   const lines = content.split('\n').map((l) => l.trim());
   const questions: ParsedQuizQuestion[] = [];
   let currentQuestion: ParsedQuizQuestion | null = null;
 
   for (const line of lines) {
-    if (line.match(/^Q\d+:/)) {
-      const keywordMatch = line.match(/^Q\d+:\s*(?:\[퀴즈\]\s*)?(.*)$/);
-      if (keywordMatch) {
-        const rawKeyword = keywordMatch[1].trim();
-        const normalizedKeyword = rawKeyword
-          .replace(/^["'“”]/, '')
-          .replace(/["'“”]$/, '')
-          .replace(/\.\.\.$/, '')
-          .trim();
+    // 퀴즈 문제 헤더 인식: "Q1:", "Q1.", "[Q1]", "❓ [Q1]", "❓ [Q1] 문제", "Q1: [퀴즈] 문제" 등
+    const qMatch = line.match(/^(?:❓\s*)?\[?Q(\d+)\]?[:.]?\s*(?:\[퀴즈\]\s*)?(.*)$/i);
+    if (qMatch && qMatch[1]) {
+      const rawKeyword = (qMatch[2] || '').trim();
+      const normalizedKeyword = rawKeyword
+        .replace(/^["'“”]/, '')
+        .replace(/["'“”]$/, '')
+        .replace(/\.\.\.$/, '')
+        .trim();
 
-        if (normalizedKeyword) {
-          currentQuestion = { keyword: normalizedKeyword, options: [] };
-          questions.push(currentQuestion);
-        }
+      if (normalizedKeyword) {
+        currentQuestion = { keyword: normalizedKeyword, options: [] };
+        questions.push(currentQuestion);
+      } else {
+        currentQuestion = { keyword: `Q${qMatch[1]}`, options: [] };
+        questions.push(currentQuestion);
       }
-    } else if (currentQuestion && line.match(/^\d+\./)) {
-      const optionText = line.replace(/^\d+\.\s*/, '').trim();
-      currentQuestion.options.push(optionText);
+      continue;
+    }
+
+    // 퀴즈 보기 인식: "1. 보기", "1) 보기", "(1) 보기", "1️⃣ 보기", "1️⃣보기" 등
+    if (currentQuestion) {
+      const isOption = line.match(/^(?:(?:\d+[.)])|(?:\(\d+\))|(?:\d\uFE0F?\u20E3)|(?:🔟))\s*(.*)$/u);
+      if (isOption) {
+        const optionText = isOption[1].trim();
+        currentQuestion.options.push(optionText);
+      }
     }
   }
 
@@ -1220,9 +1236,72 @@ if (adminBot) {
         logger.error('공지 채널 세미나 메시지 동기화 실패:', syncErr);
       }
 
+      // 닥플 e-디테일링 퀴즈 메시지인 경우 닥플 API로 퀴즈 정답 자동 제출 수행
+      let docpleSubmitNotice = '';
+      const isDocpleQuiz =
+        replyText.includes('닥플 e-디테일링') ||
+        replyText.includes('docple-plus.com/e-detailing') ||
+        replyText.includes('💊 [닥플');
+
+      if (isDocpleQuiz) {
+        try {
+          const docpleUser = process.env.DOCPLE_USER;
+          const docplePass = process.env.DOCPLE_PASS;
+          if (docpleUser && docplePass) {
+            const loginRes = await loginDocple(docpleUser, docplePass);
+            const accessToken = loginRes.data?.accessToken;
+            if (loginRes.success && accessToken) {
+              const activeQuizzes = await getDocpleActiveQuizzes(accessToken);
+              const cheatsheet = await loadSeminarQuizCheatsheet();
+
+              let submittedCount = 0;
+              let totalGrantedCash = 0;
+              const submitDetails: string[] = [];
+
+              for (const q of activeQuizzes) {
+                const quizDetail = await getDocpleQuizDetail(accessToken, q.quizId);
+                if (!quizDetail || quizDetail.hasPassedBefore) continue;
+
+                const matchResult = matchDocpleQuizAnswersWithCheatsheet(quizDetail, cheatsheet);
+                if (matchResult.isFullyMatched && quizDetail.canAttempt !== false) {
+                  const submitRes = await submitDocpleQuiz(
+                    accessToken,
+                    q.quizId,
+                    matchResult.answers.map((a) => ({
+                      questionId: a.questionId,
+                      selectedOptionId: a.selectedOptionId,
+                    })),
+                  );
+
+                  if (submitRes.success && submitRes.isPassed) {
+                    submittedCount++;
+                    const cash = submitRes.grantedCash ?? 0;
+                    totalGrantedCash += cash;
+                    submitDetails.push(`• ${q.quizName}: 정답 통과 (+${cash.toLocaleString()} 캐시)`);
+                  } else {
+                    submitDetails.push(`• ${q.quizName}: 제출 실패 (${submitRes.message || '오답'})`);
+                  }
+                }
+              }
+
+              if (submittedCount > 0) {
+                docpleSubmitNotice = `\n\n🎉 [닥플 e-디테일링] 퀴즈 정답 자동 제출 성공!\n${submitDetails.join('\n')}\n총 적립: +${totalGrantedCash.toLocaleString()} 캐시`;
+              } else if (submitDetails.length > 0) {
+                docpleSubmitNotice = `\n\n⚠️ [닥플 e-디테일링] 퀴즈 제출 결과:\n${submitDetails.join('\n')}`;
+              }
+            } else {
+              docpleSubmitNotice = `\n\n⚠️ [닥플 자동 제출 실패] 로그인 실패: ${loginRes.message}`;
+            }
+          }
+        } catch (docpleErr) {
+          logger.error('닥플 퀴즈 답장 자동 제출 실패', docpleErr);
+          docpleSubmitNotice = `\n\n⚠️ [닥플 자동 제출 오류] ${docpleErr instanceof Error ? docpleErr.message : String(docpleErr)}`;
+        }
+      }
+
       await replyWithSplit(
         ctx,
-        `✅ 세미나/오늘의 퀴즈 ${registered.length}개 족보 등록 완료 (답장 등록)\n\n${registered.join('\n')}${gitNotice}${syncNotice}\n\n재실행: /run_quiz_now`,
+        `✅ 퀴즈 ${registered.length}개 족보 등록 완료 (답장 등록)\n\n${registered.join('\n')}${gitNotice}${syncNotice}${docpleSubmitNotice}\n\n재실행: /run_quiz_now`,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

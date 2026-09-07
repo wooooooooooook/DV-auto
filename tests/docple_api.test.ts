@@ -267,6 +267,120 @@ describe('Docple Plus API & Daily Task Tests', () => {
       expect(msg).toContain('2️⃣ Pre-mix 수액제');
     });
 
+    it('submitDocpleQuiz: 퀴즈 정답 제출 및 보상 결과 확인', async () => {
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: {
+            isPassed: true,
+            isCashGranted: true,
+            grantedCash: 100,
+            remainingAttempts: 2,
+          },
+        }),
+      );
+
+      const { submitDocpleQuiz } = await import('../src/modules/docple_api');
+      const submitRes = await submitDocpleQuiz('mock-token', 49, [{ questionId: 133, selectedOptionId: 369 }]);
+
+      expect(submitRes.success).toBe(true);
+      expect(submitRes.isPassed).toBe(true);
+      expect(submitRes.isCashGranted).toBe(true);
+      expect(submitRes.grantedCash).toBe(100);
+      expect(submitRes.remainingAttempts).toBe(2);
+    });
+
+    it('matchDocpleQuizAnswersWithCheatsheet: 족보와 퀴즈 매칭 검증', async () => {
+      const { matchDocpleQuizAnswersWithCheatsheet } = await import('../src/modules/docple_api');
+
+      const quizDetail = {
+        quizId: 49,
+        quizName: '테스트 퀴즈',
+        questions: [
+          {
+            questionId: 10,
+            questionText: '아르시스주는 어떤 수액제일까요?',
+            options: [
+              { optionId: 1, optionText: '분말 수액제' },
+              { optionId: 2, optionText: 'Pre-mix 수액제' },
+            ],
+          },
+          {
+            questionId: 20,
+            questionText: '다음 중 혈압약은 무엇일까요?',
+            options: [
+              { optionId: 3, optionText: '노바스크' },
+              { optionId: 4, optionText: '타이레놀' },
+            ],
+          },
+        ],
+      };
+
+      const cheatsheet = {
+        '아르시스주는 어떤 수액제': 'Pre-mix 수액제',
+        혈압약: '노바스크',
+      };
+
+      const matchRes = matchDocpleQuizAnswersWithCheatsheet(quizDetail, cheatsheet);
+      expect(matchRes.isFullyMatched).toBe(true);
+      expect(matchRes.answers.length).toBe(2);
+      expect(matchRes.answers[0].selectedOptionId).toBe(2);
+      expect(matchRes.answers[1].selectedOptionId).toBe(3);
+      expect(matchRes.unmatchedQuestions.length).toBe(0);
+
+      // 미매칭 테스트
+      const unmatchedRes = matchDocpleQuizAnswersWithCheatsheet(quizDetail, {
+        '아르시스주는 어떤 수액제': 'Pre-mix 수액제',
+      });
+      expect(unmatchedRes.isFullyMatched).toBe(false);
+      expect(unmatchedRes.unmatchedQuestions.length).toBe(1);
+      expect(unmatchedRes.unmatchedQuestions[0]).toContain('혈압약');
+    });
+
+    it('parseQuizQuestionsFromText: 닥플 포맷 및 세미나 포맷 파싱 검증', async () => {
+      const { parseQuizQuestionsFromText } = await import('../src/services/telegram');
+
+      // 1. 닥플 퀴즈 포맷 (이모지 포함)
+      const docpleMsg = `
+💊 [닥플 e-디테일링 Quiz 안내]
+📌 퀴즈명: 일화 아르시스주
+💰 보상: +100 캐시
+
+📝 [문제 및 보기]
+
+❓ [Q1] 아르시스주는 어떤 수액제일까요?
+  1️⃣ 분말 수액제
+  2️⃣ Pre-mix 수액제
+
+❓ [Q2] 성분으로 올바른 것은?
+  1️⃣ L-아르기닌
+  2️⃣ 비타민C
+  3️⃣ 아스피린
+`;
+      const parsedDocple = parseQuizQuestionsFromText(docpleMsg);
+      expect(parsedDocple.length).toBe(2);
+      expect(parsedDocple[0].keyword).toBe('아르시스주는 어떤 수액제일까요?');
+      expect(parsedDocple[0].options).toEqual(['분말 수액제', 'Pre-mix 수액제']);
+      expect(parsedDocple[1].keyword).toBe('성분으로 올바른 것은?');
+      expect(parsedDocple[1].options).toEqual(['L-아르기닌', '비타민C', '아스피린']);
+
+      // 2. 세미나 퀴즈 포맷
+      const seminarMsg = `
+Q1: [퀴즈] 리바로의 주요 적응증은?
+1. 고지혈증
+2. 감기
+Q2: 복용 방법은?
+1. 식후
+2. 식전
+`;
+      const parsedSeminar = parseQuizQuestionsFromText(seminarMsg);
+      expect(parsedSeminar.length).toBe(2);
+      expect(parsedSeminar[0].keyword).toBe('리바로의 주요 적응증은?');
+      expect(parsedSeminar[0].options).toEqual(['고지혈증', '감기']);
+      expect(parsedSeminar[1].keyword).toBe('복용 방법은?');
+      expect(parsedSeminar[1].options).toEqual(['식후', '식전']);
+    });
+
     it('authDocpleCommunityPassword & getDocpleCommunityPosts & recommendDocpleCommunityPost', async () => {
       // 1. 커뮤니티 비밀번호 인증
       mockRequest.mockResolvedValueOnce(

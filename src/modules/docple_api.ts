@@ -811,6 +811,165 @@ export async function getDocpleMedicineDetail(
   }
 }
 
+export interface DocpleQuizSubmitResult {
+  success: boolean;
+  isPassed: boolean;
+  isCashGranted: boolean;
+  grantedCash?: number;
+  remainingAttempts?: number;
+  message: string;
+  raw?: unknown;
+}
+
+/**
+ * e-디테일링 퀴즈 정답 제출
+ */
+export async function submitDocpleQuiz(
+  accessToken: string,
+  quizId: number | string,
+  answers: Array<{ questionId: number; selectedOptionId: number }>,
+): Promise<DocpleQuizSubmitResult> {
+  try {
+    const res = await request(`${DOCPLE_BASE_URL}/api/season2/e-detailing/quiz/${quizId}/submit`, {
+      method: 'POST',
+      headers: getCommonHeaders(accessToken),
+      body: JSON.stringify({ answers }),
+    });
+
+    const bodyText = await res.body.text();
+    let json: DocpleApiResponse<{
+      isPassed?: boolean;
+      isCashGranted?: boolean;
+      grantedCash?: number;
+      remainingAttempts?: number;
+      [key: string]: unknown;
+    }>;
+    try {
+      json = JSON.parse(bodyText) as DocpleApiResponse<{
+        isPassed?: boolean;
+        isCashGranted?: boolean;
+        grantedCash?: number;
+        remainingAttempts?: number;
+        [key: string]: unknown;
+      }>;
+    } catch {
+      return {
+        success: false,
+        isPassed: false,
+        isCashGranted: false,
+        message: `응답 파싱 실패 (HTTP ${res.statusCode})`,
+      };
+    }
+
+    if (res.statusCode === 200 && json?.success && json.data) {
+      const data = json.data;
+      const isPassed = !!data.isPassed;
+      const isCashGranted = !!data.isCashGranted;
+      const grantedCash = data.grantedCash ?? 0;
+      const remainingAttempts = data.remainingAttempts ?? 0;
+
+      let msg = isPassed ? '퀴즈 정답입니다!' : '오답입니다.';
+      if (isCashGranted && grantedCash > 0) {
+        msg += ` (+${grantedCash.toLocaleString()} 캐시 획득)`;
+      }
+
+      return {
+        success: true,
+        isPassed,
+        isCashGranted,
+        grantedCash,
+        remainingAttempts,
+        message: msg,
+        raw: data,
+      };
+    }
+
+    return {
+      success: false,
+      isPassed: false,
+      isCashGranted: false,
+      message: json?.message || `퀴즈 제출 실패 (HTTP ${res.statusCode})`,
+      raw: json,
+    };
+  } catch (error) {
+    logger.error('Docple submitDocpleQuiz error', error);
+    return {
+      success: false,
+      isPassed: false,
+      isCashGranted: false,
+      message: `퀴즈 제출 오류: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+/**
+ * 세미나 퀴즈 정답 족보와 닥플 e-디테일링 퀴즈 문항 매칭
+ */
+export function matchDocpleQuizAnswersWithCheatsheet(
+  quizDetail: DocpleQuizDetail,
+  cheatsheet: Record<string, string>,
+): {
+  isFullyMatched: boolean;
+  answers: Array<{ questionId: number; selectedOptionId: number; optionText: string; questionText: string }>;
+  unmatchedQuestions: string[];
+} {
+  const answers: Array<{
+    questionId: number;
+    selectedOptionId: number;
+    optionText: string;
+    questionText: string;
+  }> = [];
+  const unmatchedQuestions: string[] = [];
+
+  const cheatsheetEntries = Object.entries(cheatsheet);
+
+  for (const q of quizDetail.questions) {
+    const qText = q.questionText.trim();
+    // 1. 문제 키워드 일치 검색
+    let matchedAnswerText: string | undefined;
+
+    // A. 질문에 족보 키워드가 포함되어 있거나 족보 키워드에 질문이 포함된 경우
+    for (const [key, answer] of cheatsheetEntries) {
+      const normKey = key.trim();
+      if (!normKey) continue;
+      if (qText.includes(normKey) || normKey.includes(qText.slice(0, 30))) {
+        matchedAnswerText = String(answer).trim();
+        break;
+      }
+    }
+
+    if (!matchedAnswerText) {
+      unmatchedQuestions.push(qText);
+      continue;
+    }
+
+    // 2. 매칭된 정답 텍스트가 보기(options) 중 어디에 해당하는지 검색
+    const targetOption = q.options.find((opt) => {
+      const optText = opt.optionText.trim();
+      return (
+        optText === matchedAnswerText || optText.includes(matchedAnswerText!) || matchedAnswerText!.includes(optText)
+      );
+    });
+
+    if (targetOption) {
+      answers.push({
+        questionId: q.questionId,
+        selectedOptionId: targetOption.optionId,
+        optionText: targetOption.optionText,
+        questionText: q.questionText,
+      });
+    } else {
+      unmatchedQuestions.push(qText);
+    }
+  }
+
+  return {
+    isFullyMatched: unmatchedQuestions.length === 0 && answers.length === quizDetail.questions.length,
+    answers,
+    unmatchedQuestions,
+  };
+}
+
 /**
  * e-디테일링 퀴즈 상세 안내 메시지(문제, 보기, 상세정보) 포맷팅
  */
@@ -868,6 +1027,10 @@ export function formatDocpleQuizTelegramMessage(params: {
         });
       }
     });
+
+    lines.push(
+      '\n💡 이 메시지에 답장(Reply)으로 정답 번호(예: 1 2 또는 1,2)를 보내시면 족보 등록과 함께 자동 제출이 수행됩니다.',
+    );
   }
 
   return lines.join('\n');
