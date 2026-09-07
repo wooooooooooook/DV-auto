@@ -446,10 +446,23 @@
 - **출석체크 수행 (`/api/season2/mission/attendance/check`)**:
   - `POST https://docple-plus.com/api/season2/mission/attendance/check`
   - 응답: `data: { "todayDone": true, "dailyGranted": true, "dailyCash": 50 }`
-- **e-디테일링 의약품 및 퀴즈 목록 (`/api/season2/e-detailing/medicines`)**:
+- **e-디테일링 의약품 목록 (`/api/season2/e-detailing/medicines`)**:
   - `GET https://docple-plus.com/api/season2/e-detailing/medicines?page=0&size=50`
   - 응답: `data: { "content": [ { "id": 3, "medicineName": "아르시스주", "hasActiveQuiz": true, ... } ] }`
   - 상세 퀴즈 URL: `https://docple-plus.com/e-detailing/{id}`
+- **e-디테일링 활성 퀴즈 목록 (`/api/season2/e-detailing/quiz`)**:
+  - `GET https://docple-plus.com/api/season2/e-detailing/quiz`
+  - 응답: `data: { "quizzes": [ { "quizId": 49, "quizName": "...", "rewardCash": 100, "medicineId": 3, ... } ] }`
+- **e-디테일링 퀴즈 상세/문제/보기 조회 (`/api/season2/e-detailing/quiz/{quizId}`)**:
+  - `GET https://docple-plus.com/api/season2/e-detailing/quiz/{quizId}`
+  - 응답: `data: { "quizId": 49, "remainingAttempts": 3, "questions": [ { "questionId": 133, "questionText": "...", "options": [ { "optionId": 368, "optionText": "..." } ] } ] }`
+- **e-디테일링 의약품 상세/성분/설명 조회 (`/api/season2/e-detailing/medicines/{medicineId}`)**:
+  - `GET https://docple-plus.com/api/season2/e-detailing/medicines/{medicineId}`
+  - 응답: `data: { "id": 3, "medicineName": "아르시스주", "mainIngredient": "L-아르기닌염산염", "therapeuticCategory": "...", ... }`
+- **e-디테일링 퀴즈 정답 제출 (`/api/season2/e-detailing/quiz/{quizId}/submit`)**:
+  - `POST https://docple-plus.com/api/season2/e-detailing/quiz/{quizId}/submit`
+  - Body: `{"answers": [{"questionId": 133, "selectedOptionId": 369}]}`
+  - 응답: `data: { "isPassed": true, "isCashGranted": true, "grantedCash": 100, "remainingAttempts": 2 }`
 - **커뮤니티 비밀번호 인증 (`/api/auth/communityLogin`)**:
   - `POST https://docple-plus.com/api/auth/communityLogin`
   - Body: `{"pw": "<DOCPLE_COMM_PASS || DOCPLE_PASS>", "ispc": "P"}`

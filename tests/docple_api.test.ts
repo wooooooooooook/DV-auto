@@ -181,6 +181,92 @@ describe('Docple Plus API & Daily Task Tests', () => {
       });
     });
 
+    it('getDocpleActiveQuizzes & getDocpleQuizDetail & getDocpleMedicineDetail & formatDocpleQuizTelegramMessage', async () => {
+      // 1. 활성 퀴즈 목록
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: {
+            quizzes: [
+              {
+                quizId: 49,
+                quizName: '선착순 퀴즈',
+                rewardCash: 100,
+                medicineId: 3,
+              },
+            ],
+          },
+        }),
+      );
+
+      const { getDocpleActiveQuizzes, getDocpleQuizDetail, getDocpleMedicineDetail, formatDocpleQuizTelegramMessage } =
+        await import('../src/modules/docple_api');
+
+      const quizzes = await getDocpleActiveQuizzes('mock-token');
+      expect(quizzes.length).toBe(1);
+      expect(quizzes[0].quizId).toBe(49);
+
+      // 2. 퀴즈 상세
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: {
+            quizId: 49,
+            quizName: '선착순 퀴즈',
+            remainingAttempts: 3,
+            maxDailyAttempts: 3,
+            questions: [
+              {
+                questionId: 133,
+                questionText: '아르시스주는 어떤 수액제일까요?',
+                options: [
+                  { optionId: 368, optionText: '분말 수액제' },
+                  { optionId: 369, optionText: 'Pre-mix 수액제' },
+                ],
+              },
+            ],
+          },
+        }),
+      );
+
+      const quizDetail = await getDocpleQuizDetail('mock-token', 49);
+      expect(quizDetail).not.toBeNull();
+      expect(quizDetail?.questions.length).toBe(1);
+
+      // 3. 의약품 상세
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: {
+            id: 3,
+            medicineName: '아르시스주',
+            pharmaCompanyName: '일화',
+            mainIngredient: 'L-아르기닌염산염',
+          },
+        }),
+      );
+
+      const medDetail = await getDocpleMedicineDetail('mock-token', 3);
+      expect(medDetail).not.toBeNull();
+      expect(medDetail?.medicineName).toBe('아르시스주');
+
+      // 4. 메시지 포맷팅
+      const msg = formatDocpleQuizTelegramMessage({
+        quiz: quizDetail!,
+        medicine: medDetail,
+        medicineId: 3,
+      });
+
+      expect(msg).toContain('💊 [닥플 e-디테일링 Quiz 안내]');
+      expect(msg).toContain('선착순 퀴즈');
+      expect(msg).toContain('+100 캐시');
+      expect(msg).toContain('아르시스주 (일화)');
+      expect(msg).toContain('L-아르기닌염산염');
+      expect(msg).toContain('아르시스주는 어떤 수액제일까요?');
+      expect(msg).toContain('1️⃣ 분말 수액제');
+      expect(msg).toContain('2️⃣ Pre-mix 수액제');
+    });
+
     it('authDocpleCommunityPassword & getDocpleCommunityPosts & recommendDocpleCommunityPost', async () => {
       // 1. 커뮤니티 비밀번호 인증
       mockRequest.mockResolvedValueOnce(
@@ -337,12 +423,32 @@ describe('Docple Plus API & Daily Task Tests', () => {
         }),
       );
 
-      // 5. 퀴즈 의약품 목록
+      // 5. 퀴즈 활성 목록, 상세, 의약품 상세
       mockRequest.mockResolvedValueOnce(
         createMockJsonResponse({
           success: true,
           data: {
-            content: [{ id: 99, medicineName: '테스트약', hasActiveQuiz: true }],
+            quizzes: [{ quizId: 49, quizName: '테스트 퀴즈', medicineId: 99 }],
+          },
+        }),
+      );
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: {
+            quizId: 49,
+            quizName: '테스트 퀴즈',
+            remainingAttempts: 3,
+            questions: [{ questionId: 1, questionText: '테스트 질문', options: [] }],
+          },
+        }),
+      );
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: {
+            id: 99,
+            medicineName: '테스트약',
           },
         }),
       );

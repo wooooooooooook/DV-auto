@@ -6,11 +6,16 @@ import {
   checkDocpleAttendance,
   getDocpleEdetailingMedicines,
   extractDocpleQuizUrls,
+  getDocpleActiveQuizzes,
+  getDocpleQuizDetail,
+  getDocpleMedicineDetail,
+  formatDocpleQuizTelegramMessage,
   authDocpleCommunityPassword,
   getDocpleCommunityPosts,
   recommendDocpleCommunityPost,
   type DocpleAttendanceResult,
 } from '../modules/docple_api';
+import { sendTelegram } from '../modules/utils';
 import * as logger from '../services/logger';
 
 export interface DocpleDailyWorkflowResult {
@@ -130,12 +135,41 @@ export async function executeDocpleDaily(
     attendanceRes = await checkDocpleAttendance(accessToken);
   }
 
-  // e-디테일링 퀴즈 URL 추출
-  logger.info('Docple daily: Step 4. Extracting e-detailing quiz URLs...');
+  // e-디테일링 퀴즈 상세 정보 및 관리자 텔레그램 발송
+  logger.info('Docple daily: Step 4. Extracting e-detailing quiz and sending details to admin bot...');
   let quizList: Array<{ id: number | string; name: string; url: string }> = [];
   try {
-    const medicines = await getDocpleEdetailingMedicines(accessToken, { size: 50 });
-    quizList = extractDocpleQuizUrls(medicines);
+    const activeQuizzes = await getDocpleActiveQuizzes(accessToken);
+    if (activeQuizzes.length > 0) {
+      for (const q of activeQuizzes) {
+        const medId = q.medicineId || 0;
+        const [quizDetail, medDetail] = await Promise.all([
+          getDocpleQuizDetail(accessToken, q.quizId),
+          medId ? getDocpleMedicineDetail(accessToken, medId) : Promise.resolve(null),
+        ]);
+
+        const quizMsg = formatDocpleQuizTelegramMessage({
+          quiz: quizDetail || q,
+          medicine: medDetail,
+          medicineId: medId,
+        });
+
+        // 관리자 봇으로 퀴즈 문제/보기/상세정보 별도 전송
+        await sendTelegram(quizMsg).catch((sendErr) => {
+          logger.warn('Failed to send Docple quiz message to admin bot', sendErr);
+        });
+
+        quizList.push({
+          id: medId || q.quizId,
+          name: medDetail?.medicineName || q.quizName,
+          url: `https://docple-plus.com/e-detailing/${medId || ''}`,
+        });
+      }
+    } else {
+      // fallback to medicine list quiz detection
+      const medicines = await getDocpleEdetailingMedicines(accessToken, { size: 50 });
+      quizList = extractDocpleQuizUrls(medicines);
+    }
   } catch (err) {
     const msg = `퀴즈 목록 조회 오류: ${err instanceof Error ? err.message : String(err)}`;
     logger.error('Docple daily quiz error', err);

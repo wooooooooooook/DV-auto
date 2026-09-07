@@ -73,6 +73,75 @@ export interface DocpleEdetailingMedicine {
   [key: string]: unknown;
 }
 
+export interface DocpleActiveQuiz {
+  quizId: number;
+  quizName: string;
+  imageUrl?: string;
+  startDate?: string;
+  endDate?: string;
+  rewardCash?: number;
+  pharmaCompanyName?: string;
+  medicineId?: number;
+  diseaseCategory?: string;
+  diseaseCategoryName?: string;
+  [key: string]: unknown;
+}
+
+export interface DocpleQuizOption {
+  optionId: number;
+  optionText: string;
+  sortOrder?: number;
+}
+
+export interface DocpleQuizQuestion {
+  questionId: number;
+  questionText: string;
+  sortOrder?: number;
+  options: DocpleQuizOption[];
+}
+
+export interface DocpleQuizDetail {
+  quizId: number;
+  quizName: string;
+  imageUrl?: string;
+  description?: string;
+  startDate?: string;
+  endDate?: string;
+  maxDailyAttempts?: number;
+  remainingAttempts?: number;
+  hasPassedBefore?: boolean;
+  canAttempt?: boolean;
+  questions: DocpleQuizQuestion[];
+  [key: string]: unknown;
+}
+
+export interface DocpleMedicineDetail {
+  id: number;
+  medicineName: string;
+  imageUrl?: string;
+  pharmaCompanyName?: string;
+  sellerCompanyName?: string;
+  therapeuticCategory?: string;
+  diseaseCategoryName?: string;
+  mainIngredient?: string;
+  billingCode?: string;
+  atcCode?: string;
+  introImageUrl?: string;
+  brochureUrl?: string;
+  brochureFileName?: string;
+  purchaseLink?: string;
+  detailContent?: string;
+  quiz?: {
+    id: number;
+    name: string;
+    imageUrl?: string;
+    startDate?: string;
+    endDate?: string;
+    rewardCash?: number;
+  };
+  [key: string]: unknown;
+}
+
 export interface DocpleCommunityAuthResult {
   success: boolean;
   communityToken?: string;
@@ -665,4 +734,141 @@ export async function recommendDocpleCommunityPost(
       message: `추천 오류: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
+}
+
+/**
+ * 활성 e-디테일링 퀴즈 목록 조회
+ */
+export async function getDocpleActiveQuizzes(accessToken: string): Promise<DocpleActiveQuiz[]> {
+  try {
+    const res = await request(`${DOCPLE_BASE_URL}/api/season2/e-detailing/quiz`, {
+      method: 'GET',
+      headers: getCommonHeaders(accessToken),
+    });
+
+    if (res.statusCode !== 200) {
+      return [];
+    }
+
+    const json = (await res.body.json()) as DocpleApiResponse<{
+      quizzes?: DocpleActiveQuiz[];
+      list?: DocpleActiveQuiz[];
+    }>;
+    return json?.data?.quizzes || json?.data?.list || [];
+  } catch (error) {
+    logger.error('Docple getDocpleActiveQuizzes error', error);
+    return [];
+  }
+}
+
+/**
+ * e-디테일링 퀴즈 상세(문제, 보기 등) 조회
+ */
+export async function getDocpleQuizDetail(
+  accessToken: string,
+  quizId: number | string,
+): Promise<DocpleQuizDetail | null> {
+  try {
+    const res = await request(`${DOCPLE_BASE_URL}/api/season2/e-detailing/quiz/${quizId}`, {
+      method: 'GET',
+      headers: getCommonHeaders(accessToken),
+    });
+
+    if (res.statusCode !== 200) {
+      return null;
+    }
+
+    const json = (await res.body.json()) as DocpleApiResponse<DocpleQuizDetail>;
+    return json?.data || null;
+  } catch (error) {
+    logger.error('Docple getDocpleQuizDetail error', error);
+    return null;
+  }
+}
+
+/**
+ * e-디테일링 의약품 상세 정보 조회
+ */
+export async function getDocpleMedicineDetail(
+  accessToken: string,
+  medicineId: number | string,
+): Promise<DocpleMedicineDetail | null> {
+  try {
+    const res = await request(`${DOCPLE_BASE_URL}/api/season2/e-detailing/medicines/${medicineId}`, {
+      method: 'GET',
+      headers: getCommonHeaders(accessToken),
+    });
+
+    if (res.statusCode !== 200) {
+      return null;
+    }
+
+    const json = (await res.body.json()) as DocpleApiResponse<DocpleMedicineDetail>;
+    return json?.data || null;
+  } catch (error) {
+    logger.error('Docple getDocpleMedicineDetail error', error);
+    return null;
+  }
+}
+
+/**
+ * e-디테일링 퀴즈 상세 안내 메시지(문제, 보기, 상세정보) 포맷팅
+ */
+export function formatDocpleQuizTelegramMessage(params: {
+  quiz: DocpleQuizDetail | DocpleActiveQuiz;
+  medicine?: DocpleMedicineDetail | null;
+  medicineId?: number | string;
+}): string {
+  const { quiz, medicine, medicineId } = params;
+  const medId = medicineId || (quiz as DocpleActiveQuiz).medicineId || medicine?.id || '';
+  const quizDetail = 'questions' in quiz ? (quiz as DocpleQuizDetail) : null;
+  const activeQuiz = quiz as DocpleActiveQuiz;
+
+  const rewardCash = quizDetail?.rewardCash ?? activeQuiz.rewardCash ?? 100;
+  const pharma = [medicine?.pharmaCompanyName, medicine?.sellerCompanyName].filter(Boolean).join(' / ');
+
+  const lines: string[] = [
+    '💊 [닥플 e-디테일링 Quiz 안내]',
+    `📌 퀴즈명: ${quiz.quizName}`,
+    `💰 보상: +${rewardCash.toLocaleString()} 캐시`,
+  ];
+
+  if (quizDetail) {
+    lines.push(
+      `🎯 남은 도전 기회: ${quizDetail.remainingAttempts ?? quizDetail.maxDailyAttempts ?? 3}회 (최대 ${quizDetail.maxDailyAttempts ?? 3}회)`,
+    );
+  }
+  if (medId) {
+    lines.push(`🔗 바로가기: ${DOCPLE_BASE_URL}/e-detailing/${medId}`);
+  }
+
+  // 의약품 상세 정보
+  if (medicine) {
+    lines.push('\n📋 [의약품 상세 정보]');
+    lines.push(`• 의약품명: ${medicine.medicineName}${pharma ? ` (${pharma})` : ''}`);
+    if (medicine.mainIngredient) {
+      lines.push(`• 주요 성분: ${medicine.mainIngredient}`);
+    }
+    const categories = [medicine.therapeuticCategory, medicine.diseaseCategoryName].filter(Boolean).join(' / ');
+    if (categories) {
+      lines.push(`• 효능/분류: ${categories}`);
+    }
+  }
+
+  // 문제 및 보기 목록
+  if (quizDetail && quizDetail.questions && quizDetail.questions.length > 0) {
+    lines.push('\n📝 [문제 및 보기]');
+    const numIcons = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣'];
+    quizDetail.questions.forEach((q, qIdx) => {
+      lines.push(`\n❓ [Q${qIdx + 1}] ${q.questionText}`);
+      if (q.options && q.options.length > 0) {
+        q.options.forEach((opt, oIdx) => {
+          const icon = numIcons[oIdx] || `(${oIdx + 1})`;
+          lines.push(`  ${icon} ${opt.optionText}`);
+        });
+      }
+    });
+  }
+
+  return lines.join('\n');
 }
