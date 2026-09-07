@@ -30,6 +30,7 @@ export interface SurveyQuizHttpResult {
   totalPageCnt: number;
   totalQuestionCnt: number;
   quizQuestionCnt: number;
+  depthSurveyQuestionCnt: number;
   isAdvancedSurvey: boolean;
   quizzes: HttpQuizQuestion[];
   allQuestions: HttpQuizQuestion[];
@@ -66,6 +67,7 @@ export async function fetchSeminarSurveyQuizHttp(
         totalPageCnt: 0,
         totalQuestionCnt: 0,
         quizQuestionCnt: 0,
+        depthSurveyQuestionCnt: 0,
         isAdvancedSurvey: false,
         quizzes: [],
         allQuestions: [],
@@ -84,6 +86,7 @@ export async function fetchSeminarSurveyQuizHttp(
         totalPageCnt: 0,
         totalQuestionCnt: 0,
         quizQuestionCnt: 0,
+        depthSurveyQuestionCnt: 0,
         isAdvancedSurvey: false,
         quizzes: [],
         allQuestions: [],
@@ -100,6 +103,7 @@ export async function fetchSeminarSurveyQuizHttp(
         totalPageCnt: 0,
         totalQuestionCnt: 0,
         quizQuestionCnt: 0,
+        depthSurveyQuestionCnt: 0,
         isAdvancedSurvey: false,
         quizzes: [],
         allQuestions: [],
@@ -138,6 +142,7 @@ export async function fetchSeminarSurveyQuizHttp(
         totalPageCnt: 0,
         totalQuestionCnt: 0,
         quizQuestionCnt: 0,
+        depthSurveyQuestionCnt: 0,
         isAdvancedSurvey: false,
         quizzes: [],
         allQuestions: [],
@@ -157,6 +162,7 @@ export async function fetchSeminarSurveyQuizHttp(
         totalPageCnt: 0,
         totalQuestionCnt: 0,
         quizQuestionCnt: 0,
+        depthSurveyQuestionCnt: 0,
         isAdvancedSurvey: false,
         quizzes: [],
         allQuestions: [],
@@ -174,6 +180,7 @@ export async function fetchSeminarSurveyQuizHttp(
         totalPageCnt: 0,
         totalQuestionCnt: 0,
         quizQuestionCnt: 0,
+        depthSurveyQuestionCnt: 0,
         isAdvancedSurvey: false,
         quizzes: [],
         allQuestions: [],
@@ -199,6 +206,7 @@ export async function fetchSeminarSurveyQuizHttp(
         totalPageCnt: 0,
         totalQuestionCnt: 0,
         quizQuestionCnt: 0,
+        depthSurveyQuestionCnt: 0,
         isAdvancedSurvey: false,
         quizzes: [],
         allQuestions: [],
@@ -305,12 +313,20 @@ export async function fetchSeminarSurveyQuizHttp(
       (q) => q.typeKey === 'QUIZ_MULTIPLE_CHOICE' || /\[\s*(퀴즈|O\s*X|주관식)\s*\]/i.test(q.questionText),
     );
 
-    // 퀴즈 정답 요약 메시지 생성
+    // 6. 심화설문 문항 수: 마지막 페이지(totalPageCnt)의 문제 개수
+    const lastPageQuestions = allQuestions.filter((q) => q.pageNumber === totalPageCnt);
+    const depthSurveyQuestionCnt = isAdvancedSurvey ? lastPageQuestions.length : 0;
+
+    // 퀴즈 정답 요약 메시지 생성 (예: "퀴즈 정답 412 + 심화1" 또는 "퀴즈 정답 412")
     let quizSummaryMessage = '';
+    const depthSuffix = isAdvancedSurvey && depthSurveyQuestionCnt > 0 ? ` + 심화${depthSurveyQuestionCnt}` : '';
+
     if (quizzes.length > 0) {
       const ansNums = quizzes.map((q) => (q.selectedIndex !== null ? String(q.selectedIndex) : '-')).join('');
       const hasUnknown = quizzes.some((q) => q.selectedIndex === null);
-      quizSummaryMessage = `퀴즈 정답 ${ansNums}${hasUnknown ? ' (일부 미해결)' : ''}`;
+      quizSummaryMessage = `퀴즈 정답 ${ansNums}${depthSuffix}${hasUnknown ? ' (일부 미해결)' : ''}`;
+    } else if (isAdvancedSurvey && depthSurveyQuestionCnt > 0) {
+      quizSummaryMessage = `심화${depthSurveyQuestionCnt}`;
     }
 
     return {
@@ -321,6 +337,7 @@ export async function fetchSeminarSurveyQuizHttp(
       totalPageCnt,
       totalQuestionCnt: allQuestions.length || totalQuestionCnt,
       quizQuestionCnt: quizzes.length,
+      depthSurveyQuestionCnt,
       isAdvancedSurvey,
       quizzes,
       allQuestions,
@@ -334,6 +351,7 @@ export async function fetchSeminarSurveyQuizHttp(
       totalPageCnt: 0,
       totalQuestionCnt: 0,
       quizQuestionCnt: 0,
+      depthSurveyQuestionCnt: 0,
       isAdvancedSurvey: false,
       quizzes: [],
       allQuestions: [],

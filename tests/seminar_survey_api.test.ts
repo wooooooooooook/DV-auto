@@ -112,13 +112,14 @@ describe('seminar_survey_api (fetchSeminarSurveyQuizHttp)', () => {
     expect(result.totalPageCnt).toBe(2);
     expect(result.totalQuestionCnt).toBe(3);
     expect(result.quizQuestionCnt).toBe(2);
+    expect(result.depthSurveyQuestionCnt).toBe(2);
     expect(result.isAdvancedSurvey).toBe(true); // '심화' 포함
     expect(result.quizzes).toHaveLength(2);
     expect(result.quizzes[0].selectedIndex).toBe(2);
     expect(result.quizzes[0].selectedText).toBe('과민성 대장증후군 (IBS)');
     expect(result.quizzes[1].selectedIndex).toBe(1);
     expect(result.quizzes[1].selectedText).toBe('1일 3회 복용');
-    expect(result.quizSummaryMessage).toBe('퀴즈 정답 21');
+    expect(result.quizSummaryMessage).toBe('퀴즈 정답 21 + 심화2');
   });
 
   it('findMinimalBranchOptionIndex: 아니오/해당없음/기타 등 분기 최소화 옵션을 올바르게 우선 선택한다', async () => {

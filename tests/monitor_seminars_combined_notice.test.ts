@@ -451,7 +451,7 @@ https://m.doctorville.co.kr/cme/seminar/5602`;
 
 🔴 종료 | 12:30~13:30 당뇨 세미나
 https://m.doctorville.co.kr/cme/seminar/1001
-퀴즈 정답 123
+퀴즈 정답 412 + 심화1
 (설문 마감 약 25분 남음)
 
 🟢 입장가능 | 13:00~14:00 고혈압 세미나
@@ -467,7 +467,7 @@ https://m.doctorville.co.kr/cme/seminar/1003
 
       assert.strictEqual(parsed[0].status, '종료');
       assert.strictEqual(parsed[0].seminarId, '1001');
-      assert.strictEqual(parsed[0].quizResultMessage, '퀴즈 정답 123');
+      assert.strictEqual(parsed[0].quizResultMessage, '퀴즈 정답 412 + 심화1');
 
       assert.strictEqual(parsed[1].status, '입장가능');
       assert.strictEqual(parsed[1].seminarId, '1002');

@@ -226,6 +226,10 @@ async function parseAllSurveyQuestions(
   cheatsheet?: Cheatsheet,
   httpQuizQuestionNums?: Set<number>,
 ): Promise<SurveyQuestion[]> {
+  // DOM 렌더링 완료 대기 (React 컴포넌트 마운트 및 텍스트 렌더링 대기)
+  await page.waitForSelector('li[data-question-number]', { timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(400);
+
   const parsed = await page.evaluate(() => {
     type Option = { index: number; text: string; value: string };
     type ParsedQ = {
@@ -243,15 +247,14 @@ async function parseAllSurveyQuestions(
     items.forEach((li) => {
       const questionNumber = parseInt((li as HTMLElement).dataset['questionNumber'] ?? '0', 10);
 
-      // 마커 span ([퀴즈] 등): 색상으로 구분된 스팬 탐색
-      // 실제 HTML에서 [퀴즈] 마커는 span.text-\[#28BCAA\] 로 렌더링됨
-      const allSpans = li.querySelectorAll('span');
+      // 마커 탐색: li 내부의 모든 태그(span, div, p, label 등)에서 [퀴즈] 등 패턴 탐색
+      const allTextNodes = Array.from(li.querySelectorAll('span, div, p, label, b, strong, em'));
       let marker: string | null = null;
-      for (const span of Array.from(allSpans)) {
-        const t = (span as HTMLElement).innerText?.trim() ?? '';
-        const m = t.match(/^\[[\s\S]*?\]$/);
-        if (m && /퀴즈|OX|주관식|설문|일반|poll/i.test(t)) {
-          marker = t;
+      for (const el of allTextNodes) {
+        const t = (el as HTMLElement).innerText?.trim() ?? '';
+        const m = t.match(/\[\s*(퀴즈|OX|O\s*X|주관식|설문|일반|poll)\s*\]/i);
+        if (m) {
+          marker = m[0].replace(/\s+/g, '');
           break;
         }
       }
@@ -266,8 +269,13 @@ async function parseAllSurveyQuestions(
           .split('\n')
           .map((l) => l.trim())
           .filter((l) => l.length > 0);
-        // 첫 번째 줄에서 마커([퀴즈] 등) 및 번호 접두어 부분 제거
+        // 첫 번째 줄에서 마커([퀴즈] 등) 감지 및 번호 접두어 부분 제거
         const firstLine = lines[0] ?? '';
+        const inlineMarkerMatch = firstLine.match(/^\[\s*(퀴즈|OX|O\s*X|주관식|설문|일반|poll)\s*\]/i);
+        if (inlineMarkerMatch && !marker) {
+          marker = inlineMarkerMatch[0].replace(/\s+/g, '');
+        }
+
         questionLine = firstLine
           .replace(/^\[[\s\S]*?\]\s*/, '')
           .replace(/^\d+\.\s*/, '')
@@ -345,18 +353,24 @@ async function parseAllSurveyQuestions(
 /**
  * 퀴즈 결과를 텔레그램 메시지 형식으로 포맷
  */
-function formatQuizResults(results: QuizResult[], _hasUnknown: boolean, _hasMultipleMatches: boolean): string {
+function formatQuizResults(
+  results: QuizResult[],
+  _hasUnknown: boolean,
+  _hasMultipleMatches: boolean,
+  depthSurveyCount?: number,
+): string {
   if (results.length === 0) {
-    return '퀴즈 없음';
+    return depthSurveyCount && depthSurveyCount > 0 ? `심화${depthSurveyCount}` : '퀴즈 없음';
   }
 
   let message = '';
 
-  // 정답 요약 (예: "퀴즈 정답 412")
+  // 정답 요약 (예: "퀴즈 정답 412 + 심화1" 또는 "퀴즈 정답 412")
   const answerSummary = results.map((r) => (r.selectedIndex !== null ? String(r.selectedIndex) : '-')).join('');
   const hasAnyUnknown = results.some((r) => r.selectedIndex === null);
   const prefix = results.length > 0 && results[0].marker ? `${results[0].marker} ` : '퀴즈 ';
-  message += `${prefix.trim()}정답 ${answerSummary}${hasAnyUnknown ? ' (일부 미해결)' : ''}\n\n`;
+  const depthSuffix = depthSurveyCount && depthSurveyCount > 0 ? ` + 심화${depthSurveyCount}` : '';
+  message += `${prefix.trim()}정답 ${answerSummary}${depthSuffix}${hasAnyUnknown ? ' (일부 미해결)' : ''}\n\n`;
 
   // 상세 내역
   let lastMarker: string | null = null;
@@ -495,16 +509,18 @@ async function processSeminarQuiz(
     const MAX_PAGES = 10;
     let currentPageNum = 1;
 
+    let lastPageQuestionCount = 0;
+
     // ── 다중 페이지 탐색 및 응답 루프 ───────────────────────────────────────────────
     while (currentPageNum <= MAX_PAGES) {
       console.log(`[seminar_quiz] 설문 페이지 ${currentPageNum} 탐색 시작 (${seminarName ?? 'unknown'})`);
 
-      // 마커 또는 일반 설문 문항 감지
+      // 마커 또는 일반 설문 문항 감지 (렌더링 안정화 대기)
       const markerSel = ':text-matches("\\[\\s*(퀴즈|O\\s*X|주관식|설문|일반|poll)\\s*\\]", "i")';
-      const quizSelector = `.whitespace-pre-wrap:has(${markerSel})`;
+      const quizSelector = `.whitespace-pre-wrap:has(${markerSel}), li[data-question-number]:has(${markerSel})`;
       let isSurveyVisible = false;
 
-      for (let attempt = 1; attempt <= 2; attempt++) {
+      for (let attempt = 1; attempt <= 3; attempt++) {
         const hasMarker = await page
           .locator(quizSelector)
           .first()
@@ -522,14 +538,15 @@ async function processSeminarQuiz(
         isSurveyVisible = hasMarker || hasSurveyItems;
         if (isSurveyVisible) break;
 
-        if (attempt < 2) {
+        if (attempt < 3) {
           await page.waitForTimeout(1000);
         }
       }
 
-      // 현재 페이지의 문항 파싱
+      // 현재 페이지의 문항 파싱 (DOM 렌더링 완료 대기 포함)
       const pageQuestions = await parseAllSurveyQuestions(page, cheatsheet, httpQuizNums);
       console.log(`[seminar_quiz] 페이지 ${currentPageNum} 문항 파싱 수: ${pageQuestions.length}`);
+      lastPageQuestionCount = pageQuestions.length;
 
       for (let i = 0; i < pageQuestions.length; i++) {
         const q = pageQuestions[i];
@@ -717,11 +734,22 @@ async function processSeminarQuiz(
       return { success: true, hasQuizResult: false, message };
     }
 
-    const resultMessage = formatQuizResults(channelResults, _hasUnknown, _hasMultipleMatches);
+    // 심화설문 문항 수: HTTP API 또는 마지막 페이지의 문항 수로 산정
+    let depthSurveyCount = 0;
+    if (effectiveIsAdvancedSurvey) {
+      if (httpQuizResult && httpQuizResult.depthSurveyQuestionCnt > 0) {
+        depthSurveyCount = httpQuizResult.depthSurveyQuestionCnt;
+      } else if (lastPageQuestionCount > 0) {
+        depthSurveyCount = lastPageQuestionCount;
+      }
+    }
+
+    const resultMessage = formatQuizResults(channelResults, _hasUnknown, _hasMultipleMatches, depthSurveyCount);
 
     // ── 심화설문인 경우: 제출 금지 ───────────────────────────────────────
     if (effectiveIsAdvancedSurvey) {
       console.log(`[seminar_quiz] ⚠️ 심화설문 세미나(${seminarName})이므로 퀴즈 정답 추출 후 제출을 생략합니다.`);
+
       const initialUrl = page.url();
       const seminarPageUrl = seminarId ? `https://m.doctorville.co.kr/cme/seminar/${seminarId}` : initialUrl;
       await sendTelegram(
