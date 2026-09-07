@@ -250,17 +250,18 @@ export function extractQuizSummaryOnly(quizMessage?: string | null): string | nu
   return lines[0];
 }
 
-interface ParsedPrevSeminar {
+export interface ParsedPrevSeminar {
   status: SeminarStatus;
   seminarId: string | null;
   url: string | null;
   title: string | null;
+  quizResultMessage?: string | null;
 }
 
 const STATUS_PREFIX_REGEX = /^(?:(🔴)\s*종료|(🟢)\s*입장가능|(⏳)\s*대기)/;
 
 /**
- * 기존 공지 메시지 본문에서 세미나 항목별 상태, seminarId, url, 제목을 정규식으로 파싱합니다.
+ * 기존 공지 메시지 본문에서 세미나 항목별 상태, seminarId, url, 제목 및 퀴즈 정답 정보를 정규식으로 파싱합니다.
  */
 export function parsePrevNoticeSeminars(prevText: string): ParsedPrevSeminar[] {
   if (!prevText || !prevText.trim()) return [];
@@ -289,29 +290,82 @@ export function parsePrevNoticeSeminars(prevText: string): ParsedPrevSeminar[] {
       title = line.slice(pipeIdx + 1).trim();
     }
 
-    // 바로 다음 줄(들)에서 URL / seminarId 탐색
+    // 바로 다음 줄(들)에서 URL / seminarId 및 퀴즈 정답 탐색
     let seminarId: string | null = null;
     let url: string | null = null;
+    let quizResultMessage: string | null = null;
+    let urlFound = false;
 
-    for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+    for (let j = i + 1; j < lines.length; j++) {
       const nextLine = lines[j].trim();
-      if (STATUS_PREFIX_REGEX.test(nextLine) || nextLine.startsWith('💬') || nextLine.startsWith('━')) {
+      if (
+        STATUS_PREFIX_REGEX.test(nextLine) ||
+        nextLine.startsWith('💬') ||
+        nextLine.startsWith('━') ||
+        nextLine.startsWith('🏁') ||
+        nextLine.startsWith('🔔')
+      ) {
         break;
       }
-      if (nextLine.startsWith('http://') || nextLine.startsWith('https://')) {
-        url = nextLine;
-        const idMatch = nextLine.match(/\/seminar\/(\d+)/);
-        if (idMatch) {
-          seminarId = idMatch[1];
+      if (!urlFound) {
+        if (nextLine.startsWith('http://') || nextLine.startsWith('https://')) {
+          url = nextLine;
+          urlFound = true;
+          const idMatch = nextLine.match(/(?:\/seminar\/|seminar_id=)(\d+)/);
+          if (idMatch) {
+            seminarId = idMatch[1];
+          }
         }
-        break;
+      } else {
+        if (!nextLine) continue;
+        const isSurveyLine =
+          (nextLine.startsWith('(') && (nextLine.includes('설문') || nextLine.includes('마감'))) ||
+          nextLine === '(설문이 없는 세미나)';
+        if (!isSurveyLine) {
+          quizResultMessage = quizResultMessage ? `${quizResultMessage}\n${nextLine}` : nextLine;
+        }
       }
     }
 
-    results.push({ status, seminarId, url, title });
+    results.push({ status, seminarId, url, title, quizResultMessage: quizResultMessage || undefined });
   }
 
   return results;
+}
+
+/**
+ * 당일 공지 메시지(또는 지정된 메시지 ID)에서 이전 세미나별 정보(상태 및 퀴즈 정답 등)를 파싱하여 복원합니다.
+ */
+export function getPrevNoticeSeminarsForPeriod(
+  periodName: string,
+  todayIsoDate: string,
+  lastStatusNoticeMessageId?: number | null,
+): ParsedPrevSeminar[] {
+  const existingMsg =
+    (lastStatusNoticeMessageId ? getChannelMessageById(lastStatusNoticeMessageId) : null) ||
+    getSeminarStatusChannelMessage(periodName, todayIsoDate);
+  if (!existingMsg?.text) return [];
+  return parsePrevNoticeSeminars(existingMsg.text);
+}
+
+/**
+ * 이전 공지 파싱 목록에서 특정 세미나와 일치하는 정보를 찾습니다.
+ */
+export function findPrevSeminarInfo(
+  prevSeminars: ParsedPrevSeminar[],
+  info: { seminarId?: string | null; url?: string; name: string },
+): ParsedPrevSeminar | undefined {
+  if (!prevSeminars || prevSeminars.length === 0) return undefined;
+  const targetSeminarId = info.seminarId ? String(info.seminarId).trim() : null;
+  const targetUrl = info.url;
+  const truncatedName = info.name && info.name.length > 20 ? info.name.slice(0, 20) : info.name;
+
+  return prevSeminars.find((p) => {
+    if (targetSeminarId && p.seminarId && targetSeminarId === String(p.seminarId).trim()) return true;
+    if (targetUrl && p.url && targetUrl === p.url) return true;
+    if (p.title && truncatedName && (p.title.includes(truncatedName) || info.name.includes(p.title))) return true;
+    return false;
+  });
 }
 
 /**
@@ -1812,6 +1866,9 @@ async function monitorSeminars(
       }
     }
 
+    // 당일 기존 공지 메시지가 있는 경우 이전 퀴즈 정답 및 상태 정보 파싱
+    const prevNoticeSeminars = getPrevNoticeSeminarsForPeriod(periodName, todayIsoDate, lastStatusNoticeMessageId);
+
     // 1. 초기 세미나 목록 조회 (API)
     const initialFetch = await getTodaysSeminarsFromApi(startHour, endHour, todayIsoDate);
     if (!initialFetch.success) {
@@ -1879,7 +1936,18 @@ async function monitorSeminars(
       const endedAt = isEnded
         ? resolveSeminarEndedAt(seminarItemForEndCheck, initialSurveyState, info.seminarCompleted)
         : undefined;
-      const quizResultMessage: string | null = null;
+
+      // 이전 공지 메시지에서 퀴즈 정답 복원
+      let quizResultMessage: string | null = null;
+      const matchedPrev = findPrevSeminarInfo(prevNoticeSeminars, {
+        seminarId: info.seminarId,
+        url: targetUrl,
+        name: info.name,
+      });
+      if (matchedPrev?.quizResultMessage) {
+        quizResultMessage = matchedPrev.quizResultMessage;
+      }
+
       let startNotified = false;
       const endNotified = isEnded;
 
@@ -2263,11 +2331,24 @@ async function monitorSeminars(
 
           let currentStatus: SeminarStatus = initialIsEnded ? '종료' : info.status || '대기';
           let quizResultMessage: string | null = null;
+          const matchedPrev = findPrevSeminarInfo(prevNoticeSeminars, {
+            seminarId,
+            url: targetUrl,
+            name: info.name,
+          });
+          if (matchedPrev?.quizResultMessage) {
+            quizResultMessage = matchedPrev.quizResultMessage;
+          }
           let startNotified = false;
           const endNotified = initialIsEnded;
 
-          // 이미 종료된 상태면 온디맨드 퀴즈 처리
-          if (initialIsEnded && info.hasSurvey !== false && dynamicSurveyState === SurveyState.SURVEY_PROGRESS) {
+          // 이미 종료된 상태이고 퀴즈 결과가 아직 없으면 온디맨드 퀴즈 처리
+          if (
+            initialIsEnded &&
+            info.hasSurvey !== false &&
+            dynamicSurveyState === SurveyState.SURVEY_PROGRESS &&
+            !quizResultMessage
+          ) {
             try {
               await withBrowserContext(providedContext, async (ctx) => {
                 const res = await handleSeminarEndAndQuiz(

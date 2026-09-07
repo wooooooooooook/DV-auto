@@ -5,6 +5,7 @@ import {
   publishSeminarStatusNotice,
   hasSeminarStatusTransition,
   parsePrevNoticeSeminars,
+  findPrevSeminarInfo,
   type MonitoredSeminarItem,
 } from '../src/tasks/monitor_seminars';
 import * as utilsModule from '../src/modules/utils';
@@ -445,29 +446,67 @@ https://m.doctorville.co.kr/cme/seminar/5602`;
       );
     });
 
-    it('parsePrevNoticeSeminars: 정규식 기반 라인 시작 prefix 상태 파싱 및 seminarId 추출 검증', () => {
+    it('parsePrevNoticeSeminars: 정규식 기반 라인 시작 prefix 상태 파싱, seminarId 및 퀴즈 정답 추출 검증', () => {
       const text = `🔔 점심세미나
 
 🔴 종료 | 12:30~13:30 당뇨 세미나
 https://m.doctorville.co.kr/cme/seminar/1001
+퀴즈 정답 123
+(설문 마감 약 25분 남음)
 
 🟢 입장가능 | 13:00~14:00 고혈압 세미나
 https://m.doctorville.co.kr/cme/seminar/1002
 
-⏳ 대기 | 14:00~15:00 비만 세미나
-https://m.doctorville.co.kr/cme/seminar/1003`;
+🔴 종료 | 13:30~14:30 비만 세미나
+https://m.doctorville.co.kr/cme/seminar/1003
+[퀴즈] 정답 1. O 2. X
+(설문 마감)`;
 
       const parsed = parsePrevNoticeSeminars(text);
       assert.strictEqual(parsed.length, 3);
 
       assert.strictEqual(parsed[0].status, '종료');
       assert.strictEqual(parsed[0].seminarId, '1001');
+      assert.strictEqual(parsed[0].quizResultMessage, '퀴즈 정답 123');
 
       assert.strictEqual(parsed[1].status, '입장가능');
       assert.strictEqual(parsed[1].seminarId, '1002');
+      assert.strictEqual(parsed[1].quizResultMessage, undefined);
 
-      assert.strictEqual(parsed[2].status, '대기');
+      assert.strictEqual(parsed[2].status, '종료');
       assert.strictEqual(parsed[2].seminarId, '1003');
+      assert.strictEqual(parsed[2].quizResultMessage, '[퀴즈] 정답 1. O 2. X');
+    });
+
+    it('findPrevSeminarInfo: ID, URL, 제목 매칭을 통한 이전 퀴즈 정답 복원 검증', () => {
+      const text = `🔔 저녁세미나
+
+🔴 종료 | 18:30~19:30 순환기 심포지엄
+https://m.doctorville.co.kr/cme/seminar/5001
+퀴즈 정답 4321
+(설문 마감 약 10분 남음)`;
+
+      const prevList = parsePrevNoticeSeminars(text);
+      const found = findPrevSeminarInfo(prevList, {
+        seminarId: '5001',
+        name: '순환기 심포지엄',
+        url: 'https://m.doctorville.co.kr/cme/seminar/5001',
+      });
+
+      assert.ok(found);
+      assert.strictEqual(found?.quizResultMessage, '퀴즈 정답 4321');
+
+      // autoResume 시 buildSeminarStatusMessage 호출 시 퀴즈 정답이 유지되는지 검증
+      const currentSeminar: MonitoredSeminarItem = {
+        seminarId: '5001',
+        name: '순환기 심포지엄',
+        url: 'https://m.doctorville.co.kr/cme/seminar/5001',
+        status: '종료',
+        quizResultMessage: found?.quizResultMessage,
+      };
+
+      const built = buildSeminarStatusMessage('저녁', [currentSeminar], false);
+      assert.ok(built.text.includes('퀴즈 정답 4321'), '메시지에 복원된 퀴즈 정답이 포함되어야 함');
     });
 
     it('이전 텍스트가 빈 문자열이거나 없는 경우 상태 전이 있음(true)을 반환해야 함', () => {

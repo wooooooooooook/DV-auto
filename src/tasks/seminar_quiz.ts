@@ -185,8 +185,33 @@ export function findMinimalBranchOptionIndex(options: QuizQuestion['options']): 
   return 1;
 }
 
-function markerKind(marker: string | null): QuizQuestion['kind'] {
-  if (marker && /퀴즈/i.test(marker)) return 'quiz';
+export function isQuizQuestionPattern(questionText: string, cheatsheet?: Cheatsheet): boolean {
+  // 1. 족보 키워드 매칭 여부
+  if (cheatsheet && findMatchingKeywords(questionText, cheatsheet).length > 0) {
+    return true;
+  }
+  // 2. 퀴즈 패턴 지문 (아닌 것은, 잘못된 것을, 적응증이 아닌, 맞지 않는 등)
+  const normalized = normalizeForMatch(questionText);
+  if (
+    /아닌것|잘못된|틀린것|맞지않는|옳지않은|알맞지않은|적절하지않은|해당하지않는|무엇일까요|고르시오|퀴즈|ox/i.test(
+      normalized,
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function markerKind(
+  marker: string | null,
+  questionText = '',
+  cheatsheet?: Cheatsheet,
+  httpQuizQuestionNums?: Set<number>,
+  questionNumber?: number,
+): QuizQuestion['kind'] {
+  if (marker && /퀴즈|ox|주관식/i.test(marker)) return 'quiz';
+  if (questionNumber && httpQuizQuestionNums?.has(questionNumber)) return 'quiz';
+  if (isQuizQuestionPattern(questionText, cheatsheet)) return 'quiz';
   return 'poll';
 }
 
@@ -196,7 +221,11 @@ function markerKind(marker: string | null): QuizQuestion['kind'] {
  * - 마커([퀴즈] 등) 있으면 kind 분류, 없으면 'poll'
  * - 필수 여부(*), inputType(radio/checkbox/text) 추출
  */
-async function parseAllSurveyQuestions(page: Page): Promise<SurveyQuestion[]> {
+async function parseAllSurveyQuestions(
+  page: Page,
+  cheatsheet?: Cheatsheet,
+  httpQuizQuestionNums?: Set<number>,
+): Promise<SurveyQuestion[]> {
   const parsed = await page.evaluate(() => {
     type Option = { index: number; text: string; value: string };
     type ParsedQ = {
@@ -227,9 +256,9 @@ async function parseAllSurveyQuestions(page: Page): Promise<SurveyQuestion[]> {
         }
       }
 
-      // 문제 텍스트: whitespace-pre-wrap 컨테이너의 innerText에서 첫 실질 라인
-      const labelEl = li.querySelector('label.block') as HTMLElement | null;
-      const preWrap = labelEl?.querySelector('.whitespace-pre-wrap') as HTMLElement | null;
+      // 문제 텍스트: whitespace-pre-wrap 컨테이너 또는 label 전체 innerText
+      const labelEl = li.querySelector('label.block, label') as HTMLElement | null;
+      const preWrap = (labelEl?.querySelector('.whitespace-pre-wrap') || labelEl) as HTMLElement | null;
       let questionLine = '';
       if (preWrap) {
         const fullText = preWrap.innerText?.trim() ?? '';
@@ -237,10 +266,12 @@ async function parseAllSurveyQuestions(page: Page): Promise<SurveyQuestion[]> {
           .split('\n')
           .map((l) => l.trim())
           .filter((l) => l.length > 0);
-        // 첫 번째 줄에서 마커([퀴즈] 등) 부분만 제거하고 나머지를 문제 텍스트로 사용
-        // 마커와 문제 텍스트가 같은 줄에 있는 경우를 올바르게 처리
+        // 첫 번째 줄에서 마커([퀴즈] 등) 및 번호 접두어 부분 제거
         const firstLine = lines[0] ?? '';
-        questionLine = firstLine.replace(/^\[[\s\S]*?\]\s*/, '').trim();
+        questionLine = firstLine
+          .replace(/^\[[\s\S]*?\]\s*/, '')
+          .replace(/^\d+\.\s*/, '')
+          .trim();
         // 끝의 * 제거 (필수 표시)
         questionLine = questionLine.replace(/\s*\*\s*(\(최소.*?\))?\s*$/, '').trim();
       }
@@ -304,7 +335,7 @@ async function parseAllSurveyQuestions(page: Page): Promise<SurveyQuestion[]> {
     questionText: q.questionLine,
     options: q.options,
     marker: q.marker,
-    kind: markerKind(q.marker),
+    kind: markerKind(q.marker, q.questionLine, cheatsheet, httpQuizQuestionNums, q.questionNumber),
     isRequired: q.isRequired,
     inputType: q.inputType,
     questionNumber: q.questionNumber,
@@ -315,15 +346,19 @@ async function parseAllSurveyQuestions(page: Page): Promise<SurveyQuestion[]> {
  * 퀴즈 결과를 텔레그램 메시지 형식으로 포맷
  */
 function formatQuizResults(results: QuizResult[], _hasUnknown: boolean, _hasMultipleMatches: boolean): string {
+  if (results.length === 0) {
+    return '퀴즈 없음';
+  }
+
   let message = '';
 
-  // 정답 요약 (예: "퀴즈 정답 1-1-?")
+  // 정답 요약 (예: "퀴즈 정답 412")
   const answerSummary = results.map((r) => (r.selectedIndex !== null ? String(r.selectedIndex) : '-')).join('');
   const hasAnyUnknown = results.some((r) => r.selectedIndex === null);
   const prefix = results.length > 0 && results[0].marker ? `${results[0].marker} ` : '퀴즈 ';
   message += `${prefix.trim()}정답 ${answerSummary}${hasAnyUnknown ? ' (일부 미해결)' : ''}\n\n`;
 
-  // 상세 내역 — 미해결은 요약에 - 로만 표시하고 상세 라인 안 찍음 (노이즈 방지)
+  // 상세 내역
   let lastMarker: string | null = null;
   for (const result of results) {
     if (result.marker !== lastMarker) {
@@ -332,14 +367,12 @@ function formatQuizResults(results: QuizResult[], _hasUnknown: boolean, _hasMult
       lastMarker = result.marker;
     }
 
-    if (result.selectedIndex === null) {
-      continue; // 미해결은 요약에 -로 표시하고 끝
-    }
-
     const shortQuestion =
       result.questionText.length > 25 ? result.questionText.substring(0, 25) + '...' : result.questionText;
 
-    if (result.multipleMatches && result.multipleMatches.length > 1) {
+    if (result.selectedIndex === null) {
+      message += `❓ Q${result.questionIndex}: ${shortQuestion}\n   → 족보 미등록 (답변 번호 미확인)\n`;
+    } else if (result.multipleMatches && result.multipleMatches.length > 1) {
       message += `⚠️ Q${result.questionIndex}: ${shortQuestion}\n`;
       message += `   → 여러 키워드 매칭: ${result.multipleMatches.join(', ')}\n`;
       message += `   → 선택: ${result.selectedText || '없음'} (${result.selectedIndex || '?'}번)\n`;
@@ -361,7 +394,8 @@ function formatUnknownQuestions(questions: SurveyQuestion[], results: QuizResult
   for (let i = 0; i < results.length; i++) {
     const result = results[i];
     if (result.selectedIndex === null && result.kind === 'quiz') {
-      const q = questions[i];
+      const q = questions.find((item) => item.questionNumber === result.questionIndex) || questions[i];
+      if (!q) continue;
       message += `Q${result.questionIndex}: ${q.questionText}\n`;
       for (const opt of q.options) {
         message += `  ${opt.index}. ${opt.text}\n`;
@@ -386,9 +420,8 @@ type SeminarQuizResult = {
  *
  * 자동 클릭 규칙:
  *   - [퀴즈] 문항: 족보 정답 인덱스로 클릭 (족보 미매칭 시 스킵)
- *   - 비퀴즈 필수(*) 문항: radio는 1번째, checkbox는 1번째만 클릭
- *   - 비필수(*없음) 문항: 스킵
- *   - 주관식: 족보에 있으면 입력
+ *   - 비퀴즈 필수(*) 문항: radio는 최소 분기(아니오 등), checkbox는 1번째만 클릭
+ *   - 주관식: 족보에 있으면 입력 또는 기본 텍스트 입력
  */
 async function processSeminarQuiz(
   page: Page,
@@ -398,11 +431,10 @@ async function processSeminarQuiz(
   const seminarName = seminarId;
   try {
     await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
-    // JS(React) 렌더링 완료 대기 - 다이얼로그는 JS 실행 후 나타남
+    // JS(React) 렌더링 완료 대기
     await page.waitForLoadState('networkidle', { timeout: 6000 }).catch(() => {});
 
     // '작성 중인 정보를 불러왔습니다' 초안 복원 다이얼로그 처리
-    // React 포탈로 렌더링되므로 텍스트로 직접 탐색
     try {
       const draftNotice = page.locator(':text("작성 중인 정보를 불러왔습니다")').first();
       const hasDraft = await draftNotice.isVisible({ timeout: 3000 }).catch(() => false);
@@ -427,7 +459,32 @@ async function processSeminarQuiz(
     // 족보 로드
     const cheatsheet = await loadCheatsheet();
 
-    // 채널 송신 자격: quiz ONLY ([퀴즈] 마커만)
+    // ── HTTP API 기반 퀴즈 사전 조회 (백업 및 퀴즈 번호/심화설문 확정용) ──
+    let httpQuizResult: import('../modules/seminar_survey_api').SurveyQuizHttpResult | null = null;
+    const httpQuizMap = new Map<number, import('../modules/seminar_survey_api').HttpQuizQuestion>();
+    const httpQuizNums = new Set<number>();
+
+    if (seminarId) {
+      try {
+        const { fetchSeminarSurveyQuizHttp } = await import('../modules/seminar_survey_api');
+        httpQuizResult = await fetchSeminarSurveyQuizHttp(seminarId, cheatsheet);
+        if (httpQuizResult.success) {
+          console.log(
+            `[seminar_quiz] HTTP API 설문 조회 성공: 총 ${httpQuizResult.totalQuestionCnt}문항 중 퀴즈 ${httpQuizResult.quizQuestionCnt}문항 (심화설문: ${httpQuizResult.isAdvancedSurvey})`,
+          );
+          for (const q of httpQuizResult.quizzes) {
+            httpQuizMap.set(q.questionNumber, q);
+            httpQuizNums.add(q.questionNumber);
+          }
+        }
+      } catch (err) {
+        console.warn('[seminar_quiz] HTTP API 퀴즈 조회 실패 fallback 진행:', err);
+      }
+    }
+
+    const effectiveIsAdvancedSurvey = Boolean(isAdvancedSurvey) || Boolean(httpQuizResult?.isAdvancedSurvey);
+
+    // 채널 송신 자격: quiz ONLY ([퀴즈] 마커 및 퀴즈 문항)
     const CHANNEL_ELIGIBLE_KINDS: ReadonlySet<QuizQuestion['kind']> = new Set(['quiz']);
 
     const accumulatedResults: QuizResult[] = [];
@@ -471,40 +528,47 @@ async function processSeminarQuiz(
       }
 
       // 현재 페이지의 문항 파싱
-      const pageQuestions = await parseAllSurveyQuestions(page);
+      const pageQuestions = await parseAllSurveyQuestions(page, cheatsheet, httpQuizNums);
       console.log(`[seminar_quiz] 페이지 ${currentPageNum} 문항 파싱 수: ${pageQuestions.length}`);
 
       for (let i = 0; i < pageQuestions.length; i++) {
         const q = pageQuestions[i];
         accumulatedQuestions.push(q);
 
+        const qNum = q.questionNumber > 0 ? q.questionNumber : i + 1;
         let selectedIndex: number | null = null;
         let selectedText: string | null = null;
         let matchedKeyword: string | null = null;
         let multipleMatches: string[] | null = null;
 
-        // [퀴즈] 문항만 족보 매칭
-        if (q.kind === 'quiz') {
+        const isQuiz = q.kind === 'quiz' || httpQuizNums.has(qNum);
+
+        // [퀴즈] 문항: 족보 매칭 또는 HTTP API 결과 사용
+        if (isQuiz) {
           const matchingKeywords = findMatchingKeywords(q.questionText, cheatsheet);
-          if (matchingKeywords.length === 0) {
-            _hasUnknown = true;
+          if (matchingKeywords.length > 1) {
+            _hasMultipleMatches = true;
+            multipleMatches = matchingKeywords;
+          }
+          const bestMatch = resolveBestKeywordMatch(q.questionText, q.options, cheatsheet);
+          if (bestMatch) {
+            matchedKeyword = bestMatch.keyword;
+            selectedIndex = bestMatch.option.index;
+            selectedText = bestMatch.option.text;
           } else {
-            if (matchingKeywords.length > 1) {
-              _hasMultipleMatches = true;
-              multipleMatches = matchingKeywords;
-            }
-            const bestMatch = resolveBestKeywordMatch(q.questionText, q.options, cheatsheet);
-            if (bestMatch) {
-              matchedKeyword = bestMatch.keyword;
-              selectedIndex = bestMatch.option.index;
-              selectedText = bestMatch.option.text;
+            // HTTP API 매칭 결과 fallback
+            const httpQ = httpQuizMap.get(qNum);
+            if (httpQ && httpQ.selectedIndex !== null) {
+              matchedKeyword = httpQ.matchedKeyword;
+              selectedIndex = httpQ.selectedIndex;
+              selectedText = httpQ.selectedText;
+              multipleMatches = httpQ.multipleMatches || null;
             } else {
               _hasUnknown = true;
             }
           }
         }
 
-        const qNum = q.questionNumber > 0 ? q.questionNumber : i + 1;
         const result: QuizResult = {
           questionIndex: qNum,
           questionText: q.questionText,
@@ -513,7 +577,7 @@ async function processSeminarQuiz(
           matchedKeyword,
           multipleMatches,
           marker: q.marker,
-          kind: q.kind,
+          kind: isQuiz ? 'quiz' : q.kind,
         };
         accumulatedResults.push(result);
 
@@ -523,7 +587,7 @@ async function processSeminarQuiz(
         const hasArea = await areaLocator.count().catch(() => 0);
         const area = hasArea > 0 ? areaLocator : page.locator('body').first();
 
-        if (q.kind === 'quiz' && q.options.length > 0) {
+        if (isQuiz && q.options.length > 0) {
           if (selectedIndex !== null) {
             const clicked = await clickOptionByIndex(page, area, selectedIndex, qNum);
             if (!clicked) {
@@ -533,11 +597,7 @@ async function processSeminarQuiz(
             console.warn(`[seminar_quiz] Q${qNum} [퀴즈] 족보 미매칭 - 선택 건너뜀`);
           }
         } else if (q.options.length > 0) {
-          // 일반 설문 문항: 분기 최소화 인덱스 선택 ("아니오", "해당없음" 우선, 기본 1번)
-          if (!q.isRequired) {
-            console.log(`[seminar_quiz] Q${qNum} 비필수 문항 스킵 (${q.marker ?? 'no-marker'})`);
-            continue;
-          }
+          // 일반 설문 문항: 분기 최소화 인덱스 선택 ("아니오", "해당없음" 우선)
           if (q.inputType === 'checkbox') {
             const checkbox = area.locator('input[type="checkbox"]:not(.sr-only)').first();
             const cbCount = await checkbox.count().catch(() => 0);
@@ -602,9 +662,26 @@ async function processSeminarQuiz(
 
       if (hasNext && !hasSubmit) {
         console.log(`[seminar_quiz] 다음 페이지 이동 버튼 감지 (현재 페이지: ${currentPageNum}) -> 클릭`);
+        const prevFirstQ = pageQuestions[0]?.questionNumber;
         await nextBtn.scrollIntoViewIfNeeded().catch(() => {});
         await nextBtn.click({ force: true }).catch(() => {});
         await page.waitForLoadState('networkidle', { timeout: 6000 }).catch(() => {});
+
+        // 다음 페이지 렌더링 대기
+        if (prevFirstQ !== undefined) {
+          await page
+            .waitForFunction(
+              (prev) => {
+                const firstLi = document.querySelector('li[data-question-number]');
+                if (!firstLi) return false;
+                const qNum = parseInt(firstLi.getAttribute('data-question-number') || '0', 10);
+                return qNum !== prev;
+              },
+              prevFirstQ,
+              { timeout: 4000 },
+            )
+            .catch(() => {});
+        }
         await page.waitForTimeout(1500);
         currentPageNum++;
       } else {
@@ -614,7 +691,23 @@ async function processSeminarQuiz(
     }
     // ── 다중 페이지 탐색 및 응답 루프 끝 ─────────────────────────────────────────
 
-    if (accumulatedQuestions.length === 0) {
+    // 채널용 결과: [퀴즈] 문항만 필터링 (UI에서 누락되었더라도 HTTP API에서 발견된 경우 HTTP 결과로 채움)
+    let channelResults = accumulatedResults.filter((r) => CHANNEL_ELIGIBLE_KINDS.has(r.kind));
+    if (channelResults.length === 0 && httpQuizResult && httpQuizResult.quizzes.length > 0) {
+      console.log('[seminar_quiz] UI에서 퀴즈를 직접 감지하지 못했으나 HTTP API 퀴즈 결과로 대체합니다.');
+      channelResults = httpQuizResult.quizzes.map((q) => ({
+        questionIndex: q.questionNumber,
+        questionText: q.questionText,
+        selectedIndex: q.selectedIndex,
+        selectedText: q.selectedText,
+        matchedKeyword: q.matchedKeyword,
+        multipleMatches: q.multipleMatches || null,
+        marker: '[퀴즈]',
+        kind: 'quiz',
+      }));
+    }
+
+    if (channelResults.length === 0 && accumulatedQuestions.length === 0) {
       const message = seminarName
         ? `ℹ️ ${seminarName} 설문 페이지에서 퀴즈를 찾지 못했습니다.`
         : 'ℹ️ 설문 페이지에서 퀴즈를 찾지 못했습니다.';
@@ -624,12 +717,10 @@ async function processSeminarQuiz(
       return { success: true, hasQuizResult: false, message };
     }
 
-    // 채널용 결과: [퀴즈] 문항만 필터링
-    const channelResults = accumulatedResults.filter((r) => CHANNEL_ELIGIBLE_KINDS.has(r.kind));
     const resultMessage = formatQuizResults(channelResults, _hasUnknown, _hasMultipleMatches);
 
     // ── 심화설문인 경우: 제출 금지 ───────────────────────────────────────
-    if (isAdvancedSurvey) {
+    if (effectiveIsAdvancedSurvey) {
       console.log(`[seminar_quiz] ⚠️ 심화설문 세미나(${seminarName})이므로 퀴즈 정답 추출 후 제출을 생략합니다.`);
       const initialUrl = page.url();
       const seminarPageUrl = seminarId ? `https://m.doctorville.co.kr/cme/seminar/${seminarId}` : initialUrl;
