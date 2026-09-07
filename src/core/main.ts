@@ -27,6 +27,7 @@ import * as seminarDetailTaskModule from '../tasks/seminar_detail';
 import * as intermdQuizTaskModule from '../tasks/intermd_quiz';
 import * as keymediAttendanceTaskModule from '../tasks/keymedi_attendance';
 import * as hmpAttendanceTaskModule from '../tasks/hmp_attendance';
+import * as docpleDailyTaskModule from '../tasks/docple_daily';
 import { sendOrUpdateTodayLinksNotification } from '../services/broadcast_today_links';
 import { sendToTopicSubscribers, sendHourlyTodayLinksToSubscribers } from '../services/subscription_service';
 import { shouldResumeSeminarMonitor } from '../services/channel_message_repository';
@@ -39,6 +40,7 @@ const HEADLESS = (process.env.HEADLESS || 'true').toLowerCase() === 'true';
 const TIMEZONE = process.env.SCHEDULE_TZ || 'Asia/Seoul';
 const DAILY_ROUTINE_CRON = process.env.DAILY_CRON || '1 0 * * *';
 const INTERMD_QUIZ_CRON = process.env.INTERMD_QUIZ_CRON || '1 8 * * *';
+const DOCPLE_DAILY_CRON = process.env.DOCPLE_DAILY_CRON || '4 7 * * *';
 const KEYMEDI_ATTENDANCE_CRON = process.env.KEYMEDI_ATTENDANCE_CRON || '5 7 * * *';
 const HMP_ATTENDANCE_CRON = process.env.HMP_ATTENDANCE_CRON || '7 7 * * *';
 const BROADCAST_TODAY_LINKS_CRON = '0 9 * * *';
@@ -516,6 +518,17 @@ const intermdQuizTask: Task = {
 };
 taskRegistry.registerTask(intermdQuizTask);
 scheduler.scheduleTaskCron(intermdQuizTask);
+
+const docpleDailyTask: Task = {
+  name: 'docple_daily',
+  schedule: DOCPLE_DAILY_CRON,
+  timezone: TIMEZONE,
+  run: async (ctx) => {
+    return await docpleDailyTaskModule.run(ctx);
+  },
+};
+taskRegistry.registerTask(docpleDailyTask);
+scheduler.scheduleTaskCron(docpleDailyTask);
 
 const keymediAttendanceTask: Task = {
   name: 'keymedi_attendance',

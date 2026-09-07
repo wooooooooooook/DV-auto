@@ -425,6 +425,45 @@
 
 ---
 
+### 5.8 닥플 플러스 API (`https://docple-plus.com`)
+- **공통 인증 헤더**: `Authorization: Bearer <accessToken>`
+- **통합 로그인 (`/api/season2/auth/login`)**:
+  - `POST https://docple-plus.com/api/season2/auth/login`
+  - Body: `{"id": "<DOCPLE_USER>", "password": "<DOCPLE_PASS>"}`
+  - 응답: `accessToken`, `refreshToken`, `joinType`, `uid`
+- **토큰 갱신 (`/api/season2/auth/token/refresh`)**:
+  - `POST https://docple-plus.com/api/season2/auth/token/refresh`
+  - Header: `Refresh-Token: <refreshToken>`
+- **회원 정보/프로필 조회 (`/api/season2/users/info`)**:
+  - `GET https://docple-plus.com/api/season2/users/info`
+- **캐시 잔액/최근 적립 내역 조회 (`/api/season2/cash/recent`)**:
+  - `GET https://docple-plus.com/api/season2/cash/recent`
+  - 응답: `totalCash`, `recentList[]`
+- **출석 캘린더 조회 (`/api/season2/mission/attendance/calendar`)**:
+  - `GET https://docple-plus.com/api/season2/mission/attendance/calendar`
+  - 응답: `isAttended` (당일 출석 여부), `items[]`
+- **출석체크 수행 (`/api/season2/mission/attendance/check`)**:
+  - `POST https://docple-plus.com/api/season2/mission/attendance/check`
+  - 응답: `rewardCash`, `accumulatedDays`
+- **e-디테일링 의약품 및 퀴즈 목록 (`/api/season2/e-detailing/medicines`)**:
+  - `GET https://docple-plus.com/api/season2/e-detailing/medicines?page=1&size=50`
+  - 응답: `items[]` (`id`, `name`, `hasQuiz`, `quizStatus` 등)
+  - 상세 퀴즈 URL: `https://docple-plus.com/e-detailing/{id}`
+- **커뮤니티 비밀번호 인증 (`/api/v3/member/community/pwd`)**:
+  - `POST https://docple-plus.com/api/v3/member/community/pwd`
+  - Body: `{"dmzPwd": "<DOCPLE_COMM_PASS>"}`
+  - 응답: `communityToken`
+- **커뮤니티 게시글 목록 (`/api/community/list`)**:
+  - `POST https://docple-plus.com/api/community/list`
+  - Header: `communityToken: <communityToken>`
+  - Body: `{"grpCode": "NI", "subCode": "", "page": 1, "size": 20}`
+- **커뮤니티 게시글 추천 (`/api/board/recommend`)**:
+  - `POST https://docple-plus.com/api/board/recommend`
+  - Header: `communityToken: <communityToken>`
+  - Body: `{"tid": <tid>, "grpCode": "NI", "subCode": "<subCode>"}`
+
+---
+
 ## 6. 주요 상태 코드 및 Enum 정리
 
 ### 6.1 세미나 진행 상태 (`ProcessState`)
@@ -446,3 +485,4 @@
 | `2` | `SURVEY_COMPLETED` | 설문 참여 완료 |
 | `3` | `SURVEY_CLOSED` | 설문 마감 / 미제공 / 대상 아님 |
 | `5` | `SURVEY_UNOPENED` | 설문 미오픈 (진행 예정 / 설문 없음) |
+
