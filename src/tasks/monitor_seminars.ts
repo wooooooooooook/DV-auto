@@ -2125,6 +2125,7 @@ async function monitorSeminars(
                 name: item.name,
                 seminarId: item.seminarId,
                 isSurveyPointExcluded: false,
+                isAdvancedSurvey: item.isAdvancedSurvey,
               },
               item.url,
             );
@@ -2353,7 +2354,12 @@ async function monitorSeminars(
               await withBrowserContext(providedContext, async (ctx) => {
                 const res = await handleSeminarEndAndQuiz(
                   ctx,
-                  { name: info.name, seminarId, isSurveyPointExcluded: false },
+                  {
+                    name: info.name,
+                    seminarId,
+                    isSurveyPointExcluded: false,
+                    isAdvancedSurvey: info.isAdvancedSurvey,
+                  },
                   targetUrl,
                 );
                 quizResultMessage = res.message;
@@ -2481,6 +2487,7 @@ async function monitorSeminars(
                   name,
                   seminarId,
                   isSurveyPointExcluded: false,
+                  isAdvancedSurvey: currentSeminar.isAdvancedSurvey,
                 },
                 currentSeminar.url || targetUrl,
               );

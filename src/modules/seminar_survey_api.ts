@@ -1,4 +1,5 @@
 import { sendDoctorVilleRequest } from './http_client';
+import { checkIsAdvancedSurvey } from './seminar_api';
 import {
   loadCheatsheet,
   findMatchingKeywords,
@@ -48,6 +49,7 @@ export const VILLEWAY_API_BASE_URL = 'https://survey.villeway.com/data/v1';
 export async function fetchSeminarSurveyQuizHttp(
   seminarId: string | number,
   customCheatsheet?: Cheatsheet,
+  isAdvancedSurveyParam?: boolean,
 ): Promise<SurveyQuizHttpResult> {
   const sid = String(seminarId).trim();
   try {
@@ -221,12 +223,12 @@ export async function fetchSeminarSurveyQuizHttp(
     const totalQuestionCnt = typeof surveyData.questionCnt === 'number' ? surveyData.questionCnt : 0;
     const surveyTitle = surveyData.config?.title || '';
 
-    // 심화설문 판별: 제목에 "심화", "만족도", 또는 2페이지 이상/문항 수가 많은 경우 등
+    // 심화설문 판별: 플래그(인자 또는 config) 및 제목("심화"/"만족도") 기반
     const isAdvancedSurvey =
+      Boolean(isAdvancedSurveyParam) ||
+      checkIsAdvancedSurvey(surveyData.config?.useDepthSurvey) ||
       surveyTitle.includes('심화') ||
-      surveyTitle.includes('만족도') ||
-      totalQuestionCnt >= 15 ||
-      Boolean(surveyData.config?.useDepthSurvey);
+      surveyTitle.includes('만족도');
 
     // 4. 각 페이지 순회 및 문항 수집
     const allQuestions: HttpQuizQuestion[] = [];
@@ -313,7 +315,7 @@ export async function fetchSeminarSurveyQuizHttp(
       (q) => q.typeKey === 'QUIZ_MULTIPLE_CHOICE' || /\[\s*(퀴즈|O\s*X|주관식)\s*\]/i.test(q.questionText),
     );
 
-    // 6. 심화설문 문항 수: 마지막 페이지(totalPageCnt)의 문제 개수
+    // 6. 심화설문 문항 수: 심화설문인 경우 마지막 페이지(totalPageCnt)의 문항 개수
     const lastPageQuestions = allQuestions.filter((q) => q.pageNumber === totalPageCnt);
     const depthSurveyQuestionCnt = isAdvancedSurvey ? lastPageQuestions.length : 0;
 

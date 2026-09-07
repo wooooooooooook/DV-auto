@@ -1948,6 +1948,7 @@ export const adminCommands = [
   { command: 'monitor_dinner_seminar_now', description: '즉시 저녁 세미나 모니터링 시작' },
   // 2. 세미나 & 퀴즈 족보
   { command: 'run_seminar_quiz', description: '특정 세미나 퀴즈 수동 실행 (seminarId, [advanced])' },
+  { command: 'set_seminar_quiz', description: '공지방 세미나 항목의 퀴즈 정답 등록/수정 (seminarId, 정답)' },
   { command: 'add_seminar_answer_batch', description: '족보 일괄 등록' },
   { command: 'list_seminar_quiz', description: '등록된 족보 목록' },
   { command: 'delete_seminar_quiz', description: '족보 삭제' },

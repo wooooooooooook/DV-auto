@@ -234,7 +234,10 @@ describe('setSeminarQuizAnswer 통합 동작', () => {
         status: 'sent',
         text: latestText,
         mediaType: 'text',
-        createdAt: '2026-09-02T19:00:00.000Z',
+        chunkIndex: 0,
+        totalChunks: 1,
+        createdAt: new Date('2026-09-02T19:00:00.000Z').getTime(),
+        updatedAt: new Date('2026-09-02T19:00:00.000Z').getTime(),
       },
       {
         id: 1,
@@ -244,7 +247,10 @@ describe('setSeminarQuizAnswer 통합 동작', () => {
         status: 'sent',
         text: oldText,
         mediaType: 'text',
-        createdAt: '2026-09-02T13:00:00.000Z',
+        chunkIndex: 0,
+        totalChunks: 1,
+        createdAt: new Date('2026-09-02T13:00:00.000Z').getTime(),
+        updatedAt: new Date('2026-09-02T13:00:00.000Z').getTime(),
       },
     ];
 
@@ -253,7 +259,7 @@ describe('setSeminarQuizAnswer 통합 동작', () => {
       success: true,
       message: '메시지 수정 완료',
     });
-    const updateStatusSpy = vi.spyOn(channelRepo, 'updateChannelMessageStatus').mockImplementation(() => {});
+    const updateStatusSpy = vi.spyOn(channelRepo, 'updateChannelMessageStatus').mockImplementation(() => true);
 
     const res = await setSeminarQuizAnswer('5612', '234');
 
@@ -269,5 +275,14 @@ describe('setSeminarQuizAnswer 통합 동작', () => {
     getRecentSpy.mockRestore();
     editSpy.mockRestore();
     updateStatusSpy.mockRestore();
+  });
+
+  describe('Telegram Command Registration Tests', () => {
+    it('adminCommands에 set_seminar_quiz가 등록되어 있어야 함', async () => {
+      const { adminCommands } = await import('../src/services/telegram');
+      const cmd = adminCommands.find((c) => c.command === 'set_seminar_quiz');
+      expect(cmd).toBeDefined();
+      expect(cmd?.description).toContain('퀴즈 정답');
+    });
   });
 });

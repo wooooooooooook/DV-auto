@@ -185,33 +185,21 @@ export function findMinimalBranchOptionIndex(options: QuizQuestion['options']): 
   return 1;
 }
 
-export function isQuizQuestionPattern(questionText: string, cheatsheet?: Cheatsheet): boolean {
-  // 1. 족보 키워드 매칭 여부
-  if (cheatsheet && findMatchingKeywords(questionText, cheatsheet).length > 0) {
-    return true;
-  }
-  // 2. 퀴즈 패턴 지문 (아닌 것은, 잘못된 것을, 적응증이 아닌, 맞지 않는 등)
-  const normalized = normalizeForMatch(questionText);
-  if (
-    /아닌것|잘못된|틀린것|맞지않는|옳지않은|알맞지않은|적절하지않은|해당하지않는|무엇일까요|고르시오|퀴즈|ox/i.test(
-      normalized,
-    )
-  ) {
+export function isQuizQuestionPattern(questionText: string, _cheatsheet?: Cheatsheet): boolean {
+  // [퀴즈] 등 명시적 마커가 포함된 경우
+  if (/\[\s*(퀴즈|OX|O\s*X|주관식|QUIZ)\s*\]/i.test(questionText)) {
     return true;
   }
   return false;
 }
 
-function markerKind(
+export function markerKind(
   marker: string | null,
-  questionText = '',
-  cheatsheet?: Cheatsheet,
   httpQuizQuestionNums?: Set<number>,
   questionNumber?: number,
 ): QuizQuestion['kind'] {
-  if (marker && /퀴즈|ox|주관식/i.test(marker)) return 'quiz';
+  if (marker && /퀴즈|ox|주관식|quiz/i.test(marker)) return 'quiz';
   if (questionNumber && httpQuizQuestionNums?.has(questionNumber)) return 'quiz';
-  if (isQuizQuestionPattern(questionText, cheatsheet)) return 'quiz';
   return 'poll';
 }
 
@@ -343,7 +331,7 @@ async function parseAllSurveyQuestions(
     questionText: q.questionLine,
     options: q.options,
     marker: q.marker,
-    kind: markerKind(q.marker, q.questionLine, cheatsheet, httpQuizQuestionNums, q.questionNumber),
+    kind: markerKind(q.marker, httpQuizQuestionNums, q.questionNumber),
     isRequired: q.isRequired,
     inputType: q.inputType,
     questionNumber: q.questionNumber,
@@ -481,7 +469,7 @@ async function processSeminarQuiz(
     if (seminarId) {
       try {
         const { fetchSeminarSurveyQuizHttp } = await import('../modules/seminar_survey_api');
-        httpQuizResult = await fetchSeminarSurveyQuizHttp(seminarId, cheatsheet);
+        httpQuizResult = await fetchSeminarSurveyQuizHttp(seminarId, cheatsheet, isAdvancedSurvey);
         if (httpQuizResult.success) {
           console.log(
             `[seminar_quiz] HTTP API 설문 조회 성공: 총 ${httpQuizResult.totalQuestionCnt}문항 중 퀴즈 ${httpQuizResult.quizQuestionCnt}문항 (심화설문: ${httpQuizResult.isAdvancedSurvey})`,
@@ -508,7 +496,6 @@ async function processSeminarQuiz(
 
     const MAX_PAGES = 10;
     let currentPageNum = 1;
-
     let lastPageQuestionCount = 0;
 
     // ── 다중 페이지 탐색 및 응답 루프 ───────────────────────────────────────────────
