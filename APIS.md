@@ -239,6 +239,43 @@
 
 ---
 
+### 3.5 오늘의 퀴즈 조회 (`/api/product-quiz/{quizId}`)
+- **Method / URL**: `GET https://api.doctorville.co.kr/api/product-quiz/{quizId}?_={timestamp}`
+- **호출 위치**: `src/modules/quiz_api.ts` (`fetchProductQuizApi`, `getTodayVerifiedQuizAnswers`)
+- **주요 사용 태스크**: `today_quiz`, `today_links`
+- **헤더**:
+  - `Accept`: `application/json, text/plain, */*`
+  - `Referer`: `https://www.doctorville.co.kr/product/productView?pId={pId}`
+- **주요 응답 데이터**:
+  ```json
+  {
+    "timestamp": "2026-09-07 13:49:14",
+    "data": {
+      "quizId": 3604,
+      "quizNm": "에빅사",
+      "point": 500,
+      "useSt": "Y",
+      "startDt": "2026-09-07",
+      "endDt": "2026-09-07",
+      "pid": 138,
+      "questionList": [
+        {
+          "questionId": 9932,
+          "quizId": 3604,
+          "questionNm": "문제 지문 텍스트",
+          "answerInfo": "O$X",
+          "answerNum": 1,
+          "answerExplanation": "정답 해설"
+        }
+      ]
+    },
+    "error": null
+  }
+  ```
+- **설명**: 퀴즈 상세 페이지 인라인 스크립트에서 추출한 `quizId`로 직접 조회하여 당일 퀴즈 문항, 보기 및 검증된 정답을 획득합니다. 당일 최초 1회 조회 후 로컬 캐시(`storage`)에 보관되어 재사용됩니다.
+
+---
+
 ## 4. 닥터빌 웹 스크래핑 및 HTML Form 엔드포인트
 
 | URL | Method / 방식 | 주요 용도 | 사용 모듈 |

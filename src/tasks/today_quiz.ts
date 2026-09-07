@@ -9,6 +9,7 @@ import {
   findOptionByAnswer,
   type QuizQuestion,
 } from './seminar_quiz';
+import { getTodayVerifiedQuizAnswers } from '../modules/quiz_api';
 
 const QUIZ_LIST_URLS = [
   'https://www.doctorville.co.kr/product/medicineList',
@@ -241,7 +242,16 @@ async function findQuizHref(page: PlaywrightRunArgs['page']) {
 
 async function run({ page }: PlaywrightRunArgs) {
   try {
-    const href = await findQuizHref(page);
+    // 1. 당일 퀴즈 정답 API / 캐시 조회 시도
+    const verifiedQuiz = await getTodayVerifiedQuizAnswers().catch((e) => {
+      console.warn('[today_quiz] API 정답 조회 중 오류 (폴백으로 진행):', e);
+      return null;
+    });
+
+    let href = verifiedQuiz?.link || null;
+    if (!href) {
+      href = await findQuizHref(page);
+    }
 
     if (!href) {
       storage.set<CachedTodayQuizInfo>(TODAY_QUIZ_INFO_KEY, {
@@ -256,7 +266,8 @@ async function run({ page }: PlaywrightRunArgs) {
 
     const titleElem = page.locator('#product_title');
     const titleCount = await titleElem.count();
-    const initialProductTitle = titleCount ? (await titleElem.first().innerText()).trim() : '';
+    const initialProductTitle =
+      verifiedQuiz?.productTitle || (titleCount ? (await titleElem.first().innerText()).trim() : '');
 
     // Click the banner button to open the quiz popup
     const btn = page.locator('#btn_quiz_banner');
@@ -314,23 +325,33 @@ async function run({ page }: PlaywrightRunArgs) {
       return { success: false, message: '제품 제목을 찾을 수 없습니다. 직접 퀴즈를 풀어주세요. ' + href };
     }
 
-    // 1. seminar_quiz_cheatsheet(족보)에서 먼저 정답 탐색
-    console.log(`[today_quiz] "${productTitle}" 족보(seminar_quiz_cheatsheet)에서 정답 찾기를 먼저 시도합니다.`);
-    const cheatsheetResult = await findAnswersByCheatsheet(page);
-    let answers = cheatsheetResult.answers || [];
+    let answers: Array<string | number> = [];
 
-    // 2. 족보에서 정답을 찾지 못한 경우 -> 관리자 봇에 등록 메시지 전송 후 quiz.json에서 탐색
+    // [1순위] API를 통해 검증된 정답 사용
+    if (verifiedQuiz && verifiedQuiz.answers && verifiedQuiz.answers.length > 0) {
+      console.log(`[today_quiz] "${productTitle}" API 검증 정답을 최우선으로 사용합니다:`, verifiedQuiz.answers);
+      answers = verifiedQuiz.answers;
+    }
+
+    // [2순위] 족보(seminar_quiz_cheatsheet)에서 탐색 (API 정답이 없을 때)
     if (answers.length === 0) {
-      console.log(
-        `[today_quiz] "${productTitle}" 족보에서 정답을 찾지 못했습니다 (이유: ${cheatsheetResult.reason}). 관리자 알림을 발송하고 quiz.json에서 찾기를 시도합니다.`,
-      );
-      await notifyTodayQuizUnknownQuestions(page, productTitle, href);
+      console.log(`[today_quiz] "${productTitle}" 족보(seminar_quiz_cheatsheet)에서 정답 찾기를 시도합니다.`);
+      const cheatsheetResult = await findAnswersByCheatsheet(page);
+      answers = cheatsheetResult.answers || [];
 
-      const mapping = quizMapping as Record<string, Array<string | number>>;
-      const mappingAnswers = mapping[productTitle];
-      if (mappingAnswers && Array.isArray(mappingAnswers) && mappingAnswers.length > 0) {
-        console.log(`[today_quiz] quiz.json에서 "${productTitle}"에 대한 정답을 찾았습니다:`, mappingAnswers);
-        answers = mappingAnswers;
+      // [3순위] 족보 미등록 시 관리자 알림 발송 및 quiz.json 매핑 탐색
+      if (answers.length === 0) {
+        console.log(
+          `[today_quiz] "${productTitle}" 족보에서 정답을 찾지 못했습니다 (이유: ${cheatsheetResult.reason}). 관리자 알림을 발송하고 quiz.json에서 찾기를 시도합니다.`,
+        );
+        await notifyTodayQuizUnknownQuestions(page, productTitle, href);
+
+        const mapping = quizMapping as Record<string, Array<string | number>>;
+        const mappingAnswers = mapping[productTitle];
+        if (mappingAnswers && Array.isArray(mappingAnswers) && mappingAnswers.length > 0) {
+          console.log(`[today_quiz] quiz.json에서 "${productTitle}"에 대한 정답을 찾았습니다:`, mappingAnswers);
+          answers = mappingAnswers;
+        }
       }
     }
 
