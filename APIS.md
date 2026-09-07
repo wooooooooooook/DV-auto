@@ -172,6 +172,23 @@
 
 ---
 
+### 2.9 세미나 설문 URL 발급
+- **Method / URL**: `GET https://m-api.doctorville.co.kr/api/mw/seminars/{seminarId}/survey-url`
+- **호출 위치**: `src/modules/seminar_survey_api.ts` (`fetchSeminarSurveyQuizHttp`)
+- **주요 사용 태스크**: `seminar_quiz`, `monitor_seminars`
+- **헤더**:
+  - `Accept`: `application/json, text/plain, */*`
+  - `Referer`: `https://m.doctorville.co.kr/cme/seminar/{seminarId}`
+- **주요 응답 데이터**:
+  ```json
+  {
+    "surveyUrl": "https://survey.villeway.com/s/c/{companyToken}/u/{secureToken}"
+  }
+  ```
+- **설명**: 해당 세미나의 Villeway 설문 페이지 접속용 고유 토큰이 포함된 URL을 조회합니다.
+
+---
+
 ## 3. 닥터빌 코어 API (`api.doctorville.co.kr`)
 
 ### 3.1 세미나 수강 신청
@@ -383,6 +400,28 @@
   - `POST https://www.hmp.co.kr/ajax/event/capsuleHist.hm` (Form `x-www-form-urlencoded`)
   - 파라미터: `cntntCd`, `cntntSeq`, `pointTitle`, `bizGbn`, `seq`
   - 응답: 성공 시 `{ "code": "800" }` (+10 캡슐 적립), 이미 완료 시 `{ "message": "1." }`
+
+---
+
+### 5.7 빌웨이 설문/퀴즈 API (`https://survey.villeway.com/data/v1`)
+- **공통 인증 헤더**: `Authorization: Bearer <accessToken>` (인증 이후 모든 요청)
+- **인증 토큰 발급 (`/auth/authenticate-via-client`)**:
+  - `POST https://survey.villeway.com/data/v1/auth/authenticate-via-client`
+  - Body: `{"type": "c", "secureToken": "<secureToken>"}`
+  - 응답: `accessToken` (JWT), `refreshToken`
+- **설문 전체 메타데이터 조회 (`/user/survey-detail`)**:
+  - `GET https://survey.villeway.com/data/v1/user/survey-detail`
+  - 응답: `config` (제목, 시작/종료일, 약관 등), `pageCnt` (총 페이지 수), `questionCnt` (총 문항 수), `pages[]`
+- **페이지별 문항 상세 조회 (`/user/survey-page/{pageNumber}`)**:
+  - `GET https://survey.villeway.com/data/v1/user/survey-page/{pageNumber}` (`1` ~ `pageCnt`)
+  - 응답: `id` (pageId), `pageNumber`, `questions[]` (`id`, `subject`, `type.key`: `QUIZ_MULTIPLE_CHOICE` 등, `options[]`)
+- **페이지별 답변 저장 (`/user/save-user-response-new`)**:
+  - `POST https://survey.villeway.com/data/v1/user/save-user-response-new`
+  - Body: `{"pageId": <pageId>, "userQuestions": [{"questionId": <id>, "optionIds": [<optionId>], "active": true}]}`
+- **설문 최종 제출 (`/user/submit`)**:
+  - `POST https://survey.villeway.com/data/v1/user/submit`
+  - Body: `{}`
+  - 응답: `isQuizPassed` (통과 여부), `quizCnt` (퀴즈 총 문항 수), `correctCnt` (정답 수), `quizPoint` (지급 포인트)
 
 ---
 

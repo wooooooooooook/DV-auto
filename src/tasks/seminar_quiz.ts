@@ -374,7 +374,7 @@ type SeminarQuizResult = {
 async function processSeminarQuiz(
   page: Page,
   seminarId?: string,
-  _isAdvancedSurvey?: boolean,
+  isAdvancedSurvey?: boolean,
 ): Promise<SeminarQuizResult> {
   const seminarName = seminarId;
   try {
@@ -399,47 +399,171 @@ async function processSeminarQuiz(
       // 다이얼로그 없으면 정상 진행
     }
 
-    // 마커 또는 일반 설문 문항 감지
-    const markerSel = ':text-matches("\\[\\s*(퀴즈|O\\s*X|주관식|설문|일반|poll)\\s*\\]", "i")';
-    const quizSelector = `.whitespace-pre-wrap:has(${markerSel})`;
-    let isQuizVisible = false;
+    // 네이티브 다이얼로그 자동 수락 핸들러 등록
+    page.on('dialog', async (dialog) => {
+      console.log(`[seminar_quiz] Dialog detected: [${dialog.type()}] "${dialog.message()}". Accepting...`);
+      await dialog.accept().catch(() => {});
+    });
 
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      // 마커 있는 [퀴즈] 문항 OR li[data-question-number] 형태의 설문 문항 중 하나라도 있으면 진행
-      const hasMarker = await page
-        .locator(quizSelector)
-        .first()
-        .waitFor({ state: 'visible', timeout: 5000 })
-        .then(() => true)
-        .catch(() => false);
+    // 족보 로드
+    const cheatsheet = await loadCheatsheet();
 
-      const hasSurveyItems = await page
-        .locator('li[data-question-number]')
-        .first()
-        .waitFor({ state: 'visible', timeout: 3000 })
-        .then(() => true)
-        .catch(() => false);
+    // 채널 송신 자격: quiz ONLY ([퀴즈] 마커만)
+    const CHANNEL_ELIGIBLE_KINDS: ReadonlySet<QuizQuestion['kind']> = new Set(['quiz']);
 
-      isQuizVisible = hasMarker || hasSurveyItems;
+    const accumulatedResults: QuizResult[] = [];
+    const accumulatedQuestions: SurveyQuestion[] = [];
+    let _hasUnknown = false;
+    let _hasMultipleMatches = false;
 
-      if (isQuizVisible) {
+    const MAX_PAGES = 10;
+    let currentPageNum = 1;
+
+    // ── 다중 페이지 탐색 및 응답 루프 ───────────────────────────────────────────────
+    while (currentPageNum <= MAX_PAGES) {
+      console.log(`[seminar_quiz] 설문 페이지 ${currentPageNum} 탐색 시작 (${seminarName ?? 'unknown'})`);
+
+      // 마커 또는 일반 설문 문항 감지
+      const markerSel = ':text-matches("\\[\\s*(퀴즈|O\\s*X|주관식|설문|일반|poll)\\s*\\]", "i")';
+      const quizSelector = `.whitespace-pre-wrap:has(${markerSel})`;
+      let isSurveyVisible = false;
+
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        const hasMarker = await page
+          .locator(quizSelector)
+          .first()
+          .waitFor({ state: 'visible', timeout: 3000 })
+          .then(() => true)
+          .catch(() => false);
+
+        const hasSurveyItems = await page
+          .locator('li[data-question-number]')
+          .first()
+          .waitFor({ state: 'visible', timeout: 3000 })
+          .then(() => true)
+          .catch(() => false);
+
+        isSurveyVisible = hasMarker || hasSurveyItems;
+        if (isSurveyVisible) break;
+
+        if (attempt < 2) {
+          await page.waitForTimeout(1000);
+        }
+      }
+
+      // 현재 페이지의 문항 파싱
+      const pageQuestions = await parseAllSurveyQuestions(page);
+      console.log(`[seminar_quiz] 페이지 ${currentPageNum} 문항 파싱 수: ${pageQuestions.length}`);
+
+      for (let i = 0; i < pageQuestions.length; i++) {
+        const q = pageQuestions[i];
+        accumulatedQuestions.push(q);
+
+        let selectedIndex: number | null = null;
+        let selectedText: string | null = null;
+        let matchedKeyword: string | null = null;
+        let multipleMatches: string[] | null = null;
+
+        // [퀴즈] 문항만 족보 매칭
+        if (q.kind === 'quiz') {
+          const matchingKeywords = findMatchingKeywords(q.questionText, cheatsheet);
+          if (matchingKeywords.length === 0) {
+            _hasUnknown = true;
+          } else {
+            if (matchingKeywords.length > 1) {
+              _hasMultipleMatches = true;
+              multipleMatches = matchingKeywords;
+            }
+            const bestMatch = resolveBestKeywordMatch(q.questionText, q.options, cheatsheet);
+            if (bestMatch) {
+              matchedKeyword = bestMatch.keyword;
+              selectedIndex = bestMatch.option.index;
+              selectedText = bestMatch.option.text;
+            } else {
+              _hasUnknown = true;
+            }
+          }
+        }
+
+        const qNum = q.questionNumber > 0 ? q.questionNumber : i + 1;
+        const result: QuizResult = {
+          questionIndex: qNum,
+          questionText: q.questionText,
+          selectedIndex,
+          selectedText,
+          matchedKeyword,
+          multipleMatches,
+          marker: q.marker,
+          kind: q.kind,
+        };
+        accumulatedResults.push(result);
+
+        // UI 선택 처리
+        await page.waitForTimeout(200);
+        const areaLocator = page.locator(`li[data-question-number="${qNum}"]`).first();
+        const hasArea = await areaLocator.count().catch(() => 0);
+        const area = hasArea > 0 ? areaLocator : page.locator('body').first();
+
+        if (q.kind === 'quiz' && q.options.length > 0) {
+          if (selectedIndex !== null) {
+            const clicked = await clickOptionByIndex(page, area, selectedIndex, qNum);
+            if (!clicked) {
+              console.warn(`[seminar_quiz] Q${qNum} [퀴즈] 선택 실패 (index=${selectedIndex})`);
+            }
+          } else {
+            console.warn(`[seminar_quiz] Q${qNum} [퀴즈] 족보 미매칭 - 선택 건너뜀`);
+          }
+        } else if (q.options.length > 0) {
+          // 일반 설문 문항: 필수인 경우 1번 선택지 선택
+          if (!q.isRequired) {
+            console.log(`[seminar_quiz] Q${qNum} 비필수 문항 스킵 (${q.marker ?? 'no-marker'})`);
+            continue;
+          }
+          if (q.inputType === 'checkbox') {
+            const checkbox = area.locator('input[type="checkbox"]:not(.sr-only)').first();
+            const cbCount = await checkbox.count().catch(() => 0);
+            if (cbCount > 0) {
+              await checkbox.check({ force: true, timeout: 2000 }).catch(() => {});
+              console.log(`[seminar_quiz] Q${qNum} 체크박스 1번째 체크`);
+            }
+          } else {
+            const clicked = await clickOptionByIndex(page, area, 1, qNum);
+            if (!clicked) {
+              console.warn(`[seminar_quiz] Q${qNum} 일반 문항 1번째 선택 실패`);
+            }
+          }
+        }
+      }
+
+      await page.waitForTimeout(500);
+
+      // "다음" 버튼 확인
+      const nextBtn = page.locator('button:text-matches("^다음$|^다음\\s*단계$|^Next$", "i"):not([disabled])').first();
+      const hasNext = await nextBtn.isVisible({ timeout: 2000 }).catch(() => false);
+
+      // "제출하기" / "설문완료" 버튼 확인
+      const submitBtn = page
+        .locator(
+          'input[type="submit"].btn-primary, button:text-matches("제출하기|설문완료|응답완료", "i"):not([disabled])',
+        )
+        .first();
+      const hasSubmit = await submitBtn.isVisible({ timeout: 2000 }).catch(() => false);
+
+      if (hasNext && !hasSubmit) {
+        console.log(`[seminar_quiz] 다음 페이지 이동 버튼 감지 (현재 페이지: ${currentPageNum}) -> 클릭`);
+        await nextBtn.scrollIntoViewIfNeeded().catch(() => {});
+        await nextBtn.click({ force: true }).catch(() => {});
+        await page.waitForLoadState('networkidle', { timeout: 6000 }).catch(() => {});
+        await page.waitForTimeout(1500);
+        currentPageNum++;
+      } else {
+        console.log(`[seminar_quiz] 마지막 설문 페이지 도달 (총 탐색 페이지: ${currentPageNum})`);
         break;
       }
-
-      if (attempt < 3) {
-        console.log(
-          `[seminar_quiz] 마커 텍스트 탐지 실패, 새로고침 재시도 (${attempt}/3) (${seminarName ?? 'unknown'})`,
-        );
-        await page.reload({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
-        await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
-        await page.waitForTimeout(2000);
-      }
     }
+    // ── 다중 페이지 탐색 및 응답 루프 끝 ─────────────────────────────────────────
 
-    // 설문 문항 파싱 (퀴즈/일반 모두 포함)
-    const questions = await parseAllSurveyQuestions(page);
-
-    if (questions.length === 0) {
+    if (accumulatedQuestions.length === 0) {
       const message = seminarName
         ? `ℹ️ ${seminarName} 설문 페이지에서 퀴즈를 찾지 못했습니다.`
         : 'ℹ️ 설문 페이지에서 퀴즈를 찾지 못했습니다.';
@@ -449,141 +573,34 @@ async function processSeminarQuiz(
       return { success: true, hasQuizResult: false, message };
     }
 
-    // 족보 로드
-    const cheatsheet = await loadCheatsheet();
-
-    if (Object.keys(cheatsheet).length === 0) {
-      // 족보가 비어있으면 문제만 보고
-      let message = '📝 퀴즈 발견 (족보 비어있음):\n\n';
-      for (let i = 0; i < questions.length; i++) {
-        const q = questions[i];
-        if (q.kind === 'quiz') {
-          message += `Q${i + 1}: ${q.questionText.substring(0, 100)}...\n`;
-          for (const opt of q.options) {
-            message += `  ${opt.index}. ${opt.text}\n`;
-          }
-          message += '\n';
-        }
-      }
-      await sendTelegram(message);
-      return { success: true, hasQuizResult: false, message };
-    }
-
-    // 채널 송신 자격: quiz ONLY ([퀴즈] 마커만)
-    const CHANNEL_ELIGIBLE_KINDS: ReadonlySet<QuizQuestion['kind']> = new Set(['quiz']);
-
-    const results: QuizResult[] = [];
-    let _hasUnknown = false;
-    let _hasMultipleMatches = false;
-
-    for (let i = 0; i < questions.length; i++) {
-      const q = questions[i];
-
-      let selectedIndex: number | null = null;
-      let selectedText: string | null = null;
-      let matchedKeyword: string | null = null;
-      let multipleMatches: string[] | null = null;
-
-      // [퀴즈] 문항만 족보 매칭
-      if (q.kind === 'quiz') {
-        const matchingKeywords = findMatchingKeywords(q.questionText, cheatsheet);
-        if (matchingKeywords.length === 0) {
-          _hasUnknown = true;
-        } else {
-          if (matchingKeywords.length > 1) {
-            _hasMultipleMatches = true;
-            multipleMatches = matchingKeywords;
-          }
-          const bestMatch = resolveBestKeywordMatch(q.questionText, q.options, cheatsheet);
-          if (bestMatch) {
-            matchedKeyword = bestMatch.keyword;
-            selectedIndex = bestMatch.option.index;
-            selectedText = bestMatch.option.text;
-          } else {
-            _hasUnknown = true;
-          }
-        }
-      }
-
-      results.push({
-        questionIndex: q.questionNumber > 0 ? q.questionNumber : i + 1,
-        questionText: q.questionText,
-        selectedIndex,
-        selectedText,
-        matchedKeyword,
-        multipleMatches,
-        marker: q.marker,
-        kind: q.kind,
-      });
-    }
-
-    // 채널용 결과: [퀴즈] 문항만
-    const channelResults = results.filter((r) => CHANNEL_ELIGIBLE_KINDS.has(r.kind));
+    // 채널용 결과: [퀴즈] 문항만 필터링
+    const channelResults = accumulatedResults.filter((r) => CHANNEL_ELIGIBLE_KINDS.has(r.kind));
     const resultMessage = formatQuizResults(channelResults, _hasUnknown, _hasMultipleMatches);
 
-    // ── 자동 클릭·제출 ───────────────────────────────────────────────
-    // 규칙:
-    //   - [퀴즈] 문항: 족보 정답 인덱스로 클릭 (족보 미매칭 시 스킵)
-    //   - 비퀴즈 필수(*) 문항: radio는 1번째, checkbox는 1번째만 클릭
-    //   - 비필수(*없음) 문항: 스킵
-    //   - 주관식: 족보에 있으면 입력
-    for (let i = 0; i < questions.length; i++) {
-      const q = questions[i];
-      const result = results[i];
-      const qNum = q.questionNumber > 0 ? q.questionNumber : i + 1;
+    // ── 심화설문인 경우: 제출 금지 ───────────────────────────────────────
+    if (isAdvancedSurvey) {
+      console.log(`[seminar_quiz] ⚠️ 심화설문 세미나(${seminarName})이므로 퀴즈 정답 추출 후 제출을 생략합니다.`);
+      const initialUrl = page.url();
+      const seminarPageUrl = seminarId ? `https://m.doctorville.co.kr/cme/seminar/${seminarId}` : initialUrl;
+      await sendTelegram(
+        `📋 ℹ️ [심화설문] 퀴즈 정답 추출 완료 (자동 제출 제외)\n${resultMessage}\n\n🔗 세미나 URL: ${seminarPageUrl}`,
+      ).catch(() => {});
 
-      await page.waitForTimeout(300); // UI 안정화
-
-      // 문항 영역 로케이터: data-question-number 속성 활용
-      const areaLocator = page.locator(`li[data-question-number="${qNum}"]`).first();
-      const hasArea = await areaLocator.count().catch(() => 0);
-      const area = hasArea > 0 ? areaLocator : page.locator('body').first();
-
-      if (q.kind === 'quiz' && q.options.length > 0) {
-        // [퀴즈] 문항: 족보 정답으로 클릭 (미매칭 시 스킵)
-        if (result.selectedIndex !== null) {
-          const clicked = await clickOptionByIndex(page, area, result.selectedIndex, qNum);
-          if (!clicked) {
-            console.warn(`[seminar_quiz] Q${qNum} [퀴즈] 선택 실패 (index=${result.selectedIndex})`);
-          }
-        } else {
-          console.warn(`[seminar_quiz] Q${qNum} [퀴즈] 족보 미매칭 - 선택 건너뜀`);
-        }
-      } else if (q.options.length > 0) {
-        // 일반 설문 문항
-        if (!q.isRequired) {
-          // 필수 아닌 문항은 스킵
-          console.log(`[seminar_quiz] Q${qNum} 비필수 문항 스킵 (${q.marker ?? 'no-marker'})`);
-          continue;
-        }
-        // 필수 문항: radio/checkbox 모두 1번째 선택지만 클릭
-        if (q.inputType === 'checkbox') {
-          // 체크박스: 1번째만 체크
-          const checkbox = area.locator('input[type="checkbox"]:not(.sr-only)').first();
-          const cbCount = await checkbox.count().catch(() => 0);
-          if (cbCount > 0) {
-            await checkbox.check({ force: true, timeout: 2000 }).catch(() => {});
-            console.log(`[seminar_quiz] Q${qNum} 체크박스 1번째 체크`);
-          }
-        } else {
-          // 라디오: 1번째 선택
-          const clicked = await clickOptionByIndex(page, area, 1, qNum);
-          if (!clicked) {
-            console.warn(`[seminar_quiz] Q${qNum} 일반 문항 1번째 선택 실패`);
-          }
-        }
+      if (_hasUnknown) {
+        const unknownMessage = formatUnknownQuestions(accumulatedQuestions, accumulatedResults);
+        await sendTelegram(unknownMessage).catch(() => {});
       }
+
+      return {
+        success: true,
+        hasQuizResult: channelResults.length > 0,
+        message: `${resultMessage}\n(※ 심화설문으로 자동 제출이 제외되었습니다)`,
+      };
     }
 
-    // 제출하기 버튼 클릭 및 native dialog/alert 처리 자동 수락 등록
-    page.on('dialog', async (dialog) => {
-      console.log(`[seminar_quiz] Dialog detected: [${dialog.type()}] "${dialog.message()}". Accepting...`);
-      await dialog.accept().catch(() => {});
-    });
-
-    // 제출 버튼 탐지·클릭
+    // ── 일반 세미나: 제출하기 버튼 클릭 및 확인 모달 처리 ─────────────────
     await page.waitForTimeout(1000);
-    const initialUrl = page.url(); // 초기 설문 URL (세미나주소) 보존
+    const initialUrl = page.url();
     const submitBtn = page
       .locator(
         'input[type="submit"].btn-primary, button:text-matches("제출하기|설문완료|응답완료", "i"):not([disabled])',
@@ -597,7 +614,6 @@ async function processSeminarQuiz(
     }
 
     // 제출하기 클릭 후 모달/다이얼로그 및 페이지 이동 대기
-    // 다이얼로그(HeadlessUI 포탈 또는 DOM) 출현 또는 /outro 이동 대기
     try {
       const modalOrOutro = await Promise.race([
         page.waitForSelector('[data-headlessui-state="open"]', { timeout: 10000 }).then(() => 'modal' as const),
@@ -610,7 +626,6 @@ async function processSeminarQuiz(
       console.log(`[seminar_quiz] 제출 후 상태 감지: ${modalOrOutro ?? 'timeout/none'}`);
 
       if (modalOrOutro === 'modal' || modalOrOutro === 'confirm_btn') {
-        // "확인" 버튼 탐지 및 클릭
         let confirmBtn = page.getByRole('button', { name: '확인' }).first();
         let isConfirmVisible = await confirmBtn.isVisible().catch(() => false);
 
@@ -651,7 +666,6 @@ async function processSeminarQuiz(
 
       await page.screenshot({ path: submitShotPath, fullPage: true }).catch(() => {});
       const submitStatus = navigatedToOutro ? '✅ 설문 제출 완료' : '⚠️ 설문 제출 결과 불확실';
-      // 세미나 ID가 포함된 세미나 페이지 URL을 사용
       const seminarPageUrl = seminarId ? `https://m.doctorville.co.kr/cme/seminar/${seminarId}` : initialUrl;
       await sendTelegram(
         `📋 ${submitStatus}\n${resultMessage}\n\n🔗 세미나 URL: ${seminarPageUrl}`,
@@ -666,7 +680,7 @@ async function processSeminarQuiz(
 
     // 미등록 [퀴즈] 문제가 있으면 관리자에게 상세 전송
     if (_hasUnknown) {
-      const unknownMessage = formatUnknownQuestions(questions, results);
+      const unknownMessage = formatUnknownQuestions(accumulatedQuestions, accumulatedResults);
       await sendTelegram(unknownMessage);
     }
 
