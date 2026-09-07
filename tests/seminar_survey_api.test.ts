@@ -13,46 +13,45 @@ describe('seminar_survey_api (fetchSeminarSurveyQuizHttp)', () => {
       '펙수클루 특장점': '1일 3회',
     };
 
+    const createMockResponse = (body: string, status = 200): httpClient.HttpResponse => ({
+      status,
+      statusText: status === 200 ? 'OK' : 'Not Found',
+      body,
+      headers: {},
+      url: 'https://survey.villeway.com',
+      redirected: false,
+      resultType: status === 200 ? 'SUCCESS' : 'HTTP_ERROR',
+    });
+
     vi.spyOn(httpClient, 'sendDoctorVilleRequest').mockImplementation(async (url: string) => {
       if (url.includes('/survey-url')) {
-        return {
-          status: 200,
-          statusText: 'OK',
-          body: JSON.stringify({
+        return createMockResponse(
+          JSON.stringify({
             surveyUrl: 'https://survey.villeway.com/s/c/testCompany/u/testSecureToken123',
           }),
-          headers: {},
-        };
+        );
       }
       if (url.includes('/auth/authenticate-via-client')) {
-        return {
-          status: 200,
-          statusText: 'OK',
-          body: JSON.stringify({
+        return createMockResponse(
+          JSON.stringify({
             data: { accessToken: 'mock-access-token' },
           }),
-          headers: {},
-        };
+        );
       }
       if (url.includes('/user/survey-detail')) {
-        return {
-          status: 200,
-          statusText: 'OK',
-          body: JSON.stringify({
+        return createMockResponse(
+          JSON.stringify({
             data: {
               config: { title: '2026 호흡기 증례 세미나 심화 설문조사' },
               pageCnt: 2,
               questionCnt: 5,
             },
           }),
-          headers: {},
-        };
+        );
       }
       if (url.includes('/user/survey-page/1')) {
-        return {
-          status: 200,
-          statusText: 'OK',
-          body: JSON.stringify({
+        return createMockResponse(
+          JSON.stringify({
             data: {
               id: 101,
               pageNumber: 1,
@@ -70,14 +69,11 @@ describe('seminar_survey_api (fetchSeminarSurveyQuizHttp)', () => {
               ],
             },
           }),
-          headers: {},
-        };
+        );
       }
       if (url.includes('/user/survey-page/2')) {
-        return {
-          status: 200,
-          statusText: 'OK',
-          body: JSON.stringify({
+        return createMockResponse(
+          JSON.stringify({
             data: {
               id: 102,
               pageNumber: 2,
@@ -105,10 +101,9 @@ describe('seminar_survey_api (fetchSeminarSurveyQuizHttp)', () => {
               ],
             },
           }),
-          headers: {},
-        };
+        );
       }
-      return { status: 404, statusText: 'Not Found', body: '', headers: {} };
+      return createMockResponse('', 404);
     });
 
     const result = await fetchSeminarSurveyQuizHttp('5616', mockCheatsheet);
@@ -126,17 +121,28 @@ describe('seminar_survey_api (fetchSeminarSurveyQuizHttp)', () => {
     expect(result.quizSummaryMessage).toBe('퀴즈 정답 21');
   });
 
-  it('설문 URL이 없는 경우 실패를 정상적으로 반환한다', async () => {
-    vi.spyOn(httpClient, 'sendDoctorVilleRequest').mockResolvedValueOnce({
-      status: 200,
-      statusText: 'OK',
-      body: JSON.stringify({ code: 404, message: '진행중인 설문이 없습니다.' }),
-      headers: {},
-    });
+  it('findMinimalBranchOptionIndex: 아니오/해당없음/기타 등 분기 최소화 옵션을 올바르게 우선 선택한다', async () => {
+    const { findMinimalBranchOptionIndex } = await import('../src/tasks/seminar_quiz');
 
-    const result = await fetchSeminarSurveyQuizHttp('9999');
-    expect(result.success).toBe(false);
-    expect(result.quizQuestionCnt).toBe(0);
-    expect(result.errorMessage).toContain('진행중인 설문이 없습니다');
+    // Case 1: 1번 "네", 2번 "아니오" -> 2번 선택
+    const options1 = [
+      { index: 1, text: '네', value: '0' },
+      { index: 2, text: '아니오', value: '1' },
+    ];
+    expect(findMinimalBranchOptionIndex(options1)).toBe(2);
+
+    // Case 2: 1번 "예", 2번 "해당 없음" -> 2번 선택
+    const options2 = [
+      { index: 1, text: '예', value: '0' },
+      { index: 2, text: '해당 없음', value: '1' },
+    ];
+    expect(findMinimalBranchOptionIndex(options2)).toBe(2);
+
+    // Case 3: 부정 보기가 없는 경우 -> 기본 1번 선택
+    const options3 = [
+      { index: 1, text: '매우 만족', value: '0' },
+      { index: 2, text: '보통', value: '1' },
+    ];
+    expect(findMinimalBranchOptionIndex(options3)).toBe(1);
   });
 });

@@ -166,6 +166,25 @@ export function resolveBestKeywordMatch(
   return null;
 }
 
+/**
+ * 일반(비퀴즈) 설문 문항에서 하위 분기를 최소화하는 최적의 보기 인덱스(1-indexed)를 찾습니다.
+ * "아니오", "해당없음", "없음", "비대상" 등의 보기가 있으면 우선 선택하여 복잡한 하위 문항 생성을 방지합니다.
+ */
+export function findMinimalBranchOptionIndex(options: QuizQuestion['options']): number {
+  if (options.length === 0) return 1;
+
+  const negativePatterns = [/^아니오$/, /^아닙니다$/, /해당\s*없음/, /^없음$/, /비대상/, /전공의\s*아님/, /기타/];
+
+  for (const pattern of negativePatterns) {
+    const matched = options.find((opt) => pattern.test(opt.text.trim()));
+    if (matched) {
+      return matched.index;
+    }
+  }
+
+  return 1;
+}
+
 function markerKind(marker: string | null): QuizQuestion['kind'] {
   if (marker && /퀴즈/i.test(marker)) return 'quiz';
   return 'poll';
@@ -514,7 +533,7 @@ async function processSeminarQuiz(
             console.warn(`[seminar_quiz] Q${qNum} [퀴즈] 족보 미매칭 - 선택 건너뜀`);
           }
         } else if (q.options.length > 0) {
-          // 일반 설문 문항: 필수인 경우 1번 선택지 선택
+          // 일반 설문 문항: 분기 최소화 인덱스 선택 ("아니오", "해당없음" 우선, 기본 1번)
           if (!q.isRequired) {
             console.log(`[seminar_quiz] Q${qNum} 비필수 문항 스킵 (${q.marker ?? 'no-marker'})`);
             continue;
@@ -527,12 +546,44 @@ async function processSeminarQuiz(
               console.log(`[seminar_quiz] Q${qNum} 체크박스 1번째 체크`);
             }
           } else {
-            const clicked = await clickOptionByIndex(page, area, 1, qNum);
+            const minIndex = findMinimalBranchOptionIndex(q.options);
+            const clicked = await clickOptionByIndex(page, area, minIndex, qNum);
             if (!clicked) {
-              console.warn(`[seminar_quiz] Q${qNum} 일반 문항 1번째 선택 실패`);
+              console.warn(`[seminar_quiz] Q${qNum} 일반 문항 선택 실패 (index=${minIndex})`);
             }
           }
         }
+      }
+
+      await page.waitForTimeout(500);
+
+      // 동적 분기로 새로 나타난 미선택 라디오 또는 빈 주관식 입력 보완
+      try {
+        // 1) 아직 체크되지 않은 라디오가 있는 문항들 1번째 옵션 체크
+        const unselectedRadios = page.locator('li[data-question-number]:not(:has(input[type="radio"]:checked))');
+        const unselectedCount = await unselectedRadios.count().catch(() => 0);
+        for (let j = 0; j < unselectedCount; j++) {
+          const item = unselectedRadios.nth(j);
+          const firstRadio = item.locator('input[type="radio"]').first();
+          if (await firstRadio.isVisible().catch(() => false)) {
+            await firstRadio.check({ force: true }).catch(() => {});
+          }
+        }
+
+        // 2) 빈 주관식 단답형/장문형 텍스트 필드 채우기
+        const emptyInputs = page.locator(
+          'li[data-question-number] input[type="text"], li[data-question-number] textarea',
+        );
+        const inputCount = await emptyInputs.count().catch(() => 0);
+        for (let j = 0; j < inputCount; j++) {
+          const inp = emptyInputs.nth(j);
+          const val = await inp.inputValue().catch(() => '');
+          if (!val && (await inp.isVisible().catch(() => false))) {
+            await inp.fill('좋습니다').catch(() => {});
+          }
+        }
+      } catch {
+        /* ignore fallback errors */
       }
 
       await page.waitForTimeout(500);
