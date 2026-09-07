@@ -96,7 +96,7 @@ export async function executeDocpleDaily(
 ): Promise<DocpleDailyWorkflowResult> {
   const username = customUser || process.env.DOCPLE_USER || '';
   const password = customPass || process.env.DOCPLE_PASS || '';
-  const commPass = customCommPass || process.env.DOCPLE_COMM_PASS || '';
+  const commPass = customCommPass || process.env.DOCPLE_COMM_PASS || password;
 
   const errors: string[] = [];
 
@@ -153,7 +153,7 @@ export async function executeDocpleDaily(
   }> = [];
 
   if (!commPass) {
-    errors.push('커뮤니티 비밀번호(DOCPLE_COMM_PASS)가 설정되지 않아 커뮤니티 추천을 건너뜁니다.');
+    errors.push('커뮤니티 비밀번호가 설정되지 않아 커뮤니티 추천을 건너뜁니다.');
   } else {
     try {
       const commAuthRes = await authDocpleCommunityPassword(accessToken, commPass);
@@ -176,16 +176,16 @@ export async function executeDocpleDaily(
 
         const targetPosts = eligiblePosts.slice(0, 5);
         for (const post of targetPosts) {
-          const recRes = await recommendDocpleCommunityPost(
-            accessToken,
-            post.tid,
-            post.grpCode || 'NI',
-            post.subCode || '',
-            commToken,
-          );
+          const recRes = await recommendDocpleCommunityPost(accessToken, {
+            bid: post.bid || post.tid,
+            no: post.no,
+            grpCode: post.grpCode || 'NI',
+            subCode: post.subCode || '',
+            communityToken: commToken,
+          });
 
           recommendedPosts.push({
-            tid: post.tid,
+            tid: post.bid || post.tid,
             title: post.title,
             subCode: post.subCode,
             success: recRes.success,

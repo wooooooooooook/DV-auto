@@ -89,16 +89,25 @@ describe('Docple Plus API & Daily Task Tests', () => {
     });
 
     it('getDocpleCash: 캐시 잔액 및 내역 반환', async () => {
+      // 1. users/info
       mockRequest.mockResolvedValueOnce(
         createMockJsonResponse({
           success: true,
           data: {
-            totalCash: 15400,
-            recentList: [
-              { id: 1, cash: 10, title: '출석체크 리워드', createdDt: '2026-09-07' },
-              { id: 2, cash: 50, title: '추천 리워드', createdDt: '2026-09-07' },
-            ],
+            myCash: 15400,
+            name: '홍길동',
           },
+        }),
+      );
+
+      // 2. cash/recent
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: [
+            { id: 1, cash: 10, title: '출석체크 리워드', createdDt: '2026-09-07' },
+            { id: 2, cash: 50, title: '추천 리워드', createdDt: '2026-09-07' },
+          ],
         }),
       );
 
@@ -176,8 +185,8 @@ describe('Docple Plus API & Daily Task Tests', () => {
       // 1. 커뮤니티 비밀번호 인증
       mockRequest.mockResolvedValueOnce(
         createMockTextResponse({
-          success: true,
-          data: {
+          resultCode: '0',
+          result: {
             communityToken: 'comm-jwt-token',
           },
         }),
@@ -190,15 +199,15 @@ describe('Docple Plus API & Daily Task Tests', () => {
       // 2. 글 목록 조회
       mockRequest.mockResolvedValueOnce(
         createMockJsonResponse({
-          success: true,
-          data: {
-            list: [
-              { tid: 501, title: '[공지] 이용 안내', isNotice: true },
-              { tid: 502, title: '[이벤트] 닥플 퀴즈 이벤트', isEvent: true },
-              { tid: 503, title: '[SOS] 진료 질문입니다', isSOS: true },
-              { tid: 504, title: '일반글 1', isNotice: false, isEvent: false, isSOS: false, isRecommended: false },
-              { tid: 505, title: '일반글 2', isNotice: false, isEvent: false, isSOS: false, isRecommended: true },
-              { tid: 506, title: '일반글 3', isNotice: false, isEvent: false, isSOS: false, isRecommended: false },
+          resultCode: '0',
+          result: {
+            communityList: [
+              { bid: 501, no: 101, title: '[공지] 이용 안내', noticeYN: 'Y' },
+              { bid: 502, no: 102, title: '[이벤트] 닥플 퀴즈 이벤트', noticeYN: 'E' },
+              { bid: 503, no: 103, title: '[SOS] 진료 질문입니다', noticeYN: 'P' },
+              { bid: 504, no: 104, title: '일반글 1', noticeYN: 'N', useYN: 'Y', reCom: 'N' },
+              { bid: 505, no: 105, title: '일반글 2', noticeYN: 'N', useYN: 'Y', reCom: 'R' },
+              { bid: 506, no: 106, title: '일반글 3', noticeYN: 'N', useYN: 'Y', reCom: 'N' },
             ],
           },
         }),
@@ -210,18 +219,31 @@ describe('Docple Plus API & Daily Task Tests', () => {
       // 필터링 검증
       const eligible = posts.filter((p) => !p.isNotice && !p.isEvent && !p.isSOS && !p.isDeleted && !p.isRecommended);
       expect(eligible.length).toBe(2);
-      expect(eligible.map((p) => p.tid)).toEqual([504, 506]);
+      expect(eligible.map((p) => p.bid)).toEqual([504, 506]);
 
       // 3. 추천
       mockRequest.mockResolvedValueOnce(
         createMockTextResponse({
-          success: true,
-          message: '게시글이 추천되었습니다.',
+          resultCode: '0',
+          result: {
+            cashGrantInfo: {
+              rewarded: true,
+              cashAmount: 10,
+              message: '추천 보상 10 캐시가 적립되었습니다',
+            },
+          },
         }),
       );
 
-      const recRes = await recommendDocpleCommunityPost('mock-token', 504, 'NI', '', 'comm-jwt-token');
+      const recRes = await recommendDocpleCommunityPost('mock-token', {
+        bid: 504,
+        no: 104,
+        grpCode: 'NI',
+        subCode: '',
+        communityToken: 'comm-jwt-token',
+      });
       expect(recRes.success).toBe(true);
+      expect(recRes.rewardCash).toBe(10);
     });
   });
 
@@ -284,11 +306,18 @@ describe('Docple Plus API & Daily Task Tests', () => {
         }),
       );
 
-      // 2. 시작 캐시
+      // 2. 시작 캐시: users/info
       mockRequest.mockResolvedValueOnce(
         createMockJsonResponse({
           success: true,
-          data: { totalCash: 5000 },
+          data: { myCash: 5000 },
+        }),
+      );
+      // 시작 캐시: cash/recent
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: [],
         }),
       );
 
@@ -296,7 +325,7 @@ describe('Docple Plus API & Daily Task Tests', () => {
       mockRequest.mockResolvedValueOnce(
         createMockJsonResponse({
           success: true,
-          data: { isAttended: false },
+          data: { attendedDates: [] },
         }),
       );
 
@@ -304,7 +333,7 @@ describe('Docple Plus API & Daily Task Tests', () => {
       mockRequest.mockResolvedValueOnce(
         createMockTextResponse({
           success: true,
-          data: { rewardCash: 10 },
+          data: { dailyGranted: true, dailyCash: 50 },
         }),
       );
 
@@ -313,7 +342,7 @@ describe('Docple Plus API & Daily Task Tests', () => {
         createMockJsonResponse({
           success: true,
           data: {
-            items: [{ id: 99, name: '테스트약', hasQuiz: true }],
+            content: [{ id: 99, medicineName: '테스트약', hasActiveQuiz: true }],
           },
         }),
       );
@@ -321,17 +350,17 @@ describe('Docple Plus API & Daily Task Tests', () => {
       // 6. 커뮤니티 비밀번호 인증
       mockRequest.mockResolvedValueOnce(
         createMockTextResponse({
-          success: true,
-          data: { communityToken: 'comm-token' },
+          resultCode: '0',
+          result: { communityToken: 'comm-token' },
         }),
       );
 
       // 7. 커뮤니티 글 목록
       mockRequest.mockResolvedValueOnce(
         createMockJsonResponse({
-          success: true,
-          data: {
-            list: [{ tid: 1234, title: '좋은 하루 되세요', isNotice: false, isRecommended: false }],
+          resultCode: '0',
+          result: {
+            communityList: [{ bid: 1234, no: 888, title: '좋은 하루 되세요', noticeYN: 'N', useYN: 'Y', reCom: 'N' }],
           },
         }),
       );
@@ -339,22 +368,27 @@ describe('Docple Plus API & Daily Task Tests', () => {
       // 8. 게시글 추천
       mockRequest.mockResolvedValueOnce(
         createMockTextResponse({
-          success: true,
-          message: '추천 성공',
+          resultCode: '0',
+          result: { cashGrantInfo: { rewarded: true, cashAmount: 10 } },
         }),
       );
 
-      // 9. 종료 캐시
+      // 9. 종료 캐시: users/info
       mockRequest.mockResolvedValueOnce(
         createMockJsonResponse({
           success: true,
-          data: { totalCash: 5010 },
+          data: { myCash: 5060 },
+        }),
+      );
+      // 종료 캐시: cash/recent
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: [],
         }),
       );
 
       const taskRes = await runDocpleDaily({
-        name: 'docple_daily',
-        type: 'daily',
         args: {
           user: 'user1',
           password: 'pass1',
@@ -364,7 +398,7 @@ describe('Docple Plus API & Daily Task Tests', () => {
 
       expect(taskRes.success).toBe(true);
       expect(taskRes.message).toContain('📋 [닥플 플러스 일일 자동화 리포트]');
-      expect(taskRes.message).toContain('5,000원 → 5,010원 (+10원)');
+      expect(taskRes.message).toContain('5,000원 → 5,060원 (+60원)');
       expect(taskRes.message).toContain('https://docple-plus.com/e-detailing/99');
       expect(taskRes.message).toContain('[1234] 좋은 하루 되세요');
     });

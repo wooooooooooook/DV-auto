@@ -25,15 +25,21 @@ export interface DocpleUserInfo {
   email?: string;
   joinType?: string;
   name?: string;
+  myCash?: number;
+  hospitalName?: string;
+  dutyCode?: string;
+  dutyText?: string;
   [key: string]: unknown;
 }
 
 export interface DocpleCashInfo {
-  totalCash?: number;
+  totalCash: number;
   recentList?: Array<{
     id?: number;
     cash?: number;
     title?: string;
+    type?: string;
+    date?: string;
     description?: string;
     createdDt?: string;
     [key: string]: unknown;
@@ -60,6 +66,7 @@ export interface DocpleEdetailingMedicine {
   name: string;
   companyName?: string;
   hasQuiz?: boolean;
+  hasActiveQuiz?: boolean;
   quizStatus?: string;
   quizUrl: string;
   thumbnailUrl?: string;
@@ -74,10 +81,13 @@ export interface DocpleCommunityAuthResult {
 
 export interface DocpleCommunityPost {
   tid: number;
+  bid: number;
+  no: number;
   title: string;
   grpCode: string;
   subCode: string;
   subCodeName?: string;
+  nickname?: string;
   isNotice?: boolean;
   isEvent?: boolean;
   isSOS?: boolean;
@@ -93,7 +103,9 @@ export interface DocpleCommunityPost {
 export interface DocpleRecommendResult {
   success: boolean;
   message: string;
-  tid?: number;
+  bid?: number | string;
+  no?: number;
+  rewardCash?: number;
 }
 
 interface DocpleApiResponse<T = unknown> {
@@ -101,6 +113,9 @@ interface DocpleApiResponse<T = unknown> {
   code?: string | number;
   message?: string;
   data?: T;
+  resultCode?: string | number;
+  resultMsg?: string;
+  result?: T;
   [key: string]: unknown;
 }
 
@@ -118,6 +133,7 @@ function getCommonHeaders(accessToken?: string, communityToken?: string): Record
   }
   if (communityToken) {
     headers['communityToken'] = communityToken;
+    headers['Cookie'] = `communityToken=${communityToken}${accessToken ? `; accessToken=${accessToken}` : ''}`;
   }
 
   return headers;
@@ -227,32 +243,34 @@ export async function getDocpleUserInfo(accessToken: string): Promise<DocpleUser
 
 /**
  * 캐시 잔액 및 최근 적립 내역 조회
+ * userInfo(myCash)와 cash/recent 내역을 결합하여 정확한 잔액 산출
  */
 export async function getDocpleCash(accessToken: string): Promise<DocpleCashInfo | null> {
   try {
+    // 1. users/info에서 현재 보유 myCash 조회
+    const userInfo = await getDocpleUserInfo(accessToken);
+    const totalCash = userInfo?.myCash ?? 0;
+
+    // 2. cash/recent에서 최근 적립 리스트 조회
     const res = await request(`${DOCPLE_BASE_URL}/api/season2/cash/recent`, {
       method: 'GET',
       headers: getCommonHeaders(accessToken),
     });
 
-    if (res.statusCode !== 200) {
-      return null;
+    let recentList: DocpleCashInfo['recentList'] = [];
+    if (res.statusCode === 200) {
+      const json = (await res.body.json()) as DocpleApiResponse<
+        Array<{ type?: string; date?: string; cash?: number; [key: string]: unknown }>
+      >;
+      if (Array.isArray(json?.data)) {
+        recentList = json.data;
+      }
     }
 
-    const json = (await res.body.json()) as DocpleApiResponse<{
-      totalCash?: number;
-      cash?: number;
-      recentList?: DocpleCashInfo['recentList'];
-      list?: DocpleCashInfo['recentList'];
-      [key: string]: unknown;
-    }>;
-    const data = json?.data;
-    if (!data) return null;
-
     return {
-      totalCash: typeof data.totalCash === 'number' ? data.totalCash : (data.cash ?? 0),
-      recentList: Array.isArray(data.recentList) ? data.recentList : data.list || [],
-      ...data,
+      totalCash,
+      recentList,
+      user: userInfo,
     };
   } catch (error) {
     logger.error('Docple getDocpleCash error', error);
@@ -261,12 +279,26 @@ export async function getDocpleCash(accessToken: string): Promise<DocpleCashInfo
 }
 
 /**
+ * 오늘 KST 날짜 문자열(YYYY-MM-DD) 반환
+ */
+function getKstDateString(): string {
+  const d = new Date();
+  const kstFormatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  return kstFormatter.format(d);
+}
+
+/**
  * 출석 캘린더 조회
  */
 export async function getDocpleAttendanceCalendar(
   accessToken: string,
   month?: string,
-): Promise<{ attendedToday: boolean; items: DocpleAttendanceCalendarItem[] }> {
+): Promise<{ attendedToday: boolean; items: DocpleAttendanceCalendarItem[]; raw?: unknown }> {
   try {
     const query = month ? `?month=${encodeURIComponent(month)}` : '';
     const res = await request(`${DOCPLE_BASE_URL}/api/season2/mission/attendance/calendar${query}`, {
@@ -279,17 +311,25 @@ export async function getDocpleAttendanceCalendar(
     }
 
     const json = (await res.body.json()) as DocpleApiResponse<{
+      yearMonth?: string;
+      attendedDates?: string[];
       isAttended?: boolean;
       isTodayAttended?: boolean;
-      todayAttended?: boolean;
       items?: DocpleAttendanceCalendarItem[];
-      calendar?: DocpleAttendanceCalendarItem[];
+      [key: string]: unknown;
     }>;
     const data = json?.data || {};
-    const attendedToday = !!(data.isAttended || data.isTodayAttended || data.todayAttended);
-    const items = Array.isArray(data.items) ? data.items : Array.isArray(data.calendar) ? data.calendar : [];
 
-    return { attendedToday, items };
+    const todayKst = getKstDateString();
+    const attendedDates = Array.isArray(data.attendedDates) ? data.attendedDates : [];
+    const attendedToday = attendedDates.includes(todayKst) || !!(data.isAttended || data.isTodayAttended);
+
+    const items: DocpleAttendanceCalendarItem[] = attendedDates.map((dateStr) => ({
+      date: dateStr,
+      attended: true,
+    }));
+
+    return { attendedToday, items, raw: data };
   } catch (error) {
     logger.error('Docple getDocpleAttendanceCalendar error', error);
     return { attendedToday: false, items: [] };
@@ -309,16 +349,20 @@ export async function checkDocpleAttendance(accessToken: string): Promise<Docple
 
     const bodyText = await res.body.text();
     let json: DocpleApiResponse<{
+      todayDone?: boolean;
+      dailyGranted?: boolean;
+      dailyCash?: number;
       rewardCash?: number;
       cash?: number;
-      rewardPoint?: number;
       [key: string]: unknown;
     }>;
     try {
       json = JSON.parse(bodyText) as DocpleApiResponse<{
+        todayDone?: boolean;
+        dailyGranted?: boolean;
+        dailyCash?: number;
         rewardCash?: number;
         cash?: number;
-        rewardPoint?: number;
         [key: string]: unknown;
       }>;
     } catch {
@@ -329,7 +373,18 @@ export async function checkDocpleAttendance(accessToken: string): Promise<Docple
     }
 
     if (res.statusCode === 200 && json?.success) {
-      const rewardCash = json.data?.rewardCash ?? json.data?.cash ?? json.data?.rewardPoint ?? 0;
+      const data = json.data;
+      const rewardCash = data?.dailyCash ?? data?.rewardCash ?? data?.cash ?? 50;
+
+      if (data?.dailyGranted === false && data?.todayDone === true) {
+        return {
+          status: 'ALREADY',
+          message: '이미 오늘 출석을 완료했습니다.',
+          rewardCash: 0,
+          raw: json.data,
+        };
+      }
+
       return {
         status: 'SUCCESS',
         rewardCash,
@@ -338,7 +393,6 @@ export async function checkDocpleAttendance(accessToken: string): Promise<Docple
       };
     }
 
-    // 이미 출석한 경우 판별
     const msg = json?.message || '';
     if (msg.includes('이미') || msg.includes('완료') || String(json?.code) === 'ALREADY_ATTENDED') {
       return {
@@ -370,7 +424,7 @@ export async function getDocpleEdetailingMedicines(
   options: { page?: number; size?: number } = {},
 ): Promise<DocpleEdetailingMedicine[]> {
   try {
-    const page = options.page ?? 1;
+    const page = options.page ?? 0;
     const size = options.size ?? 50;
     const res = await request(`${DOCPLE_BASE_URL}/api/season2/e-detailing/medicines?page=${page}&size=${size}`, {
       method: 'GET',
@@ -382,23 +436,25 @@ export async function getDocpleEdetailingMedicines(
     }
 
     const json = (await res.body.json()) as DocpleApiResponse<{
+      content?: Record<string, unknown>[];
       items?: Record<string, unknown>[];
       list?: Record<string, unknown>[];
     }>;
-    const rawItems = json?.data?.items || json?.data?.list || (Array.isArray(json?.data) ? json.data : []);
+    const rawItems = json?.data?.content || json?.data?.items || json?.data?.list || [];
 
     return rawItems.map((item: Record<string, unknown>) => {
       const id = (item.id ?? item.medicineId ?? item.idx) as string | number;
-      const name = String(item.name ?? item.title ?? item.medicineName ?? `의약품 #${id}`);
-      const hasQuiz = (item.hasQuiz ?? item.isQuiz ?? item.quizExist ?? true) as boolean;
+      const name = String(item.medicineName ?? item.name ?? item.title ?? `의약품 #${id}`);
+      const hasActiveQuiz = !!(item.hasActiveQuiz || item.hasQuiz || item.isQuiz);
       return {
         id,
         name,
-        companyName: (item.companyName ?? item.pharmaName) as string | undefined,
-        hasQuiz,
+        companyName: (item.pharmaCompanyName ?? item.companyName ?? item.sellerCompanyName) as string | undefined,
+        hasQuiz: hasActiveQuiz,
+        hasActiveQuiz,
         quizStatus: item.quizStatus as string | undefined,
         quizUrl: `${DOCPLE_BASE_URL}/e-detailing/${id}`,
-        thumbnailUrl: (item.thumbnailUrl ?? item.imageUrl) as string | undefined,
+        thumbnailUrl: (item.imageUrl ?? item.thumbnailUrl) as string | undefined,
         ...item,
       };
     });
@@ -415,7 +471,7 @@ export function extractDocpleQuizUrls(
   medicines: DocpleEdetailingMedicine[],
 ): Array<{ id: number | string; name: string; url: string }> {
   return medicines
-    .filter((m) => m.hasQuiz !== false)
+    .filter((m) => m.hasActiveQuiz === true || m.hasQuiz === true)
     .map((m) => ({
       id: m.id,
       name: m.name,
@@ -431,10 +487,10 @@ export async function authDocpleCommunityPassword(
   dmzPwd: string,
 ): Promise<DocpleCommunityAuthResult> {
   try {
-    const res = await request(`${DOCPLE_BASE_URL}/api/v3/member/community/pwd`, {
+    const res = await request(`${DOCPLE_BASE_URL}/api/auth/communityLogin`, {
       method: 'POST',
       headers: getCommonHeaders(accessToken),
-      body: JSON.stringify({ dmzPwd }),
+      body: JSON.stringify({ pw: dmzPwd, ispc: 'P' }),
     });
 
     const bodyText = await res.body.text();
@@ -448,9 +504,9 @@ export async function authDocpleCommunityPassword(
       };
     }
 
-    const tokenVal = json?.data?.communityToken || (typeof json?.data === 'string' ? json.data : undefined);
+    const tokenVal = json?.result?.communityToken || json?.data?.communityToken;
 
-    if (res.statusCode === 200 && (json?.success || tokenVal)) {
+    if (res.statusCode === 200 && (String(json?.resultCode) === '0' || json?.success || tokenVal)) {
       return {
         success: true,
         communityToken: tokenVal,
@@ -460,7 +516,7 @@ export async function authDocpleCommunityPassword(
 
     return {
       success: false,
-      message: json?.message || `커뮤니티 비밀번호 인증 실패 (HTTP ${res.statusCode})`,
+      message: json?.resultMsg || json?.message || `커뮤니티 비밀번호 인증 실패 (HTTP ${res.statusCode})`,
     };
   } catch (error) {
     logger.error('Docple authDocpleCommunityPassword error', error);
@@ -482,7 +538,7 @@ export async function getDocpleCommunityPosts(
     const grpCode = options.grpCode ?? 'NI';
     const subCode = options.subCode ?? '';
     const page = options.page ?? 1;
-    const size = options.size ?? 20;
+    const size = options.size ?? 25;
 
     const res = await request(`${DOCPLE_BASE_URL}/api/community/list`, {
       method: 'POST',
@@ -495,36 +551,40 @@ export async function getDocpleCommunityPosts(
     }
 
     const json = (await res.body.json()) as DocpleApiResponse<{
+      communityList?: Record<string, unknown>[];
       list?: Record<string, unknown>[];
-      items?: Record<string, unknown>[];
     }>;
-    const list = json?.data?.list || json?.data?.items || (Array.isArray(json?.data) ? json.data : []);
+    const list = json?.result?.communityList || json?.data?.list || json?.result?.list || [];
 
     return list.map((item: Record<string, unknown>) => {
-      const tid = Number(item.tid ?? item.id ?? item.boardId);
+      const bid = Number(item.bid ?? item.id ?? item.boardId);
+      const no = Number(item.no ?? item.idx ?? bid);
       const title = String(item.title ?? item.subject ?? '');
       const itemSubCode = String(item.subCode ?? subCode);
-      const isNotice = !!(item.isNotice || item.noticeYn === 'Y' || title.includes('[공지]'));
-      const isEvent = !!(item.isEvent || item.eventYn === 'Y' || title.includes('[이벤트]'));
-      const isSOS = !!(item.isSOS || item.sosYn === 'Y' || title.includes('[SOS]'));
-      const isDeleted = !!(item.isDeleted || item.delYn === 'Y' || item.status === 'DELETED');
-      const isRecommended = !!(item.isRecommended || item.myRecommendYn === 'Y');
+      const isNotice = !!(item.noticeYN === 'Y' || title.includes('[공지]'));
+      const isEvent = !!(item.noticeYN === 'E' || title.includes('[이벤트]'));
+      const isSOS = !!(item.noticeYN === 'P' || item.isSOS || title.includes('[SOS]'));
+      const isDeleted = !!(item.useYN === 'N' || item.isDeleted || item.delYn === 'Y');
+      const isRecommended = !!(item.reCom === 'R' || item.myRecommendYn === 'Y');
 
       return {
-        tid,
+        tid: bid,
+        bid,
+        no,
         title,
         grpCode: (item.grpCode as string) ?? grpCode,
         subCode: itemSubCode,
         subCodeName: item.subCodeName as string | undefined,
+        nickname: item.nickname as string | undefined,
         isNotice,
         isEvent,
         isSOS,
         isDeleted,
         isRecommended,
-        recommendCnt: Number(item.recommendCnt ?? item.likeCount ?? 0),
-        commentCnt: Number(item.commentCnt ?? item.commentCount ?? 0),
-        viewCnt: Number(item.viewCnt ?? item.readCount ?? 0),
-        createdDt: (item.createdDt ?? item.regDt ?? item.createdAt) as string | undefined,
+        recommendCnt: Number(item.rCnt ?? item.recommendCnt ?? 0),
+        commentCnt: Number(item.replyCnt ?? item.commentCnt ?? 0),
+        viewCnt: Number(item.nCnt ?? item.viewCnt ?? 0),
+        createdDt: (item.insertDt ?? item.createdDt) as string | undefined,
         ...item,
       };
     });
@@ -539,48 +599,69 @@ export async function getDocpleCommunityPosts(
  */
 export async function recommendDocpleCommunityPost(
   accessToken: string,
-  tid: number,
-  grpCode: string = 'NI',
-  subCode: string = '',
-  communityToken?: string,
+  params: {
+    bid: number | string;
+    no?: number | string;
+    grpCode?: string;
+    subCode?: string;
+    communityToken?: string;
+  },
 ): Promise<DocpleRecommendResult> {
   try {
+    const { bid, no, grpCode = 'NI', communityToken } = params;
     const res = await request(`${DOCPLE_BASE_URL}/api/board/recommend`, {
       method: 'POST',
       headers: getCommonHeaders(accessToken, communityToken),
-      body: JSON.stringify({ tid, grpCode, subCode }),
+      body: JSON.stringify({
+        kind: 'W',
+        bid: String(bid),
+        yesNo: 'Y',
+        grpCode: grpCode || 'NI',
+        ispc: 'P',
+        no: no !== undefined ? no : Number(bid),
+      }),
     });
 
     const bodyText = await res.body.text();
-    let json: DocpleApiResponse;
+    let json: DocpleApiResponse<{
+      cashGrantInfo?: { rewarded?: boolean; cashAmount?: number; message?: string };
+      resultData?: string;
+    }>;
     try {
-      json = JSON.parse(bodyText) as DocpleApiResponse;
+      json = JSON.parse(bodyText) as DocpleApiResponse<{
+        cashGrantInfo?: { rewarded?: boolean; cashAmount?: number; message?: string };
+        resultData?: string;
+      }>;
     } catch {
       return {
         success: false,
-        tid,
+        bid,
         message: `추천 응답 파싱 실패 (HTTP ${res.statusCode})`,
       };
     }
 
-    if (res.statusCode === 200 && (json?.success || json?.code === 200 || json?.data)) {
+    if (res.statusCode === 200 && (String(json?.resultCode) === '0' || json?.success)) {
+      const rewardCash = json?.result?.cashGrantInfo?.cashAmount ?? 0;
       return {
         success: true,
-        tid,
-        message: '게시글 추천 성공',
+        bid,
+        no: Number(no ?? bid),
+        rewardCash,
+        message: rewardCash > 0 ? `게시글 추천 성공 (+${rewardCash} 캐시)` : '게시글 추천 성공',
       };
     }
 
     return {
       success: false,
-      tid,
-      message: json?.message || `게시글 추천 실패 (HTTP ${res.statusCode})`,
+      bid,
+      no: Number(no ?? bid),
+      message: json?.resultMsg || json?.message || `게시글 추천 실패 (HTTP ${res.statusCode})`,
     };
   } catch (error) {
     logger.error('Docple recommendDocpleCommunityPost error', error);
     return {
       success: false,
-      tid,
+      bid: params.bid,
       message: `추천 오류: ${error instanceof Error ? error.message : String(error)}`,
     };
   }

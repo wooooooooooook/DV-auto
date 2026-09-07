@@ -434,33 +434,36 @@
 - **토큰 갱신 (`/api/season2/auth/token/refresh`)**:
   - `POST https://docple-plus.com/api/season2/auth/token/refresh`
   - Header: `Refresh-Token: <refreshToken>`
-- **회원 정보/프로필 조회 (`/api/season2/users/info`)**:
+- **회원 정보/프로필 및 보유 캐시 조회 (`/api/season2/users/info`)**:
   - `GET https://docple-plus.com/api/season2/users/info`
-- **캐시 잔액/최근 적립 내역 조회 (`/api/season2/cash/recent`)**:
+  - 응답: `data: { "name": "...", "joinType": "DOCTOR", "myCash": 5100, ... }`
+- **최근 캐시 적립 내역 조회 (`/api/season2/cash/recent`)**:
   - `GET https://docple-plus.com/api/season2/cash/recent`
-  - 응답: `totalCash`, `recentList[]`
+  - 응답: `data: [ { "type": "...", "date": "YYYY-MM-DD", "cash": 10 } ]`
 - **출석 캘린더 조회 (`/api/season2/mission/attendance/calendar`)**:
   - `GET https://docple-plus.com/api/season2/mission/attendance/calendar`
-  - 응답: `isAttended` (당일 출석 여부), `items[]`
+  - 응답: `data: { "attendedDates": ["2026-09-07"], "monthCount": 1, ... }` (오늘 KST 날짜 포함 여부로 당일 출석 여부 판별)
 - **출석체크 수행 (`/api/season2/mission/attendance/check`)**:
   - `POST https://docple-plus.com/api/season2/mission/attendance/check`
-  - 응답: `rewardCash`, `accumulatedDays`
+  - 응답: `data: { "todayDone": true, "dailyGranted": true, "dailyCash": 50 }`
 - **e-디테일링 의약품 및 퀴즈 목록 (`/api/season2/e-detailing/medicines`)**:
-  - `GET https://docple-plus.com/api/season2/e-detailing/medicines?page=1&size=50`
-  - 응답: `items[]` (`id`, `name`, `hasQuiz`, `quizStatus` 등)
+  - `GET https://docple-plus.com/api/season2/e-detailing/medicines?page=0&size=50`
+  - 응답: `data: { "content": [ { "id": 3, "medicineName": "아르시스주", "hasActiveQuiz": true, ... } ] }`
   - 상세 퀴즈 URL: `https://docple-plus.com/e-detailing/{id}`
-- **커뮤니티 비밀번호 인증 (`/api/v3/member/community/pwd`)**:
-  - `POST https://docple-plus.com/api/v3/member/community/pwd`
-  - Body: `{"dmzPwd": "<DOCPLE_COMM_PASS>"}`
-  - 응답: `communityToken`
+- **커뮤니티 비밀번호 인증 (`/api/auth/communityLogin`)**:
+  - `POST https://docple-plus.com/api/auth/communityLogin`
+  - Body: `{"pw": "<DOCPLE_COMM_PASS || DOCPLE_PASS>", "ispc": "P"}`
+  - 응답: `resultCode === "0"`, `result: { "communityToken": "<JWT>" }`
 - **커뮤니티 게시글 목록 (`/api/community/list`)**:
   - `POST https://docple-plus.com/api/community/list`
-  - Header: `communityToken: <communityToken>`
-  - Body: `{"grpCode": "NI", "subCode": "", "page": 1, "size": 20}`
+  - Header: `communityToken: <communityToken>`, `Cookie: communityToken=<communityToken>; accessToken=<accessToken>`
+  - Body: `{"grpCode": "NI", "subCode": "", "page": 1, "size": 25}`
+  - 응답: `result: { "communityList": [ { "bid": 2032652, "no": 100136914, "title": "...", "noticeYN": "N", "useYN": "Y", "reCom": "N", ... } ] }`
 - **커뮤니티 게시글 추천 (`/api/board/recommend`)**:
   - `POST https://docple-plus.com/api/board/recommend`
-  - Header: `communityToken: <communityToken>`
-  - Body: `{"tid": <tid>, "grpCode": "NI", "subCode": "<subCode>"}`
+  - Header: `communityToken: <communityToken>`, `Cookie: communityToken=<communityToken>; accessToken=<accessToken>`
+  - Body: `{"kind": "W", "bid": "<bid>", "yesNo": "Y", "grpCode": "NI", "ispc": "P", "no": <no>}`
+  - 응답: `resultCode === "0"`, `result: { "cashGrantInfo": { "rewarded": true, "cashAmount": 10 } }`
 
 ---
 
