@@ -1,14 +1,6 @@
-import type { BrowserContext } from 'playwright';
 import quizMapping from '../../data/quiz.json';
 import type { PlaywrightRunArgs } from '../types';
-import {
-  safeGoto,
-  sendTelegram,
-  getSeminarIdFromUrl,
-  hasSurveyPointExcludedNotice,
-  getPointConversionAvailabilityHttp,
-  isSurveyPointExcludedSeminarHttp,
-} from '../modules/utils';
+import { safeGoto, getPointConversionAvailabilityHttp } from '../modules/utils';
 import * as storage from '../services/storage';
 import * as seminarRepo from '../services/seminar_repository';
 import {
@@ -19,16 +11,14 @@ import {
   type QuizQuestion,
 } from './seminar_quiz';
 import { TODAY_QUIZ_INFO_KEY, type CachedTodayQuizInfo } from './today_quiz';
-import { fetchSeminarDetail, ProcessState } from '../modules/seminar_api';
+import { ProcessState } from '../modules/seminar_api';
 
 const QUIZ_LIST_URLS = [
   'https://www.doctorville.co.kr/product/medicineList',
   'https://www.doctorville.co.kr/product/instrumentList',
 ];
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
-const BASE_URL = 'https://www.doctorville.co.kr/';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
-const POINT_CONVERSION_API_URL = 'https://api.doctorville.co.kr/api/point/conversion/availability';
 const POINT_CONVERSION_URL = 'https://www.doctorville.co.kr/my/point/pointUseHistoryList';
 const TODAY_QUIZ_TEMP_KEY = 'today_quiz:temp_answers';
 export const TODAY_LINKS_CACHE_KEY = 'today_links_cache';
@@ -92,103 +82,6 @@ const TODAY_SEMINAR_KEY = 'today_seminars';
 
 function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-/**
- * today_links 전용: HTTP 요청 우선 검사 후 필요 시 빠른 DOM 로드로 포인트미지급 여부 검사
- */
-async function checkPointExcludedFast(url: string, context?: BrowserContext): Promise<boolean> {
-  const start = Date.now();
-  try {
-    const httpRes = await isSurveyPointExcludedSeminarHttp(url);
-    if (httpRes.status === 'success') {
-      console.log(
-        `[today_links] 포인트미지급 HTTP 확인 완료 (${Date.now() - start}ms, 결과: ${httpRes.excluded}): ${url}`,
-      );
-      return httpRes.excluded;
-    }
-  } catch (_e) {
-    /* ignore and fallback */
-  }
-
-  if (!context) return false;
-
-  await sendTelegram(
-    `⚠️ [today_links] 포인트미지급 HTTP 조회 실패로 Playwright DOM 폴백을 실행합니다.\nURL: ${url}`,
-  ).catch(() => {});
-
-  const page = await context.newPage();
-  try {
-    await safeGoto(page, url, { waitUntil: 'domcontentloaded', timeout: 8000 }, 1);
-    await page
-      .locator('text=공유, .detail_cont, .seminar_info, body')
-      .first()
-      .waitFor({ state: 'attached', timeout: 3000 })
-      .catch(() => {});
-    const isExcluded = await hasSurveyPointExcludedNotice(page);
-    console.log(
-      `[today_links] 포인트미지급 DOM fallback 확인 완료 (${Date.now() - start}ms, 결과: ${isExcluded}): ${url}`,
-    );
-    return isExcluded;
-  } catch (_e) {
-    console.warn(`[today_links] 포인트미지급 확인 실패 (${Date.now() - start}ms): ${url}`);
-    return false;
-  } finally {
-    await page.close().catch(() => {});
-  }
-}
-
-/**
- * 미확인 세미나 목록을 병렬(concurrency=4)로 빠르게 일괄 확인 (HTTP 우선, 필요 시 브라우저 fallback)
- */
-async function batchCheckPointExcluded(
-  items: Array<{ link: string; cacheKey: string }>,
-  cache: Map<string, boolean>,
-  context?: BrowserContext,
-): Promise<void> {
-  const targets = items.filter((item) => !cache.has(item.cacheKey));
-  if (targets.length === 0) return;
-
-  console.log(`[today_links] 포인트미지급 병렬 일괄 확인 시작 (총 ${targets.length}건, HTTP 우선)`);
-  const startTime = Date.now();
-
-  const concurrency = 4;
-  for (let i = 0; i < targets.length; i += concurrency) {
-    const batch = targets.slice(i, i + concurrency);
-    await Promise.all(
-      batch.map(async (target) => {
-        try {
-          const isExcluded = await checkPointExcludedFast(target.link, context);
-          cache.set(target.cacheKey, isExcluded);
-        } catch {
-          cache.set(target.cacheKey, false);
-        }
-      }),
-    );
-  }
-
-  console.log(`[today_links] 포인트미지급 병렬 일괄 확인 완료 (총 소요시간: ${Date.now() - startTime}ms)`);
-}
-
-function findPointExcludedFromStoredSeminars(
-  storedSeminars: Array<{ url: string; seminarId?: string | null; isPointExcluded?: boolean }>,
-  seminarId: string | null,
-  fullUrl: string,
-): boolean | undefined {
-  const normalizedFullUrl = fullUrl.replace(/\/+$/, '');
-  const matched = storedSeminars.find((seminar) => {
-    if (typeof seminar.isPointExcluded !== 'boolean') return false;
-
-    if (seminarId) {
-      if (seminar.seminarId && seminar.seminarId === seminarId) return true;
-      const storedId = getSeminarIdFromUrl(seminar.url);
-      if (storedId && storedId === seminarId) return true;
-    }
-
-    return seminar.url.replace(/\/+$/, '') === normalizedFullUrl;
-  });
-
-  return matched?.isPointExcluded;
 }
 
 /**
@@ -712,7 +605,6 @@ async function collectTodaySeminarMessage(
 
     const lunchSeminars: string[] = [];
     const dinnerSeminars: string[] = [];
-    const pointExcludedCache = new Map<string, boolean>();
 
     const isDinnerSeminar = (classAttr: string, time: string): boolean => {
       if (classAttr.includes('night_time')) return true;
@@ -724,41 +616,8 @@ async function collectTodaySeminarMessage(
       return Number.isFinite(hour) && hour >= 16;
     };
 
-    const uncachedSeminarItems: Array<{ link: string; cacheKey: string }> = [];
     for (const item of parsedSeminars) {
-      const pointExcludedKey = item.seminarId || item.fullUrl;
-      if (typeof item.isPointExcluded === 'boolean') {
-        pointExcludedCache.set(pointExcludedKey, item.isPointExcluded);
-        continue;
-      }
-      const storedPointExcluded = findPointExcludedFromStoredSeminars(storedSeminars, item.seminarId, item.fullUrl);
-      if (typeof storedPointExcluded === 'boolean') {
-        pointExcludedCache.set(pointExcludedKey, storedPointExcluded);
-      } else if (item.seminarId) {
-        // detail API로 비동기 확인
-        try {
-          const detailRes = await fetchSeminarDetail(item.seminarId);
-          if (detailRes.success) {
-            pointExcludedCache.set(pointExcludedKey, detailRes.isPointExcluded);
-            continue;
-          }
-        } catch (_e) {
-          // ignore
-        }
-        const httpLink = 'https://www.doctorville.co.kr/seminar/seminarDetail?seminarId=' + item.seminarId;
-        uncachedSeminarItems.push({ link: httpLink, cacheKey: pointExcludedKey });
-      } else {
-        uncachedSeminarItems.push({ link: item.seminarLink, cacheKey: pointExcludedKey });
-      }
-    }
-
-    if (uncachedSeminarItems.length > 0) {
-      await batchCheckPointExcluded(uncachedSeminarItems, pointExcludedCache, page?.context());
-    }
-
-    for (const item of parsedSeminars) {
-      const pointExcludedKey = item.seminarId || item.fullUrl;
-      const isPointExcluded = pointExcludedCache.get(pointExcludedKey) || false;
+      const isPointExcluded = item.isPointExcluded ?? false;
       const isPrivate = item.hiddenYn === 'Y' || item.hiddenYn === 'y';
       const diseaseTag =
         isPrivate && item.diseaseCategoryNm && item.diseaseCategoryNm.trim()
@@ -819,39 +678,15 @@ async function collectTodaySeminarMessage(
   }
 }
 
-async function collectPointConversionInfo(page?: PlaywrightRunArgs['page']): Promise<PointConversionInfo | null> {
+async function collectPointConversionInfo(_page?: PlaywrightRunArgs['page']): Promise<PointConversionInfo | null> {
   try {
     const httpData = await getPointConversionAvailabilityHttp();
-    if (httpData) {
-      return httpData;
-    }
-
-    if (page) {
-      await sendTelegram(
-        '⚠️ [today_links] 포인트 전환 정보 API 직접 조회 실패로 Playwright 브라우저 폴백을 실행합니다.',
-      ).catch(() => {});
-      const currentUrl = page.url();
-      if (!currentUrl.includes('doctorville.co.kr')) {
-        await safeGoto(page, BASE_URL, { waitUntil: 'domcontentloaded', timeout: 15000 }, 1);
-      }
-      const response = (await page.evaluate(async (apiUrl: string) => {
-        try {
-          const res = await fetch(apiUrl, { credentials: 'include' });
-          if (!res.ok) return null;
-          const text = await res.text();
-          if (!text) return null;
-          return JSON.parse(text);
-        } catch {
-          return null;
-        }
-      }, POINT_CONVERSION_API_URL)) as { data?: PointConversionInfo } | null;
-
-      return response?.data ?? null;
-    }
-
-    return null;
-  } catch (err) {
-    console.error('[today_links] 포인트 전환 정보 조회 실패:', err);
+    return httpData ?? null;
+  } catch (_e) {
+    console.error(
+      'collectPointConversionInfo error',
+      _e && typeof _e === 'object' && 'stack' in _e ? (_e as Error).stack : _e,
+    );
     return null;
   }
 }
@@ -1062,66 +897,7 @@ async function run({ page, args }: Partial<PlaywrightRunArgs> = {}, taskOptions?
     const seminarMessage = await collectTodaySeminarMessage(page, inputDate);
     const pointConversionInfo = await collectPointConversionInfo(page);
 
-    let storedNewSeminars = getYesterdayAddedSeminars(yesterdayIso);
-    if (storedNewSeminars.length > 0) {
-      let updatedMissingPointFlag = false;
-      const pointExcludedCache = new Map<string, boolean>();
-
-      const storedSeminars = seminarRepo.getAllSeminars();
-
-      const uncachedItems: Array<{ link: string; cacheKey: string }> = [];
-
-      for (const item of storedNewSeminars) {
-        const link = item.seminarId ? `${SEMINAR_DETAIL_PAGE}${item.seminarId}` : item.url;
-        const cacheKey = item.seminarId || item.url;
-
-        if (typeof item.isPointExcluded === 'boolean') {
-          pointExcludedCache.set(cacheKey, item.isPointExcluded);
-          continue;
-        }
-
-        const storedPointExcluded = findPointExcludedFromStoredSeminars(storedSeminars, item.seminarId, link);
-        if (typeof storedPointExcluded === 'boolean') {
-          pointExcludedCache.set(cacheKey, storedPointExcluded);
-        } else {
-          const httpLink = item.seminarId
-            ? 'https://www.doctorville.co.kr/seminar/seminarDetail?seminarId=' + item.seminarId
-            : link;
-          uncachedItems.push({ link: httpLink, cacheKey });
-        }
-      }
-
-      if (uncachedItems.length > 0) {
-        await batchCheckPointExcluded(uncachedItems, pointExcludedCache, page?.context());
-      }
-
-      storedNewSeminars = storedNewSeminars.map((item) => {
-        const cacheKey = item.seminarId || item.url;
-        const isPointExcluded = pointExcludedCache.get(cacheKey);
-        if (typeof isPointExcluded === 'boolean' && item.isPointExcluded !== isPointExcluded) {
-          updatedMissingPointFlag = true;
-          return { ...item, isPointExcluded };
-        }
-        return item;
-      });
-
-      if (updatedMissingPointFlag) {
-        for (const item of storedNewSeminars) {
-          if (typeof item.isPointExcluded === 'boolean') {
-            const sid = item.seminarId || getSeminarIdFromUrl(item.url);
-            if (sid) {
-              const existing = seminarRepo.getSeminarById(sid);
-              if (existing && existing.isPointExcluded !== item.isPointExcluded) {
-                seminarRepo.upsertSeminar({
-                  ...existing,
-                  isPointExcluded: item.isPointExcluded,
-                });
-              }
-            }
-          }
-        }
-      }
-    }
+    const storedNewSeminars = getYesterdayAddedSeminars(yesterdayIso);
 
     const { message, options } = formatTodayLinksBroadcast({
       quizInfo,
