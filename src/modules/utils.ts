@@ -41,6 +41,29 @@ function maskToken(token?: string | null): string {
   return token.length > 10 ? `${token.slice(0, 6)}...${token.slice(-4)}` : token;
 }
 
+export function isTelegram429Error(error: unknown): boolean {
+  if (!error) return false;
+  const err = error as { response?: { error_code?: number }; message?: string };
+  if (err.response?.error_code === 429) return true;
+  if (typeof err.message === 'string' && (err.message.includes('429') || err.message.includes('Too Many Requests'))) {
+    return true;
+  }
+  return false;
+}
+
+export function getTelegramRetryAfter(error: unknown): number | null {
+  if (!error) return null;
+  const err = error as { response?: { parameters?: { retry_after?: number } }; message?: string };
+  if (typeof err.response?.parameters?.retry_after === 'number') {
+    return err.response.parameters.retry_after;
+  }
+  if (typeof err.message === 'string') {
+    const match = err.message.match(/retry after (\d+)/i);
+    if (match) return parseInt(match[1], 10);
+  }
+  return null;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -109,6 +132,12 @@ async function sendTelegram(
     }
     return true;
   } catch (error) {
+    if (isTelegram429Error(error)) {
+      const retryAfter = getTelegramRetryAfter(error);
+      const retryInfo = retryAfter ? ` (retry after ${retryAfter}s)` : '';
+      console.warn(`[Telegram] Rate limit exceeded (429)${retryInfo}. Skipping failure notification.`);
+      return false;
+    }
     console.error('Failed to send Telegram message:', error);
     try {
       const message = error instanceof Error ? error.message : String(error);
@@ -119,7 +148,13 @@ async function sendTelegram(
         if (i < errorChunks.length - 1) await sleep(100);
       }
     } catch (nestedError) {
-      console.error('Failed to send the failure notification as well:', nestedError);
+      if (isTelegram429Error(nestedError)) {
+        const retryAfter = getTelegramRetryAfter(nestedError);
+        const retryInfo = retryAfter ? ` (retry after ${retryAfter}s)` : '';
+        console.warn(`[Telegram] Rate limit exceeded (429) during error notification${retryInfo}.`);
+      } else {
+        console.error('Failed to send the failure notification as well:', nestedError);
+      }
     }
     return false;
   }
@@ -226,6 +261,12 @@ async function sendNotificationToChannel(
       return lastMessageId;
     }
   } catch (error) {
+    if (isTelegram429Error(error)) {
+      const retryAfter = getTelegramRetryAfter(error);
+      const retryInfo = retryAfter ? ` (retry after ${retryAfter}s)` : '';
+      console.warn(`[Telegram Channel] Rate limit exceeded (429)${retryInfo}. Skipping fallback.`);
+      return null;
+    }
     console.error('Failed to send Telegram notification to channel:', error);
 
     try {
@@ -307,6 +348,12 @@ async function sendNotificationToChannel(
         return plainLastId;
       }
     } catch (fallbackError) {
+      if (isTelegram429Error(fallbackError)) {
+        const retryAfter = getTelegramRetryAfter(fallbackError);
+        const retryInfo = retryAfter ? ` (retry after ${retryAfter}s)` : '';
+        console.warn(`[Telegram Channel] Rate limit exceeded (429) during fallback${retryInfo}.`);
+        return null;
+      }
       console.error('Failed to send escaped Telegram notification to channel:', fallbackError);
     }
 
@@ -327,7 +374,13 @@ async function sendNotificationToChannel(
         if (i < errorChunks.length - 1) await sleep(100);
       }
     } catch (nestedError) {
-      console.error('Failed to send the failure notification as well:', nestedError);
+      if (isTelegram429Error(nestedError)) {
+        const retryAfter = getTelegramRetryAfter(nestedError);
+        const retryInfo = retryAfter ? ` (retry after ${retryAfter}s)` : '';
+        console.warn(`[Telegram Channel] Rate limit exceeded (429) during failure notification${retryInfo}.`);
+      } else {
+        console.error('Failed to send the failure notification as well:', nestedError);
+      }
     }
   }
   return null;
