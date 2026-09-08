@@ -1,5 +1,5 @@
 import type { PlaywrightRunArgs } from '../types';
-import { getPointConversionAvailabilityHttp } from '../modules/utils';
+import { getPointConversionAvailabilityHttp, truncateSeminarName } from '../modules/utils';
 import * as storage from '../services/storage';
 import * as seminarRepo from '../services/seminar_repository';
 import { TODAY_QUIZ_INFO_KEY, type CachedTodayQuizInfo } from './today_quiz';
@@ -539,7 +539,7 @@ function formatTodayLinksBroadcast(input: TodayLinksFormatInput): TodayLinksForm
         const pointExcludedSuffix = item.isPointExcluded ? ' 🚫[포인트미지급]' : '';
         const advancedSurveySuffix = item.isAdvancedSurvey ? ' ✨<b>[심화설문]</b>' : '';
         const dateTimePrefix = item.date || item.time ? `[${item.date}${item.time ? ' ' + item.time : ''}] ` : '';
-        const truncatedName = item.name.length > 20 ? `${item.name.slice(0, 20)}...` : item.name;
+        const truncatedName = truncateSeminarName(item.name);
         const capacityInfo =
           item.currentCount || item.totalCount ? ` (${item.currentCount || '0'}/${item.totalCount || '0'})` : '';
         const nameDisplay = item.isPointExcluded ? `<s>${escapeHtml(truncatedName)}</s>` : escapeHtml(truncatedName);

@@ -739,9 +739,23 @@ async function processSeminarQuiz(
 
       const initialUrl = page.url();
       const seminarPageUrl = seminarId ? `https://m.doctorville.co.kr/cme/seminar/${seminarId}` : initialUrl;
-      await sendTelegram(
-        `📋 ℹ️ [심화설문] 퀴즈 정답 추출 완료 (자동 제출 제외)\n${resultMessage}\n\n🔗 세미나 URL: ${seminarPageUrl}`,
-      ).catch(() => {});
+      const baseDir = path.join(process.cwd(), 'screenshot');
+      const advancedShotPath = path.join(baseDir, `quiz_advanced_${seminarName ?? 'unknown'}_${Date.now()}.png`);
+
+      try {
+        await fs.mkdir(baseDir, { recursive: true });
+        await page.screenshot({ path: advancedShotPath, fullPage: true }).catch(() => {});
+        await sendTelegram(
+          `📋 ℹ️ [심화설문] 퀴즈 정답 추출 완료 (자동 제출 제외)\n${resultMessage}\n\n🔗 세미나 URL: ${seminarPageUrl}`,
+          advancedShotPath,
+        ).catch(() => {});
+      } catch (_ssErr) {
+        await sendTelegram(
+          `📋 ℹ️ [심화설문] 퀴즈 정답 추출 완료 (자동 제출 제외)\n${resultMessage}\n\n🔗 세미나 URL: ${seminarPageUrl}`,
+        ).catch(() => {});
+      } finally {
+        await fs.unlink(advancedShotPath).catch(() => {});
+      }
 
       if (_hasUnknown) {
         const unknownMessage = formatUnknownQuestions(accumulatedQuestions, accumulatedResults);

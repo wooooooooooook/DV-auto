@@ -117,3 +117,25 @@ export async function publishAndReplaceChannelNotice(
 
   return { newMessageId, success: true };
 }
+
+export const DEFAULT_NOTICE_OPTIONS: Record<string, unknown> = {
+  link_preview_options: {
+    is_disabled: true,
+  },
+};
+
+/**
+ * 텔레그램 공지 메시지 하단에 첨부할 이전 댓글 섹션을 포맷팅합니다.
+ * @param comments 첨부할 댓글 목록
+ * @param maxCount 최대 첨부 개수 (기본값: 5)
+ */
+export function formatRecentCommentsSection(comments: Array<{ userName: string; text: string }>, maxCount = 5): string {
+  if (!comments || comments.length === 0) return '';
+  let text = `\n\n💬 [이전 댓글]\n`;
+  const recent = comments.slice(-maxCount);
+  for (const c of recent) {
+    const cleanText = c.text.replace(/\n/g, ' ').slice(0, 100);
+    text += `• ${c.userName}: ${cleanText}\n`;
+  }
+  return text;
+}

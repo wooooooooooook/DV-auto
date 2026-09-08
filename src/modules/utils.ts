@@ -794,6 +794,28 @@ export async function getPointConversionAvailabilityHttp(): Promise<{
   }
 }
 
+/**
+ * 세미나명 n글자 truncation 포맷터 (기본 20글자 초과 시 20글자 + '...')
+ */
+function truncateSeminarName(name: string, maxLen = 20): string {
+  const trimmed = (name || '').trim();
+  if (trimmed.length > maxLen) {
+    return `${trimmed.slice(0, maxLen)}...`;
+  }
+  return trimmed;
+}
+
+/**
+ * 비공개 세미나 태그 문자열(예: "[비공개][심혈관질환]")을 생성합니다.
+ */
+function formatPrivateSeminarTag(seminar: { hiddenYn?: string; diseaseCategoryNm?: string }): string {
+  const isPrivate = seminar.hiddenYn === 'Y' || seminar.hiddenYn === 'y';
+  if (!isPrivate) return '';
+  const categoryTag =
+    seminar.diseaseCategoryNm && seminar.diseaseCategoryNm.trim() ? `[${seminar.diseaseCategoryNm.trim()}]` : '';
+  return `[비공개]${categoryTag}`;
+}
+
 export {
   invalidateLoginStatus,
   sendTelegram,
@@ -823,6 +845,8 @@ export {
   truncateHtml,
   truncateMarkdownV2,
   truncatePlainText,
+  truncateSeminarName,
+  formatPrivateSeminarTag,
   TELEGRAM_SAFE_MESSAGE_LENGTH,
   TELEGRAM_SAFE_CAPTION_LENGTH,
   TELEGRAM_MAX_MESSAGE_LENGTH,

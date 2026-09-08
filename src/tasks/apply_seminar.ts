@@ -8,12 +8,8 @@ import {
   applySeminarWithTerms,
   convertApiItemToRawSeminar,
   convertApiItemToSeminarListItem,
-  parseSeminarDateTime,
-  checkIsAdvancedSurvey,
-  checkIsPointExcluded,
   ProcessState,
 } from '../modules/seminar_api';
-import { searchSeminarPoints } from './check_seminar_point';
 import * as storage from '../services/storage';
 import * as logger from '../services/logger';
 import * as seminarRepo from '../services/seminar_repository';
@@ -23,15 +19,39 @@ import {
   sendUrgentSeminarsToSubscribers,
   parseCapacityNumbers,
 } from '../services/subscription_service';
-import * as channelRepo from '../services/channel_message_repository';
 import { checkAndTriggerSeminarMonitors } from '../services/seminar_monitor_trigger';
 
-const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
-const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
-export const SEMINAR_LIST_KEY = 'apply_seminar:seminar_list';
-const LEGACY_NEW_SEMINAR_KEY = 'apply_seminar:new_seminars';
-const LEGACY_HISTORY_KEY = 'apply_seminar:new_seminars_history';
-const SEMINAR_RETENTION_DAYS = 60;
+// 모듈화된 공지, 갭 탐색, 포인트 동기화 로직 import 및 re-export (하위 호환성 유지)
+import {
+  truncateSeminarName,
+  buildNewSeminarsNoticeMessage,
+  publishNewSeminarsNotice,
+  extractHighlightedSeminarIds,
+  syncNewSeminarsNotice,
+  getSeminarInfoChanges,
+  formatSeminarChangeNotification,
+  type SeminarFieldChange,
+  type SeminarInfoChange,
+  type SeminarPointChange,
+} from './apply_seminar_notice';
+export {
+  truncateSeminarName,
+  buildNewSeminarsNoticeMessage,
+  publishNewSeminarsNotice,
+  extractHighlightedSeminarIds,
+  syncNewSeminarsNotice,
+  getSeminarInfoChanges,
+  formatSeminarChangeNotification,
+  type SeminarFieldChange,
+  type SeminarInfoChange,
+  type SeminarPointChange,
+};
+
+import { discoverMissingGapSeminars, CHECKED_GAP_SEMINAR_IDS_KEY } from '../services/seminar_gap_service';
+export { discoverMissingGapSeminars, CHECKED_GAP_SEMINAR_IDS_KEY };
+
+import { refreshSeminarPointStatus, fetchAndPopulateSeminarInfo } from '../services/seminar_point_sync';
+export { refreshSeminarPointStatus, fetchAndPopulateSeminarInfo };
 
 export type { SeminarListItem, SeminarPointStatus } from '../services/seminar_repository';
 import type { SeminarListItem } from '../services/seminar_repository';
@@ -45,31 +65,12 @@ export { enrichSeminarsWithDetail, refreshPastUncompletedSeminars, isPastSeminar
 
 export const mergeSeminar = seminarRepo.mergeSeminarRecord;
 
-export type SeminarFieldChange = {
-  field: string;
-  label: string;
-  oldValue: string | number | boolean;
-  newValue: string | number | boolean;
-};
-
-export type SeminarInfoChange = {
-  seminarId: string;
-  name: string;
-  date?: string;
-  url?: string;
-  changes: SeminarFieldChange[];
-};
-
-export type SeminarPointChange = {
-  seminarId: string;
-  name: string;
-  date?: string;
-  url?: string;
-  point?: number;
-  pointText?: string;
-  pointDate?: string;
-  pointContent?: string;
-};
+const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
+const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
+export const SEMINAR_LIST_KEY = 'apply_seminar:seminar_list';
+const LEGACY_NEW_SEMINAR_KEY = 'apply_seminar:new_seminars';
+const LEGACY_HISTORY_KEY = 'apply_seminar:new_seminars_history';
+const SEMINAR_RETENTION_DAYS = 60;
 
 type LegacyHistoryEntry = {
   detectedDate?: string;
@@ -101,18 +102,6 @@ export type RawSeminarData = {
   hiddenYn?: string;
   diseaseCategoryNm?: string;
 };
-
-const MEANINGFUL_FIELDS: Array<{
-  key: keyof SeminarListItem;
-  label: string;
-}> = [
-  { key: 'date', label: '날짜' },
-  { key: 'time', label: '시간' },
-  { key: 'totalCount', label: '총원' },
-  { key: 'isPointExcluded', label: '포인트미지급' },
-  { key: 'isAdvancedSurvey', label: '심화설문' },
-  { key: 'hiddenYn', label: '비공개' },
-];
 
 /**
  * processState 기반 신청 완료 여부 판정
@@ -212,118 +201,6 @@ export function logProcessStateDistribution(
   }
 }
 
-const BOOLEAN_FIELDS = new Set<keyof SeminarListItem>(['isPointExcluded', 'isAdvancedSurvey']);
-
-export function getSeminarInfoChanges(existing: SeminarListItem, incoming: SeminarListItem): SeminarFieldChange[] {
-  const changes: SeminarFieldChange[] = [];
-  for (const { key, label } of MEANINGFUL_FIELDS) {
-    const oldVal = existing[key];
-    const newVal = incoming[key];
-
-    if (newVal === undefined && oldVal !== undefined) continue;
-
-    // 기존 값이 undefined(또는 빈 문자열)였던 경우:
-    // 이전에 상세 정보를 조회하지 못해 미확인 상태였다가 처음으로 값이 채워진 것이므로
-    // "세미나 정보 변경" 알림 대상이 아님 (기존 값이 유효하게 존재했던 경우에만 변경 감지)
-    if (oldVal === undefined || oldVal === '') continue;
-
-    if (key === 'hiddenYn') {
-      // 레거시 호환: 기존 DB 데이터에 hiddenYn이 마이그레이션되지 않았거나 'N'인 경우에도,
-      // 기존 세미나의 isClosed가 true였다면 과거에 비공개로 취급되었던 세미나이므로 기존 비공개로 인정하여 알림 오발송 방지
-      const oldIsPrivate = oldVal === 'Y' || oldVal === 'y' || existing.isClosed === true;
-      const newIsPrivate = newVal === 'Y' || newVal === 'y';
-      if (oldIsPrivate !== newIsPrivate) {
-        changes.push({
-          field: key,
-          label,
-          oldValue: oldIsPrivate,
-          newValue: newIsPrivate,
-        });
-      }
-      continue;
-    }
-
-    if (BOOLEAN_FIELDS.has(key)) {
-      if (oldVal !== newVal) {
-        changes.push({
-          field: key,
-          label,
-          oldValue: oldVal as boolean,
-          newValue: newVal as boolean,
-        });
-      }
-      continue;
-    }
-
-    if (oldVal !== newVal) {
-      changes.push({
-        field: key,
-        label,
-        oldValue: (oldVal ?? '') as string | number | boolean,
-        newValue: (newVal ?? '') as string | number | boolean,
-      });
-    }
-  }
-  return changes;
-}
-
-export function formatSeminarChangeNotification(
-  infoChanges: SeminarInfoChange[],
-  pointChanges: SeminarPointChange[],
-): string | null {
-  if (infoChanges.length === 0 && pointChanges.length === 0) {
-    return null;
-  }
-
-  const sections: string[] = ['🔔 세미나 정보 변경 감지'];
-
-  if (pointChanges.length > 0) {
-    sections.push('[포인트 지급]');
-    for (const p of pointChanges) {
-      const lines: string[] = [];
-      lines.push(p.name || '세미나');
-      lines.push(`seminarId: ${p.seminarId}`);
-      if (p.date) {
-        lines.push(`날짜: ${p.date}`);
-      }
-      if (p.pointText || p.point !== undefined) {
-        lines.push(`포인트: ${p.pointText || `${p.point}P`}`);
-      }
-      if (p.pointDate) {
-        lines.push(`지급일: ${p.pointDate}`);
-      }
-      const targetUrl = p.url || (p.seminarId ? `https://m.doctorville.co.kr/cme/seminar/${p.seminarId}` : '');
-      if (targetUrl) {
-        lines.push(targetUrl);
-      }
-      sections.push(lines.join('\n'));
-    }
-  }
-
-  if (infoChanges.length > 0) {
-    if (pointChanges.length > 0) sections.push('');
-    sections.push('[정보 변경]');
-    for (const info of infoChanges) {
-      const lines: string[] = [];
-      lines.push(info.name || '세미나');
-      lines.push(`seminarId: ${info.seminarId}`);
-      if (info.date) {
-        lines.push(`날짜: ${info.date}`);
-      }
-      for (const ch of info.changes) {
-        lines.push(`${ch.label}: ${ch.oldValue} → ${ch.newValue}`);
-      }
-      const targetUrl = info.url || (info.seminarId ? `https://m.doctorville.co.kr/cme/seminar/${info.seminarId}` : '');
-      if (targetUrl) {
-        lines.push(targetUrl);
-      }
-      sections.push(lines.join('\n'));
-    }
-  }
-
-  return sections.join('\n\n');
-}
-
 function normalizeSeminarDate(value: string | undefined, referenceDate: string): string | null {
   if (!value) return null;
   const text = value.trim();
@@ -409,14 +286,71 @@ function migrateLegacySeminarStorage(referenceDate: string): SeminarListItem[] {
   return seminarRepo.getAllSeminars();
 }
 
+export function isSeminarRecordChanged(existing: SeminarListItem, incoming: SeminarListItem): boolean {
+  const checkKeys: Array<keyof SeminarListItem> = [
+    'name',
+    'date',
+    'time',
+    'currentCount',
+    'totalCount',
+    'nightTime',
+    'isPointExcluded',
+    'isAdvancedSurvey',
+    'processState',
+    'cancelProcessState',
+    'seminarCompleted',
+    'hiddenYn',
+    'diseaseCategoryNm',
+    'isClosed',
+  ];
+
+  for (const key of checkKeys) {
+    const newVal = incoming[key];
+    if (newVal === undefined) continue;
+    const oldVal = existing[key];
+
+    if (key === 'hiddenYn') {
+      const oldHidden = oldVal === 'Y' || oldVal === 'y';
+      const newHidden = newVal === 'Y' || newVal === 'y';
+      if (oldHidden !== newHidden) return true;
+      continue;
+    }
+
+    if (key === 'isClosed' || key === 'isAdvancedSurvey' || key === 'nightTime') {
+      const oldBool = Boolean(oldVal);
+      const newBool = Boolean(newVal);
+      if (oldBool !== newBool) return true;
+      continue;
+    }
+
+    if (key === 'isPointExcluded') {
+      if (oldVal !== undefined && newVal !== undefined && oldVal !== newVal) {
+        return true;
+      }
+      continue;
+    }
+
+    if (oldVal !== newVal) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function refreshStoredSeminarList(
   current: SeminarListItem[],
   stored: SeminarListItem[],
   referenceDate: string,
-): { seminars: SeminarListItem[]; newlyAdded: SeminarListItem[]; infoChanges: SeminarInfoChange[] } {
+): {
+  seminars: SeminarListItem[];
+  newlyAdded: SeminarListItem[];
+  infoChanges: SeminarInfoChange[];
+  updatedSeminars: SeminarListItem[];
+} {
   const storedByKey = new Map(stored.map((seminar) => [seminarKey(seminar), seminar]));
   const newlyAdded = current.filter((seminar) => !storedByKey.has(seminarKey(seminar)));
   const infoChanges: SeminarInfoChange[] = [];
+  const updatedSeminars: SeminarListItem[] = [];
   const now = new Date().toISOString();
 
   for (const seminar of current) {
@@ -439,14 +373,18 @@ export function refreshStoredSeminarList(
       }
     }
 
-    storedByKey.set(
-      key,
-      mergeSeminar(existing, {
-        ...seminar,
-        detectedDate: existing?.detectedDate ?? referenceDate,
-        detectedAt: existing?.detectedAt ?? now,
-      }),
-    );
+    const merged = mergeSeminar(existing, {
+      ...seminar,
+      detectedDate: existing?.detectedDate ?? referenceDate,
+      detectedAt: existing?.detectedAt ?? now,
+    });
+
+    storedByKey.set(key, merged);
+
+    // 신규 추가이거나 기존 레코드 대비 새로운 변경사항이 유입된 경우에만 DB 갱신 대상에 포함
+    if (!existing || isSeminarRecordChanged(existing, seminar)) {
+      updatedSeminars.push(merged);
+    }
   }
 
   const todayMs = Date.parse(`${referenceDate}T00:00:00+09:00`);
@@ -458,270 +396,7 @@ export function refreshStoredSeminarList(
     return Number.isNaN(dateMs) || Number.isNaN(todayMs) || todayMs - dateMs <= retentionMs;
   });
 
-  return { seminars, newlyAdded, infoChanges };
-}
-
-/**
- * 세미나명 20글자 truncation 포맷터 (20글자 초과 시 20글자 + '...')
- */
-export function truncateSeminarName(name: string, maxLen = 20): string {
-  const trimmed = (name || '').trim();
-  if (trimmed.length > maxLen) {
-    return `${trimmed.slice(0, maxLen)}...`;
-  }
-  return trimmed;
-}
-
-/**
- * 신규 세미나 모음 채널 공지 메시지 빌더
- * - 헤더: 🆕 오늘 추가된 세미나 모음 (누적 ${count}건)
- * - 정원 10명 미만 세미나는 표시에서 제외
- * - 세미나명: 20글자 초과 시 truncation
- * - 이번 회차 신규 세미나(newlyAddedIds)는 '✨ 방금 추가됨' 구분선(━ ✨ 방금 추가됨 ━━━━━)으로 감싸 강조
- * - 토론방 이전 댓글 섹션(최대 5개) 첨부
- * - link_preview_options: { is_disabled: true }
- */
-export function buildNewSeminarsNoticeMessage(
-  seminars: SeminarListItem[],
-  newlyAddedIds?: string[] | Set<string>,
-  comments: Array<{ userName: string; text: string }> = [],
-): { text: string; options: Record<string, unknown> } {
-  // 정원 10명 미만인 세미나는 공지 목록에서 제외하고, 발견 순서(detectedAt 오름차순)대로 정렬
-  const visibleSeminars = seminars
-    .filter((item) => {
-      if (!item.totalCount || item.totalCount.trim() === '') return true;
-      const parsed = parseInt(item.totalCount.replace(/[^0-9]/g, ''), 10);
-      return isNaN(parsed) || parsed >= 10;
-    })
-    .sort((a, b) => {
-      if (a.detectedAt && b.detectedAt) {
-        return a.detectedAt.localeCompare(b.detectedAt);
-      }
-      return 0;
-    });
-
-  let text = `🆕 오늘 추가된 세미나 모음 (누적 ${visibleSeminars.length}건)\n\n`;
-
-  const newIdSet =
-    newlyAddedIds instanceof Set
-      ? newlyAddedIds
-      : new Set(newlyAddedIds ? newlyAddedIds.map((id) => String(id).trim()) : []);
-
-  const formattedItems: string[] = [];
-
-  for (let i = 0; i < visibleSeminars.length; i++) {
-    const item = visibleSeminars[i];
-    const sid = item.seminarId || getSeminarIdFromUrl(item.url) || '';
-    const isHighlighted = newIdSet.has(sid);
-
-    const tags: string[] = [];
-    if (item.date || item.time) {
-      tags.push(`[${item.date || ''}${item.date && item.time ? ' ' : ''}${item.time || ''}]`);
-    }
-    if (item.hiddenYn === 'Y') {
-      tags.push('[비공개]');
-      if (item.diseaseCategoryNm && item.diseaseCategoryNm.trim()) {
-        tags.push(`[${item.diseaseCategoryNm.trim()}]`);
-      }
-    }
-    if (item.isPointExcluded) {
-      tags.push('[포인트미지급]');
-    }
-    if (item.isAdvancedSurvey) {
-      tags.push('[심화설문]');
-    }
-
-    const prefix = tags.length > 0 ? `${tags.join(' ')} ` : '';
-    const capacityInfo = item.currentCount && item.totalCount ? ` (${item.currentCount}/${item.totalCount})` : '';
-    const truncatedName = truncateSeminarName(item.name || '세미나');
-
-    const itemText = `${i + 1}. ${prefix}${truncatedName}${capacityInfo}\n${item.url}`;
-
-    if (isHighlighted) {
-      formattedItems.push(`━ ✨ 방금 추가됨 ━━━━━\n${itemText}\n━━━━━━━━━━━━━━━━`);
-    } else {
-      formattedItems.push(itemText);
-    }
-  }
-
-  text += formattedItems.join('\n\n');
-
-  // 이전 댓글 섹션 첨부 (최근 최대 5개)
-  if (comments.length > 0) {
-    text += `\n\n💬 [이전 댓글]\n`;
-    const recentComments = comments.slice(-5);
-    for (const c of recentComments) {
-      const cleanText = c.text.replace(/\n/g, ' ').slice(0, 100);
-      text += `• ${c.userName}: ${cleanText}\n`;
-    }
-  }
-
-  const options: Record<string, unknown> = {
-    link_preview_options: {
-      is_disabled: true,
-    },
-  };
-
-  return { text, options };
-}
-
-/**
- * 신규 세미나 모음 통합 메시지를 채널에 발송하고 이전 메시지를 안전하게 삭제/교체합니다.
- * - 댓글 보존: 기존 메시지에 연결된 댓글 조회 후 새 메시지 본문에 첨부
- * - 안전 가드: 댓글 확보 실패 또는 새 메시지 발송 실패 시 기존 메시지 유지
- */
-export async function publishNewSeminarsNotice(
-  seminars: SeminarListItem[],
-  prevMessageId: number | null,
-  newlyAddedIds?: string[] | Set<string>,
-  comments?: Array<{ userName: string; text: string }>,
-  _date?: string,
-  channelId?: string,
-): Promise<number | null> {
-  const visibleSeminars = seminars.filter((item) => {
-    if (!item.totalCount || item.totalCount.trim() === '') return true;
-    const parsed = parseInt(item.totalCount.replace(/[^0-9]/g, ''), 10);
-    return isNaN(parsed) || parsed >= 10;
-  });
-
-  if (visibleSeminars.length === 0) return prevMessageId;
-
-  const result = await channelRepo.publishAndReplaceChannelNotice({
-    channelId,
-    prevMessageId,
-    buildMessageFn: (commentsToAttach) =>
-      buildNewSeminarsNoticeMessage(visibleSeminars, newlyAddedIds, commentsToAttach),
-    customComments: comments,
-    logPrefix: 'apply_seminar',
-  });
-
-  return result.newMessageId;
-}
-
-/**
- * 기존 공지 메시지 본문에서 '━ ✨ 방금 추가됨 ━━━━━'으로 감싸진 강조 블록의 세미나 ID 목록을 추출합니다.
- */
-export function extractHighlightedSeminarIds(messageText?: string | null): string[] {
-  if (!messageText) return [];
-  const highlightedIds: string[] = [];
-  const regex = /━ ✨ 방금 추가됨 ━━━━━([\s\S]*?)━━━━━━━━━━━━━━━━/g;
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(messageText)) !== null) {
-    const blockContent = match[1];
-    const urlMatch = blockContent.match(/https?:\/\/[^\s]+/);
-    if (urlMatch) {
-      const sid = getSeminarIdFromUrl(urlMatch[0]);
-      if (sid) {
-        highlightedIds.push(sid);
-      }
-    }
-  }
-  return highlightedIds;
-}
-
-/**
- * 오늘 발견된 세미나 누적 공지를 동기화합니다.
- * - newlyAdded.length > 0: 새 메시지 발행 및 이전 메시지 교체 (이번 회차 신규 세미나 강조)
- * - newlyAdded.length === 0: 기존 메시지가 있을 경우, 기존 강조 표시를 보존한 채 최신 세미나 목록/정원 정보로 메시지 인플레이스 수정 (editChannelMessage)
- */
-export async function syncNewSeminarsNotice(
-  referenceDate: string,
-  newlyAdded: SeminarListItem[] = [],
-  channelId?: string,
-): Promise<number | null> {
-  const targetChannelId = channelId || process.env.NOTICE_CHANNEL_ID;
-  const prevMsg = channelRepo.getNewSeminarsChannelMessage(referenceDate, targetChannelId);
-  const todayNewSeminars = seminarRepo.getSeminarsByDetectedDate(referenceDate);
-
-  if (newlyAdded.length > 0) {
-    const targetSeminars = todayNewSeminars.length > 0 ? todayNewSeminars : newlyAdded;
-    const newlyAddedIds = newlyAdded.map((s) => s.seminarId || getSeminarIdFromUrl(s.url)).filter(Boolean) as string[];
-    return await publishNewSeminarsNotice(
-      targetSeminars,
-      prevMsg ? prevMsg.messageId : null,
-      newlyAddedIds,
-      undefined,
-      referenceDate,
-      targetChannelId,
-    );
-  }
-
-  // 신규 세미나가 없지만 오늘 기존 공지 메시지가 전송되어 있는 경우: 인플레이스 수정
-  if (prevMsg && todayNewSeminars.length > 0) {
-    const prevText = prevMsg.text || '';
-    const highlightedIds = extractHighlightedSeminarIds(prevText);
-    const commentRecords = channelRepo.getChannelCommentsByParentMessageId(prevMsg.messageId, targetChannelId);
-    const comments = commentRecords.map((r) => ({ userName: r.userName, text: r.text }));
-
-    const { text: newText } = buildNewSeminarsNoticeMessage(todayNewSeminars, highlightedIds, comments);
-
-    if (newText.trim() !== prevText.trim()) {
-      logger.info(`[apply_seminar] 오늘 발견된 세미나 누적 공지 정원/정보 수정 (Message ID: ${prevMsg.messageId})`);
-      await channelRepo.editChannelMessage(prevMsg.messageId, newText, { channelId: targetChannelId });
-    }
-    return prevMsg.messageId;
-  }
-
-  return prevMsg ? prevMsg.messageId : null;
-}
-
-async function fetchAndPopulateSeminarInfo(
-  seminarId: string,
-  fallbackDate?: string,
-): Promise<Partial<SeminarListItem>> {
-  try {
-    const detailRes = await fetchSeminarDetail(seminarId);
-    if (!detailRes.success || !detailRes.rawResponse?.seminarDetail) {
-      return {};
-    }
-    const d = detailRes.rawResponse.seminarDetail;
-    const startDt = typeof d.startDt === 'string' ? d.startDt : undefined;
-    const endDt = typeof d.endDt === 'string' ? d.endDt : undefined;
-    const { date, time, nightTime } = parseSeminarDateTime(startDt, endDt);
-    const isAdvancedSurvey = checkIsAdvancedSurvey(d.useDepthSurvey);
-    const isPointExcluded = detailRes.isPointExcluded ?? checkIsPointExcluded(d.intro);
-    const processStateNum = d.processState !== undefined ? Number(d.processState) : undefined;
-    const cancelProcessStateNum = d.cancelProcessState !== undefined ? Number(d.cancelProcessState) : undefined;
-    const seminarCompletedNum =
-      d.seminarCompleted !== undefined
-        ? typeof d.seminarCompleted === 'boolean'
-          ? d.seminarCompleted
-            ? 1
-            : 0
-          : Number(d.seminarCompleted)
-        : undefined;
-
-    let detectedDate = date;
-    if (!detectedDate && typeof d.createDt === 'string') {
-      detectedDate = d.createDt.split(' ')[0] || '';
-    }
-    if (!detectedDate && fallbackDate) {
-      detectedDate = fallbackDate;
-    }
-
-    const hiddenYn = typeof d.hiddenYn === 'string' ? d.hiddenYn : undefined;
-    const diseaseCategoryNm = typeof d.diseaseCategoryNm === 'string' ? d.diseaseCategoryNm : undefined;
-
-    return {
-      name: typeof d.seminarNm === 'string' ? d.seminarNm : '',
-      date,
-      time,
-      nightTime,
-      currentCount: d.applyCnt !== undefined && d.applyCnt !== null ? String(d.applyCnt) : '',
-      totalCount: d.maxPeopleCnt !== undefined && d.maxPeopleCnt !== null ? String(d.maxPeopleCnt) : '',
-      isAdvancedSurvey,
-      isPointExcluded,
-      processState: processStateNum,
-      cancelProcessState: cancelProcessStateNum,
-      seminarCompleted: seminarCompletedNum,
-      hiddenYn,
-      diseaseCategoryNm,
-      detectedDate: detectedDate || '',
-    };
-  } catch (err) {
-    logger.warn(`Failed to fetch seminar detail for ID ${seminarId}:`, err);
-    return {};
-  }
+  return { seminars, newlyAdded, infoChanges, updatedSeminars };
 }
 
 export const LAST_ENRICH_TIMESTAMP_KEY = 'apply_seminar:last_enrich_timestamp';
@@ -757,316 +432,6 @@ export function convertSeminarListItemToRawSeminar(item: SeminarListItem): RawSe
     hiddenYn: item.hiddenYn,
     diseaseCategoryNm: item.diseaseCategoryNm,
   };
-}
-
-export const CHECKED_GAP_SEMINAR_IDS_KEY = 'apply_seminar:checked_gap_ids';
-
-/**
- * mainFuture API 결과 목록(currentSeminars) 내의 세미나 ID 불연속(Gap)을 탐색하여 누락된 비공개 세미나를 발굴합니다.
- * - mainFuture API 목록의 ID들을 오름차순 정렬하여 최소 ID ~ 최대 ID 사이에서 누락된 정수 ID(Gap) 추출
- * - 이미 DB에 저장되어 있거나(storedSeminars) 확인 완료된 캐시(checkedGapIds)는 제외
- * - 누락된 각 ID에 대해 fetchSeminarDetail을 호출하여 상세 정보 조회
- * - 정원(maxPeopleCnt)이 100명 이상인 세미나만 비공개 세미나([비공개])로 등록 및 반환
- * - 정원이 100명 미만이거나 조회 실패/존재하지 않는 ID는 CHECKED_GAP_SEMINAR_IDS_KEY에 기록하여 중복 호출 방지
- */
-export async function discoverMissingGapSeminars(
-  currentSeminars: SeminarListItem[] = [],
-  storedSeminars: SeminarListItem[] = [],
-  referenceDate: string = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' }),
-  options: { maxCheckRange?: number; concurrency?: number; delayMs?: number } = {},
-): Promise<{ gapSeminars: SeminarListItem[]; isAuthExpired: boolean }> {
-  const { maxCheckRange = 50, concurrency = 2, delayMs = process.env.NODE_ENV === 'test' ? 0 : 150 } = options;
-
-  // 1. mainFuture API 결과(currentSeminars)의 숫자 seminarId 목록 추출
-  const mainFutureNumericIds: number[] = [];
-  for (const s of currentSeminars) {
-    const rawId = s.seminarId || getSeminarIdFromUrl(s.url);
-    if (rawId) {
-      const num = parseInt(String(rawId).replace(/[^0-9]/g, ''), 10);
-      if (!Number.isNaN(num) && num > 0) {
-        mainFutureNumericIds.push(num);
-      }
-    }
-  }
-
-  // mainFuture 결과에 2개 이상의 ID가 있어야 그 사이의 불연속(Gap)을 판별할 수 있음
-  if (mainFutureNumericIds.length < 2) {
-    return { gapSeminars: [], isAuthExpired: false };
-  }
-
-  const sortedMainFutureIds = Array.from(new Set(mainFutureNumericIds)).sort((a, b) => a - b);
-  const minMainFutureId = sortedMainFutureIds[0];
-  const maxMainFutureId = sortedMainFutureIds[sortedMainFutureIds.length - 1];
-  const minCheckId = Math.max(minMainFutureId, maxMainFutureId - maxCheckRange);
-
-  const mainFutureIdSet = new Set<number>(sortedMainFutureIds);
-
-  // 2. 이미 DB에 저장된 ID 목록 및 확인 완료된 무효 ID 캐시 조회
-  const storedIdSet = new Set<number>();
-  for (const s of storedSeminars) {
-    const rawId = s.seminarId || getSeminarIdFromUrl(s.url);
-    if (rawId) {
-      const num = parseInt(String(rawId).replace(/[^0-9]/g, ''), 10);
-      if (!Number.isNaN(num) && num > 0) {
-        storedIdSet.add(num);
-      }
-    }
-  }
-
-  const checkedGapIdsList = storage.get<number[]>(CHECKED_GAP_SEMINAR_IDS_KEY, []) || [];
-  const checkedGapSet = new Set<number>(checkedGapIdsList);
-
-  // 3. mainFuture 목록에서 빠져 있고, 아직 DB나 캐시에 없는 누락된 갭 ID 추출 (minCheckId ~ maxMainFutureId 사이)
-  const missingGapIds: number[] = [];
-  for (let id = minCheckId; id < maxMainFutureId; id++) {
-    if (!mainFutureIdSet.has(id) && !storedIdSet.has(id) && !checkedGapSet.has(id)) {
-      missingGapIds.push(id);
-    }
-  }
-
-  if (missingGapIds.length === 0) {
-    return { gapSeminars: [], isAuthExpired: false };
-  }
-
-  let isAuthExpired = false;
-  const discoveredGapSeminars: SeminarListItem[] = [];
-  const newlyCheckedIds: number[] = [];
-  const nowIso = new Date().toISOString();
-
-  // 4. Concurrency 기반으로 누락된 ID 상세 조회
-  for (let i = 0; i < missingGapIds.length; i += concurrency) {
-    if (isAuthExpired) break;
-    const chunk = missingGapIds.slice(i, i + concurrency);
-
-    await Promise.all(
-      chunk.map(async (gapId) => {
-        if (isAuthExpired) return;
-        const sid = String(gapId);
-        try {
-          const detailRes = await fetchSeminarDetail(sid);
-          if (detailRes.isAuthExpired) {
-            isAuthExpired = true;
-            return;
-          }
-
-          if (detailRes.success && detailRes.rawResponse?.seminarDetail) {
-            const d = detailRes.rawResponse.seminarDetail;
-            const maxPeopleCnt =
-              d.maxPeopleCnt !== undefined && d.maxPeopleCnt !== null
-                ? parseInt(String(d.maxPeopleCnt).replace(/[^0-9]/g, ''), 10)
-                : 0;
-
-            // 정원이 100명 이상인 경우에만 비공개 세미나로 등록
-            if (!Number.isNaN(maxPeopleCnt) && maxPeopleCnt >= 100) {
-              const startDt = typeof d.startDt === 'string' ? d.startDt : undefined;
-              const endDt = typeof d.endDt === 'string' ? d.endDt : undefined;
-              const { date, time, nightTime } = parseSeminarDateTime(startDt, endDt);
-              const isAdvancedSurvey = checkIsAdvancedSurvey(d.useDepthSurvey);
-              const isPointExcluded = detailRes.isPointExcluded ?? checkIsPointExcluded(d.intro);
-              const processStateNum = d.processState !== undefined ? Number(d.processState) : undefined;
-              const cancelProcessStateNum =
-                d.cancelProcessState !== undefined ? Number(d.cancelProcessState) : undefined;
-              const seminarCompletedNum =
-                d.seminarCompleted !== undefined
-                  ? typeof d.seminarCompleted === 'boolean'
-                    ? d.seminarCompleted
-                      ? 1
-                      : 0
-                    : Number(d.seminarCompleted)
-                  : undefined;
-              const hiddenYn = typeof d.hiddenYn === 'string' ? d.hiddenYn : 'Y';
-              const diseaseCategoryNm = typeof d.diseaseCategoryNm === 'string' ? d.diseaseCategoryNm : undefined;
-
-              const newItem: SeminarListItem = {
-                seminarId: sid,
-                name: typeof d.seminarNm === 'string' && d.seminarNm ? d.seminarNm : '비공개 세미나',
-                url: `https://m.doctorville.co.kr/cme/seminar/${sid}`,
-                date,
-                time,
-                nightTime,
-                currentCount: d.applyCnt !== undefined && d.applyCnt !== null ? String(d.applyCnt) : '',
-                totalCount: String(maxPeopleCnt),
-                isAdvancedSurvey,
-                isPointExcluded,
-                processState: processStateNum,
-                cancelProcessState: cancelProcessStateNum,
-                seminarCompleted: seminarCompletedNum,
-                hiddenYn,
-                diseaseCategoryNm,
-                detectedDate: referenceDate,
-                detectedAt: nowIso,
-              };
-
-              discoveredGapSeminars.push(newItem);
-              return;
-            }
-          }
-
-          // 유효하지 않거나 정원 100명 미만인 경우 캐싱 목록에 추가
-          newlyCheckedIds.push(gapId);
-        } catch (err) {
-          logger.warn(`discoverMissingGapSeminars: ID ${sid} 조회 실패`, err);
-          newlyCheckedIds.push(gapId);
-        }
-      }),
-    );
-
-    if (i + concurrency < missingGapIds.length && delayMs > 0 && !isAuthExpired) {
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-    }
-  }
-
-  // 5. 새로 검사된 gapId 캐시 갱신 (최근 최대 500개 보관)
-  if (newlyCheckedIds.length > 0) {
-    const updatedCheckedList = Array.from(new Set([...checkedGapIdsList, ...newlyCheckedIds])).slice(-500);
-    storage.set(CHECKED_GAP_SEMINAR_IDS_KEY, updatedCheckedList);
-  }
-
-  return { gapSeminars: discoveredGapSeminars, isAuthExpired };
-}
-
-export async function refreshSeminarPointStatus(
-  _context?: TaskContext['context'],
-  seminars: SeminarListItem[] = [],
-): Promise<{ seminars: SeminarListItem[]; pointChanges: SeminarPointChange[] }> {
-  const searchRes = await searchSeminarPoints(undefined, [], 60);
-  if (!searchRes.success) {
-    console.warn(
-      'refreshSeminarPointStatus: point history query failed, keeping seminar_list status intact:',
-      searchRes.error,
-    );
-    return { seminars, pointChanges: [] };
-  }
-  const parsedPoints = searchRes.points;
-  const checkedAt = new Date().toISOString();
-  const pointChanges: SeminarPointChange[] = [];
-
-  const changedSeminars: SeminarListItem[] = [];
-
-  const updatedSeminars: SeminarListItem[] = [];
-  for (const seminar of seminars) {
-    const id = seminar.seminarId || getSeminarIdFromUrl(seminar.url);
-    let currentItem = { ...seminar };
-    let hasChanged = false;
-
-    // 만약 기존 세미나 메타데이터(이름 또는 일자)가 비어 있는 경우, detail API로 정보 채우기
-    if (id && (!currentItem.name || !currentItem.date)) {
-      const extra = await fetchAndPopulateSeminarInfo(id, currentItem.detectedDate || currentItem.date);
-      currentItem = {
-        ...currentItem,
-        name: extra.name || currentItem.name || '',
-        date: extra.date || currentItem.date || '',
-        time: extra.time || currentItem.time || '',
-        nightTime: extra.nightTime ?? currentItem.nightTime ?? false,
-        currentCount: extra.currentCount || currentItem.currentCount || '',
-        totalCount: extra.totalCount || currentItem.totalCount || '',
-        isAdvancedSurvey: extra.isAdvancedSurvey ?? currentItem.isAdvancedSurvey ?? false,
-        isPointExcluded: extra.isPointExcluded ?? currentItem.isPointExcluded,
-        processState: extra.processState ?? currentItem.processState,
-        cancelProcessState: extra.cancelProcessState ?? currentItem.cancelProcessState,
-        seminarCompleted: extra.seminarCompleted ?? currentItem.seminarCompleted,
-        detectedDate: extra.detectedDate || currentItem.detectedDate || '',
-      };
-      hasChanged = true;
-    }
-
-    if (currentItem.pointPaid === true) {
-      if (hasChanged) {
-        changedSeminars.push(currentItem);
-      }
-      updatedSeminars.push(currentItem);
-      continue;
-    }
-
-    if (id && parsedPoints.has(id)) {
-      const pointResult = parsedPoints.get(id)!;
-      if (pointResult.found && pointResult.type === '적립') {
-        pointChanges.push({
-          seminarId: id,
-          name: currentItem.name,
-          date: currentItem.date,
-          url: id ? `https://m.doctorville.co.kr/cme/seminar/${id}` : currentItem.url,
-          point: pointResult.point,
-          pointText: pointResult.pointText,
-          pointDate: pointResult.date,
-          pointContent: pointResult.content,
-        });
-
-        const updatedItem: SeminarListItem = {
-          ...currentItem,
-          pointPaid: true,
-          point: pointResult.point,
-          pointDate: pointResult.date,
-          pointText: pointResult.pointText,
-          pointContent: pointResult.content,
-          pointCheckedAt: checkedAt,
-        };
-        changedSeminars.push(updatedItem);
-        updatedSeminars.push(updatedItem);
-        continue;
-      }
-    }
-
-    const updatedItem: SeminarListItem = {
-      ...currentItem,
-      pointPaid: false,
-      pointCheckedAt: checkedAt,
-    };
-    changedSeminars.push(updatedItem);
-    updatedSeminars.push(updatedItem);
-  }
-
-  for (const [id, pointResult] of parsedPoints) {
-    if (!pointResult.found || pointResult.type !== '적립') continue;
-
-    const exists = updatedSeminars.some((item) => (item.seminarId || getSeminarIdFromUrl(item.url)) === id);
-    if (!exists) {
-      // 포인트 목록에서만 신규 발견된 경우: seminar detail API로 세미나 메타데이터 채우기
-      const detailInfo = await fetchAndPopulateSeminarInfo(id, pointResult.date);
-
-      const newItem: SeminarListItem = {
-        seminarId: id,
-        name: detailInfo.name || '',
-        url: `https://m.doctorville.co.kr/cme/seminar/${id}`,
-        date: detailInfo.date || '',
-        time: detailInfo.time || '',
-        currentCount: detailInfo.currentCount || '',
-        totalCount: detailInfo.totalCount || '',
-        nightTime: detailInfo.nightTime ?? false,
-        isAdvancedSurvey: detailInfo.isAdvancedSurvey ?? false,
-        isPointExcluded: detailInfo.isPointExcluded ?? false,
-        processState: detailInfo.processState,
-        cancelProcessState: detailInfo.cancelProcessState,
-        seminarCompleted: detailInfo.seminarCompleted,
-        pointPaid: true,
-        point: pointResult.point,
-        pointDate: pointResult.date,
-        pointText: pointResult.pointText,
-        pointContent: pointResult.content,
-        pointCheckedAt: checkedAt,
-        detectedDate: detailInfo.detectedDate || '',
-        detectedAt: checkedAt,
-      };
-      changedSeminars.push(newItem);
-      updatedSeminars.push(newItem);
-
-      pointChanges.push({
-        seminarId: id,
-        name: newItem.name,
-        date: newItem.date,
-        url: newItem.url || `https://m.doctorville.co.kr/cme/seminar/${id}`,
-        point: pointResult.point,
-        pointText: pointResult.pointText,
-        pointDate: pointResult.date,
-        pointContent: pointResult.content,
-      });
-    }
-  }
-
-  if (changedSeminars.length > 0) {
-    seminarRepo.upsertSeminars(changedSeminars);
-  }
-  return { seminars: updatedSeminars, pointChanges };
 }
 
 export type ApplySeminarOptions = {
@@ -1255,14 +620,14 @@ export async function syncSeminars(options: ApplySeminarOptions = {}): Promise<S
       );
     }
 
-    const { seminars, newlyAdded, infoChanges } = refreshStoredSeminarList(
+    const { newlyAdded, infoChanges, updatedSeminars } = refreshStoredSeminarList(
       enrichedSeminars,
       storedSeminars,
       referenceDate,
     );
 
-    if (seminars.length > 0) {
-      seminarRepo.upsertSeminars(seminars);
+    if (updatedSeminars.length > 0) {
+      seminarRepo.upsertSeminars(updatedSeminars);
     }
 
     if (notifyNewSeminarsToChannel) {
@@ -1421,27 +786,46 @@ export async function applySeminars(
   }
 
   try {
-    // 1단계: HTTP API로 세미나 신청 시도 (약관 처리 및 fetchSeminarDetail 재조회 검증 포함)
+    // 1단계: HTTP API로 세미나 신청 시도 (동시 2개 청크로 병렬 신청 및 fetchSeminarDetail 재조회 검증)
     const confirmedAppliedIds = new Set<string>();
-    for (const seminarId of targetSeminarIds) {
-      try {
-        const applyRes = await applySeminarWithTerms(seminarId);
-        if (applyRes.isAuthExpired) {
-          const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
-          await sendTelegram(msg).catch(() => {});
-          return { success: false, message: msg };
-        }
-        if (applyRes.success && isAppliedSeminar(applyRes.processState)) {
-          confirmedAppliedIds.add(seminarId);
-        } else {
-          console.warn(
-            `[apply_seminar] seminarId ${seminarId} API 신청 실패 (상태 미확정), Playwright 폴백 대상에 추가:`,
-            applyRes.errorMessage,
-          );
-        }
-      } catch (err) {
-        console.warn(`[apply_seminar] seminarId ${seminarId} API 신청 중 예외 발생, Playwright 폴백 대상에 추가:`, err);
-      }
+    const concurrency = 2;
+    let isAuthExpired = false;
+
+    for (let i = 0; i < targetSeminarIds.length; i += concurrency) {
+      if (isAuthExpired) break;
+      const chunk = targetSeminarIds.slice(i, i + concurrency);
+
+      await Promise.all(
+        chunk.map(async (seminarId) => {
+          if (isAuthExpired) return;
+          try {
+            const applyRes = await applySeminarWithTerms(seminarId);
+            if (applyRes.isAuthExpired) {
+              isAuthExpired = true;
+              return;
+            }
+            if (applyRes.success && isAppliedSeminar(applyRes.processState)) {
+              confirmedAppliedIds.add(seminarId);
+            } else {
+              console.warn(
+                `[apply_seminar] seminarId ${seminarId} API 신청 실패 (상태 미확정), Playwright 폴백 대상에 추가:`,
+                applyRes.errorMessage,
+              );
+            }
+          } catch (err) {
+            console.warn(
+              `[apply_seminar] seminarId ${seminarId} API 신청 중 예외 발생, Playwright 폴백 대상에 추가:`,
+              err,
+            );
+          }
+        }),
+      );
+    }
+
+    if (isAuthExpired) {
+      const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';
+      await sendTelegram(msg).catch(() => {});
+      return { success: false, message: msg };
     }
 
     // 2단계: API로 신청 완료(isAppliedSeminar=true)가 확정되지 않은 세미나에 대해 Playwright 브라우저 폴백 실행
@@ -1594,6 +978,7 @@ export const applySeminarsTask = {
   description: '세미나 신청 및 목록 저장',
   run: applySeminars,
 };
+
 export const syncSeminarsTask = {
   name: 'sync_seminars',
   description: '세미나 목록 갱신 및 심화 세미나 포인트 확인',

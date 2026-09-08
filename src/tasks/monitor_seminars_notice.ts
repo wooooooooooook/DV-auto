@@ -6,8 +6,13 @@ import {
   publishAndReplaceChannelNotice,
   getRecentChannelMessages,
   updateChannelMessageStatus,
+  DEFAULT_NOTICE_OPTIONS,
+  formatRecentCommentsSection,
 } from '../services/channel_message_repository';
 import { sendToTopicSubscribers, type SubscriptionTopic } from '../services/subscription_service';
+import { formatPrivateSeminarTag, truncateSeminarName } from '../modules/utils';
+
+export { formatPrivateSeminarTag, truncateSeminarName };
 
 export const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
 export const SEMINAR_DETAIL_PC_PAGE = 'https://www.doctorville.co.kr/seminar/seminarDetail';
@@ -50,17 +55,6 @@ export interface MonitoredSeminarItem {
 }
 
 export type SeminarInfo = MonitoredSeminarItem;
-
-/**
- * 비공개 세미나 태그 문자열(예: "[비공개][심혈관질환]")을 생성합니다.
- */
-export function formatPrivateSeminarTag(seminar: { hiddenYn?: string; diseaseCategoryNm?: string }): string {
-  const isPrivate = seminar.hiddenYn === 'Y' || seminar.hiddenYn === 'y';
-  if (!isPrivate) return '';
-  const categoryTag =
-    seminar.diseaseCategoryNm && seminar.diseaseCategoryNm.trim() ? `[${seminar.diseaseCategoryNm.trim()}]` : '';
-  return `[비공개]${categoryTag}`;
-}
 
 /**
  * 설문 마감/시작 시각 문자열(예: "2026-08-28 14:41:57.0")을 파싱하여 timestamp(ms)를 반환합니다.
@@ -528,7 +522,7 @@ export function buildSeminarStatusMessage(
     const statusDisplay = getSeminarStatusDisplay(s);
 
     const timeStr = s.time ? `${s.time} ` : '';
-    const truncatedName = s.name.length > 20 ? `${s.name.slice(0, 20)}...` : s.name;
+    const truncatedName = truncateSeminarName(s.name);
     const privateTag = formatPrivateSeminarTag(s);
     const privatePrefix = privateTag ? `${privateTag} ` : '';
     const advancedSuffix = s.isAdvancedSurvey ? ' [심화설문]' : '';
@@ -560,14 +554,7 @@ export function buildSeminarStatusMessage(
   }
 
   // 이전 댓글 섹션 첨부 (최근 최대 5개)
-  if (comments.length > 0) {
-    text += `\n\n💬 [이전 댓글]\n`;
-    const recentComments = comments.slice(-5);
-    for (const c of recentComments) {
-      const cleanText = c.text.replace(/\n/g, ' ').slice(0, 100);
-      text += `• ${c.userName}: ${cleanText}\n`;
-    }
-  }
+  text += formatRecentCommentsSection(comments);
 
   if (isAllCompleted) {
     text += `\n━━━━━━━━━━━━━━━━━━\n🏁 ${periodName}세미나가 모두 종료되었습니다.`;
@@ -575,13 +562,7 @@ export function buildSeminarStatusMessage(
     text += `\n━━━━━━━━━━━━━━━━━━\n⚠️ ${timeExpiredMessage}`;
   }
 
-  const options: Record<string, unknown> = {
-    link_preview_options: {
-      is_disabled: true,
-    },
-  };
-
-  return { text, options };
+  return { text, options: DEFAULT_NOTICE_OPTIONS };
 }
 
 /**

@@ -580,7 +580,12 @@ export function getChannelCommentsByDate(date?: string, limit = 10): ChannelComm
   }));
 }
 
-export { publishAndReplaceChannelNotice, type PublishAndReplaceOptions } from './channel_notice_service';
+export {
+  publishAndReplaceChannelNotice,
+  type PublishAndReplaceOptions,
+  DEFAULT_NOTICE_OPTIONS,
+  formatRecentCommentsSection,
+} from './channel_notice_service';
 
 /**
  * 텔레그램 공지봇을 통해 공지방 메시지를 수정하고 DB를 갱신합니다.
