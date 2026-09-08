@@ -81,6 +81,7 @@ type StoredNewSeminars = {
     isPointExcluded?: boolean;
     isAdvancedSurvey?: boolean;
     hiddenYn?: string;
+    diseaseCategoryNm?: string;
     date?: string;
     time?: string;
     currentCount?: string;
@@ -407,6 +408,7 @@ function getYesterdayAddedSeminars(yesterdayIso: string): StoredNewSeminars['sem
       isPointExcluded: seminar.isPointExcluded,
       isAdvancedSurvey: seminar.isAdvancedSurvey,
       hiddenYn: seminar.hiddenYn,
+      diseaseCategoryNm: seminar.diseaseCategoryNm,
       date: seminar.date,
       time: seminar.time,
       currentCount: seminar.currentCount,
@@ -552,6 +554,7 @@ type ParsedSeminarItem = {
   isAdvancedSurvey: boolean;
   isPointExcluded?: boolean;
   hiddenYn?: string;
+  diseaseCategoryNm?: string;
 };
 
 function isDateMatching(dateText: string, target: DateTarget): boolean {
@@ -668,6 +671,7 @@ async function collectTodaySeminarMessage(
         const seminarLink = `https://m.doctorville.co.kr/cme/seminar/${seminarId}`;
         const isAdvancedSurvey = checkIsAdvancedSurvey(item.useDepthSurvey);
         const hiddenYn = typeof item.hiddenYn === 'string' ? item.hiddenYn : undefined;
+        const diseaseCategoryNm = typeof item.diseaseCategoryNm === 'string' ? item.diseaseCategoryNm : undefined;
         parsedSeminars.push({
           title: item.seminarNm || '세미나',
           time,
@@ -677,6 +681,7 @@ async function collectTodaySeminarMessage(
           classAttr: nightTime ? 'night_time' : '',
           isAdvancedSurvey,
           hiddenYn,
+          diseaseCategoryNm,
         });
       }
     } else if (page) {
@@ -733,19 +738,23 @@ async function collectTodaySeminarMessage(
         isAdvancedSurvey: stored.isAdvancedSurvey ?? false,
         isPointExcluded: stored.isPointExcluded,
         hiddenYn: stored.hiddenYn,
+        diseaseCategoryNm: stored.diseaseCategoryNm,
       });
       if (sid) parsedIdSet.add(sid);
       if (fullUrl) parsedUrlSet.add(fullUrl);
     }
 
-    // 기존 parsedSeminars의 hiddenYn 필드를 DB 저장 데이터와 매칭하여 보강
+    // 기존 parsedSeminars의 hiddenYn / diseaseCategoryNm 필드를 DB 저장 데이터와 매칭하여 보강
     for (const item of parsedSeminars) {
-      if (item.hiddenYn !== 'Y') {
-        const matched = storedSeminars.find(
-          (s) => (item.seminarId && s.seminarId === item.seminarId) || (s.url && s.url === item.fullUrl),
-        );
-        if (matched && (matched.hiddenYn === 'Y' || matched.hiddenYn === 'y')) {
+      const matched = storedSeminars.find(
+        (s) => (item.seminarId && s.seminarId === item.seminarId) || (s.url && s.url === item.fullUrl),
+      );
+      if (matched) {
+        if (item.hiddenYn !== 'Y' && (matched.hiddenYn === 'Y' || matched.hiddenYn === 'y')) {
           item.hiddenYn = 'Y';
+        }
+        if (!item.diseaseCategoryNm && matched.diseaseCategoryNm) {
+          item.diseaseCategoryNm = matched.diseaseCategoryNm;
         }
       }
     }
@@ -809,7 +818,11 @@ async function collectTodaySeminarMessage(
       const pointExcludedKey = item.seminarId || item.fullUrl;
       const isPointExcluded = pointExcludedCache.get(pointExcludedKey) || false;
       const isPrivate = item.hiddenYn === 'Y' || item.hiddenYn === 'y';
-      const privateSuffix = isPrivate ? ' 🔒<b>[비공개]</b>' : '';
+      const diseaseTag =
+        isPrivate && item.diseaseCategoryNm && item.diseaseCategoryNm.trim()
+          ? `[${escapeHtml(item.diseaseCategoryNm.trim())}]`
+          : '';
+      const privateSuffix = isPrivate ? ` 🔒<b>[비공개]${diseaseTag}</b>` : '';
       const pointExcludedSuffix = isPointExcluded ? ' 🚫<b>[포인트미지급]</b>' : '';
       const advancedSurveySuffix = item.isAdvancedSurvey ? ' 📝<b>[심화설문]</b>' : '';
       const titleDisplay = isPointExcluded ? `<s>${escapeHtml(item.title)}</s>` : escapeHtml(item.title);
@@ -1020,7 +1033,11 @@ function formatTodayLinksBroadcast(input: TodayLinksFormatInput): TodayLinksForm
       .map((item, index) => {
         const link = item.seminarId ? `${SEMINAR_DETAIL_PAGE}${item.seminarId}` : item.url;
         const isPrivate = item.hiddenYn === 'Y' || item.hiddenYn === 'y';
-        const privateSuffix = isPrivate ? ' 🔒<b>[비공개]</b>' : '';
+        const diseaseTag =
+          isPrivate && item.diseaseCategoryNm && item.diseaseCategoryNm.trim()
+            ? `[${escapeHtml(item.diseaseCategoryNm.trim())}]`
+            : '';
+        const privateSuffix = isPrivate ? ` 🔒<b>[비공개]${diseaseTag}</b>` : '';
         const pointExcludedSuffix = item.isPointExcluded ? ' 🚫[포인트미지급]' : '';
         const advancedSurveySuffix = item.isAdvancedSurvey ? ' ✨<b>[심화설문]</b>' : '';
         const dateTimePrefix = item.date || item.time ? `[${item.date}${item.time ? ' ' + item.time : ''}] ` : '';

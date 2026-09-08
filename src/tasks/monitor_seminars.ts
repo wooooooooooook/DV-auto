@@ -68,6 +68,8 @@ export interface MonitoredSeminarItem {
   cancelProcessState?: number;
   seminarCompleted?: number;
   surveyState?: number;
+  hiddenYn?: string;
+  diseaseCategoryNm?: string;
   startNotified?: boolean;
   endNotified?: boolean;
   notifiedClosing20?: boolean;
@@ -75,6 +77,17 @@ export interface MonitoredSeminarItem {
 }
 
 export type SeminarInfo = MonitoredSeminarItem;
+
+/**
+ * 비공개 세미나 태그 문자열(예: "[비공개][심혈관질환]")을 생성합니다.
+ */
+export function formatPrivateSeminarTag(seminar: { hiddenYn?: string; diseaseCategoryNm?: string }): string {
+  const isPrivate = seminar.hiddenYn === 'Y' || seminar.hiddenYn === 'y';
+  if (!isPrivate) return '';
+  const categoryTag =
+    seminar.diseaseCategoryNm && seminar.diseaseCategoryNm.trim() ? `[${seminar.diseaseCategoryNm.trim()}]` : '';
+  return `[비공개]${categoryTag}`;
+}
 
 /**
  * 설문 마감/시작 시각 문자열(예: "2026-08-28 14:41:57.0")을 파싱하여 timestamp(ms)를 반환합니다.
@@ -542,10 +555,12 @@ export function buildSeminarStatusMessage(
     const statusDisplay = getSeminarStatusDisplay(s);
 
     const timeStr = s.time ? `${s.time} ` : '';
-    const truncatedName = s.name.length > 20 ? s.name.slice(0, 20) : s.name;
+    const truncatedName = s.name.length > 20 ? `${s.name.slice(0, 20)}...` : s.name;
+    const privateTag = formatPrivateSeminarTag(s);
+    const privatePrefix = privateTag ? `${privateTag} ` : '';
     const advancedSuffix = s.isAdvancedSurvey ? ' [심화설문]' : '';
     const targetUrl = s.url || (s.seminarId ? `${SEMINAR_DETAIL_PAGE}${s.seminarId}` : '');
-    text += `${statusDisplay.emoji} ${statusDisplay.text} | ${timeStr}${truncatedName}${advancedSuffix}\n${targetUrl}`;
+    text += `${statusDisplay.emoji} ${statusDisplay.text} | ${timeStr}${privatePrefix}${truncatedName}${advancedSuffix}\n${targetUrl}`;
 
     if (s.status === '종료' || statusDisplay.text === '종료') {
       const summaryQuiz = extractQuizSummaryOnly(s.quizResultMessage);
@@ -616,10 +631,12 @@ export function buildSeminarLiveStartMessage(seminar: MonitoredSeminarItem): {
   options: Record<string, unknown>;
 } {
   const timeStr = seminar.time ? `[${seminar.time}] ` : '';
+  const privateTag = formatPrivateSeminarTag(seminar);
+  const privatePrefix = privateTag ? `${privateTag} ` : '';
   const advancedSuffix = seminar.isAdvancedSurvey ? ' [심화설문]' : '';
   const targetUrl = seminar.url || (seminar.seminarId ? `${SEMINAR_DETAIL_PAGE}${seminar.seminarId}` : '');
 
-  const text = `🟢 <b>[세미나 시작]</b>\n\n${timeStr}<b>${seminar.name}</b>${advancedSuffix}\n${targetUrl}`;
+  const text = `🟢 <b>[세미나 시작]</b>\n\n${timeStr}${privatePrefix}<b>${seminar.name}</b>${advancedSuffix}\n${targetUrl}`;
 
   return {
     text,
@@ -648,10 +665,12 @@ export function buildSeminarLiveEndMessage(seminar: MonitoredSeminarItem): {
   options: Record<string, unknown>;
 } {
   const timeStr = seminar.time ? `[${seminar.time}] ` : '';
+  const privateTag = formatPrivateSeminarTag(seminar);
+  const privatePrefix = privateTag ? `${privateTag} ` : '';
   const advancedSuffix = seminar.isAdvancedSurvey ? ' [심화설문]' : '';
   const targetUrl = seminar.url || (seminar.seminarId ? `${SEMINAR_DETAIL_PAGE}${seminar.seminarId}` : '');
 
-  let text = `🔴 <b>[세미나 종료]</b>\n\n${timeStr}<b>${seminar.name}</b>${advancedSuffix}\n${targetUrl}`;
+  let text = `🔴 <b>[세미나 종료]</b>\n\n${timeStr}${privatePrefix}<b>${seminar.name}</b>${advancedSuffix}\n${targetUrl}`;
 
   if (seminar.quizResultMessage) {
     text += `\n\n${seminar.quizResultMessage.trim()}`;
@@ -689,10 +708,12 @@ export function buildSurveyClosingMessage(
   options: Record<string, unknown>;
 } {
   const timeStr = seminar.time ? `[${seminar.time}] ` : '';
+  const privateTag = formatPrivateSeminarTag(seminar);
+  const privatePrefix = privateTag ? `${privateTag} ` : '';
   const advancedSuffix = seminar.isAdvancedSurvey ? ' [심화설문]' : '';
   const targetUrl = seminar.url || (seminar.seminarId ? `${SEMINAR_DETAIL_PAGE}${seminar.seminarId}` : '');
 
-  let text = `⏳ <b>[설문 마감 ${minutesLeft}분 전]</b>\n\n${timeStr}<b>${seminar.name}</b>${advancedSuffix}\n${targetUrl}`;
+  let text = `⏳ <b>[설문 마감 ${minutesLeft}분 전]</b>\n\n${timeStr}${privatePrefix}<b>${seminar.name}</b>${advancedSuffix}\n${targetUrl}`;
 
   if (seminar.quizResultMessage) {
     text += `\n\n${seminar.quizResultMessage.trim()}`;
@@ -1157,6 +1178,8 @@ export async function getTodaysSeminarsFromApi(
         hasSurvey,
         isSurveyPointExcluded: isPointExcluded,
         isAdvancedSurvey,
+        hiddenYn: typeof item.hiddenYn === 'string' ? item.hiddenYn : undefined,
+        diseaseCategoryNm: typeof item.diseaseCategoryNm === 'string' ? item.diseaseCategoryNm : undefined,
         processState: processStateNum,
         cancelProcessState: cancelProcessStateNum,
         seminarCompleted: seminarCompletedNum,
@@ -1211,6 +1234,8 @@ export async function getTodaysSeminarsFromApi(
         hasSurvey: true,
         isSurveyPointExcluded: stored.isPointExcluded ?? false,
         isAdvancedSurvey: stored.isAdvancedSurvey ?? false,
+        hiddenYn: stored.hiddenYn,
+        diseaseCategoryNm: stored.diseaseCategoryNm,
         processState: processStateNum,
         cancelProcessState: cancelProcessStateNum,
         seminarCompleted: seminarCompletedNum,
@@ -1233,6 +1258,8 @@ export async function checkSeminarEndStatusFromApi(seminarId: string): Promise<{
   isPointExcluded: boolean;
   hasEntryHistory: boolean;
   isPrivate?: boolean;
+  hiddenYn?: string;
+  diseaseCategoryNm?: string;
   survey?: SeminarSurveyInfo | null;
   surveyMinutesLeft?: number | null;
   surveyEndDt?: string | null;
@@ -1307,6 +1334,8 @@ export async function checkSeminarEndStatusFromApi(seminarId: string): Promise<{
     isPointExcluded: detailRes.isPointExcluded,
     hasEntryHistory: detailRes.hasEntryHistory ?? false,
     isPrivate,
+    hiddenYn,
+    diseaseCategoryNm: typeof detail?.diseaseCategoryNm === 'string' ? detail.diseaseCategoryNm : undefined,
     survey,
     surveyMinutesLeft,
     surveyEndDt: survey?.endDt || null,
@@ -1943,6 +1972,8 @@ async function monitorSeminars(
         surveyStartDt = detailCheck.surveyStartDt ?? null;
         surveyMinutesLeft = detailCheck.surveyMinutesLeft ?? null;
         info.isSurveyPointExcluded = isPointExcluded;
+        if (detailCheck.hiddenYn) info.hiddenYn = detailCheck.hiddenYn;
+        if (detailCheck.diseaseCategoryNm) info.diseaseCategoryNm = detailCheck.diseaseCategoryNm;
         if (detailCheck.isEnded) {
           initialIsEnded = true;
         }
@@ -2387,6 +2418,8 @@ async function monitorSeminars(
             loopSurveyEndDt = detailCheck.surveyEndDt ?? null;
             loopSurveyStartDt = detailCheck.surveyStartDt ?? null;
             loopSurveyMinutesLeft = detailCheck.surveyMinutesLeft ?? null;
+            if (detailCheck.hiddenYn) info.hiddenYn = detailCheck.hiddenYn;
+            if (detailCheck.diseaseCategoryNm) info.diseaseCategoryNm = detailCheck.diseaseCategoryNm;
             if (detailCheck.isEnded) {
               initialIsEnded = true;
             }

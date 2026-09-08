@@ -173,6 +173,7 @@ describe('비공개 세미나 예외처리 및 today_links 비공개 플래그 �
         totalCount: '100',
         nightTime: false,
         hiddenYn: 'Y',
+        diseaseCategoryNm: '심혈관질환',
         processState: seminarApi.ProcessState.PROCESS_APPLY,
         isPointExcluded: false,
         isAdvancedSurvey: false,
@@ -181,11 +182,11 @@ describe('비공개 세미나 예외처리 및 today_links 비공개 플래그 �
 
     const res = await collectTodaySeminarMessage(undefined, '2026-09-08');
     expect(res.message).toContain('개원의를 위한 고혈압 처방 팁');
-    expect(res.message).toContain('🔒<b>[비공개]</b>');
+    expect(res.message).toContain('🔒<b>[비공개][심혈관질환]</b>');
     expect(res.lunchSeminarIds).toContain('5653');
   });
 
-  it('6. today_links: formatTodayLinksBroadcast에서 어제 추가된 비공개 신규 세미나에 🔒[비공개] 플래그가 붙어야 한다', () => {
+  it('6. today_links: formatTodayLinksBroadcast에서 어제 추가된 비공개 신규 세미나에 🔒[비공개][질환분류명] 플래그가 붙어야 한다', () => {
     const formatted = formatTodayLinksBroadcast({
       quizInfo: null,
       seminarMessage: null,
@@ -199,6 +200,7 @@ describe('비공개 세미나 예외처리 및 today_links 비공개 플래그 �
           currentCount: '0',
           totalCount: '500',
           hiddenYn: 'Y',
+          diseaseCategoryNm: '심혈관질환',
           isPointExcluded: false,
           isAdvancedSurvey: false,
         },
@@ -207,6 +209,6 @@ describe('비공개 세미나 예외처리 및 today_links 비공개 플래그 �
     });
 
     expect(formatted.message).toContain('비공개 신규 세미나');
-    expect(formatted.message).toContain('🔒<b>[비공개]</b>');
+    expect(formatted.message).toContain('🔒<b>[비공개][심혈관질환]</b>');
   });
 });

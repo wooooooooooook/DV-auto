@@ -104,6 +104,30 @@ describe('세미나 모니터링 통합 메시지 (삭제/재발송) 단위 테�
     assert.ok(text.includes('🏁 점심세미나가 모두 종료되었습니다.'));
   });
 
+  it('buildSeminarStatusMessage: 세미나 이름 20자 초과 시 줄임표(...) 및 [비공개][질환분류명] 태그 표시 검증', () => {
+    const longName = '개원의를 위한 고혈압 처방 팁: 인다파미드 기반 3제 복합제로 강압효과 극대화하기';
+    const seminars: MonitoredSeminarItem[] = [
+      {
+        seminarId: '5653',
+        name: longName,
+        time: '13:00~14:00',
+        url: 'https://m.doctorville.co.kr/cme/seminar/5653',
+        status: '입장가능',
+        hiddenYn: 'Y',
+        diseaseCategoryNm: '심혈관질환',
+        isAdvancedSurvey: true,
+      },
+    ];
+
+    const { text } = buildSeminarStatusMessage('점심', seminars, false);
+    // 20자 slice + '...' 확인
+    const expectedTruncated = `${longName.slice(0, 20)}...`;
+    assert.ok(text.includes(expectedTruncated));
+    // [비공개][심혈관질환] 태그 확인
+    assert.ok(text.includes('[비공개][심혈관질환]'));
+    assert.ok(text.includes(`🟢 입장가능 | 13:00~14:00 [비공개][심혈관질환] ${expectedTruncated} [심화설문]`));
+  });
+
   it('publishSeminarStatusNotice: 새 메시지 발송 및 이전 메시지 삭제 동작 검증', async () => {
     const deletedMessageIds: number[] = [];
     const sentMessages: string[] = [];

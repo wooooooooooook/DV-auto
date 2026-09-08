@@ -46,24 +46,24 @@ describe('buildSeminarMonitorStatusMessage 세미나 모니터 현황 메시지 
     // 2. ** 볼드 마크다운이 포함되지 않았는지 검증
     assert(!message.includes('**'), '메시지에 ** 볼드 마크다운이 포함되지 않아야 함');
 
-    // 3. 5580 세미나 검증: 🟢 입장가능 | 18:00~19:00 [재] ENVLO WEB SYMPOS [심화설문]
+    // 3. 5580 세미나 검증: 🟢 입장가능 | 18:00~19:00 [재] ENVLO WEB SYMPOS... [심화설문]
     assert(
-      message.includes('🟢 입장가능 | 18:00~19:00 [재] ENVLO WEB SYMPOS [심화설문]'),
-      '5580 세미나의 시작종료시각, 20자 트렁케이션, 심화설문 태그가 올바르게 포맷되어야 함',
+      message.includes('🟢 입장가능 | 18:00~19:00 [재] ENVLO WEB SYMPOS... [심화설문]'),
+      '5580 세미나의 시작종료시각, 20자 트렁케이션(...), 심화설문 태그가 올바르게 포맷되어야 함',
     );
     assert(message.includes('https://m.doctorville.co.kr/cme/seminar/5580'), '5580 URL이 포함되어야 함');
 
-    // 4. 5579 세미나 검증: 🟢 입장가능 | 18:30~19:30 [재] Redefining P-CAB [심화설문]
+    // 4. 5579 세미나 검증: 🟢 입장가능 | 18:30~19:30 [재] Redefining P-CAB... [심화설문]
     assert(
-      message.includes('🟢 입장가능 | 18:30~19:30 [재] Redefining P-CAB [심화설문]'),
-      '5579 세미나의 시작종료시각, 20자 트렁케이션, 심화설문 태그가 올바르게 포맷되어야 함',
+      message.includes('🟢 입장가능 | 18:30~19:30 [재] Redefining P-CAB... [심화설문]'),
+      '5579 세미나의 시작종료시각, 20자 트렁케이션(...), 심화설문 태그가 올바르게 포맷되어야 함',
     );
     assert(message.includes('https://m.doctorville.co.kr/cme/seminar/5579'), '5579 URL이 포함되어야 함');
 
-    // 5. 5600 세미나 검증: ⏳ 대기 | 19:00~20:00 DIVE (Digital Innova
+    // 5. 5600 세미나 검증: ⏳ 대기 | 19:00~20:00 DIVE (Digital Innova...
     assert(
-      message.includes('⏳ 대기 | 19:00~20:00 DIVE (Digital Innova\nhttps://m.doctorville.co.kr/cme/seminar/5600'),
-      '5600 세미나의 대기 상태, 시작종료시각, 20자 트렁케이션이 올바르게 포맷되어야 함',
+      message.includes('⏳ 대기 | 19:00~20:00 DIVE (Digital Innova...\nhttps://m.doctorville.co.kr/cme/seminar/5600'),
+      '5600 세미나의 대기 상태, 시작종료시각, 20자 트렁케이션(...)이 올바르게 포맷되어야 함',
     );
   });
 
