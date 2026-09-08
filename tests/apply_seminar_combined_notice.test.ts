@@ -6,8 +6,8 @@ import {
   publishNewSeminarsNotice,
   extractHighlightedSeminarIds,
   syncNewSeminarsNotice,
-  type SeminarListItem,
-} from '../src/tasks/apply_seminar';
+} from '../src/tasks/apply_seminar_notice';
+import type { SeminarListItem } from '../src/services/seminar_repository';
 import * as utilsModule from '../src/modules/utils';
 import * as channelRepoModule from '../src/services/channel_message_repository';
 import * as seminarRepo from '../src/services/seminar_repository';

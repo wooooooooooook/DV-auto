@@ -15,7 +15,7 @@ import {
 } from '../src/tasks/seminar_detail';
 import { ProcessState, SurveyState } from '../src/modules/seminar_api';
 import * as seminarRepo from '../src/services/seminar_repository';
-import type { SeminarListItem } from '../src/tasks/apply_seminar';
+import type { SeminarListItem } from '../src/services/seminar_repository';
 import * as httpClient from '../src/modules/http_client';
 import { createSeminarDetailHandler } from '../src/services/telegram';
 import type { Context } from 'telegraf';

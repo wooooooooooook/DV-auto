@@ -7,7 +7,7 @@ import {
   parsePrevNoticeSeminars,
   findPrevSeminarInfo,
   type MonitoredSeminarItem,
-} from '../src/tasks/monitor_seminars';
+} from '../src/tasks/monitor_seminars_notice';
 import * as utilsModule from '../src/modules/utils';
 import * as channelRepoModule from '../src/services/channel_message_repository';
 

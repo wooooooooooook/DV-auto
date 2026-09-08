@@ -1,5 +1,6 @@
 import { httpGet, sendDoctorVilleRequest, type HttpResponse } from './http_client';
-import type { RawSeminarData, SeminarListItem } from '../tasks/apply_seminar';
+import type { RawSeminarData } from '../tasks/apply_seminar';
+import type { SeminarListItem } from '../services/seminar_repository';
 import { isAuthExpiredHtml } from './html_parser';
 
 export const MAIN_FUTURE_SEMINARS_API_URL = 'https://m-api.doctorville.co.kr/api/mw/seminars/mainFuture';

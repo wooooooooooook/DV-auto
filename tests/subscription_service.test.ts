@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as storage from '../src/services/storage';
-import type { SeminarListItem } from '../src/tasks/apply_seminar';
+import type { SeminarListItem } from '../src/services/seminar_repository';
 import {
   getSubscription,
   updateSubscription,
@@ -517,6 +517,9 @@ describe('subscription_service', () => {
         seminarId: '2001',
         name: '일반 세미나',
         url: 'https://m.doctorville.co.kr/cme/seminar/2001',
+        time: '12:00',
+        nightTime: false,
+        isAdvancedSurvey: false,
         totalCount: '5000',
         currentCount: '0',
         isPointExcluded: false,
@@ -525,6 +528,9 @@ describe('subscription_service', () => {
         seminarId: '2002',
         name: '포인트 미지급 세미나',
         url: 'https://m.doctorville.co.kr/cme/seminar/2002',
+        time: '12:00',
+        nightTime: false,
+        isAdvancedSurvey: false,
         totalCount: '5000',
         currentCount: '0',
         isPointExcluded: true,

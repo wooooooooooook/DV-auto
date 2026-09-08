@@ -3,7 +3,7 @@ import { getBot } from './bot_instance';
 import { splitTelegramMessage, TELEGRAM_SAFE_MESSAGE_LENGTH } from '../modules/telegram_splitter';
 import { sleep } from '../modules/utils';
 import * as logger from './logger';
-import type { SeminarListItem } from '../tasks/apply_seminar';
+import type { SeminarListItem } from './seminar_repository';
 
 export type SubscriptionTopic =
   | 'today_links'

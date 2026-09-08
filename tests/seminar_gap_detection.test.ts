@@ -7,14 +7,10 @@ import * as utilsModule from '../src/modules/utils';
 import * as checkPointModule from '../src/tasks/check_seminar_point';
 import * as channelRepo from '../src/services/channel_message_repository';
 import * as subscriptionService from '../src/services/subscription_service';
-import {
-  discoverMissingGapSeminars,
-  buildNewSeminarsNoticeMessage,
-  syncSeminars,
-  CHECKED_GAP_SEMINAR_IDS_KEY,
-  LAST_ENRICH_TIMESTAMP_KEY,
-  type SeminarListItem,
-} from '../src/tasks/apply_seminar';
+import { discoverMissingGapSeminars, CHECKED_GAP_SEMINAR_IDS_KEY } from '../src/services/seminar_gap_service';
+import { buildNewSeminarsNoticeMessage } from '../src/tasks/apply_seminar_notice';
+import { syncSeminars, LAST_ENRICH_TIMESTAMP_KEY } from '../src/tasks/apply_seminar';
+import type { SeminarListItem } from '../src/services/seminar_repository';
 
 describe('세미나 ID 불연속(Gap) 탐색 및 비공개 세미나 발굴/알림 테스트', () => {
   beforeEach(() => {

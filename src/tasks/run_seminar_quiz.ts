@@ -1,7 +1,7 @@
 import type { BrowserContext, Page } from 'playwright';
 import type { PlaywrightRunArgs, TaskContext, TaskResult } from '../types';
 import { ensureLoggedIn, safeGoto } from '../modules/utils';
-import { extractQuizSummaryOnly, setSeminarQuizAnswer } from './monitor_seminars';
+import { extractQuizSummaryOnly, setSeminarQuizAnswer } from './monitor_seminars_notice';
 import { processSeminarQuiz } from './seminar_quiz';
 
 /**

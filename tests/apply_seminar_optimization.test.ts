@@ -1,10 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import {
-  refreshStoredSeminarList,
-  isSeminarRecordChanged,
-  applySeminars,
-  type SeminarListItem,
-} from '../src/tasks/apply_seminar';
+import { refreshStoredSeminarList, isSeminarRecordChanged, applySeminars } from '../src/tasks/apply_seminar';
+import type { SeminarListItem } from '../src/services/seminar_repository';
 import * as seminarApi from '../src/modules/seminar_api';
 import * as seminarRepo from '../src/services/seminar_repository';
 

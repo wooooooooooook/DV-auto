@@ -1,10 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import {
-  tryFetchSeminarQuizHttpFast,
-  handleSeminarEndAndQuiz,
-  buildSeminarLiveEndMessage,
-  type MonitoredSeminarItem,
-} from '../src/tasks/monitor_seminars';
+import { tryFetchSeminarQuizHttpFast, handleSeminarEndAndQuiz } from '../src/tasks/monitor_seminars_quiz';
+import { buildSeminarLiveEndMessage, type MonitoredSeminarItem } from '../src/tasks/monitor_seminars_notice';
 import * as seminarSurveyApi from '../src/modules/seminar_survey_api';
 import * as seminarQuiz from '../src/tasks/seminar_quiz';
 

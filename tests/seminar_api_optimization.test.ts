@@ -1,14 +1,9 @@
 import assert from 'node:assert';
 import { describe, it, vi, beforeEach } from 'vitest';
 import type { Page, BrowserContext } from 'playwright';
-import {
-  enrichSeminarsWithDetail,
-  shouldRunEnrich,
-  recordEnrichTime,
-  syncSeminars,
-  LAST_ENRICH_TIMESTAMP_KEY,
-  type SeminarListItem,
-} from '../src/tasks/apply_seminar';
+import { enrichSeminarsWithDetail } from '../src/services/seminar_sync_service';
+import { shouldRunEnrich, recordEnrichTime, syncSeminars, LAST_ENRICH_TIMESTAMP_KEY } from '../src/tasks/apply_seminar';
+import type { SeminarListItem } from '../src/services/seminar_repository';
 import { monitorSeminars } from '../src/tasks/monitor_seminars';
 import * as seminarApiModule from '../src/modules/seminar_api';
 import * as utilsModule from '../src/modules/utils';

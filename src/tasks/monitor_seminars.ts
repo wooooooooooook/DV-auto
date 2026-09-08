@@ -22,11 +22,6 @@ import {
 } from '../services/channel_message_repository';
 import * as logger from '../services/logger';
 
-// 분리된 하위 모듈 전체 re-export (하위 호환성 100% 보장)
-export * from './monitor_seminars_notice';
-export * from './monitor_seminars_entry';
-export * from './monitor_seminars_quiz';
-
 import { tryFetchSeminarQuizHttpFast, handleSeminarEndAndQuiz } from './monitor_seminars_quiz';
 
 import {

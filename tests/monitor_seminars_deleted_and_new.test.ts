@@ -3,12 +3,8 @@ import * as storage from '../src/services/storage';
 import * as seminarRepo from '../src/services/seminar_repository';
 import * as seminarApiModule from '../src/modules/seminar_api';
 import * as utilsModule from '../src/modules/utils';
-import {
-  monitorSeminars,
-  buildSeminarStatusMessage,
-  getTodaysSeminarsFromApi,
-  checkSeminarEndStatusFromApi,
-} from '../src/tasks/monitor_seminars';
+import { monitorSeminars, getTodaysSeminarsFromApi, checkSeminarEndStatusFromApi } from '../src/tasks/monitor_seminars';
+import { buildSeminarStatusMessage } from '../src/tasks/monitor_seminars_notice';
 import type { BrowserContext, Page } from 'playwright';
 
 describe('monitor_seminars 삭제 세미나, 신규 세미나 및 종료 안내 개선 테스트', () => {
@@ -20,6 +16,7 @@ describe('monitor_seminars 삭제 세미나, 신규 세미나 및 종료 안내 
     vi.spyOn(seminarApiModule, 'attendSeminarApi').mockResolvedValue({
       success: true,
       hasEntryHistory: true,
+      isAuthExpired: false,
     });
   });
 
@@ -291,8 +288,6 @@ describe('monitor_seminars 삭제 세미나, 신규 세미나 및 종료 안내 
     vi.spyOn(utilsModule, 'sendNotificationToChannel').mockResolvedValue(1003);
     const applySeminarSpy = vi.spyOn(seminarApiModule, 'applySeminarWithTerms').mockResolvedValue({
       success: true,
-      message: '신청 완료',
-      seminarId: '303',
       isAuthExpired: false,
     });
 

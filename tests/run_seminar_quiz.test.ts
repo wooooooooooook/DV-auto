@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as seminarQuizModule from '../src/tasks/seminar_quiz';
-import * as monitorSeminarsModule from '../src/tasks/monitor_seminars';
+import * as monitorSeminarsModule from '../src/tasks/monitor_seminars_notice';
 import * as utilsModule from '../src/modules/utils';
 import { run } from '../src/tasks/run_seminar_quiz';
 import type { Page, BrowserContext } from 'playwright';
@@ -34,7 +34,7 @@ describe('run_seminar_quiz 태스크 단위 테스트', () => {
     };
 
     vi.spyOn(utilsModule, 'ensureLoggedIn').mockResolvedValue(undefined);
-    vi.spyOn(utilsModule, 'safeGoto').mockResolvedValue(undefined);
+    vi.spyOn(utilsModule, 'safeGoto').mockResolvedValue(null);
   });
 
   afterEach(() => {

@@ -2,8 +2,9 @@ import assert from 'node:assert';
 import { describe, it, vi, beforeEach } from 'vitest';
 import * as utilsModule from '../src/modules/utils';
 import * as channelRepoModule from '../src/services/channel_message_repository';
-import { publishSeminarStatusNotice, type MonitoredSeminarItem } from '../src/tasks/monitor_seminars';
-import { publishNewSeminarsNotice, type SeminarListItem } from '../src/tasks/apply_seminar';
+import { publishSeminarStatusNotice, type MonitoredSeminarItem } from '../src/tasks/monitor_seminars_notice';
+import { publishNewSeminarsNotice } from '../src/tasks/apply_seminar_notice';
+import type { SeminarListItem } from '../src/services/seminar_repository';
 import { extractParentMessageId } from '../src/services/telegram';
 import { getDatabase } from '../src/services/storage';
 

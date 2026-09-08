@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as seminarApiModule from '../src/modules/seminar_api';
-import * as monitorModule from '../src/tasks/monitor_seminars';
+import * as monitorModule from '../src/tasks/monitor_seminars_entry';
 import * as utilsModule from '../src/modules/utils';
 
 describe('monitor_seminars - checkAndPerformAutoEnter', () => {

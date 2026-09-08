@@ -2,15 +2,13 @@ import assert from 'node:assert';
 import {
   getSeminarInfoChanges,
   formatSeminarChangeNotification,
-  refreshSeminarPointStatus,
   buildNewSeminarsNoticeMessage,
-  applySeminars as runApplySeminar,
-  syncSeminars,
-  syncSeminarsTask,
-  type SeminarListItem,
   type SeminarInfoChange,
   type SeminarPointChange,
-} from '../src/tasks/apply_seminar';
+} from '../src/tasks/apply_seminar_notice';
+import { refreshSeminarPointStatus } from '../src/services/seminar_point_sync';
+import { applySeminars as runApplySeminar, syncSeminars, syncSeminarsTask } from '../src/tasks/apply_seminar';
+import type { SeminarListItem } from '../src/services/seminar_repository';
 import { buildSingleNewSeminarMessage } from '../src/services/subscription_service';
 import * as runner from '../src/core/runner';
 import * as utilsModule from '../src/modules/utils';

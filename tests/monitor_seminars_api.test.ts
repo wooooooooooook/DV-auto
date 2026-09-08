@@ -1,11 +1,7 @@
 import assert from 'node:assert';
 import type { BrowserContext, Page } from 'playwright';
-import {
-  getTodaysSeminarsFromApi,
-  checkSeminarEndStatusFromApi,
-  monitorSeminars,
-  isSeminarStartedByTime,
-} from '../src/tasks/monitor_seminars';
+import { getTodaysSeminarsFromApi, checkSeminarEndStatusFromApi, monitorSeminars } from '../src/tasks/monitor_seminars';
+import { isSeminarStartedByTime } from '../src/tasks/monitor_seminars_notice';
 import * as seminarApiModule from '../src/modules/seminar_api';
 import * as utilsModule from '../src/modules/utils';
 import * as seminarQuizModule from '../src/tasks/seminar_quiz';

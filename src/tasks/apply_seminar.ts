@@ -21,47 +21,16 @@ import {
 } from '../services/subscription_service';
 import { checkAndTriggerSeminarMonitors } from '../services/seminar_monitor_trigger';
 
-// 모듈화된 공지, 갭 탐색, 포인트 동기화 로직 import 및 re-export (하위 호환성 유지)
 import {
-  truncateSeminarName,
-  buildNewSeminarsNoticeMessage,
-  publishNewSeminarsNotice,
-  extractHighlightedSeminarIds,
   syncNewSeminarsNotice,
   getSeminarInfoChanges,
   formatSeminarChangeNotification,
-  type SeminarFieldChange,
   type SeminarInfoChange,
-  type SeminarPointChange,
 } from './apply_seminar_notice';
-export {
-  truncateSeminarName,
-  buildNewSeminarsNoticeMessage,
-  publishNewSeminarsNotice,
-  extractHighlightedSeminarIds,
-  syncNewSeminarsNotice,
-  getSeminarInfoChanges,
-  formatSeminarChangeNotification,
-  type SeminarFieldChange,
-  type SeminarInfoChange,
-  type SeminarPointChange,
-};
-
-import { discoverMissingGapSeminars, CHECKED_GAP_SEMINAR_IDS_KEY } from '../services/seminar_gap_service';
-export { discoverMissingGapSeminars, CHECKED_GAP_SEMINAR_IDS_KEY };
-
-import { refreshSeminarPointStatus, fetchAndPopulateSeminarInfo } from '../services/seminar_point_sync';
-export { refreshSeminarPointStatus, fetchAndPopulateSeminarInfo };
-
-export type { SeminarListItem, SeminarPointStatus } from '../services/seminar_repository';
+import { discoverMissingGapSeminars } from '../services/seminar_gap_service';
+import { refreshSeminarPointStatus } from '../services/seminar_point_sync';
 import type { SeminarListItem } from '../services/seminar_repository';
-import {
-  enrichSeminarsWithDetail,
-  refreshPastUncompletedSeminars,
-  isPastSeminar,
-  isUncompletedSeminar,
-} from '../services/seminar_sync_service';
-export { enrichSeminarsWithDetail, refreshPastUncompletedSeminars, isPastSeminar, isUncompletedSeminar };
+import { enrichSeminarsWithDetail, isPastSeminar, isUncompletedSeminar } from '../services/seminar_sync_service';
 
 export const mergeSeminar = seminarRepo.mergeSeminarRecord;
 

@@ -22,7 +22,7 @@ import {
 } from './channel_message_repository';
 import { sendOrUpdateTodayLinksNotification } from './broadcast_today_links';
 import { extractSeminarIds } from '../tasks/seminar_detail';
-import { syncChannelSeminarStatusOnQuizRegister, setSeminarQuizAnswer } from '../tasks/monitor_seminars';
+import { syncChannelSeminarStatusOnQuizRegister, setSeminarQuizAnswer } from '../tasks/monitor_seminars_notice';
 import {
   loginDocple,
   getDocpleActiveQuizzes,

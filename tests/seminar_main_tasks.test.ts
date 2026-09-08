@@ -1,5 +1,7 @@
 import type { PlaywrightRunArgs } from '../src/types';
-import { refreshSeminarPointStatus, mergeSeminar, type SeminarListItem } from '../src/tasks/apply_seminar';
+import { refreshSeminarPointStatus } from '../src/services/seminar_point_sync';
+import { mergeSeminar } from '../src/tasks/apply_seminar';
+import type { SeminarListItem } from '../src/services/seminar_repository';
 import * as checkSeminarPointModule from '../src/tasks/check_seminar_point';
 import * as seminarApiModule from '../src/modules/seminar_api';
 import * as storage from '../src/services/storage';

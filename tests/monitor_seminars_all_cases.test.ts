@@ -289,7 +289,7 @@ describe('monitor_seminars_all_cases (앱 재시작 및 공지방 상태 기반 
   });
 
   it('resolveSeminarEndedAt 단위 동작 검증', async () => {
-    const { resolveSeminarEndedAt, getSurveyRemainingMinutes } = await import('../src/tasks/monitor_seminars');
+    const { resolveSeminarEndedAt, getSurveyRemainingMinutes } = await import('../src/tasks/monitor_seminars_notice');
 
     const now = Date.now();
 

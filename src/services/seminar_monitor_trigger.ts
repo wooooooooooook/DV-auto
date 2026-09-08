@@ -1,5 +1,5 @@
 import { ProcessState } from '../modules/seminar_api';
-import { isSeminarStartedByTime } from '../tasks/monitor_seminars';
+import { isSeminarStartedByTime } from '../tasks/monitor_seminars_notice';
 import type { SeminarListItem } from './seminar_repository';
 import type { RawSeminarData } from '../tasks/apply_seminar';
 import { isSeminarNoticeCompleted } from './channel_message_repository';

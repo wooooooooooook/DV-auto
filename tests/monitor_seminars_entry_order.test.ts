@@ -344,7 +344,7 @@ describe('monitor_seminars 공지채널 메시지 선발송 및 Playwright 입�
   });
 
   it('performAutoEnterForActiveSeminars 헬퍼: autoResume 이력 스킵 및 retry 동작 검증', async () => {
-    const { performAutoEnterForActiveSeminars } = await import('../src/tasks/monitor_seminars');
+    const { performAutoEnterForActiveSeminars } = await import('../src/tasks/monitor_seminars_entry');
     const seminarApi = await import('../src/modules/seminar_api');
 
     let apiCallCount = 0;

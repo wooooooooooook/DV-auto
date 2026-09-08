@@ -7,7 +7,7 @@ import {
   ProcessState,
   SurveyState,
 } from '../modules/seminar_api';
-import { type SeminarListItem } from './apply_seminar';
+import { type SeminarListItem } from '../services/seminar_repository';
 import * as seminarRepo from '../services/seminar_repository';
 import { getSeminarIdFromUrl } from '../modules/utils';
 

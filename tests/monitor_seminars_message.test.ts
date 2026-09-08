@@ -4,7 +4,7 @@ import {
   buildSeminarMonitorStatusMessage,
   getSeminarStatusDisplay,
   type SeminarInfo,
-} from '../src/tasks/monitor_seminars';
+} from '../src/tasks/monitor_seminars_notice';
 
 describe('buildSeminarMonitorStatusMessage 세미나 모니터 현황 메시지 포맷팅 테스트', () => {
   it('** 볼드 제거, 시작종료시각 제목 앞 표시, 20글자 트렁케이션, 심화설문 접미사 검증', () => {
@@ -126,7 +126,8 @@ describe('buildSeminarMonitorStatusMessage 세미나 모니터 현황 메시지 
   });
 
   it('buildSeminarLiveStartMessage 및 buildSeminarLiveEndMessage 개별 알림 포맷 검증', async () => {
-    const { buildSeminarLiveStartMessage, buildSeminarLiveEndMessage } = await import('../src/tasks/monitor_seminars');
+    const { buildSeminarLiveStartMessage, buildSeminarLiveEndMessage } =
+      await import('../src/tasks/monitor_seminars_notice');
 
     // 1. 시작 알림
     const startMsg = buildSeminarLiveStartMessage({
@@ -169,7 +170,7 @@ describe('buildSeminarMonitorStatusMessage 세미나 모니터 현황 메시지 
 
   it('종료된 세미나의 설문 잔여 시간(약 N분 남음) 포맷팅 및 설문 없는 세미나 검증', async () => {
     const { buildSeminarMonitorStatusMessage, getSurveyRemainingMinutes } =
-      await import('../src/tasks/monitor_seminars');
+      await import('../src/tasks/monitor_seminars_notice');
 
     const baseTime = new Date('2026-08-27T13:00:00+09:00').getTime(); // 종료 시점 (13:00)
 
@@ -222,6 +223,7 @@ describe('buildSeminarMonitorStatusMessage 세미나 모니터 현황 메시지 
       time: '12:00~13:00',
       quizResultMessage: '정답 : 2번',
       hasSurvey: true,
+      endedAt: undefined,
     };
     const msgNoEndedAt = buildSeminarMonitorStatusMessage('점심', [seminarNoEndedAt], baseTime);
     assert(msgNoEndedAt.includes('정답 : 2번'));
@@ -237,7 +239,7 @@ describe('buildSeminarMonitorStatusMessage 세미나 모니터 현황 메시지 
   });
 
   it('buildSurveyClosingMessage 설문 마감 20분전 / 10분전 알림 포맷 검증', async () => {
-    const { buildSurveyClosingMessage } = await import('../src/tasks/monitor_seminars');
+    const { buildSurveyClosingMessage } = await import('../src/tasks/monitor_seminars_notice');
 
     const seminar = {
       seminarId: '7788',
@@ -271,7 +273,7 @@ describe('buildSeminarMonitorStatusMessage 세미나 모니터 현황 메시지 
       buildSeminarLiveEndMessage,
       buildSurveyClosingMessage,
       extractQuizSummaryOnly,
-    } = await import('../src/tasks/monitor_seminars');
+    } = await import('../src/tasks/monitor_seminars_notice');
 
     const multiLineQuizMessage = `[퀴즈] 정답 123\n\n[퀴즈]\n✅ Q1: 1차 치료제는 무엇인가요?\n   → 메트포르민 (1번)\n✅ Q2: 병용 요법의 장점은?\n   → 혈당 강하 (2번)\n✅ Q3: 투약 간격은?\n   → 1일 1회 (3번)`;
 
@@ -318,7 +320,8 @@ describe('buildSeminarMonitorStatusMessage 세미나 모니터 현황 메시지 
   });
 
   it('세미나 목록이 시작시간 순(이른 시간 우선)으로 정렬되어 메시지가 생성되는지 검증', async () => {
-    const { buildSeminarMonitorStatusMessage, sortSeminarsByStartTime } = await import('../src/tasks/monitor_seminars');
+    const { buildSeminarMonitorStatusMessage, sortSeminarsByStartTime } =
+      await import('../src/tasks/monitor_seminars_notice');
 
     const unsortedSeminars: SeminarInfo[] = [
       {
@@ -363,7 +366,7 @@ describe('buildSeminarMonitorStatusMessage 세미나 모니터 현황 메시지 
   });
 
   it('startDt 없이 time 문자열만 있는 경우 및 시작시간이 같을 때 seminarId 순 정렬 검증', async () => {
-    const { sortSeminarsByStartTime } = await import('../src/tasks/monitor_seminars');
+    const { sortSeminarsByStartTime } = await import('../src/tasks/monitor_seminars_notice');
 
     const sameTimeSeminars: SeminarInfo[] = [
       {

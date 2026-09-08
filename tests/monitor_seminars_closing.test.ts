@@ -7,7 +7,7 @@ import {
   getSurveyRemainingMinutes,
   sendSurveyClosingNotice,
   type MonitoredSeminarItem,
-} from '../src/tasks/monitor_seminars';
+} from '../src/tasks/monitor_seminars_notice';
 
 describe('monitor_seminars_closing (설문 가능 시간 및 마감 알림)', () => {
   beforeEach(() => {

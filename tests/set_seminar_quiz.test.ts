@@ -7,7 +7,7 @@ import {
   activeMonitors,
   setSeminarQuizAnswer,
   type MonitoredSeminarItem,
-} from '../src/tasks/monitor_seminars';
+} from '../src/tasks/monitor_seminars_notice';
 
 describe('formatQuizAnswerInput', () => {
   it('숫자 형태의 정답을 "퀴즈 정답 <숫자>"로 포맷팅', () => {

@@ -2,7 +2,8 @@ import assert from 'node:assert';
 import * as seminarApiModule from '../src/modules/seminar_api';
 import * as checkSeminarPointModule from '../src/tasks/check_seminar_point';
 import * as checkAdvancedSeminarsModule from '../src/tasks/check_advanced_seminars';
-import { refreshSeminarPointStatus, type SeminarListItem } from '../src/tasks/apply_seminar';
+import { refreshSeminarPointStatus } from '../src/services/seminar_point_sync';
+import type { SeminarListItem } from '../src/services/seminar_repository';
 import * as seminarRepo from '../src/services/seminar_repository';
 import { describe, it, vi } from 'vitest';
 
