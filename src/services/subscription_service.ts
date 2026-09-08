@@ -374,7 +374,8 @@ export async function sendToTopicSubscribers(
   let failCount = 0;
   const invalidChatIds: number[] = [];
 
-  for (const chatId of subscribers) {
+  for (let idx = 0; idx < subscribers.length; idx++) {
+    const chatId = subscribers[idx];
     try {
       const chunks = splitTelegramMessage(message, { maxLength: TELEGRAM_SAFE_MESSAGE_LENGTH });
       for (let i = 0; i < chunks.length; i++) {
@@ -398,6 +399,10 @@ export async function sendToTopicSubscribers(
       ) {
         invalidChatIds.push(chatId);
       }
+    }
+    // 구독자 간 레이트리밋 방지 딜레이 (마지막 구독자 제외)
+    if (idx < subscribers.length - 1) {
+      await sleep(50);
     }
   }
 
@@ -490,7 +495,8 @@ export async function sendNewSeminarToSubscribers(
   let failCount = 0;
   const invalidChatIds: number[] = [];
 
-  for (const row of rows) {
+  for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+    const row = rows[rowIdx];
     const chatId = row.chat_id;
     const filter = (row.new_seminar as NewSeminarFilter) || 'all';
     const includePointExcluded = row.new_seminar_include_point_excluded === 1;
@@ -530,6 +536,10 @@ export async function sendNewSeminarToSubscribers(
       ) {
         invalidChatIds.push(chatId);
       }
+    }
+    // 구독자 간 레이트리밋 방지 딜레이 (마지막 구독자 제외)
+    if (rowIdx < rows.length - 1) {
+      await sleep(50);
     }
   }
 
@@ -590,8 +600,8 @@ export async function sendUrgentSeminarsToSubscribers(
   let failCount = 0;
   const invalidChatIds: number[] = [];
 
-  for (const row of rows) {
-    const chatId = row.chat_id;
+  for (let idx = 0; idx < rows.length; idx++) {
+    const chatId = rows[idx].chat_id;
     try {
       const chunks = splitTelegramMessage(messageText, { maxLength: TELEGRAM_SAFE_MESSAGE_LENGTH });
       for (let i = 0; i < chunks.length; i++) {
@@ -618,6 +628,10 @@ export async function sendUrgentSeminarsToSubscribers(
       ) {
         invalidChatIds.push(chatId);
       }
+    }
+    // 구독자 간 레이트리밋 방지 딜레이 (마지막 구독자 제외)
+    if (idx < rows.length - 1) {
+      await sleep(50);
     }
   }
 
@@ -690,7 +704,8 @@ export async function sendHourlyTodayLinksToSubscribers(
   const sentChatIds: number[] = [];
   const invalidChatIds: number[] = [];
 
-  for (const chatId of subscribers) {
+  for (let idx = 0; idx < subscribers.length; idx++) {
+    const chatId = subscribers[idx];
     try {
       const chunks = splitTelegramMessage(messageText, { maxLength: TELEGRAM_SAFE_MESSAGE_LENGTH });
       for (let i = 0; i < chunks.length; i++) {
@@ -715,6 +730,10 @@ export async function sendHourlyTodayLinksToSubscribers(
       ) {
         invalidChatIds.push(chatId);
       }
+    }
+    // 구독자 간 레이트리밋 방지 딜레이 (마지막 구독자 제외)
+    if (idx < subscribers.length - 1) {
+      await sleep(50);
     }
   }
 

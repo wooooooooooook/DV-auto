@@ -147,9 +147,13 @@ export async function checkAndTriggerSeminarMonitors(
         });
       }
     } else if (hasActiveOrEndedLunch) {
-      logger.info(
-        `[점심세미나 트리거 스킵] 입장 가능 세미나가 있으나 트리거 조건 미충족 (activeOrEnded: true, noticeCompleted: ${isLunchNoticeCompleted}, running: ${isLunchRunning})`,
-      );
+      if (isLunchRunning && isLunchNoticeCompleted) {
+        logger.info(`[점심세미나 트리거 스킵] 이미 실행 중 + 공지 완료 (running: true, noticeCompleted: true)`);
+      } else if (isLunchRunning) {
+        logger.info(`[점심세미나 트리거 스킵] 이미 실행 중 (running: true, noticeCompleted: false)`);
+      } else if (isLunchNoticeCompleted) {
+        logger.info(`[점심세미나 트리거 스킵] 공지 이미 완료됨 (running: false, noticeCompleted: true)`);
+      }
     }
   }
 
@@ -172,9 +176,13 @@ export async function checkAndTriggerSeminarMonitors(
         });
       }
     } else if (hasActiveOrEndedDinner) {
-      logger.info(
-        `[저녁세미나 트리거 스킵] 입장 가능 세미나가 있으나 트리거 조건 미충족 (activeOrEnded: true, noticeCompleted: ${isDinnerNoticeCompleted}, running: ${isDinnerRunning})`,
-      );
+      if (isDinnerRunning && isDinnerNoticeCompleted) {
+        logger.info(`[저녁세미나 트리거 스킵] 이미 실행 중 + 공지 완료 (running: true, noticeCompleted: true)`);
+      } else if (isDinnerRunning) {
+        logger.info(`[저녁세미나 트리거 스킵] 이미 실행 중 (running: true, noticeCompleted: false)`);
+      } else if (isDinnerNoticeCompleted) {
+        logger.info(`[저녁세미나 트리거 스킵] 공지 이미 완료됨 (running: false, noticeCompleted: true)`);
+      }
     }
   }
 
