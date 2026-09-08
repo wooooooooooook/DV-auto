@@ -951,10 +951,13 @@ function formatSeminarDisplayName(item: SeminarDisplayItem, options: FormatSemin
   const escapedName = escapeHtml(truncatedName);
   const titleDisplay = isPointExcluded ? `<s>${escapedName}</s>` : escapedName;
 
-  // 4. 정원 (현재/총원)
+  // 4. 정원 (현재/총원) - 둘 중 하나라도 누락되면(undefined, null, 빈 문자열) 표시하지 않음
   let capacitySuffix = '';
-  if (includeCapacity && (item.currentCount !== undefined || item.totalCount !== undefined)) {
-    capacitySuffix = ` (${item.currentCount ?? '0'}/${item.totalCount ?? '0'})`;
+  const currentCountStr =
+    item.currentCount !== undefined && item.currentCount !== null ? String(item.currentCount).trim() : '';
+  const totalCountStr = item.totalCount !== undefined && item.totalCount !== null ? String(item.totalCount).trim() : '';
+  if (includeCapacity && currentCountStr !== '' && totalCountStr !== '') {
+    capacitySuffix = ` (${currentCountStr}/${totalCountStr})`;
   }
 
   // 조합: [일시] [플래그들...] [제목] [정원]

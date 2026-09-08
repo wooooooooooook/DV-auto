@@ -89,7 +89,7 @@ describe('formatSeminarDisplayName 공통 함수 테스트', () => {
     expect(formatSeminarDisplayName(advancedSurvey)).toBe('✨<b>[심화설문]</b> 심화설문 세미나');
   });
 
-  it('8. 정원(현재/총원) 표시 검증', () => {
+  it('8. 정원(현재/총원) 표시 검증 (둘 다 유효할 때만 표시, 하나라도 누락되면 미표시)', () => {
     const item: SeminarDisplayItem = {
       name: '정원 세미나',
       currentCount: '15',
@@ -99,8 +99,31 @@ describe('formatSeminarDisplayName 공통 함수 테스트', () => {
     // 기본적으로 includeCapacity=false
     expect(formatSeminarDisplayName(item)).toBe('정원 세미나');
 
-    // includeCapacity=true
+    // includeCapacity=true (둘 다 존재)
     expect(formatSeminarDisplayName(item, { includeCapacity: true })).toBe('정원 세미나 (15/100)');
+
+    // 0명/100명인 경우 (0은 정상 표시)
+    expect(formatSeminarDisplayName({ ...item, currentCount: '0' }, { includeCapacity: true })).toBe(
+      '정원 세미나 (0/100)',
+    );
+    expect(formatSeminarDisplayName({ ...item, currentCount: 0 }, { includeCapacity: true })).toBe(
+      '정원 세미나 (0/100)',
+    );
+
+    // currentCount 누락 시 표시 안 함
+    expect(formatSeminarDisplayName({ name: '세미나', totalCount: '100' }, { includeCapacity: true })).toBe('세미나');
+    expect(
+      formatSeminarDisplayName({ name: '세미나', currentCount: '', totalCount: '100' }, { includeCapacity: true }),
+    ).toBe('세미나');
+
+    // totalCount 누락 시 표시 안 함
+    expect(formatSeminarDisplayName({ name: '세미나', currentCount: '15' }, { includeCapacity: true })).toBe('세미나');
+    expect(
+      formatSeminarDisplayName({ name: '세미나', currentCount: '15', totalCount: '' }, { includeCapacity: true }),
+    ).toBe('세미나');
+
+    // 둘 다 누락 시 표시 안 함
+    expect(formatSeminarDisplayName({ name: '세미나' }, { includeCapacity: true })).toBe('세미나');
   });
 
   it('9. 모든 플래그 및 일시, 정원이 결합된 종합 포맷팅 및 순서(플래그가 제목 앞) 검증', () => {
