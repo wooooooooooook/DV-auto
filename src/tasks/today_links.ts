@@ -1,5 +1,5 @@
 import type { PlaywrightRunArgs } from '../types';
-import { getPointConversionAvailabilityHttp, truncateSeminarName } from '../modules/utils';
+import { getPointConversionAvailabilityHttp, formatSeminarDisplayName } from '../modules/utils';
 import * as storage from '../services/storage';
 import * as seminarRepo from '../services/seminar_repository';
 import { TODAY_QUIZ_INFO_KEY, type CachedTodayQuizInfo } from './today_quiz';
@@ -346,17 +346,8 @@ async function collectTodaySeminarMessage(
     };
 
     for (const item of parsedSeminars) {
-      const isPointExcluded = item.isPointExcluded ?? false;
-      const isPrivate = item.hiddenYn === 'Y' || item.hiddenYn === 'y';
-      const diseaseTag =
-        isPrivate && item.diseaseCategoryNm && item.diseaseCategoryNm.trim()
-          ? `[${escapeHtml(item.diseaseCategoryNm.trim())}]`
-          : '';
-      const privateSuffix = isPrivate ? ` 🔒<b>[비공개]${diseaseTag}</b>` : '';
-      const pointExcludedSuffix = isPointExcluded ? ' 🚫<b>[포인트미지급]</b>' : '';
-      const advancedSurveySuffix = item.isAdvancedSurvey ? ' 📝<b>[심화설문]</b>' : '';
-      const titleDisplay = isPointExcluded ? `<s>${escapeHtml(item.title)}</s>` : escapeHtml(item.title);
-      const seminarInfo = ` ${item.time}. ${titleDisplay}${privateSuffix}${pointExcludedSuffix}${advancedSurveySuffix} ${item.seminarLink}`;
+      const seminarTitle = formatSeminarDisplayName(item, { maxLen: false });
+      const seminarInfo = ` ${item.time}. ${seminarTitle} ${item.seminarLink}`;
 
       if (isDinnerSeminar(item.classAttr, item.time)) {
         dinnerSeminars.push(seminarInfo);
@@ -530,20 +521,13 @@ function formatTodayLinksBroadcast(input: TodayLinksFormatInput): TodayLinksForm
     const newSeminarList = visibleNewSeminars
       .map((item, index) => {
         const link = item.seminarId ? `${SEMINAR_DETAIL_PAGE}${item.seminarId}` : item.url;
-        const isPrivate = item.hiddenYn === 'Y' || item.hiddenYn === 'y';
-        const diseaseTag =
-          isPrivate && item.diseaseCategoryNm && item.diseaseCategoryNm.trim()
-            ? `[${escapeHtml(item.diseaseCategoryNm.trim())}]`
-            : '';
-        const privateSuffix = isPrivate ? ` 🔒<b>[비공개]${diseaseTag}</b>` : '';
-        const pointExcludedSuffix = item.isPointExcluded ? ' 🚫[포인트미지급]' : '';
-        const advancedSurveySuffix = item.isAdvancedSurvey ? ' ✨<b>[심화설문]</b>' : '';
-        const dateTimePrefix = item.date || item.time ? `[${item.date}${item.time ? ' ' + item.time : ''}] ` : '';
-        const truncatedName = truncateSeminarName(item.name);
-        const capacityInfo =
-          item.currentCount || item.totalCount ? ` (${item.currentCount || '0'}/${item.totalCount || '0'})` : '';
-        const nameDisplay = item.isPointExcluded ? `<s>${escapeHtml(truncatedName)}</s>` : escapeHtml(truncatedName);
-        return `${index + 1}. ${dateTimePrefix}${nameDisplay}${capacityInfo}${privateSuffix}${pointExcludedSuffix}${advancedSurveySuffix}\n${link}`;
+        const seminarTitle = formatSeminarDisplayName(item, {
+          includeDate: true,
+          includeTime: true,
+          includeCapacity: true,
+          maxLen: 20,
+        });
+        return `${index + 1}. ${seminarTitle}\n${link}`;
       })
       .join('\n');
 

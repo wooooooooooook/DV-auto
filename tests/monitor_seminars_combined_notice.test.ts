@@ -39,7 +39,7 @@ describe('세미나 모니터링 통합 메시지 (삭제/재발송) 단위 테�
     assert.ok(text.startsWith('🔔 점심세미나\n\n'));
 
     // 2. 세미나별 상태 이모티콘 및 태그 검증
-    assert.ok(text.includes('🟢 입장가능 | 1번 점심 세미나 [심화설문]'));
+    assert.ok(text.includes('🟢 입장가능 | ✨<b>[심화설문]</b> 1번 점심 세미나'));
     assert.ok(text.includes('https://m.doctorville.co.kr/cme/seminar/101'));
     assert.ok(text.includes('⏳ 대기 | 2번 점심 세미나'));
     assert.ok(text.includes('https://m.doctorville.co.kr/cme/seminar/102'));
@@ -125,7 +125,11 @@ describe('세미나 모니터링 통합 메시지 (삭제/재발송) 단위 테�
     assert.ok(text.includes(expectedTruncated));
     // [비공개][심혈관질환] 태그 확인
     assert.ok(text.includes('[비공개][심혈관질환]'));
-    assert.ok(text.includes(`🟢 입장가능 | 13:00~14:00 [비공개][심혈관질환] ${expectedTruncated} [심화설문]`));
+    assert.ok(
+      text.includes(
+        `🟢 입장가능 | [13:00~14:00] 🔒<b>[비공개][심혈관질환]</b> ✨<b>[심화설문]</b> ${expectedTruncated}`,
+      ),
+    );
   });
 
   it('publishSeminarStatusNotice: 새 메시지 발송 및 이전 메시지 삭제 동작 검증', async () => {

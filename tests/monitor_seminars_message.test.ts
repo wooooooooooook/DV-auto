@@ -46,23 +46,23 @@ describe('buildSeminarMonitorStatusMessage 세미나 모니터 현황 메시지 
     // 2. ** 볼드 마크다운이 포함되지 않았는지 검증
     assert(!message.includes('**'), '메시지에 ** 볼드 마크다운이 포함되지 않아야 함');
 
-    // 3. 5580 세미나 검증: 🟢 입장가능 | 18:00~19:00 [재] ENVLO WEB SYMPOS... [심화설문]
+    // 3. 5580 세미나 검증: 🟢 입장가능 | [18:00~19:00] ✨<b>[심화설문]</b> [재] ENVLO WEB SYMPOS...
     assert(
-      message.includes('🟢 입장가능 | 18:00~19:00 [재] ENVLO WEB SYMPOS... [심화설문]'),
+      message.includes('🟢 입장가능 | [18:00~19:00] ✨<b>[심화설문]</b> [재] ENVLO WEB SYMPOS...'),
       '5580 세미나의 시작종료시각, 20자 트렁케이션(...), 심화설문 태그가 올바르게 포맷되어야 함',
     );
     assert(message.includes('https://m.doctorville.co.kr/cme/seminar/5580'), '5580 URL이 포함되어야 함');
 
-    // 4. 5579 세미나 검증: 🟢 입장가능 | 18:30~19:30 [재] Redefining P-CAB... [심화설문]
+    // 4. 5579 세미나 검증: 🟢 입장가능 | [18:30~19:30] ✨<b>[심화설문]</b> [재] Redefining P-CAB...
     assert(
-      message.includes('🟢 입장가능 | 18:30~19:30 [재] Redefining P-CAB... [심화설문]'),
+      message.includes('🟢 입장가능 | [18:30~19:30] ✨<b>[심화설문]</b> [재] Redefining P-CAB...'),
       '5579 세미나의 시작종료시각, 20자 트렁케이션(...), 심화설문 태그가 올바르게 포맷되어야 함',
     );
     assert(message.includes('https://m.doctorville.co.kr/cme/seminar/5579'), '5579 URL이 포함되어야 함');
 
-    // 5. 5600 세미나 검증: ⏳ 대기 | 19:00~20:00 DIVE (Digital Innova...
+    // 5. 5600 세미나 검증: ⏳ 대기 | [19:00~20:00] DIVE (Digital Innova...
     assert(
-      message.includes('⏳ 대기 | 19:00~20:00 DIVE (Digital Innova...\nhttps://m.doctorville.co.kr/cme/seminar/5600'),
+      message.includes('⏳ 대기 | [19:00~20:00] DIVE (Digital Innova...\nhttps://m.doctorville.co.kr/cme/seminar/5600'),
       '5600 세미나의 대기 상태, 시작종료시각, 20자 트렁케이션(...)이 올바르게 포맷되어야 함',
     );
   });
@@ -81,7 +81,7 @@ describe('buildSeminarMonitorStatusMessage 세미나 모니터 현황 메시지 
     ];
 
     const message = buildSeminarMonitorStatusMessage('점심', seminars);
-    assert(message.includes('🟢 입장가능 | 12:00~13:00 짧은 세미나 제목'));
+    assert(message.includes('🟢 입장가능 | [12:00~13:00] 짧은 세미나 제목'));
   });
 
   it('시간(time) 정보가 없을 경우 시간 생략 후 제목 바로 출력', () => {
@@ -140,7 +140,7 @@ describe('buildSeminarMonitorStatusMessage 세미나 모니터 현황 메시지 
     });
     assert(startMsg.text.includes('🟢 <b>[세미나 시작]</b>'));
     assert(startMsg.text.includes('[18:00~19:00]'));
-    assert(startMsg.text.includes('<b>ENVLO WEB SYMPOSIUM</b> [심화설문]'));
+    assert(startMsg.text.includes('✨<b>[심화설문]</b> ENVLO WEB SYMPOSIUM'));
     assert(startMsg.text.includes('https://m.doctorville.co.kr/cme/seminar/5580'));
 
     // 2. 종료 알림 (퀴즈 결과 포함)
@@ -255,7 +255,7 @@ describe('buildSeminarMonitorStatusMessage 세미나 모니터 현황 메시지 
     const msg20 = buildSurveyClosingMessage(seminar, 20);
     assert(msg20.text.includes('⏳ <b>[설문 마감 20분 전]</b>'));
     assert(msg20.text.includes('[12:00~13:00]'));
-    assert(msg20.text.includes('<b>고혈압 최신지견</b> [심화설문]'));
+    assert(msg20.text.includes('✨<b>[심화설문]</b> 고혈압 최신지견'));
     assert(msg20.text.includes('정답 : 2번 X'));
     assert(msg20.text.includes('약 20분 남았습니다.'));
     assert(msg20.text.includes('설문 진행 여부와 관계없이 발송'));
@@ -356,9 +356,9 @@ describe('buildSeminarMonitorStatusMessage 세미나 모니터 현황 메시지 
 
     // 2. 메시지 본문에서 순서대로 출력되는지 검증
     const message = buildSeminarMonitorStatusMessage('저녁', unsortedSeminars);
-    const idx100 = message.indexOf('18:00~19:00 첫 번째 세미나');
-    const idx200 = message.indexOf('18:30~19:30 두 번째 세미나');
-    const idx300 = message.indexOf('19:30~20:30 세 번째 세미나');
+    const idx100 = message.indexOf('[18:00~19:00] 첫 번째 세미나');
+    const idx200 = message.indexOf('[18:30~19:30] 두 번째 세미나');
+    const idx300 = message.indexOf('[19:30~20:30] 세 번째 세미나');
 
     expect(idx100).toBeGreaterThan(-1);
     expect(idx200).toBeGreaterThan(idx100);

@@ -119,6 +119,7 @@ export async function publishAndReplaceChannelNotice(
 }
 
 export const DEFAULT_NOTICE_OPTIONS: Record<string, unknown> = {
+  parse_mode: 'HTML',
   link_preview_options: {
     is_disabled: true,
   },

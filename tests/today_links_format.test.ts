@@ -92,7 +92,7 @@ function testTodayLinksFormatWithUserExample() {
   // 4. 신규 세미나 및 20자 truncation, 신청자수 현황(현재/총원), 강조된 플래그
   assert(message.includes('🆕 <b>어제 추가된 신규 세미나</b>'));
   assert(message.includes('1. [9/1 13:00~13:40] 척수성 근위축증(SMA) 조기 진단과... (15/100)'));
-  assert(message.includes('2. [8/20 13:00~14:00] <s>ChatGPT 실용 입문 — AI로 ...</s> (0/500) 🚫[포인트미지급]'));
+  assert(message.includes('2. [8/20 13:00~14:00] 🚫<b>[포인트미지급]</b> <s>ChatGPT 실용 입문 — AI로 ...</s> (0/500)'));
 
   // 5. 포인트 전환 안내 (available: true 일 때 현재 전환 가능 문구)
   assert(message.includes('💳 <b>현재 네이버페이 포인트 전환 가능합니다.</b>'));
@@ -566,7 +566,9 @@ function testSeminarNameTruncationAndCapacityFormat() {
   // 3. 20자 초과: 20자 slice + '...' + (30/100) + 취소선
   // '스무 글자를 초과하는 아주 길고 긴 ' (20자)
   assert.ok(
-    message.includes('3. [8/27 13:00~14:00] <s>스무 글자를 초과하는 아주 길고 긴 ...</s> (30/100) 🚫[포인트미지급]'),
+    message.includes(
+      '3. [8/27 13:00~14:00] 🚫<b>[포인트미지급]</b> <s>스무 글자를 초과하는 아주 길고 긴 ...</s> (30/100)',
+    ),
     `20자 초과 Truncation 및 취소선 실패: ${message}`,
   );
 

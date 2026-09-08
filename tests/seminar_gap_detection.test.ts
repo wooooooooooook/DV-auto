@@ -192,12 +192,14 @@ describe('세미나 ID 불연속(Gap) 탐색 및 비공개 세미나 발굴/알�
     expect(channelNotice.text).toContain('[2026-09-08 13:00~14:00]');
     expect(channelNotice.text).toContain('[비공개]');
     expect(channelNotice.text).toContain('[심혈관질환]');
-    expect(channelNotice.text).toContain('[2026-09-08 13:00~14:00] [비공개] [심혈관질환] 개원의를 위한 고혈압 처방 팁');
+    expect(channelNotice.text).toContain(
+      '[2026-09-08 13:00~14:00] 🔒<b>[비공개][심혈관질환]</b> 개원의를 위한 고혈압 처방 팁',
+    );
 
     // 구독자 개인별 알림 메시지 검증
     const singleMsg = subscriptionService.buildSingleNewSeminarMessage(item);
-    expect(singleMsg.text).toContain('[2026-09-08 13:00~14:00] [비공개] [심혈관질환]');
-    expect(singleMsg.text).toContain('<b>개원의를 위한 고혈압 처방 팁</b>');
+    expect(singleMsg.text).toContain('[2026-09-08 13:00~14:00] 🔒<b>[비공개][심혈관질환]</b>');
+    expect(singleMsg.text).toContain('개원의를 위한 고혈압 처방 팁');
   });
 
   it('4. syncSeminars E2E: 불연속 갭으로 비공개 세미나 발굴 시 신규 세미나 알림 발송 및 DB 저장 검증', async () => {

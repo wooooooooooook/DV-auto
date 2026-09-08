@@ -10,9 +10,9 @@ import {
   formatRecentCommentsSection,
 } from '../services/channel_message_repository';
 import { sendToTopicSubscribers, type SubscriptionTopic } from '../services/subscription_service';
-import { formatPrivateSeminarTag, truncateSeminarName } from '../modules/utils';
+import { formatPrivateSeminarTag, truncateSeminarName, formatSeminarDisplayName } from '../modules/utils';
 
-export { formatPrivateSeminarTag, truncateSeminarName };
+export { formatPrivateSeminarTag, truncateSeminarName, formatSeminarDisplayName };
 
 export const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
 export const SEMINAR_DETAIL_PC_PAGE = 'https://www.doctorville.co.kr/seminar/seminarDetail';
@@ -521,13 +521,12 @@ export function buildSeminarStatusMessage(
     const s = sortedList[i];
     const statusDisplay = getSeminarStatusDisplay(s);
 
-    const timeStr = s.time ? `${s.time} ` : '';
-    const truncatedName = truncateSeminarName(s.name);
-    const privateTag = formatPrivateSeminarTag(s);
-    const privatePrefix = privateTag ? `${privateTag} ` : '';
-    const advancedSuffix = s.isAdvancedSurvey ? ' [심화설문]' : '';
+    const seminarTitle = formatSeminarDisplayName(s, {
+      includeTime: true,
+      maxLen: 20,
+    });
     const targetUrl = s.url || (s.seminarId ? `${SEMINAR_DETAIL_PAGE}${s.seminarId}` : '');
-    text += `${statusDisplay.emoji} ${statusDisplay.text} | ${timeStr}${privatePrefix}${truncatedName}${advancedSuffix}\n${targetUrl}`;
+    text += `${statusDisplay.emoji} ${statusDisplay.text} | ${seminarTitle}\n${targetUrl}`;
 
     if (s.status === '종료' || statusDisplay.text === '종료') {
       const summaryQuiz = extractQuizSummaryOnly(s.quizResultMessage);
@@ -584,13 +583,13 @@ export function buildSeminarLiveStartMessage(seminar: MonitoredSeminarItem): {
   text: string;
   options: Record<string, unknown>;
 } {
-  const timeStr = seminar.time ? `[${seminar.time}] ` : '';
-  const privateTag = formatPrivateSeminarTag(seminar);
-  const privatePrefix = privateTag ? `${privateTag} ` : '';
-  const advancedSuffix = seminar.isAdvancedSurvey ? ' [심화설문]' : '';
+  const seminarTitle = formatSeminarDisplayName(seminar, {
+    includeTime: true,
+    maxLen: false,
+  });
   const targetUrl = seminar.url || (seminar.seminarId ? `${SEMINAR_DETAIL_PAGE}${seminar.seminarId}` : '');
 
-  const text = `🟢 <b>[세미나 시작]</b>\n\n${timeStr}${privatePrefix}<b>${seminar.name}</b>${advancedSuffix}\n${targetUrl}`;
+  const text = `🟢 <b>[세미나 시작]</b>\n\n${seminarTitle}\n${targetUrl}`;
 
   return {
     text,
@@ -618,13 +617,13 @@ export function buildSeminarLiveEndMessage(seminar: MonitoredSeminarItem): {
   text: string;
   options: Record<string, unknown>;
 } {
-  const timeStr = seminar.time ? `[${seminar.time}] ` : '';
-  const privateTag = formatPrivateSeminarTag(seminar);
-  const privatePrefix = privateTag ? `${privateTag} ` : '';
-  const advancedSuffix = seminar.isAdvancedSurvey ? ' [심화설문]' : '';
+  const seminarTitle = formatSeminarDisplayName(seminar, {
+    includeTime: true,
+    maxLen: false,
+  });
   const targetUrl = seminar.url || (seminar.seminarId ? `${SEMINAR_DETAIL_PAGE}${seminar.seminarId}` : '');
 
-  let text = `🔴 <b>[세미나 종료]</b>\n\n${timeStr}${privatePrefix}<b>${seminar.name}</b>${advancedSuffix}\n${targetUrl}`;
+  let text = `🔴 <b>[세미나 종료]</b>\n\n${seminarTitle}\n${targetUrl}`;
 
   if (seminar.quizResultMessage) {
     text += `\n\n${seminar.quizResultMessage.trim()}`;
@@ -661,13 +660,13 @@ export function buildSurveyClosingMessage(
   text: string;
   options: Record<string, unknown>;
 } {
-  const timeStr = seminar.time ? `[${seminar.time}] ` : '';
-  const privateTag = formatPrivateSeminarTag(seminar);
-  const privatePrefix = privateTag ? `${privateTag} ` : '';
-  const advancedSuffix = seminar.isAdvancedSurvey ? ' [심화설문]' : '';
+  const seminarTitle = formatSeminarDisplayName(seminar, {
+    includeTime: true,
+    maxLen: false,
+  });
   const targetUrl = seminar.url || (seminar.seminarId ? `${SEMINAR_DETAIL_PAGE}${seminar.seminarId}` : '');
 
-  let text = `⏳ <b>[설문 마감 ${minutesLeft}분 전]</b>\n\n${timeStr}${privatePrefix}<b>${seminar.name}</b>${advancedSuffix}\n${targetUrl}`;
+  let text = `⏳ <b>[설문 마감 ${minutesLeft}분 전]</b>\n\n${seminarTitle}\n${targetUrl}`;
 
   if (seminar.quizResultMessage) {
     text += `\n\n${seminar.quizResultMessage.trim()}`;

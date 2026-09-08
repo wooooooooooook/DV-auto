@@ -869,6 +869,107 @@ function formatPrivateSeminarTag(seminar: { hiddenYn?: string; diseaseCategoryNm
   return `[비공개]${categoryTag}`;
 }
 
+/**
+ * HTML 특수문자(&, <, >)를 이스케이프합니다.
+ */
+function escapeHtml(text: string): string {
+  return (text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/**
+ * 세미나 표시용 공통 아이템 인터페이스
+ */
+export interface SeminarDisplayItem {
+  name?: string;
+  title?: string;
+  seminarNm?: string;
+  date?: string;
+  time?: string;
+  currentCount?: string | number;
+  totalCount?: string | number;
+  hiddenYn?: string;
+  diseaseCategoryNm?: string;
+  isPointExcluded?: boolean;
+  isAdvancedSurvey?: boolean;
+}
+
+/**
+ * 세미나 포맷팅 옵션
+ */
+export interface FormatSeminarOptions {
+  /** 날짜 포함 여부 (기본값: false) */
+  includeDate?: boolean;
+  /** 시간 포함 여부 (기본값: false) */
+  includeTime?: boolean;
+  /** 세미나명 최대 글자수 (기본값: 20, false/0/null 지정 시 자르지 않음) */
+  maxLen?: number | false | null;
+  /** 현재/총원 정원 표시 여부 (기본값: false) */
+  includeCapacity?: boolean;
+}
+
+/**
+ * 세미나 이름 truncation + 플래그들을 통일된 Today Links 스타일로 포맷팅합니다.
+ * 포맷: [일시] 🔒<b>[비공개][진료과]</b> 🚫<b>[포인트미지급]</b> ✨<b>[심화설문]</b> <s>세미나명</s> (현재/총원)
+ */
+function formatSeminarDisplayName(item: SeminarDisplayItem, options: FormatSeminarOptions = {}): string {
+  const { includeDate = false, includeTime = false, maxLen = 20, includeCapacity = false } = options;
+
+  // 1. 일시 접두사
+  const datePart = includeDate && item.date ? String(item.date).trim() : '';
+  const timePart = includeTime && item.time ? String(item.time).trim() : '';
+  let dateTimePrefix = '';
+  if (datePart && timePart) {
+    dateTimePrefix = `[${datePart} ${timePart}]`;
+  } else if (datePart) {
+    dateTimePrefix = `[${datePart}]`;
+  } else if (timePart) {
+    dateTimePrefix = `[${timePart}]`;
+  }
+
+  // 2. 플래그들 (제목 앞으로)
+  const flags: string[] = [];
+  const isPrivate = item.hiddenYn === 'Y' || item.hiddenYn === 'y';
+  if (isPrivate) {
+    const diseaseTag =
+      item.diseaseCategoryNm && item.diseaseCategoryNm.trim() ? `[${escapeHtml(item.diseaseCategoryNm.trim())}]` : '';
+    flags.push(`🔒<b>[비공개]${diseaseTag}</b>`);
+  }
+
+  const isPointExcluded = Boolean(item.isPointExcluded);
+  if (isPointExcluded) {
+    flags.push('🚫<b>[포인트미지급]</b>');
+  }
+
+  if (item.isAdvancedSurvey) {
+    flags.push('✨<b>[심화설문]</b>');
+  }
+
+  // 3. 세미나 제목
+  const rawName = item.name || item.title || item.seminarNm || '세미나';
+  const truncatedName =
+    maxLen === false || maxLen === 0 || maxLen === null ? rawName.trim() : truncateSeminarName(rawName, maxLen);
+  const escapedName = escapeHtml(truncatedName);
+  const titleDisplay = isPointExcluded ? `<s>${escapedName}</s>` : escapedName;
+
+  // 4. 정원 (현재/총원)
+  let capacitySuffix = '';
+  if (includeCapacity && (item.currentCount !== undefined || item.totalCount !== undefined)) {
+    capacitySuffix = ` (${item.currentCount ?? '0'}/${item.totalCount ?? '0'})`;
+  }
+
+  // 조합: [일시] [플래그들...] [제목] [정원]
+  const prefixParts: string[] = [];
+  if (dateTimePrefix) {
+    prefixParts.push(dateTimePrefix);
+  }
+  if (flags.length > 0) {
+    prefixParts.push(...flags);
+  }
+
+  const prefix = prefixParts.length > 0 ? `${prefixParts.join(' ')} ` : '';
+  return `${prefix}${titleDisplay}${capacitySuffix}`;
+}
+
 export {
   invalidateLoginStatus,
   sendTelegram,
@@ -884,6 +985,7 @@ export {
   checkLoginStatus,
   checkLoginStatusHttp,
   escapeMarkdownV2,
+  escapeHtml,
   getSeminarIdFromUrl,
   hasSurveyPointExcludedNotice,
   ensureSeminarDetailReady,
@@ -900,6 +1002,7 @@ export {
   truncatePlainText,
   truncateSeminarName,
   formatPrivateSeminarTag,
+  formatSeminarDisplayName,
   TELEGRAM_SAFE_MESSAGE_LENGTH,
   TELEGRAM_SAFE_CAPTION_LENGTH,
   TELEGRAM_MAX_MESSAGE_LENGTH,

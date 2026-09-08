@@ -75,7 +75,7 @@ describe('신규 세미나 모음 통합 공지 (삭제/재발송) 단위 테스
     // 3. 102번 세미나 포맷 (20자 트렁케이션 + 태그 + 구분자 강조 + 2. 순번)
     assert.ok(
       text.includes(
-        '━ ✨ 방금 추가됨 ━━━━━\n2. [2026-08-28 19:00] [포인트미지급] [심화설문] 이번에새롭게추가된매우긴제목의심화설문세... (5/50)',
+        '━ ✨ 방금 추가됨 ━━━━━\n2. [2026-08-28 19:00] 🚫<b>[포인트미지급]</b> ✨<b>[심화설문]</b> <s>이번에새롭게추가된매우긴제목의심화설문세...</s> (5/50)',
       ),
     );
     assert.ok(text.includes('https://m.doctorville.co.kr/cme/seminar/102\n━━━━━━━━━━━━━━━━'));
@@ -85,7 +85,7 @@ describe('신규 세미나 모음 통합 공지 (삭제/재발송) 단위 테스
     assert.ok(text.includes('• 홍길동: 102번 세미나 기다렸는데 드디어 떴네요!'));
     assert.ok(text.includes('• 이영희: 감사합니다'));
 
-    // 5. 옵션 검증 (링크 미리보기 비활성화)
+    // 5. 옵션 검증 (링크 미리보기 비활성화 및 HTML parse mode)
     assert.deepStrictEqual(options.link_preview_options, { is_disabled: true });
   });
 
@@ -112,7 +112,9 @@ describe('신규 세미나 모음 통합 공지 (삭제/재발송) 단위 테스
     assert.ok(channelNotice.text.includes('[심혈관질환]'));
     console.log('  ✓ [비공개] + [심혈관질환] 순서 확인');
     assert.ok(
-      channelNotice.text.includes('[2026-09-08 13:00~14:00] [비공개] [심혈관질환] 개원의를 위한 고혈압 처방 팁'),
+      channelNotice.text.includes(
+        '[2026-09-08 13:00~14:00] 🔒<b>[비공개][심혈관질환]</b> 개원의를 위한 고혈압 처방 팁',
+      ),
     );
   });
 
@@ -474,7 +476,9 @@ describe('신규 세미나 모음 통합 공지 (삭제/재발송) 단위 테스
     assert.ok(sentHistory[1].text.includes('🆕 오늘 추가된 세미나 모음 (누적 3건)'));
     // 103번에만 구분자가 적용되었는지 검증
     assert.ok(
-      sentHistory[1].text.includes('━ ✨ 방금 추가됨 ━━━━━\n3. [2026-08-29 13:00] [심화설문] 103번 신규 세미나 (5/50)'),
+      sentHistory[1].text.includes(
+        '━ ✨ 방금 추가됨 ━━━━━\n3. [2026-08-29 13:00] ✨<b>[심화설문]</b> 103번 신규 세미나 (5/50)',
+      ),
     );
     // 이전 메시지 ID 1001이 삭제되었는지 검증
     assert.strictEqual(deletedIds.length, 1);

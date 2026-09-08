@@ -1,7 +1,7 @@
 import { getDatabase } from './storage';
 import { getBot } from './bot_instance';
 import { splitTelegramMessage, TELEGRAM_SAFE_MESSAGE_LENGTH } from '../modules/telegram_splitter';
-import { sleep } from '../modules/utils';
+import { sleep, formatSeminarDisplayName } from '../modules/utils';
 import * as logger from './logger';
 import type { SeminarListItem } from './seminar_repository';
 
@@ -419,39 +419,19 @@ export async function sendToTopicSubscribers(
   return { successCount, failCount };
 }
 
-function escapeHtml(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-/**
- * 단일 신규 세미나 알림 메시지 빌더 (구독자 개인별 개별 전송용)
- */
 export function buildSingleNewSeminarMessage(item: SeminarListItem): {
   text: string;
   options: Record<string, unknown>;
 } {
-  const tags: string[] = [];
-  if (item.date || item.time) {
-    tags.push(`[${item.date || ''}${item.date && item.time ? ' ' : ''}${item.time || ''}]`);
-  }
-  if (item.hiddenYn === 'Y') {
-    tags.push('[비공개]');
-  }
-  if (item.diseaseCategoryNm && item.diseaseCategoryNm.trim()) {
-    tags.push(`[${item.diseaseCategoryNm.trim()}]`);
-  }
-  if (item.isPointExcluded) {
-    tags.push('[포인트미지급]');
-  }
-  if (item.isAdvancedSurvey) {
-    tags.push('[심화설문]');
-  }
-
-  const tagPrefix = tags.length > 0 ? `${tags.join(' ')} ` : '';
-  const capacityInfo = item.currentCount && item.totalCount ? ` (${item.currentCount}/${item.totalCount})` : '';
+  const seminarTitle = formatSeminarDisplayName(item, {
+    includeDate: true,
+    includeTime: true,
+    includeCapacity: true,
+    maxLen: false,
+  });
   const targetUrl = item.url || (item.seminarId ? `https://m.doctorville.co.kr/cme/seminar/${item.seminarId}` : '');
 
-  const text = `🆕 <b>[신규 세미나 등록]</b>\n\n${tagPrefix}<b>${escapeHtml(item.name || '세미나')}</b>${capacityInfo}\n${targetUrl}`;
+  const text = `🆕 <b>[신규 세미나 등록]</b>\n\n${seminarTitle}\n${targetUrl}`;
 
   return {
     text,

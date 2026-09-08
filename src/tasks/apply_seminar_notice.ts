@@ -2,10 +2,15 @@ import type { SeminarListItem } from '../services/seminar_repository';
 import * as seminarRepo from '../services/seminar_repository';
 import * as channelRepo from '../services/channel_message_repository';
 import * as logger from '../services/logger';
-import { getSeminarIdFromUrl, truncateSeminarName, formatPrivateSeminarTag } from '../modules/utils';
+import {
+  getSeminarIdFromUrl,
+  truncateSeminarName,
+  formatPrivateSeminarTag,
+  formatSeminarDisplayName,
+} from '../modules/utils';
 import { DEFAULT_NOTICE_OPTIONS, formatRecentCommentsSection } from '../services/channel_notice_service';
 
-export { truncateSeminarName, formatPrivateSeminarTag };
+export { truncateSeminarName, formatPrivateSeminarTag, formatSeminarDisplayName };
 
 export type SeminarFieldChange = {
   field: string;
@@ -199,28 +204,13 @@ export function buildNewSeminarsNoticeMessage(
     const sid = item.seminarId || getSeminarIdFromUrl(item.url) || '';
     const isHighlighted = newIdSet.has(sid);
 
-    const tags: string[] = [];
-    if (item.date || item.time) {
-      tags.push(`[${item.date || ''}${item.date && item.time ? ' ' : ''}${item.time || ''}]`);
-    }
-    if (item.hiddenYn === 'Y' || item.hiddenYn === 'y') {
-      tags.push('[비공개]');
-      if (item.diseaseCategoryNm && item.diseaseCategoryNm.trim()) {
-        tags.push(`[${item.diseaseCategoryNm.trim()}]`);
-      }
-    }
-    if (item.isPointExcluded) {
-      tags.push('[포인트미지급]');
-    }
-    if (item.isAdvancedSurvey) {
-      tags.push('[심화설문]');
-    }
-
-    const prefix = tags.length > 0 ? `${tags.join(' ')} ` : '';
-    const capacityInfo = item.currentCount && item.totalCount ? ` (${item.currentCount}/${item.totalCount})` : '';
-    const truncatedName = truncateSeminarName(item.name || '세미나');
-
-    const itemText = `${i + 1}. ${prefix}${truncatedName}${capacityInfo}\n${item.url}`;
+    const itemTitle = formatSeminarDisplayName(item, {
+      includeDate: true,
+      includeTime: true,
+      includeCapacity: true,
+      maxLen: 20,
+    });
+    const itemText = `${i + 1}. ${itemTitle}\n${item.url}`;
 
     if (isHighlighted) {
       formattedItems.push(`━ ✨ 방금 추가됨 ━━━━━\n${itemText}\n━━━━━━━━━━━━━━━━`);

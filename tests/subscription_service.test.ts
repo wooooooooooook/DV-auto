@@ -439,8 +439,8 @@ describe('subscription_service', () => {
     });
     expect(singleMsg.text).toContain('🆕 <b>[신규 세미나 등록]</b>');
     expect(singleMsg.text).toContain('[2026-08-27 12:30~13:30]');
-    expect(singleMsg.text).toContain('[심화설문]');
-    expect(singleMsg.text).toContain('<b>새로운 당뇨 세미나</b> (0/5000)');
+    expect(singleMsg.text).toContain('✨<b>[심화설문]</b>');
+    expect(singleMsg.text).toContain('새로운 당뇨 세미나 (0/5000)');
     expect(singleMsg.text).toContain('https://m.doctorville.co.kr/cme/seminar/1111');
 
     // 2. 2건의 신규 세미나 발송 시 개별로 2건 메시지가 전송되는지 검증
