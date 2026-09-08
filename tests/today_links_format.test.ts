@@ -611,6 +611,59 @@ async function testCollectTodaySeminarMessageIncludesEndedSeminars() {
   assert.deepStrictEqual(res.dinnerSeminarIds, ['9002']);
 }
 
+async function testCollectTodaySeminarMessageExcludesSmallCapacitySeminars() {
+  vi.spyOn(seminarRepo, 'getAllSeminars').mockReturnValue([
+    {
+      seminarId: '9101',
+      name: '정원 5명 세미나 (제외대상)',
+      url: 'https://m.doctorville.co.kr/cme/seminar/9101',
+      date: '2026-09-08',
+      time: '12:30~13:30',
+      totalCount: '5',
+    },
+    {
+      seminarId: '9102',
+      name: '정원 9명 세미나 (제외대상)',
+      url: 'https://m.doctorville.co.kr/cme/seminar/9102',
+      date: '2026-09-08',
+      time: '12:30~13:30',
+      totalCount: '9',
+    },
+    {
+      seminarId: '9103',
+      name: '정원 10명 세미나 (표시대상)',
+      url: 'https://m.doctorville.co.kr/cme/seminar/9103',
+      date: '2026-09-08',
+      time: '12:30~13:30',
+      totalCount: '10',
+    },
+    {
+      seminarId: '9104',
+      name: '정원 100명 세미나 (표시대상)',
+      url: 'https://m.doctorville.co.kr/cme/seminar/9104',
+      date: '2026-09-08',
+      time: '18:00~19:00',
+      totalCount: '100',
+    },
+    {
+      seminarId: '9105',
+      name: '정원 미지정 세미나 (표시대상)',
+      url: 'https://m.doctorville.co.kr/cme/seminar/9105',
+      date: '2026-09-08',
+      time: '18:00~19:00',
+    },
+  ]);
+
+  const res = await collectTodaySeminarMessage(undefined, '2026-09-08');
+  assert.ok(!res.message.includes('정원 5명 세미나'), '정원 10명 미만 세미나는 제외되어야 함');
+  assert.ok(!res.message.includes('정원 9명 세미나'), '정원 10명 미만 세미나는 제외되어야 함');
+  assert.ok(res.message.includes('정원 10명 세미나'), '정원 10명 이상 세미나는 포함되어야 함');
+  assert.ok(res.message.includes('정원 100명 세미나'), '정원 100명 세미나는 포함되어야 함');
+  assert.ok(res.message.includes('정원 미지정 세미나'), '정원 미지정 세미나는 포함되어야 함');
+  assert.deepStrictEqual(res.lunchSeminarIds, ['9103']);
+  assert.deepStrictEqual(res.dinnerSeminarIds, ['9104', '9105']);
+}
+
 describe('today_links_format 단위 테스트', () => {
   it('testTodayLinksFormatWithUserExample', () => {
     testTodayLinksFormatWithUserExample();
@@ -638,5 +691,9 @@ describe('today_links_format 단위 테스트', () => {
 
   it('testCollectTodaySeminarMessageIncludesEndedSeminars', async () => {
     await testCollectTodaySeminarMessageIncludesEndedSeminars();
+  });
+
+  it('testCollectTodaySeminarMessageExcludesSmallCapacitySeminars', async () => {
+    await testCollectTodaySeminarMessageExcludesSmallCapacitySeminars();
   });
 });

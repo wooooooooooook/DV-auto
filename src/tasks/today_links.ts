@@ -281,6 +281,15 @@ async function collectTodaySeminarMessage(
 
     for (const stored of storedSeminars) {
       if (!stored.date || !isDateMatching(stored.date, dateTarget)) continue;
+
+      // 정원 10명 미만 세미나는 표시하지 않음
+      if (stored.totalCount && stored.totalCount.trim() !== '') {
+        const parsedCapacity = parseInt(stored.totalCount.replace(/[^0-9]/g, ''), 10);
+        if (!isNaN(parsedCapacity) && parsedCapacity < 10) {
+          continue;
+        }
+      }
+
       const sid = stored.seminarId ? String(stored.seminarId).trim() : null;
       const fullUrl = stored.url || (sid ? `${SEMINAR_DETAIL_PAGE}${sid}` : '');
       if ((sid && seenIds.has(sid)) || (fullUrl && seenUrls.has(fullUrl))) continue;

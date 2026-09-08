@@ -170,7 +170,7 @@ describe('비공개 세미나 예외처리 및 today_links 비공개 플래그 �
         date: '2026-09-08',
         time: '13:00~14:00',
         currentCount: '10',
-        totalCount: '100',
+        totalCount: '500',
         nightTime: false,
         hiddenYn: 'Y',
         diseaseCategoryNm: '심혈관질환',
