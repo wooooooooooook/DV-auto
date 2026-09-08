@@ -494,13 +494,17 @@ async function processSeminarQuiz(
     let _hasUnknown = false;
     let _hasMultipleMatches = false;
 
-    const MAX_PAGES = 10;
+    const targetTotalPages =
+      httpQuizResult?.totalPageCnt && httpQuizResult.totalPageCnt > 0 ? httpQuizResult.totalPageCnt : 2;
+    const maxLoopPages = effectiveIsAdvancedSurvey ? targetTotalPages : 10;
     let currentPageNum = 1;
     let lastPageQuestionCount = 0;
 
     // ── 다중 페이지 탐색 및 응답 루프 ───────────────────────────────────────────────
-    while (currentPageNum <= MAX_PAGES) {
-      console.log(`[seminar_quiz] 설문 페이지 ${currentPageNum} 탐색 시작 (${seminarName ?? 'unknown'})`);
+    while (currentPageNum <= maxLoopPages) {
+      console.log(
+        `[seminar_quiz] 설문 페이지 ${currentPageNum}/${effectiveIsAdvancedSurvey ? targetTotalPages : maxLoopPages} 탐색 시작 (${seminarName ?? 'unknown'})`,
+      );
 
       // 마커 또는 일반 설문 문항 감지 (렌더링 안정화 대기)
       const markerSel = ':text-matches("\\[\\s*(퀴즈|O\\s*X|주관식|설문|일반|poll)\\s*\\]", "i")';
@@ -652,45 +656,99 @@ async function processSeminarQuiz(
 
       await page.waitForTimeout(500);
 
-      // "다음" 버튼 확인
-      const nextBtn = page.locator('button:text-matches("^다음$|^다음\\s*단계$|^Next$", "i"):not([disabled])').first();
-      const hasNext = await nextBtn.isVisible({ timeout: 2000 }).catch(() => false);
-
-      // "제출하기" / "설문완료" 버튼 확인
-      const submitBtn = page
-        .locator(
-          'input[type="submit"].btn-primary, button:text-matches("제출하기|설문완료|응답완료", "i"):not([disabled])',
-        )
-        .first();
-      const hasSubmit = await submitBtn.isVisible({ timeout: 2000 }).catch(() => false);
-
-      if (hasNext && !hasSubmit) {
-        console.log(`[seminar_quiz] 다음 페이지 이동 버튼 감지 (현재 페이지: ${currentPageNum}) -> 클릭`);
-        const prevFirstQ = pageQuestions[0]?.questionNumber;
-        await nextBtn.scrollIntoViewIfNeeded().catch(() => {});
-        await nextBtn.click({ force: true }).catch(() => {});
-        await page.waitForLoadState('networkidle', { timeout: 6000 }).catch(() => {});
-
-        // 다음 페이지 렌더링 대기
-        if (prevFirstQ !== undefined) {
-          await page
-            .waitForFunction(
-              (prev) => {
-                const firstLi = document.querySelector('li[data-question-number]');
-                if (!firstLi) return false;
-                const qNum = parseInt(firstLi.getAttribute('data-question-number') || '0', 10);
-                return qNum !== prev;
-              },
-              prevFirstQ,
-              { timeout: 4000 },
-            )
-            .catch(() => {});
+      if (effectiveIsAdvancedSurvey) {
+        // ── [심화 세미나]: API 획득 총 페이지 수(targetTotalPages) 기반 이동 ──
+        if (currentPageNum >= targetTotalPages) {
+          console.log(
+            `[seminar_quiz] [심화설문] 마지막 설문 페이지 도달 (현재 페이지: ${currentPageNum}/${targetTotalPages})`,
+          );
+          break;
         }
-        await page.waitForTimeout(1500);
-        currentPageNum++;
+
+        // 제출하기, 설문완료는 제외하고 명시적인 "다음" 버튼 탐색
+        let nextBtn = page.locator('button:text-matches("^다음$|^다음\\s*단계$|^Next$", "i"):not([disabled])').first();
+        let hasNext = await nextBtn.isVisible({ timeout: 2000 }).catch(() => false);
+
+        if (!hasNext) {
+          // 폴백: "다음" 또는 "Next" 텍스트 포함 버튼
+          nextBtn = page.locator('button:text-matches("다음|Next", "i"):not([disabled])').first();
+          hasNext = await nextBtn.isVisible({ timeout: 1500 }).catch(() => false);
+        }
+
+        if (hasNext) {
+          console.log(
+            `[seminar_quiz] [심화설문] 다음 페이지 이동 버튼 감지 (현재 페이지: ${currentPageNum}/${targetTotalPages}) -> 클릭`,
+          );
+          const prevFirstQ = pageQuestions[0]?.questionNumber;
+          await nextBtn.scrollIntoViewIfNeeded().catch(() => {});
+          await nextBtn.click({ force: true }).catch(() => {});
+          await page.waitForLoadState('networkidle', { timeout: 6000 }).catch(() => {});
+
+          // 다음 페이지 렌더링 대기
+          if (prevFirstQ !== undefined) {
+            await page
+              .waitForFunction(
+                (prev) => {
+                  const firstLi = document.querySelector('li[data-question-number]');
+                  if (!firstLi) return false;
+                  const qNum = parseInt(firstLi.getAttribute('data-question-number') || '0', 10);
+                  return qNum !== prev;
+                },
+                prevFirstQ,
+                { timeout: 4000 },
+              )
+              .catch(() => {});
+          }
+          await page.waitForTimeout(1500);
+          currentPageNum++;
+        } else {
+          console.warn(
+            `[seminar_quiz] [심화설문] 다음 페이지 이동 버튼 미발견 (현재 페이지: ${currentPageNum}/${targetTotalPages}) -> 탐색 종료`,
+          );
+          break;
+        }
       } else {
-        console.log(`[seminar_quiz] 마지막 설문 페이지 도달 (총 탐색 페이지: ${currentPageNum})`);
-        break;
+        // ── [일반 세미나]: 기존 정상 동작 로직 유지 (hasNext && !hasSubmit 확인) ──
+        const nextBtn = page
+          .locator('button:text-matches("^다음$|^다음\\s*단계$|^Next$", "i"):not([disabled])')
+          .first();
+        const hasNext = await nextBtn.isVisible({ timeout: 2000 }).catch(() => false);
+
+        const submitBtn = page
+          .locator(
+            'input[type="submit"].btn-primary, button:text-matches("제출하기|설문완료|응답완료", "i"):not([disabled])',
+          )
+          .first();
+        const hasSubmit = await submitBtn.isVisible({ timeout: 2000 }).catch(() => false);
+
+        if (hasNext && !hasSubmit) {
+          console.log(`[seminar_quiz] 다음 페이지 이동 버튼 감지 (현재 페이지: ${currentPageNum}) -> 클릭`);
+          const prevFirstQ = pageQuestions[0]?.questionNumber;
+          await nextBtn.scrollIntoViewIfNeeded().catch(() => {});
+          await nextBtn.click({ force: true }).catch(() => {});
+          await page.waitForLoadState('networkidle', { timeout: 6000 }).catch(() => {});
+
+          // 다음 페이지 렌더링 대기
+          if (prevFirstQ !== undefined) {
+            await page
+              .waitForFunction(
+                (prev) => {
+                  const firstLi = document.querySelector('li[data-question-number]');
+                  if (!firstLi) return false;
+                  const qNum = parseInt(firstLi.getAttribute('data-question-number') || '0', 10);
+                  return qNum !== prev;
+                },
+                prevFirstQ,
+                { timeout: 4000 },
+              )
+              .catch(() => {});
+          }
+          await page.waitForTimeout(1500);
+          currentPageNum++;
+        } else {
+          console.log(`[seminar_quiz] 마지막 설문 페이지 도달 (총 탐색 페이지: ${currentPageNum})`);
+          break;
+        }
       }
     }
     // ── 다중 페이지 탐색 및 응답 루프 끝 ─────────────────────────────────────────
