@@ -17,7 +17,8 @@ import {
   type FutureSeminarApiItem,
   type SeminarSurveyInfo,
 } from '../modules/seminar_api';
-import { processSeminarQuiz } from './seminar_quiz';
+import { processSeminarQuiz, loadCheatsheet } from './seminar_quiz';
+import { fetchSeminarSurveyQuizHttp } from '../modules/seminar_survey_api';
 import * as seminarRepo from '../services/seminar_repository';
 import { syncSeminarsDetailToDb } from '../services/seminar_sync_service';
 import {
@@ -1312,6 +1313,32 @@ export async function checkSeminarEndStatusFromApi(seminarId: string): Promise<{
 }
 
 /**
+ * 순수 HTTP API로 퀴즈 결과 및 심화설문 여부를 1~2초 내에 사전 조회합니다.
+ * - seminarId가 없는 경우 바로 null 반환
+ * - HTTP 조회 실패 시 null 반환 (후속 브라우저 fallback 처리)
+ */
+export async function tryFetchSeminarQuizHttpFast(
+  seminarId: string | null | undefined,
+  isAdvancedSurvey?: boolean,
+): Promise<{ quizResultMessage: string | null; isAdvancedSurvey?: boolean } | null> {
+  if (!seminarId) return null;
+  try {
+    const cheatsheet = await loadCheatsheet();
+    const httpResult = await fetchSeminarSurveyQuizHttp(seminarId, cheatsheet, isAdvancedSurvey);
+    if (httpResult && httpResult.success) {
+      const quizResultMessage = httpResult.quizSummaryMessage || null;
+      return {
+        quizResultMessage,
+        isAdvancedSurvey: httpResult.isAdvancedSurvey || isAdvancedSurvey,
+      };
+    }
+  } catch (err) {
+    console.warn(`[monitor_seminars] HTTP 퀴즈 사전 조회 실패 (${seminarId}):`, err);
+  }
+  return null;
+}
+
+/**
  * 세미나 종료 후 Playwright로 설문참여 버튼을 클릭하고 퀴즈를 처리하는 함수
  */
 export async function handleSeminarEndAndQuiz(
@@ -2117,6 +2144,36 @@ async function monitorSeminars(
         !item.quizResultMessage;
 
       if (shouldAttemptQuiz) {
+        // 1. HTTP API 퀴즈 선제 조회 (1~2초)
+        const httpQuizRes = await tryFetchSeminarQuizHttpFast(item.seminarId, item.isAdvancedSurvey);
+        if (httpQuizRes?.quizResultMessage) {
+          item.quizResultMessage = httpQuizRes.quizResultMessage;
+          if (httpQuizRes.isAdvancedSurvey !== undefined) {
+            item.isAdvancedSurvey = httpQuizRes.isAdvancedSurvey;
+          }
+
+          if (lastStatusNoticeMessageId) {
+            const currentNowMs = Date.now();
+            const attachedComments = getChannelCommentsByParentMessageId(lastStatusNoticeMessageId).map((r) => ({
+              userName: r.userName,
+              text: r.text,
+            }));
+            const updatedStatusText = buildSeminarStatusMessage(
+              periodName,
+              Array.from(monitoredSeminarsMap.values()),
+              isAllInitiallyCompleted,
+              attachedComments,
+              currentNowMs,
+            ).text;
+            const editRes = await editChannelMessage(lastStatusNoticeMessageId, updatedStatusText).catch(() => null);
+            if (editRes && editRes.success) {
+              lastStatusNoticeText = updatedStatusText;
+            }
+          }
+        }
+
+        // 2. Playwright 브라우저 실행 (심화: 문항체크+마지막페이지 / 일반: 문항체크+자동제출)
+        let browserQuizMessage: string | null = null;
         try {
           await withBrowserContext(providedContext, async (ctx) => {
             const res = await handleSeminarEndAndQuiz(
@@ -2129,28 +2186,32 @@ async function monitorSeminars(
               },
               item.url,
             );
-            item.quizResultMessage = res.message;
+            browserQuizMessage = res.message;
           });
         } catch (quizErr) {
           console.warn(`[${periodName}] 초기 세미나 퀴즈 처리 건너뜀 (${item.name}):`, quizErr);
         }
 
-        if (item.quizResultMessage && lastStatusNoticeMessageId) {
-          const currentNowMs = Date.now();
-          const attachedComments = getChannelCommentsByParentMessageId(lastStatusNoticeMessageId).map((r) => ({
-            userName: r.userName,
-            text: r.text,
-          }));
-          const updatedStatusText = buildSeminarStatusMessage(
-            periodName,
-            Array.from(monitoredSeminarsMap.values()),
-            isAllInitiallyCompleted,
-            attachedComments,
-            currentNowMs,
-          ).text;
-          const editRes = await editChannelMessage(lastStatusNoticeMessageId, updatedStatusText).catch(() => null);
-          if (editRes && editRes.success) {
-            lastStatusNoticeText = updatedStatusText;
+        // 3. 브라우저에서 새로운 정답이 획득되었거나 갱신된 경우 현황판 2차 갱신
+        if (browserQuizMessage && browserQuizMessage !== item.quizResultMessage) {
+          item.quizResultMessage = browserQuizMessage;
+          if (lastStatusNoticeMessageId) {
+            const currentNowMs = Date.now();
+            const attachedComments = getChannelCommentsByParentMessageId(lastStatusNoticeMessageId).map((r) => ({
+              userName: r.userName,
+              text: r.text,
+            }));
+            const updatedStatusText = buildSeminarStatusMessage(
+              periodName,
+              Array.from(monitoredSeminarsMap.values()),
+              isAllInitiallyCompleted,
+              attachedComments,
+              currentNowMs,
+            ).text;
+            const editRes = await editChannelMessage(lastStatusNoticeMessageId, updatedStatusText).catch(() => null);
+            if (editRes && editRes.success) {
+              lastStatusNoticeText = updatedStatusText;
+            }
           }
         }
       }
@@ -2350,6 +2411,16 @@ async function monitorSeminars(
             dynamicSurveyState === SurveyState.SURVEY_PROGRESS &&
             !quizResultMessage
           ) {
+            // 1. HTTP API 퀴즈 선제 조회 (1~2초)
+            const httpQuizRes = await tryFetchSeminarQuizHttpFast(seminarId, info.isAdvancedSurvey);
+            if (httpQuizRes?.quizResultMessage) {
+              quizResultMessage = httpQuizRes.quizResultMessage;
+              if (httpQuizRes.isAdvancedSurvey !== undefined) {
+                info.isAdvancedSurvey = httpQuizRes.isAdvancedSurvey;
+              }
+            }
+
+            // 2. Playwright 브라우저 실행
             try {
               await withBrowserContext(providedContext, async (ctx) => {
                 const res = await handleSeminarEndAndQuiz(
@@ -2362,7 +2433,9 @@ async function monitorSeminars(
                   },
                   targetUrl,
                 );
-                quizResultMessage = res.message;
+                if (res.message) {
+                  quizResultMessage = res.message;
+                }
               });
             } catch (quizErr) {
               console.warn(`[${periodName}] 신규 세미나 퀴즈 처리 실패 (${info.name}):`, quizErr);
@@ -2477,24 +2550,30 @@ async function monitorSeminars(
         if (isEnded) {
           console.log(`[${periodName}] 세미나 종료 감지됨: ${name} (${seminarId}), isSurveyOpen=${isSurveyOpen}`);
 
-          let quizResultMessage: string | null = null;
+          const isPointExcludedSeminar = Boolean(currentSeminar.isSurveyPointExcluded || isDetailPointExcluded);
 
-          if (!currentSeminar.isSurveyPointExcluded && !isDetailPointExcluded) {
-            await withBrowserContext(providedContext, async (ctx) => {
-              const res = await handleSeminarEndAndQuiz(
-                ctx,
-                {
-                  name,
-                  seminarId,
-                  isSurveyPointExcluded: false,
-                  isAdvancedSurvey: currentSeminar.isAdvancedSurvey,
-                },
-                currentSeminar.url || targetUrl,
-              );
-              quizResultMessage = res.message;
-            });
+          if (isPointExcludedSeminar) {
+            console.log(`[${periodName}] 포인트 미지급 세미나 종료 감지 (${name}, ${seminarId}) - 알림/퀴즈/공지 생략`);
+            currentSeminar.status = '종료';
+            currentSeminar.isEnded = true;
+            if (realtimeSurveyEndDt) currentSeminar.surveyEndDt = realtimeSurveyEndDt;
+            if (realtimeSurveyStartDt) currentSeminar.surveyStartDt = realtimeSurveyStartDt;
+            if (realtimeSurveyMinutesLeft !== null) currentSeminar.surveyMinutesLeft = realtimeSurveyMinutesLeft;
+            currentSeminar.endedAt = currentSeminar.endedAt || Date.now();
+            continue;
           }
 
+          // 1. HTTP API를 통한 초고속 퀴즈 사전 조회 시도 (1~2초)
+          let quizResultMessage: string | null = currentSeminar.quizResultMessage || null;
+          const httpQuizRes = await tryFetchSeminarQuizHttpFast(seminarId, currentSeminar.isAdvancedSurvey);
+          if (httpQuizRes?.quizResultMessage) {
+            quizResultMessage = httpQuizRes.quizResultMessage;
+            if (httpQuizRes.isAdvancedSurvey !== undefined) {
+              currentSeminar.isAdvancedSurvey = httpQuizRes.isAdvancedSurvey;
+            }
+          }
+
+          // 2. 상태 갱신 및 구독자 종료 알림 + 공지채널 현황판 1차 갱신 즉시 발송
           currentSeminar.status = '종료';
           currentSeminar.isEnded = true;
           if (realtimeSurveyEndDt) currentSeminar.surveyEndDt = realtimeSurveyEndDt;
@@ -2508,6 +2587,66 @@ async function monitorSeminars(
             currentSeminar.endNotified = true;
             await sendSeminarLiveEndNotice(currentSeminar).catch(() => {});
           }
+
+          // 공지채널 현황판 1차 즉시 갱신 (선제 갱신)
+          if (lastStatusNoticeMessageId) {
+            const currentNowMs = Date.now();
+            const attachedComments = getChannelCommentsByParentMessageId(lastStatusNoticeMessageId).map((r) => ({
+              userName: r.userName,
+              text: r.text,
+            }));
+            const updatedStatusText = buildSeminarStatusMessage(
+              periodName,
+              Array.from(monitoredSeminarsMap.values()),
+              false,
+              attachedComments,
+              currentNowMs,
+            ).text;
+            const editRes = await editChannelMessage(lastStatusNoticeMessageId, updatedStatusText).catch(() => null);
+            if (editRes && editRes.success) {
+              lastStatusNoticeText = updatedStatusText;
+            }
+          }
+
+          // 3. Playwright 브라우저 실행 (심화: 문항체크+마지막페이지 / 일반: 문항체크+자동제출)
+          let browserQuizMessage: string | null = null;
+          await withBrowserContext(providedContext, async (ctx) => {
+            const res = await handleSeminarEndAndQuiz(
+              ctx,
+              {
+                name,
+                seminarId,
+                isSurveyPointExcluded: false,
+                isAdvancedSurvey: currentSeminar.isAdvancedSurvey,
+              },
+              currentSeminar.url || targetUrl,
+            );
+            browserQuizMessage = res.message;
+          });
+
+          // 4. 브라우저에서 새로운 정답이 획득되었거나 갱신된 경우 현황판 2차 갱신
+          if (browserQuizMessage && browserQuizMessage !== quizResultMessage) {
+            currentSeminar.quizResultMessage = browserQuizMessage;
+            if (lastStatusNoticeMessageId) {
+              const currentNowMs = Date.now();
+              const attachedComments = getChannelCommentsByParentMessageId(lastStatusNoticeMessageId).map((r) => ({
+                userName: r.userName,
+                text: r.text,
+              }));
+              const updatedStatusText = buildSeminarStatusMessage(
+                periodName,
+                Array.from(monitoredSeminarsMap.values()),
+                false,
+                attachedComments,
+                currentNowMs,
+              ).text;
+              const editRes = await editChannelMessage(lastStatusNoticeMessageId, updatedStatusText).catch(() => null);
+              if (editRes && editRes.success) {
+                lastStatusNoticeText = updatedStatusText;
+              }
+            }
+          }
+
           continue;
         }
 

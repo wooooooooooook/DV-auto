@@ -2,6 +2,7 @@ import assert from 'assert';
 import { chromium } from 'playwright';
 import { syncSeminarsTask } from '../src/tasks/apply_seminar';
 import * as seminarApiModule from '../src/modules/seminar_api';
+import * as checkSeminarPointModule from '../src/tasks/check_seminar_point';
 import { describe, it, vi } from 'vitest';
 
 describe('sync_seminars execution without Playwright Browser', () => {
@@ -20,6 +21,11 @@ describe('sync_seminars execution without Playwright Browser', () => {
       success: true,
       items: [],
       rawResponse: {},
+    });
+
+    vi.spyOn(checkSeminarPointModule, 'searchSeminarPoints').mockResolvedValue({
+      success: true,
+      points: new Map(),
     });
 
     try {

@@ -7,7 +7,7 @@ import {
 } from '../src/tasks/today_links';
 import * as storage from '../src/services/storage';
 import * as seminarRepo from '../src/services/seminar_repository';
-import { describe, it } from 'vitest';
+import { describe, it, vi } from 'vitest';
 
 /**
  * 사용자가 제공한 예시 문구를 바탕으로 구성한 테스트 케이스
@@ -453,33 +453,53 @@ async function testTodayQuizCacheIntegration() {
   const { TODAY_QUIZ_INFO_KEY } = await import('../src/tasks/today_quiz');
   type CachedTodayQuizInfo = import('../src/tasks/today_quiz').CachedTodayQuizInfo;
   const todayLinks = await import('../src/tasks/today_links');
+  const utilsModule = await import('../src/modules/utils');
+  const seminarApiModule = await import('../src/modules/seminar_api');
 
-  const todayIso = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' as const });
-
-  // 1. 캐시 저장
-  storage.set<CachedTodayQuizInfo>(TODAY_QUIZ_INFO_KEY, {
-    date: todayIso,
-    link: 'https://www.doctorville.co.kr/product/productView?pId=999',
-    productTitle: '테스트약품',
-    answers: [2, 3, 1],
+  const pointAvailabilitySpy = vi.spyOn(utilsModule, 'getPointConversionAvailabilityHttp').mockResolvedValue(null);
+  const telegramSpy = vi.spyOn(utilsModule, 'sendTelegram').mockResolvedValue(true);
+  const pointExcludedSpy = vi
+    .spyOn(utilsModule, 'isSurveyPointExcludedSeminarHttp')
+    .mockResolvedValue({ status: 'success', excluded: false });
+  const futureSeminarsSpy = vi.spyOn(seminarApiModule, 'fetchMainFutureSeminars').mockResolvedValue({
+    success: true,
+    items: [],
+    rawResponse: {},
   });
 
-  // 2. todayLinks.run을 브라우저(page) 없이 실행
-  const res = await todayLinks.run({});
-  assert.strictEqual(res.success, true, 'todayLinks.run() without page should succeed');
-  assert.ok(res.message.includes('테스트약품'), '캐시된 퀴즈 제목이 메시지에 포함되어야 함');
-  assert.ok(res.message.includes('231'), '캐시된 정답 번호가 메시지에 포함되어야 함');
+  try {
+    const todayIso = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' as const });
 
-  // 3. 퀴즈 없음 캐시 테스트
-  storage.set<CachedTodayQuizInfo>(TODAY_QUIZ_INFO_KEY, {
-    date: todayIso,
-    link: null,
-  });
-  const resNoQuiz = await todayLinks.run({});
-  assert.strictEqual(resNoQuiz.success, true, 'todayLinks.run() without quiz should succeed');
-  assert.ok(resNoQuiz.message.includes('오늘은 퀴즈가 없습니다. ☕'), '퀴즈 없음 시 안내 문구가 포함되어야 함');
+    // 1. 캐시 저장
+    storage.set<CachedTodayQuizInfo>(TODAY_QUIZ_INFO_KEY, {
+      date: todayIso,
+      link: 'https://www.doctorville.co.kr/product/productView?pId=999',
+      productTitle: '테스트약품',
+      answers: [2, 3, 1],
+    });
 
-  console.log('✅ [Pass] today_quiz 캐시 연동 테스트 통과!\n');
+    // 2. todayLinks.run을 브라우저(page) 없이 실행
+    const res = await todayLinks.run({});
+    assert.strictEqual(res.success, true, 'todayLinks.run() without page should succeed');
+    assert.ok(res.message.includes('테스트약품'), '캐시된 퀴즈 제목이 메시지에 포함되어야 함');
+    assert.ok(res.message.includes('231'), '캐시된 정답 번호가 메시지에 포함되어야 함');
+
+    // 3. 퀴즈 없음 캐시 테스트
+    storage.set<CachedTodayQuizInfo>(TODAY_QUIZ_INFO_KEY, {
+      date: todayIso,
+      link: null,
+    });
+    const resNoQuiz = await todayLinks.run({});
+    assert.strictEqual(resNoQuiz.success, true, 'todayLinks.run() without quiz should succeed');
+    assert.ok(resNoQuiz.message.includes('오늘은 퀴즈가 없습니다. ☕'), '퀴즈 없음 시 안내 문구가 포함되어야 함');
+
+    console.log('✅ [Pass] today_quiz 캐시 연동 테스트 통과!\n');
+  } finally {
+    pointAvailabilitySpy.mockRestore();
+    telegramSpy.mockRestore();
+    pointExcludedSpy.mockRestore();
+    futureSeminarsSpy.mockRestore();
+  }
 }
 
 function testSeminarNameTruncationAndCapacityFormat() {

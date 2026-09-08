@@ -395,6 +395,10 @@ describe('apply_seminar HTTP pre-check 및 조건부 Playwright 실행 테스트
 
     // shouldRunEnrich=false 강제 → 공개 세미나 enrich는 건너뜀
     vi.spyOn(applyModule, 'shouldRunEnrich').mockReturnValue(false);
+    vi.spyOn(checkSeminarPointModule, 'searchSeminarPoints').mockResolvedValue({
+      success: true,
+      points: new Map(),
+    });
 
     seminarRepo.clearSeminars();
 

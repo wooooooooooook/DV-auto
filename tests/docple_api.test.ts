@@ -16,6 +16,7 @@ import {
   run as runDocpleDaily,
   type DocpleDailyWorkflowResult,
 } from '../src/tasks/docple_daily';
+import * as utilsModule from '../src/modules/utils';
 
 vi.mock('undici', () => ({
   request: vi.fn(),
@@ -48,6 +49,7 @@ function createMockJsonResponse(data: unknown, statusCode = 200) {
 describe('Docple Plus API & Daily Task Tests', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(utilsModule, 'sendTelegram').mockResolvedValue(true);
   });
 
   describe('API Client Methods', () => {

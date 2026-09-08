@@ -752,7 +752,7 @@ export async function discoverMissingGapSeminars(
   referenceDate: string = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' }),
   options: { maxCheckRange?: number; concurrency?: number; delayMs?: number } = {},
 ): Promise<{ gapSeminars: SeminarListItem[]; isAuthExpired: boolean }> {
-  const { maxCheckRange = 50, concurrency = 2, delayMs = 150 } = options;
+  const { maxCheckRange = 50, concurrency = 2, delayMs = process.env.NODE_ENV === 'test' ? 0 : 150 } = options;
 
   // 1. mainFuture API 결과(currentSeminars)의 숫자 seminarId 목록 추출
   const mainFutureNumericIds: number[] = [];

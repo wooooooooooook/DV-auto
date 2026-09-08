@@ -11,7 +11,7 @@ import { getSeminarIdFromUrl } from '../modules/utils';
 export async function enrichSeminarsWithDetail(
   seminars: SeminarListItem[],
   concurrency = 2,
-  delayMs = 150,
+  delayMs = process.env.NODE_ENV === 'test' ? 0 : 150,
 ): Promise<{ seminars: SeminarListItem[]; isAuthExpired: boolean; deletedSeminarIds: string[] }> {
   let isAuthExpired = false;
   const enriched: SeminarListItem[] = [];
