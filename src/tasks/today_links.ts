@@ -3,7 +3,6 @@ import { getPointConversionAvailabilityHttp, formatSeminarDisplayName } from '..
 import * as storage from '../services/storage';
 import * as seminarRepo from '../services/seminar_repository';
 import { TODAY_QUIZ_INFO_KEY, type CachedTodayQuizInfo } from './today_quiz';
-import { ProcessState } from '../modules/seminar_api';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
@@ -282,10 +281,6 @@ async function collectTodaySeminarMessage(
 
     for (const stored of storedSeminars) {
       if (!stored.date || !isDateMatching(stored.date, dateTarget)) continue;
-      const ps = stored.processState;
-      if (ps === ProcessState.PROCESS_END || ps === ProcessState.PROCESS_COMPLETED || stored.seminarCompleted === 1) {
-        continue;
-      }
       const sid = stored.seminarId ? String(stored.seminarId).trim() : null;
       const fullUrl = stored.url || (sid ? `${SEMINAR_DETAIL_PAGE}${sid}` : '');
       if ((sid && seenIds.has(sid)) || (fullUrl && seenUrls.has(fullUrl))) continue;

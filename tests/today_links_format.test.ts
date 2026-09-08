@@ -3,6 +3,7 @@ import {
   formatTodayLinksBroadcast,
   getTodayDateStrings,
   getYesterdayAddedSeminars,
+  collectTodaySeminarMessage,
   type TodayLinksFormatInput,
 } from '../src/tasks/today_links';
 import * as storage from '../src/services/storage';
@@ -581,6 +582,35 @@ function testSeminarNameTruncationAndCapacityFormat() {
   console.log('✅ [Pass] 신규 세미나 제목 20자 Truncation 및 신청자수 포맷팅 테스트 통과!\n');
 }
 
+async function testCollectTodaySeminarMessageIncludesEndedSeminars() {
+  vi.spyOn(seminarRepo, 'getAllSeminars').mockReturnValue([
+    {
+      seminarId: '9001',
+      name: '종료된 점심 세미나',
+      url: 'https://m.doctorville.co.kr/cme/seminar/9001',
+      date: '2026-09-08',
+      time: '12:30~13:30',
+      processState: 7, // PROCESS_END
+      seminarCompleted: 1,
+    },
+    {
+      seminarId: '9002',
+      name: '진행 예정인 저녁 세미나',
+      url: 'https://m.doctorville.co.kr/cme/seminar/9002',
+      date: '2026-09-08',
+      time: '18:00~19:00',
+      processState: 2, // PROCESS_APPLY
+      seminarCompleted: 0,
+    },
+  ]);
+
+  const res = await collectTodaySeminarMessage(undefined, '2026-09-08');
+  assert.ok(res.message.includes('종료된 점심 세미나'), '종료 상태인 세미나도 메시지에 포함되어야 함');
+  assert.ok(res.message.includes('진행 예정인 저녁 세미나'), '진행 예정인 세미나도 메시지에 포함되어야 함');
+  assert.deepStrictEqual(res.lunchSeminarIds, ['9001']);
+  assert.deepStrictEqual(res.dinnerSeminarIds, ['9002']);
+}
+
 describe('today_links_format 단위 테스트', () => {
   it('testTodayLinksFormatWithUserExample', () => {
     testTodayLinksFormatWithUserExample();
@@ -605,4 +635,8 @@ describe('today_links_format 단위 테스트', () => {
   it('testTodayQuizCacheIntegration', async () => {
     await testTodayQuizCacheIntegration();
   }, 30000);
+
+  it('testCollectTodaySeminarMessageIncludesEndedSeminars', async () => {
+    await testCollectTodaySeminarMessageIncludesEndedSeminars();
+  });
 });
