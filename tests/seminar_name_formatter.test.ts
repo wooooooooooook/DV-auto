@@ -138,4 +138,30 @@ describe('formatSeminarDisplayName 공통 함수 테스트', () => {
     const result = formatSeminarDisplayName(item);
     expect(result).toBe('🔒<b>[비공개][내분비 &amp; 대사]</b> &lt;당뇨 &amp; 고혈압&gt; 완벽 가이드');
   });
+
+  it('11. formatRecentCommentsSection: 사용자 이름 및 댓글 내용의 HTML 특수문자 이스케이프 검증', async () => {
+    const { formatRecentCommentsSection } = await import('../src/services/channel_notice_service');
+    const comments = [{ userName: '<user_1>', text: '당뇨 혈당 < 100 & 고혈압' }];
+    const section = formatRecentCommentsSection(comments);
+    expect(section).toContain('• &lt;user_1&gt;: 당뇨 혈당 &lt; 100 &amp; 고혈압');
+    expect(section).not.toContain('<user_1>');
+  });
+
+  it('12. buildSeminarStatusMessage 및 개별알림: 퀴즈 결과 메시지의 HTML 특수문자 이스케이프 검증', async () => {
+    const { buildSeminarStatusMessage, buildSeminarLiveEndMessage } =
+      await import('../src/tasks/monitor_seminars_notice');
+    const seminar = {
+      seminarId: '999',
+      name: '테스트 세미나',
+      url: 'https://m.doctorville.co.kr/cme/seminar/999',
+      status: '종료' as const,
+      quizResultMessage: '📋 퀴즈: HbA1c < 6.5% & LDL < 100',
+    };
+
+    const statusResult = buildSeminarStatusMessage('점심', [seminar]);
+    expect(statusResult.text).toContain('HbA1c &lt; 6.5% &amp; LDL &lt; 100');
+
+    const liveEndResult = buildSeminarLiveEndMessage(seminar);
+    expect(liveEndResult.text).toContain('HbA1c &lt; 6.5% &amp; LDL &lt; 100');
+  });
 });

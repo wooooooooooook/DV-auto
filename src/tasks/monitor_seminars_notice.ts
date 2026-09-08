@@ -10,7 +10,7 @@ import {
   formatRecentCommentsSection,
 } from '../services/channel_message_repository';
 import { sendToTopicSubscribers, type SubscriptionTopic } from '../services/subscription_service';
-import { formatPrivateSeminarTag, truncateSeminarName, formatSeminarDisplayName } from '../modules/utils';
+import { formatPrivateSeminarTag, truncateSeminarName, formatSeminarDisplayName, escapeHtml } from '../modules/utils';
 
 export { formatPrivateSeminarTag, truncateSeminarName, formatSeminarDisplayName };
 
@@ -531,7 +531,7 @@ export function buildSeminarStatusMessage(
     if (s.status === '종료' || statusDisplay.text === '종료') {
       const summaryQuiz = extractQuizSummaryOnly(s.quizResultMessage);
       if (summaryQuiz) {
-        text += `\n${summaryQuiz}`;
+        text += `\n${escapeHtml(summaryQuiz)}`;
       }
       if (s.hasSurvey === false) {
         text += `\n(설문이 없는 세미나)`;
@@ -558,7 +558,7 @@ export function buildSeminarStatusMessage(
   if (isAllCompleted) {
     text += `\n━━━━━━━━━━━━━━━━━━\n🏁 ${periodName}세미나가 모두 종료되었습니다.`;
   } else if (timeExpiredMessage) {
-    text += `\n━━━━━━━━━━━━━━━━━━\n⚠️ ${timeExpiredMessage}`;
+    text += `\n━━━━━━━━━━━━━━━━━━\n⚠️ ${escapeHtml(timeExpiredMessage)}`;
   }
 
   return { text, options: DEFAULT_NOTICE_OPTIONS };
@@ -626,7 +626,7 @@ export function buildSeminarLiveEndMessage(seminar: MonitoredSeminarItem): {
   let text = `🔴 <b>[세미나 종료]</b>\n\n${seminarTitle}\n${targetUrl}`;
 
   if (seminar.quizResultMessage) {
-    text += `\n\n${seminar.quizResultMessage.trim()}`;
+    text += `\n\n${escapeHtml(seminar.quizResultMessage.trim())}`;
   } else if (seminar.hasSurvey === false) {
     text += `\n\n(설문이 없는 세미나)`;
   }
@@ -669,7 +669,7 @@ export function buildSurveyClosingMessage(
   let text = `⏳ <b>[설문 마감 ${minutesLeft}분 전]</b>\n\n${seminarTitle}\n${targetUrl}`;
 
   if (seminar.quizResultMessage) {
-    text += `\n\n${seminar.quizResultMessage.trim()}`;
+    text += `\n\n${escapeHtml(seminar.quizResultMessage.trim())}`;
   }
   text += `\n\n⚠️ <b>설문 참여 마감까지 약 ${minutesLeft}분 남았습니다.</b>`;
   text += `\n<i>(※ 본 알림은 설문 진행 여부와 관계없이 발송되며, 이미 설문을 완료하셨다면 무시하셔도 됩니다.)</i>`;

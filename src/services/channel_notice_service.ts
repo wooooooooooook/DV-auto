@@ -1,4 +1,4 @@
-import { sendNotificationToChannel } from '../modules/utils';
+import { sendNotificationToChannel, escapeHtml } from '../modules/utils';
 import * as logger from './logger';
 import * as channelRepo from './channel_message_repository';
 
@@ -136,7 +136,7 @@ export function formatRecentCommentsSection(comments: Array<{ userName: string; 
   const recent = comments.slice(-maxCount);
   for (const c of recent) {
     const cleanText = c.text.replace(/\n/g, ' ').slice(0, 100);
-    text += `• ${c.userName}: ${cleanText}\n`;
+    text += `• ${escapeHtml(c.userName)}: ${escapeHtml(cleanText)}\n`;
   }
   return text;
 }
