@@ -4,6 +4,7 @@ import * as seminarApiModule from '../src/modules/seminar_api';
 import type { FutureSeminarApiItem } from '../src/modules/seminar_api';
 import * as seminarPointSyncModule from '../src/services/seminar_point_sync';
 import * as seminarRepo from '../src/services/seminar_repository';
+import * as seminarSyncService from '../src/services/seminar_sync_service';
 import * as storage from '../src/services/storage';
 
 describe('syncSeminarsTask auto-apply integration', () => {
@@ -65,6 +66,87 @@ describe('syncSeminarsTask auto-apply integration', () => {
       applyCnt: 10,
       maxPeopleCnt: 100,
       processState: seminarApiModule.ProcessState.PROCESS_CANCEL, // 3: 이미 신청됨
+      cancelProcessState: 0,
+      useDepthSurvey: 'N',
+    };
+
+    vi.spyOn(seminarApiModule, 'fetchMainFutureSeminars').mockResolvedValue({
+      success: true,
+      items: [mockItem],
+      rawResponse: {},
+    });
+
+    const applySpy = vi.spyOn(seminarApiModule, 'applySeminarWithTerms');
+
+    const result = await syncSeminarsTask.run({}, { notifyNewSeminarsToTelegram: false });
+
+    expect(applySpy).not.toHaveBeenCalled();
+    expect(result).toBeDefined();
+    expect(result && typeof result === 'object' && result.success).toBe(true);
+  });
+
+  it('기존에 DB에 저장되어 있던 비공개 세미나는 PROCESS_APPLY 상태여도 신청으로 빠지지 않는다', async () => {
+    // 기존 DB에 저장되어 있던 비공개 세미나 (이전에 이미 발견되었던 건)
+    seminarRepo.setAllSeminars([
+      {
+        seminarId: '5674',
+        name: '기존 비공개 세미나',
+        url: 'https://m.doctorville.co.kr/cme/seminar/5674',
+        date: '2026-09-15',
+        time: '19:00',
+        currentCount: '10',
+        totalCount: '100',
+        nightTime: false,
+        hiddenYn: 'Y',
+        processState: seminarApiModule.ProcessState.PROCESS_APPLY, // 신청 가능 상태이지만 기존 비공개 건
+        isAdvancedSurvey: false,
+      },
+    ]);
+
+    vi.spyOn(seminarApiModule, 'fetchMainFutureSeminars').mockResolvedValue({
+      success: true,
+      items: [],
+      rawResponse: {},
+    });
+
+    vi.spyOn(seminarSyncService, 'enrichSeminarsWithDetail').mockResolvedValue({
+      seminars: [
+        {
+          seminarId: '5674',
+          name: '기존 비공개 세미나',
+          url: 'https://m.doctorville.co.kr/cme/seminar/5674',
+          date: '2026-09-15',
+          time: '19:00',
+          currentCount: '10',
+          totalCount: '100',
+          nightTime: false,
+          hiddenYn: 'Y',
+          processState: seminarApiModule.ProcessState.PROCESS_APPLY,
+          isAdvancedSurvey: false,
+        },
+      ],
+      isAuthExpired: false,
+      deletedSeminarIds: [],
+    });
+
+    const applySpy = vi.spyOn(seminarApiModule, 'applySeminarWithTerms');
+
+    const result = await syncSeminarsTask.run({}, { notifyNewSeminarsToTelegram: false });
+
+    expect(applySpy).not.toHaveBeenCalled();
+    expect(result).toBeDefined();
+    expect(result && typeof result === 'object' && result.success).toBe(true);
+  });
+
+  it('정원 초과(PROCESS_EXCESS) 또는 마감(isClosed) 세미나는 신청 대상에서 제외된다', async () => {
+    const mockItem: FutureSeminarApiItem = {
+      seminarId: '7777',
+      seminarNm: '정원 초과 세미나',
+      startDt: '2026-09-10 19:00:00',
+      endDt: '2026-09-10 20:00:00',
+      applyCnt: 100,
+      maxPeopleCnt: 100,
+      processState: seminarApiModule.ProcessState.PROCESS_EXCESS, // 4: 정원 초과
       cancelProcessState: 0,
       useDepthSurvey: 'N',
     };

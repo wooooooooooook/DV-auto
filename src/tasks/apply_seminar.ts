@@ -92,6 +92,43 @@ export function isAppliedSeminar(processState?: number): boolean {
 }
 
 /**
+ * 세미나가 자동 신청 대상인지 판별
+ * - 이미 신청 완료 상태이거나 마감(isClosed), PROCESS_APPLY(2)가 아닌 경우 제외
+ * - 비공개 세미나(hiddenYn === 'Y')인 경우: 이번에 새로 발견된 세미나가 아니면 제외
+ */
+export function isEligibleApplyTarget(
+  seminar: {
+    seminarId?: string | null;
+    url?: string;
+    processState?: number;
+    isClosed?: boolean;
+    hiddenYn?: string;
+  },
+  options: {
+    newlyAddedIds?: Set<string>;
+    initialStoredIdSet?: Set<string>;
+  } = {},
+): boolean {
+  if (isAppliedSeminar(seminar.processState)) return false;
+  if (seminar.processState !== ProcessState.PROCESS_APPLY) return false;
+  if (seminar.isClosed) return false;
+
+  const isPrivate = seminar.hiddenYn === 'Y' || seminar.hiddenYn === 'y';
+  if (isPrivate) {
+    const sid = seminar.seminarId || getSeminarIdFromUrl(seminar.url || '');
+    if (!sid) return false;
+
+    if (options.newlyAddedIds) {
+      if (!options.newlyAddedIds.has(sid)) return false;
+    } else if (options.initialStoredIdSet) {
+      if (options.initialStoredIdSet.has(sid)) return false;
+    }
+  }
+
+  return true;
+}
+
+/**
  * 세미나 목록의 processState 상태 분포 문자열 생성
  */
 export function formatProcessStateDistribution(
@@ -502,8 +539,12 @@ export async function syncSeminars(options: ApplySeminarOptions = {}): Promise<S
 
     // 1시간에 1번(또는 forceEnrich=true)만 전체 세미나 상세(detail) API를 조회하여 최신 메타데이터 갱신
     // 단, 저장소에 없는 신규 세미나가 처음 발견된 경우 해당 신규 세미나는 즉시 enrich하여 포인트미지급 등 메타데이터 보강
-    const storedIdSet = new Set(storedSeminars.map((s) => s.seminarId || getSeminarIdFromUrl(s.url)).filter(Boolean));
-    const gapIdSet = new Set(gapSeminars.map((s) => s.seminarId || getSeminarIdFromUrl(s.url)).filter(Boolean));
+    const storedIdSet = new Set(
+      storedSeminars.map((s) => s.seminarId || getSeminarIdFromUrl(s.url)).filter(Boolean) as string[],
+    );
+    const gapIdSet = new Set(
+      gapSeminars.map((s) => s.seminarId || getSeminarIdFromUrl(s.url)).filter(Boolean) as string[],
+    );
     const newlyDiscovered = normalizedCurrentSeminars.filter((s) => {
       const sid = s.seminarId || getSeminarIdFromUrl(s.url);
       return sid && !storedIdSet.has(sid) && !gapIdSet.has(sid);
@@ -647,8 +688,15 @@ export async function syncSeminars(options: ApplySeminarOptions = {}): Promise<S
     // 10분 실행 1회당 processState 상태 분포 출력 (total 및 future 목록 분리 로깅)
     logProcessStateDistribution(finalSeminars, enrichedSeminars);
 
-    const hasApplyTarget = currentSeminars.some(
-      (s) => !isAppliedSeminar(s.processState) && s.processState === ProcessState.PROCESS_APPLY,
+    const newlyAddedIdSet = new Set(
+      newlyAdded.map((s) => s.seminarId || getSeminarIdFromUrl(s.url)).filter(Boolean) as string[],
+    );
+
+    const hasApplyTarget = currentSeminars.some((s) =>
+      isEligibleApplyTarget(s, {
+        newlyAddedIds: newlyAddedIdSet,
+        initialStoredIdSet: storedIdSet,
+      }),
     );
 
     const syncResult: SyncSeminarsResult = {
@@ -700,10 +748,12 @@ export async function applySeminars(
   const newlyAdded = sync.newlyAdded || [];
   const referenceDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
 
-  // API processState 기반: 미신청 && PROCESS_APPLY 세미나만 신청 대상
-  const applyTargets = currentSeminars.filter(
-    (s) => !isAppliedSeminar(s.processState) && s.processState === ProcessState.PROCESS_APPLY,
+  const newlyAddedIdSet = new Set(
+    newlyAdded.map((s) => s.seminarId || getSeminarIdFromUrl(s.url)).filter(Boolean) as string[],
   );
+
+  // API processState 기반: 미신청 && PROCESS_APPLY && 마감 아님 && (비공개 세미나인 경우 이번에 새로 발견된 건만)
+  const applyTargets = currentSeminars.filter((s) => isEligibleApplyTarget(s, { newlyAddedIds: newlyAddedIdSet }));
   const hasApplyTarget = applyTargets.length > 0;
   const totalSeminarsAvailable = currentSeminars.length;
 
