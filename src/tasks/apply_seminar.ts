@@ -55,6 +55,7 @@ export type SeminarFieldChange = {
 export type SeminarInfoChange = {
   seminarId: string;
   name: string;
+  date?: string;
   url?: string;
   changes: SeminarFieldChange[];
 };
@@ -62,6 +63,7 @@ export type SeminarInfoChange = {
 export type SeminarPointChange = {
   seminarId: string;
   name: string;
+  date?: string;
   url?: string;
   point?: number;
   pointText?: string;
@@ -265,6 +267,9 @@ export function formatSeminarChangeNotification(
       const lines: string[] = [];
       lines.push(p.name || '세미나');
       lines.push(`seminarId: ${p.seminarId}`);
+      if (p.date) {
+        lines.push(`날짜: ${p.date}`);
+      }
       if (p.pointText || p.point !== undefined) {
         lines.push(`포인트: ${p.pointText || `${p.point}P`}`);
       }
@@ -286,6 +291,9 @@ export function formatSeminarChangeNotification(
       const lines: string[] = [];
       lines.push(info.name || '세미나');
       lines.push(`seminarId: ${info.seminarId}`);
+      if (info.date) {
+        lines.push(`날짜: ${info.date}`);
+      }
       for (const ch of info.changes) {
         lines.push(`${ch.label}: ${ch.oldValue} → ${ch.newValue}`);
       }
@@ -405,6 +413,7 @@ export function refreshStoredSeminarList(
         infoChanges.push({
           seminarId: existing.seminarId || seminar.seminarId || '',
           name: seminar.name || existing.name || '',
+          date: seminar.date || existing.date,
           url:
             seminar.url ||
             existing.url ||
@@ -962,6 +971,7 @@ export async function refreshSeminarPointStatus(
         pointChanges.push({
           seminarId: id,
           name: currentItem.name,
+          date: currentItem.date,
           url: id ? `https://m.doctorville.co.kr/cme/seminar/${id}` : currentItem.url,
           point: pointResult.point,
           pointText: pointResult.pointText,
@@ -1030,6 +1040,7 @@ export async function refreshSeminarPointStatus(
       pointChanges.push({
         seminarId: id,
         name: newItem.name,
+        date: newItem.date,
         url: newItem.url || `https://m.doctorville.co.kr/cme/seminar/${id}`,
         point: pointResult.point,
         pointText: pointResult.pointText,

@@ -248,6 +248,7 @@ describe('apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스�
         {
           seminarId: '12346',
           name: '정보 변경 세미나',
+          date: '2026-08-24',
           url: 'https://m.doctorville.co.kr/cme/seminar/12346',
           changes: [
             { field: 'time', label: '시간', oldValue: '20:00', newValue: '21:00' },
@@ -259,6 +260,7 @@ describe('apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스�
         {
           seminarId: '12345',
           name: '포인트 지급 세미나',
+          date: '2026-08-23',
           url: 'https://m.doctorville.co.kr/cme/seminar/12345',
           point: 3000,
           pointText: '3,000P',
@@ -270,6 +272,7 @@ describe('apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스�
       assert(formattedMessage.includes('🔔 세미나 정보 변경 감지'));
       assert(formattedMessage.includes('[포인트 지급]'));
       assert(formattedMessage.includes('seminarId: 12345'));
+      assert(formattedMessage.includes('날짜: 2026-08-23'), '포인트 지급 알림에 세미나 날짜 포함');
       assert(formattedMessage.includes('포인트: 3,000P'));
       assert(
         formattedMessage.includes('https://m.doctorville.co.kr/cme/seminar/12345'),
@@ -277,13 +280,14 @@ describe('apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스�
       );
       assert(formattedMessage.includes('[정보 변경]'));
       assert(formattedMessage.includes('seminarId: 12346'));
+      assert(formattedMessage.includes('날짜: 2026-08-24'), '정보 변경 알림에 세미나 날짜 포함');
       assert(formattedMessage.includes('시간: 20:00 → 21:00'));
       assert(formattedMessage.includes('총원: 100 → 120'));
       assert(
         formattedMessage.includes('https://m.doctorville.co.kr/cme/seminar/12346'),
         '정보 변경 알림에 세미나 url 포함',
       );
-      console.log('  ✓ [Pass] 여러 변경사항 단일 메시지 포맷팅 및 url 포함 성공\n');
+      console.log('  ✓ [Pass] 여러 변경사항 단일 메시지 포맷팅, 날짜 및 url 포함 성공\n');
 
       // 10 & 11. sync_seminars 실행 시 변경 알림은 adminbot으로만 전송되고 notice channel에는 전송되지 않는지 모킹 E2E 검증
       console.log('--- Case 10 & 11: apply_seminars 실행 및 sync_seminars 알림 분리 테스트 ---');
@@ -542,5 +546,48 @@ describe('apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스�
     } finally {
       vi.restoreAllMocks();
     }
+  });
+
+  it('세미나 정보 변경 알림 포맷에 세미나 날짜정보 포함 여부 상세 테스트', () => {
+    // 1. date가 있을 때: 날짜 정보가 정상적으로 포함되는지 검증
+    const infoWithDate: SeminarInfoChange[] = [
+      {
+        seminarId: '777',
+        name: '날짜 포함 세미나',
+        date: '2026-09-15',
+        url: 'https://m.doctorville.co.kr/cme/seminar/777',
+        changes: [{ field: 'totalCount', label: '총원', oldValue: '50', newValue: '100' }],
+      },
+    ];
+    const pointWithDate: SeminarPointChange[] = [
+      {
+        seminarId: '888',
+        name: '포인트 날짜 포함 세미나',
+        date: '2026-09-10',
+        url: 'https://m.doctorville.co.kr/cme/seminar/888',
+        point: 2000,
+        pointText: '2,000P',
+        pointDate: '2026-09-11',
+      },
+    ];
+
+    const messageWithDate = formatSeminarChangeNotification(infoWithDate, pointWithDate);
+    assert(messageWithDate !== null);
+    assert(messageWithDate.includes('seminarId: 777\n날짜: 2026-09-15\n총원: 50 → 100'));
+    assert(messageWithDate.includes('seminarId: 888\n날짜: 2026-09-10\n포인트: 2,000P\n지급일: 2026-09-11'));
+
+    // 2. date가 없을 때: 날짜 라인 없이도 정상 포맷팅되는지 fallback 검증
+    const infoWithoutDate: SeminarInfoChange[] = [
+      {
+        seminarId: '778',
+        name: '날짜 미포함 세미나',
+        url: 'https://m.doctorville.co.kr/cme/seminar/778',
+        changes: [{ field: 'time', label: '시간', oldValue: '19:00', newValue: '20:00' }],
+      },
+    ];
+    const messageWithoutDate = formatSeminarChangeNotification(infoWithoutDate, []);
+    assert(messageWithoutDate !== null);
+    assert(!messageWithoutDate.includes('날짜:'));
+    assert(messageWithoutDate.includes('seminarId: 778\n시간: 19:00 → 20:00'));
   });
 });
