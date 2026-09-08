@@ -19,13 +19,7 @@ import {
   type QuizQuestion,
 } from './seminar_quiz';
 import { TODAY_QUIZ_INFO_KEY, type CachedTodayQuizInfo } from './today_quiz';
-import {
-  fetchMainFutureSeminars,
-  fetchSeminarDetail,
-  parseSeminarDateTime,
-  checkIsAdvancedSurvey,
-  ProcessState,
-} from '../modules/seminar_api';
+import { fetchSeminarDetail, ProcessState } from '../modules/seminar_api';
 
 const QUIZ_LIST_URLS = [
   'https://www.doctorville.co.kr/product/medicineList',
@@ -658,57 +652,12 @@ async function collectTodaySeminarMessage(
   const seminarTitlePrefix = isCustomDate ? `[${todayString}]` : '오늘의';
 
   try {
-    let parsedSeminars: ParsedSeminarItem[] = [];
     const dateTarget: DateTarget = { todayString, isoDate, targetMonth, targetDay };
-
-    const apiRes = await fetchMainFutureSeminars();
-    if (apiRes.success) {
-      for (const item of apiRes.items) {
-        const { date, time, nightTime } = parseSeminarDateTime(item.startDt, item.endDt);
-        if (!isDateMatching(date, dateTarget)) continue;
-
-        const seminarId = String(item.seminarId ?? '');
-        const seminarLink = `https://m.doctorville.co.kr/cme/seminar/${seminarId}`;
-        const isAdvancedSurvey = checkIsAdvancedSurvey(item.useDepthSurvey);
-        const hiddenYn = typeof item.hiddenYn === 'string' ? item.hiddenYn : undefined;
-        const diseaseCategoryNm = typeof item.diseaseCategoryNm === 'string' ? item.diseaseCategoryNm : undefined;
-        parsedSeminars.push({
-          title: item.seminarNm || '세미나',
-          time,
-          seminarLink,
-          fullUrl: seminarLink,
-          seminarId,
-          classAttr: nightTime ? 'night_time' : '',
-          isAdvancedSurvey,
-          hiddenYn,
-          diseaseCategoryNm,
-        });
-      }
-    } else if (page) {
-      console.warn('[today_links] fetchMainFutureSeminars 실패, DOM fallback 시도:', apiRes.errorMessage);
-      await sendTelegram(
-        `⚠️ [today_links] 세미나 목록 API 조회 실패(${apiRes.errorMessage})로 Playwright DOM 폴백을 실행합니다.`,
-      ).catch(() => {});
-      await safeGoto(page, SEMINAR_PAGE, { waitUntil: 'domcontentloaded', timeout: 30000 }, 1);
-
-      parsedSeminars = await page.locator('.list_cont').evaluateAll(parseSeminarsFromNodes, {
-        todayString,
-        isoDate,
-        targetMonth,
-        targetDay,
-      });
-    } else {
-      console.warn(
-        '[today_links] fetchMainFutureSeminars 실패 및 page 미제공으로 DOM fallback 생략:',
-        apiRes.errorMessage,
-      );
-    }
-
     const storedSeminars = seminarRepo.getAllSeminars();
+    const seenIds = new Set<string>();
+    const seenUrls = new Set<string>();
+    const parsedSeminars: ParsedSeminarItem[] = [];
 
-    // 메인 미래 세미나 API에 노출되지 않는 당일 비공개 세미나(hiddenYn === 'Y') 등을 DB에서 보충
-    const parsedIdSet = new Set(parsedSeminars.map((s) => s.seminarId).filter(Boolean));
-    const parsedUrlSet = new Set(parsedSeminars.map((s) => s.fullUrl));
     for (const stored of storedSeminars) {
       if (!stored.date || !isDateMatching(stored.date, dateTarget)) continue;
       const ps = stored.processState;
@@ -717,7 +666,7 @@ async function collectTodaySeminarMessage(
       }
       const sid = stored.seminarId ? String(stored.seminarId).trim() : null;
       const fullUrl = stored.url || (sid ? `${SEMINAR_DETAIL_PAGE}${sid}` : '');
-      if ((sid && parsedIdSet.has(sid)) || (fullUrl && parsedUrlSet.has(fullUrl))) continue;
+      if ((sid && seenIds.has(sid)) || (fullUrl && seenUrls.has(fullUrl))) continue;
 
       let nightTime = stored.nightTime ?? false;
       if (stored.time) {
@@ -740,24 +689,17 @@ async function collectTodaySeminarMessage(
         hiddenYn: stored.hiddenYn,
         diseaseCategoryNm: stored.diseaseCategoryNm,
       });
-      if (sid) parsedIdSet.add(sid);
-      if (fullUrl) parsedUrlSet.add(fullUrl);
+      if (sid) seenIds.add(sid);
+      if (fullUrl) seenUrls.add(fullUrl);
     }
 
-    // 기존 parsedSeminars의 hiddenYn / diseaseCategoryNm 필드를 DB 저장 데이터와 매칭하여 보강
-    for (const item of parsedSeminars) {
-      const matched = storedSeminars.find(
-        (s) => (item.seminarId && s.seminarId === item.seminarId) || (s.url && s.url === item.fullUrl),
-      );
-      if (matched) {
-        if (item.hiddenYn !== 'Y' && (matched.hiddenYn === 'Y' || matched.hiddenYn === 'y')) {
-          item.hiddenYn = 'Y';
-        }
-        if (!item.diseaseCategoryNm && matched.diseaseCategoryNm) {
-          item.diseaseCategoryNm = matched.diseaseCategoryNm;
-        }
-      }
-    }
+    parsedSeminars.sort((a, b) => {
+      const timeA = a.time || '';
+      const timeB = b.time || '';
+      const comp = timeA.localeCompare(timeB);
+      if (comp !== 0) return comp;
+      return (a.seminarId || '').localeCompare(b.seminarId || '');
+    });
 
     if (!parsedSeminars || parsedSeminars.length === 0) {
       return {
