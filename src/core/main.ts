@@ -449,12 +449,8 @@ const broadcastTodayLinksTask: Task = {
   schedule: BROADCAST_TODAY_LINKS_CRON,
   timezone: TIMEZONE,
   run: async () => {
-    const browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
-    const context = await browser.newContext();
-    const page = await context.newPage();
     try {
-      await utils.ensureLoggedIn({ page, context });
-      const linksResult = await todayLinksTaskModule.run({ page, context });
+      const linksResult = await todayLinksTaskModule.run({});
       if (
         linksResult &&
         (linksResult as { success?: boolean }).success !== false &&
@@ -477,9 +473,6 @@ const broadcastTodayLinksTask: Task = {
       const message = e instanceof Error ? e.message : String(e);
       await utils.sendTelegram(`❗ Daily link broadcast failed: ${message}`).catch(() => {});
       return { success: false, message: `Broadcast failed: ${message}` };
-    } finally {
-      await context.close().catch(() => {});
-      await browser.close().catch(() => {});
     }
   },
 };

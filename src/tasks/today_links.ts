@@ -1,22 +1,10 @@
-import quizMapping from '../../data/quiz.json';
 import type { PlaywrightRunArgs } from '../types';
-import { safeGoto, getPointConversionAvailabilityHttp } from '../modules/utils';
+import { getPointConversionAvailabilityHttp } from '../modules/utils';
 import * as storage from '../services/storage';
 import * as seminarRepo from '../services/seminar_repository';
-import {
-  loadCheatsheet,
-  findMatchingKeywords,
-  resolveBestKeywordMatch,
-  findOptionByAnswer,
-  type QuizQuestion,
-} from './seminar_quiz';
 import { TODAY_QUIZ_INFO_KEY, type CachedTodayQuizInfo } from './today_quiz';
 import { ProcessState } from '../modules/seminar_api';
 
-const QUIZ_LIST_URLS = [
-  'https://www.doctorville.co.kr/product/medicineList',
-  'https://www.doctorville.co.kr/product/instrumentList',
-];
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
 const POINT_CONVERSION_URL = 'https://www.doctorville.co.kr/my/point/pointUseHistoryList';
@@ -82,113 +70,6 @@ const TODAY_SEMINAR_KEY = 'today_seminars';
 
 function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-/**
- * 텍스트에서 괄호 안의 내용을 정리합니다.
- */
-function cleanBrackets(text: string): string {
-  let prev = text;
-  let cur = text;
-  do {
-    prev = cur;
-    cur = cur
-      .replace(/\([^)()]*\)/g, '')
-      .replace(/\[[^[\]]*\]/g, '')
-      .trim();
-  } while (cur !== prev);
-  return cur;
-}
-
-/**
- * 문제 텍스트를 검색용으로 정규화합니다.
- */
-function _normalizeQuestionText(text: string): string {
-  return cleanBrackets(text)
-    .replace(/[^가-힣a-zA-Z0-9]/g, '')
-    .trim();
-}
-
-async function parseTodayQuizQuestions(page: PlaywrightRunArgs['page']): Promise<QuizQuestion[]> {
-  const questions: QuizQuestion[] = [];
-
-  const areaSelector = '#questionArea .question_area';
-  const areas = await page.locator(areaSelector).all();
-
-  for (const area of areas) {
-    const questionText = await area
-      .locator('.txt_question')
-      .innerText()
-      .catch(() => '');
-    const options: QuizQuestion['options'] = [];
-
-    const choiceItems = await area.locator('.question_choice li').all();
-    for (let i = 0; i < choiceItems.length; i++) {
-      const item = choiceItems[i];
-      const label = item.locator('label');
-      const input = item.locator('input[type="radio"]');
-
-      const text = await label.innerText().catch(() => '');
-      const value = (await input.getAttribute('value')) || '';
-
-      options.push({
-        index: i + 1,
-        text: text.trim(),
-        value,
-      });
-    }
-
-    if (questionText) {
-      questions.push({
-        questionText: questionText.trim(),
-        options,
-        marker: '[퀴즈]',
-        kind: 'quiz',
-      });
-    }
-  }
-
-  return questions;
-}
-
-async function findAnswersByCheatsheet(page: PlaywrightRunArgs['page']): Promise<Array<string | number> | null> {
-  try {
-    const cheatsheet = await loadCheatsheet();
-    if (Object.keys(cheatsheet).length === 0) return null;
-
-    const questions = await parseTodayQuizQuestions(page);
-    if (questions.length === 0) return null;
-
-    const result: Array<string | number> = [];
-    for (const q of questions) {
-      console.log(`[today_links] 매칭 시도 문제: ${q.questionText.substring(0, 30)}...`);
-      const bestMatch = resolveBestKeywordMatch(q.questionText, q.options, cheatsheet);
-      if (bestMatch) {
-        console.log(
-          `[today_links] 매칭 성공: ${bestMatch.keyword} -> ${cheatsheet[bestMatch.keyword]} (보기 ${bestMatch.option.index}번)`,
-        );
-        result.push(bestMatch.option.index);
-        continue;
-      }
-      const matches = findMatchingKeywords(q.questionText, cheatsheet);
-      if (matches.length > 0) {
-        const chosenKeyword = matches[0];
-        const answerKeyword = cheatsheet[chosenKeyword];
-        const option = findOptionByAnswer(q.options, answerKeyword);
-        if (option) {
-          console.log(`[today_links] 매칭 성공: ${chosenKeyword} -> ${answerKeyword} (보기 ${option.index}번)`);
-          result.push(option.index);
-          continue;
-        }
-      }
-      console.warn(`[today_links] 문제에 대한 정답을 찾지 못했습니다: ${q.questionText.substring(0, 50)}...`);
-      return null;
-    }
-    return result;
-  } catch (e) {
-    console.error('[today_links] 족보 매칭 중 오류', e);
-    return null;
-  }
 }
 
 function parseTargetDate(input?: string): Date {
@@ -316,55 +197,14 @@ function getTempQuizAnswers(isoDate: string, productTitle: string): Array<string
   return stored.answers;
 }
 
-async function findQuizHref(page: PlaywrightRunArgs['page']): Promise<string | null> {
-  for (const url of QUIZ_LIST_URLS) {
-    console.log(`[today_links] 퀴즈 목록 확인: ${url}`);
-    await safeGoto(page, url, { waitUntil: 'load', timeout: 30000 }, 1);
-
-    const quizBg = page.locator('.product_list .quiz_bg').first();
-    const quizBgCount = await quizBg.count();
-    if (!quizBgCount) {
-      console.log(`[today_links] 퀴즈 항목을 찾지 못했습니다. 다음 경로를 확인합니다: ${url}`);
-      continue;
-    }
-
-    const handle = await quizBg.elementHandle();
-    if (!handle) continue;
-
-    const href = await page
-      .evaluate((el) => {
-        let cur: Element | null = el;
-        while (cur && cur.nodeType === 1) {
-          const anchor = cur as HTMLAnchorElement;
-          if (anchor.tagName === 'A' && anchor.href) return anchor.href;
-          cur = cur.parentElement;
-        }
-        return null;
-      }, handle)
-      .catch(() => null);
-
-    if (!href) {
-      console.log(`[today_links] 퀴즈 링크를 찾지 못했습니다. 다음 경로를 확인합니다: ${url}`);
-      continue;
-    }
-
-    return href;
-  }
-
-  return null;
-}
-
-async function collectQuizInfo(page?: PlaywrightRunArgs['page']): Promise<QuizInfo | null> {
+function collectQuizInfo(_page?: PlaywrightRunArgs['page']): QuizInfo | null {
   try {
     const { isoDate } = getTodayDateStrings();
 
-    // 1. today_quiz가 실행되어 스토리지에 캐시된 오늘자 퀴즈 정보가 있는지 먼저 확인
     const cachedQuiz = storage.get<CachedTodayQuizInfo>(TODAY_QUIZ_INFO_KEY);
     if (cachedQuiz && cachedQuiz.date === isoDate) {
-      console.log('[today_links] 캐시된 오늘의 퀴즈 정보를 사용합니다:', cachedQuiz);
       if (!cachedQuiz.link) return null;
 
-      // temp_answers 갱신 여부 확인 (사용자가 텔레그램 답장으로 정답을 갱신했을 수 있음)
       const tempAnswers = cachedQuiz.productTitle ? getTempQuizAnswers(isoDate, cachedQuiz.productTitle) : null;
       return {
         link: cachedQuiz.link,
@@ -373,51 +213,7 @@ async function collectQuizInfo(page?: PlaywrightRunArgs['page']): Promise<QuizIn
       };
     }
 
-    // 2. 캐시가 없고 page가 제공되지 않은 경우 브라우저 탐색 생략
-    if (!page) {
-      console.log('[today_links] 오늘자 퀴즈 캐시가 없고 브라우저 페이지가 제공되지 않아 퀴즈 탐색을 건너뜁니다.');
-      return null;
-    }
-
-    const href = await findQuizHref(page);
-    if (!href) return null;
-
-    await safeGoto(page, href, { waitUntil: 'load', timeout: 30000 }, 1);
-
-    const titleElem = page.locator('#product_title');
-    const productTitle =
-      (await titleElem.count()) > 0
-        ? (
-            await titleElem
-              .first()
-              .innerText()
-              .catch(() => '')
-          ).trim()
-        : '';
-
-    // 1. seminar_quiz_cheatsheet(족보)에서 먼저 탐색
-    let answers: Array<string | number> = (await findAnswersByCheatsheet(page)) || [];
-
-    // 2. 족보에 없으면 임시 캐시 또는 quiz.json 매핑에서 탐색
-    if (answers.length === 0) {
-      const tempAnswers = productTitle ? getTempQuizAnswers(isoDate, productTitle) : null;
-      if (tempAnswers) {
-        answers = tempAnswers;
-      } else if (productTitle) {
-        const mapping = quizMapping as Record<string, Array<string | number>>;
-        const mappingAnswers = mapping[productTitle];
-        if (mappingAnswers && Array.isArray(mappingAnswers) && mappingAnswers.length > 0) {
-          console.log(`[today_links] "${productTitle}" 족보 미매칭으로 quiz.json에서 정답을 참조합니다.`);
-          answers = mappingAnswers;
-        }
-      }
-    }
-
-    return {
-      link: href,
-      productTitle: productTitle || undefined,
-      answers: Array.isArray(answers) && answers.length > 0 ? answers : undefined,
-    };
+    return null;
   } catch (_e) {
     console.error('collectQuizInfo error', _e && typeof _e === 'object' && 'stack' in _e ? (_e as Error).stack : _e);
     return null;
@@ -466,73 +262,6 @@ function isDateMatching(dateText: string, target: DateTarget): boolean {
   }
 
   return false;
-}
-
-function parseSeminarsFromNodes(nodes: Array<Element>, target: DateTarget): ParsedSeminarItem[] {
-  const results: ParsedSeminarItem[] = [];
-
-  function isDateMatching(dateText: string, t: DateTarget): boolean {
-    if (!dateText) return false;
-    if (dateText.includes(t.todayString)) return true;
-    if (dateText.includes(t.isoDate)) return true;
-
-    const ymdMatch = dateText.match(/(\d{4})[^\d]+(\d{1,2})[^\d]+(\d{1,2})/);
-    if (ymdMatch) {
-      const m = parseInt(ymdMatch[2], 10);
-      const d = parseInt(ymdMatch[3], 10);
-      if (m === t.targetMonth && d === t.targetDay) return true;
-    }
-
-    const mdMatch = dateText.match(/(\d{1,2})[^\d]+(\d{1,2})/);
-    if (mdMatch) {
-      const m = parseInt(mdMatch[1], 10);
-      const d = parseInt(mdMatch[2], 10);
-      if (m === t.targetMonth && d === t.targetDay) return true;
-    }
-
-    return false;
-  }
-
-  nodes.forEach((node) => {
-    const date =
-      node.querySelector('.seminar_day .date')?.textContent?.trim() ||
-      node.querySelector('.list_time .txt_date')?.textContent?.trim() ||
-      '';
-    if (!isDateMatching(date, target)) return;
-
-    const links = node.querySelectorAll('a.list_detail, .list_seminar > li');
-    links.forEach((link) => {
-      const anchor = link.tagName && link.tagName.toLowerCase() === 'a' ? link : link.querySelector('a');
-      const href = anchor?.getAttribute('href') || link.getAttribute('href') || '';
-      if (!href) return;
-
-      const title =
-        link.querySelector('.list_tit .tit')?.textContent?.trim() ||
-        link.querySelector('.txt_tit')?.textContent?.trim() ||
-        link.textContent?.trim() ||
-        '세미나';
-      const timeElem = link.querySelector('.txt_num.time') || link.querySelector('.time');
-      const time = timeElem?.textContent?.replace(/\n/g, '').trim() || '';
-      const classAttr = link.getAttribute('class') || timeElem?.getAttribute('class') || '';
-      const isAdvancedSurvey = !!link.querySelector('.advanced-survey, [class*="advanced"], .ic_survey');
-
-      const urlObj = new URL(href, 'https://www.doctorville.co.kr/');
-      const seminarId = urlObj.searchParams.get('seminarId') || (href.match(/\/seminar\/(\d+)/)?.[1] ?? null);
-      const seminarLink = seminarId ? `https://m.doctorville.co.kr/cme/seminar/${seminarId}` : urlObj.toString();
-
-      results.push({
-        title,
-        time,
-        seminarLink,
-        fullUrl: urlObj.toString(),
-        seminarId,
-        classAttr: classAttr || '',
-        isAdvancedSurvey,
-      });
-    });
-  });
-
-  return results;
 }
 
 async function collectTodaySeminarMessage(
@@ -591,7 +320,7 @@ async function collectTodaySeminarMessage(
       const timeB = b.time || '';
       const comp = timeA.localeCompare(timeB);
       if (comp !== 0) return comp;
-      return (a.seminarId || '').localeCompare(b.seminarId || '');
+      return (a.seminarId || '').localeCompare(b.seminarId || '', undefined, { numeric: true });
     });
 
     if (!parsedSeminars || parsedSeminars.length === 0) {
@@ -701,27 +430,12 @@ function parsePointConversionPlannedDate(plannedAt: string | undefined): { month
   return { month, day };
 }
 
-export function isPointConversionDay(info: PointConversionInfo | null | undefined, todayIsoOverride?: string): boolean {
-  if (!info || info.available) return false;
-  const planned = parsePointConversionPlannedDate(info.availablePlannedAt);
-  if (!planned) return false;
-  const todayIso = todayIsoOverride ?? new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
-  const [y, mo, d] = todayIso.split('-').map(Number);
-  if (!y || !mo || !d) return false;
-  const todayMs = Date.UTC(y, mo - 1, d);
-  let targetMs = Date.UTC(y, planned.month - 1, planned.day);
-  if (targetMs < todayMs) {
-    targetMs = Date.UTC(y + 1, planned.month - 1, planned.day);
-  }
-  return targetMs === todayMs;
-}
-
-function getPointConversionDdayLabel(plannedAt: string | undefined, todayIsoOverride?: string): string {
+function getPointConversionDiffDays(plannedAt: string | undefined, todayIsoOverride?: string): number | null {
   const planned = parsePointConversionPlannedDate(plannedAt);
-  if (!planned) return '';
+  if (!planned) return null;
   const todayIso = todayIsoOverride ?? new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
   const [y, mo, d] = todayIso.split('-').map(Number);
-  if (!y || !mo || !d) return '';
+  if (!y || !mo || !d) return null;
   const todayMs = Date.UTC(y, mo - 1, d);
   let targetYear = y;
   let targetMs = Date.UTC(targetYear, planned.month - 1, planned.day);
@@ -729,7 +443,18 @@ function getPointConversionDdayLabel(plannedAt: string | undefined, todayIsoOver
     targetYear += 1;
     targetMs = Date.UTC(targetYear, planned.month - 1, planned.day);
   }
-  const diffDays = Math.round((targetMs - todayMs) / 86400000);
+  return Math.round((targetMs - todayMs) / 86400000);
+}
+
+export function isPointConversionDay(info: PointConversionInfo | null | undefined, todayIsoOverride?: string): boolean {
+  if (!info || info.available) return false;
+  const diffDays = getPointConversionDiffDays(info.availablePlannedAt, todayIsoOverride);
+  return diffDays === 0;
+}
+
+function getPointConversionDdayLabel(plannedAt: string | undefined, todayIsoOverride?: string): string {
+  const diffDays = getPointConversionDiffDays(plannedAt, todayIsoOverride);
+  if (diffDays === null) return '';
   if (diffDays === 0) return ' (D-Day)';
   if (diffDays > 0) return ` (D-${diffDays})`;
   return '';
@@ -799,11 +524,7 @@ function formatTodayLinksBroadcast(input: TodayLinksFormatInput): TodayLinksForm
     message += `\n📖 ${seminarMessage.message}\n`;
   }
 
-  const visibleNewSeminars = (storedNewSeminars || []).filter((item) => {
-    if (!item.totalCount || item.totalCount.trim() === '') return true;
-    const parsed = parseInt(item.totalCount.replace(/[^0-9]/g, ''), 10);
-    return isNaN(parsed) || parsed >= 10;
-  });
+  const visibleNewSeminars = storedNewSeminars || [];
 
   if (visibleNewSeminars.length > 0) {
     const newSeminarList = visibleNewSeminars
@@ -958,7 +679,6 @@ export {
   getTodayDateStrings,
   parseTargetDate,
   isDateMatching,
-  parseSeminarsFromNodes,
   collectTodaySeminarMessage,
   getYesterdayAddedSeminars,
   getTodayLinksCache,
