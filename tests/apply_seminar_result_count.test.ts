@@ -196,7 +196,34 @@ describe('apply_seminar 신청 결과 집계 정확성 테스트', () => {
       assert.ok(msgE.includes('0개 세미나 신청 완료'), `전체 실패 검증: "${msgE}"`);
       assert.ok(msgE.includes('(0/2)'), `0/2 카운트: "${msgE}"`);
       assert.ok(msgE.includes('2개 정원 초과'), `정원 초과 검증: "${msgE}"`);
+      assert.ok(msgE.includes('https://m.doctorville.co.kr/cme/seminar/5606'), `5606 링크 포함: "${msgE}"`);
+      assert.ok(msgE.includes('https://m.doctorville.co.kr/cme/seminar/5607'), `5607 링크 포함: "${msgE}"`);
       console.log(`    ✓ [Pass] 결과: "${msgE}"\n`);
+
+      // Case F: 신청 대상(PROCESS_APPLY) 신청 시도 후 실패한 세미나의 링크 포함 검증
+      console.log('  Case F: 신청 실패한 세미나 링크 포함 검증');
+      seminarRepo.clearSeminars();
+      fetchMainFutureSpy.mockResolvedValue({
+        success: true,
+        items: [
+          createFutureSeminarApiItem(5601, ProcessState.PROCESS_CANCEL, 100, 5000),
+          createFutureSeminarApiItem(5602, ProcessState.PROCESS_APPLY, 200, 5000),
+        ],
+        rawResponse: { futureSeminarList: { items: [] } },
+      });
+
+      vi.spyOn(seminarApiModule, 'applySeminarWithTerms').mockResolvedValue({
+        success: false,
+        isAuthExpired: false,
+        errorMessage: '신청 마감',
+      });
+
+      const resultF = await runApplySeminar({}, { notifyNewSeminarsToTelegram: false });
+      assert.strictEqual(resultF.success, true);
+      const msgF = resultF.message || '';
+      assert.ok(msgF.includes('1개는 마감 등의 사유로 신청 실패'), `실패 카운트 검증: "${msgF}"`);
+      assert.ok(msgF.includes('https://m.doctorville.co.kr/cme/seminar/5602'), `5602 실패 세미나 링크 포함: "${msgF}"`);
+      console.log(`    ✓ [Pass] 결과: "${msgF}"\n`);
 
       console.log('🎉 모든 신청 결과 집계 정확성 테스트 통과!\n');
     } finally {

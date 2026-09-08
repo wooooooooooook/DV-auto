@@ -221,8 +221,8 @@ const syncSeminarsTask: Task = {
     silentIfNoNew: true,
     checkAdvancedPointStatus: true,
   },
-  run: async (_ctx, options) => {
-    return await applySeminarTask.syncSeminars({
+  run: async (ctx, options) => {
+    return await applySeminarTask.syncSeminarsTask.run(ctx, {
       notifyNewSeminarsToChannel: true,
       notifyNewSeminarsToTelegram: true,
       silentIfNoNew: true,

@@ -721,10 +721,24 @@ export async function applySeminars(
       message = `✅ ${completionCount}개 세미나 신청 완료 (${completionCount}/${totalSeminarsAvailable})`;
       if (excessCount > 0) {
         message += `\n⚠️ ${excessCount}개 정원 초과로 신청 불가`;
+        const excessItems = currentSeminars.filter((s) => s.processState === ProcessState.PROCESS_EXCESS);
+        for (const item of excessItems) {
+          const sid = item.seminarId || getSeminarIdFromUrl(item.url);
+          const url = item.url || (sid ? `${SEMINAR_DETAIL_PAGE}${sid}` : '');
+          message += `\n- ${item.name ? `${item.name}: ` : ''}${url}`;
+        }
       }
       const otherUnapplied = unappliedCount - excessCount;
       if (otherUnapplied > 0) {
         message += `\n📋 ${otherUnapplied}개 미신청 (대기 중/신청 필요)`;
+        const otherItems = currentSeminars.filter(
+          (s) => !isAppliedSeminar(s.processState) && s.processState !== ProcessState.PROCESS_EXCESS,
+        );
+        for (const item of otherItems) {
+          const sid = item.seminarId || getSeminarIdFromUrl(item.url);
+          const url = item.url || (sid ? `${SEMINAR_DETAIL_PAGE}${sid}` : '');
+          message += `\n- ${item.name ? `${item.name}: ` : ''}${url}`;
+        }
       }
     }
 
@@ -912,10 +926,25 @@ export async function applySeminars(
     let message = `✅ ${totalApplied}개 세미나 신청 완료! (${totalApplied}/${totalSeminarsAvailable})`;
     if (failCount > 0) {
       message += `\n (${failCount}개는 마감 등의 사유로 신청 실패)`;
+      const failedTargets = applyTargets.filter((s) => {
+        const id = s.seminarId || getSeminarIdFromUrl(s.url);
+        return id && !confirmedAppliedIds.has(id);
+      });
+      for (const target of failedTargets) {
+        const sid = target.seminarId || getSeminarIdFromUrl(target.url);
+        const url = target.url || (sid ? `${SEMINAR_DETAIL_PAGE}${sid}` : '');
+        message += `\n- ${target.name ? `${target.name}: ` : ''}${url}`;
+      }
     }
     const excessCount = currentSeminars.filter((s) => s.processState === ProcessState.PROCESS_EXCESS).length;
     if (excessCount > 0) {
       message += `\n⚠️ ${excessCount}개 정원 초과로 신청 불가`;
+      const excessItems = currentSeminars.filter((s) => s.processState === ProcessState.PROCESS_EXCESS);
+      for (const item of excessItems) {
+        const sid = item.seminarId || getSeminarIdFromUrl(item.url);
+        const url = item.url || (sid ? `${SEMINAR_DETAIL_PAGE}${sid}` : '');
+        message += `\n- ${item.name ? `${item.name}: ` : ''}${url}`;
+      }
     }
 
     message += `\n${SEMINAR_DETAIL_PAGE}`;
@@ -929,7 +958,6 @@ export async function applySeminars(
       message,
       ...(screenshotPath ? { imagePath: screenshotPath } : {}),
     };
-    if (options.silentIfNoNew && newlyAdded.length === 0) result.silent = true;
     return result;
   } catch (error) {
     console.error(
