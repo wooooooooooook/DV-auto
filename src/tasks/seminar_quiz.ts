@@ -25,7 +25,7 @@ export interface SurveyQuestion extends QuizQuestion {
   questionNumber: number;
 }
 
-interface QuizResult {
+export interface QuizResult {
   questionIndex: number;
   questionText: string;
   selectedIndex: number | null;
@@ -341,7 +341,7 @@ async function parseAllSurveyQuestions(
 /**
  * 퀴즈 결과를 텔레그램 메시지 형식으로 포맷
  */
-function formatQuizResults(
+export function formatQuizResults(
   results: QuizResult[],
   _hasUnknown: boolean,
   _hasMultipleMatches: boolean,

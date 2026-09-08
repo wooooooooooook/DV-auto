@@ -20,7 +20,7 @@ export async function tryFetchSeminarQuizHttpFast(
     const cheatsheet = await loadCheatsheet();
     const httpResult = await fetchSeminarSurveyQuizHttp(seminarId, cheatsheet, isAdvancedSurvey);
     if (httpResult && httpResult.success) {
-      const quizResultMessage = httpResult.quizSummaryMessage || null;
+      const quizResultMessage = httpResult.quizResultMessage || httpResult.quizSummaryMessage || null;
       return {
         quizResultMessage,
         isAdvancedSurvey: httpResult.isAdvancedSurvey || isAdvancedSurvey,

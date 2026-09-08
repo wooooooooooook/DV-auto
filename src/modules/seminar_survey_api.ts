@@ -4,8 +4,10 @@ import {
   loadCheatsheet,
   findMatchingKeywords,
   resolveBestKeywordMatch,
+  formatQuizResults,
   type Cheatsheet,
   type QuizQuestion,
+  type QuizResult,
 } from '../tasks/seminar_quiz';
 
 export interface HttpQuizQuestion {
@@ -36,6 +38,7 @@ export interface SurveyQuizHttpResult {
   quizzes: HttpQuizQuestion[];
   allQuestions: HttpQuizQuestion[];
   quizSummaryMessage: string;
+  quizResultMessage?: string;
   errorMessage?: string;
 }
 
@@ -331,6 +334,27 @@ export async function fetchSeminarSurveyQuizHttp(
       quizSummaryMessage = `심화${depthSurveyQuestionCnt}`;
     }
 
+    // 상세 내역을 포함한 전체 퀴즈 결과 메시지 생성
+    let quizResultMessage = quizSummaryMessage;
+    if (quizzes.length > 0 || (isAdvancedSurvey && depthSurveyQuestionCnt > 0)) {
+      const channelResults: QuizResult[] = quizzes.map((q) => ({
+        questionIndex: q.questionNumber,
+        questionText: q.questionText,
+        selectedIndex: q.selectedIndex,
+        selectedText: q.selectedText,
+        matchedKeyword: q.matchedKeyword,
+        multipleMatches: q.multipleMatches || null,
+        marker: '[퀴즈]',
+        kind: 'quiz',
+      }));
+      quizResultMessage = formatQuizResults(
+        channelResults,
+        quizzes.some((q) => q.selectedIndex === null),
+        quizzes.some((q) => q.multipleMatches && q.multipleMatches.length > 1),
+        depthSurveyQuestionCnt,
+      );
+    }
+
     return {
       success: true,
       seminarId: sid,
@@ -344,6 +368,7 @@ export async function fetchSeminarSurveyQuizHttp(
       quizzes,
       allQuestions,
       quizSummaryMessage,
+      quizResultMessage,
     };
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
