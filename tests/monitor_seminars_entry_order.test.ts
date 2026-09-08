@@ -145,6 +145,7 @@ describe('monitor_seminars 공지채널 메시지 선발송 및 Playwright 입�
     const seminarApi = await import('../src/modules/seminar_api');
     vi.spyOn(seminarApi, 'attendSeminarApi').mockResolvedValue({
       success: false,
+      isAuthExpired: false,
       hasEntryHistory: false,
       errorMessage: 'API fallback test',
     });
@@ -321,6 +322,7 @@ describe('monitor_seminars 공지채널 메시지 선발송 및 Playwright 입�
     const seminarApi = await import('../src/modules/seminar_api');
     vi.spyOn(seminarApi, 'attendSeminarApi').mockResolvedValue({
       success: false,
+      isAuthExpired: false,
       hasEntryHistory: false,
       errorMessage: 'API fallback test',
     });
@@ -350,10 +352,10 @@ describe('monitor_seminars 공지채널 메시지 선발송 및 Playwright 입�
       apiCallCount++;
       if (apiCallCount === 1) {
         // 첫 시도 실패
-        return { success: false, hasEntryHistory: false, errorMessage: 'temporary fail' };
+        return { success: false, isAuthExpired: false, hasEntryHistory: false, errorMessage: 'temporary fail' };
       }
       // 재시도 성공
-      return { success: true, hasEntryHistory: true, rawResponse: {} };
+      return { success: true, isAuthExpired: false, hasEntryHistory: true, rawResponse: {} };
     });
 
     const seminars = [
@@ -527,6 +529,7 @@ describe('monitor_seminars 공지채널 메시지 선발송 및 Playwright 입�
     const seminarApi = await import('../src/modules/seminar_api');
     vi.spyOn(seminarApi, 'attendSeminarApi').mockResolvedValue({
       success: false,
+      isAuthExpired: false,
       hasEntryHistory: false,
       errorMessage: 'API fallback test',
     });
@@ -540,5 +543,146 @@ describe('monitor_seminars 공지채널 메시지 선발송 및 Playwright 입�
     expect(result).toBe(true);
     expect(channelNoticeSent).toBe(true);
     expect(autoEnterExecuted).toBe(true);
+  });
+
+  it('공지채널 발송(sendNotificationToChannel)이 개별 토픽 구독자 알림(sendToTopicSubscribers)보다 우선 실행되어야 한다', async () => {
+    const fetchMainFutureSpy = vi.spyOn(seminarApiModule, 'fetchMainFutureSeminars');
+    const fetchSeminarDetailSpy = vi.spyOn(seminarApiModule, 'fetchSeminarDetail');
+    const sendNotificationToChannelSpy = vi.spyOn(utilsModule, 'sendNotificationToChannel');
+    const sendTelegramSpy = vi.spyOn(utilsModule, 'sendTelegram');
+    const ensureLoggedInSpy = vi.spyOn(utilsModule, 'ensureLoggedIn');
+    const safeGotoSpy = vi.spyOn(utilsModule, 'safeGoto');
+    const subscriptionService = await import('../src/services/subscription_service');
+
+    const callOrder: string[] = [];
+
+    sendNotificationToChannelSpy.mockImplementation(async () => {
+      callOrder.push('channel_notice');
+      return 999;
+    });
+
+    vi.spyOn(subscriptionService, 'sendToTopicSubscribers').mockImplementation(async () => {
+      callOrder.push('topic_subscriber');
+      return { successCount: 1, failCount: 0 };
+    });
+
+    sendTelegramSpy.mockResolvedValue(true);
+    ensureLoggedInSpy.mockResolvedValue(undefined as never);
+    safeGotoSpy.mockResolvedValue(undefined as never);
+
+    const mockPage = {
+      locator: (selector: string) => ({
+        first: () => ({
+          isVisible: async () => selector.includes('입장하기'),
+          click: async () => {},
+          isEnabled: async () => true,
+          count: async () => 1,
+          waitFor: async () => {},
+        }),
+        count: async () => 1,
+        waitFor: async () => {},
+      }),
+      getByRole: () => ({
+        first: () => ({
+          isVisible: async () => true,
+          click: async () => {},
+          waitFor: async () => {},
+        }),
+      }),
+      evaluate: async () => [],
+      on: () => {},
+      waitForEvent: async () => null,
+      waitForTimeout: async () => {},
+      waitForLoadState: async () => {},
+      screenshot: async () => {},
+      frames: () => [{ url: () => 'https://video.ibm.com/socialstream/123' }],
+      url: () => 'https://m.doctorville.co.kr/cme/seminar/attend?seminarId=8804',
+      close: async () => {},
+    } as unknown as Page;
+
+    const mockContext = {
+      newPage: async () => mockPage,
+      waitForEvent: async () => null,
+      close: async () => {},
+    } as unknown as BrowserContext;
+
+    const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+    const currentHour = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' })).getHours();
+
+    let step = 0;
+    fetchMainFutureSpy.mockImplementation(async () => {
+      step++;
+      if (step === 1) {
+        return {
+          success: true,
+          items: [
+            {
+              seminarId: 8804,
+              seminarNm: '공지 우선순위 테스트 세미나',
+              startDt: `${todayStr} ${String(currentHour).padStart(2, '0')}:00:00`,
+              endDt: `${todayStr} ${String(currentHour + 1).padStart(2, '0')}:00:00`,
+              useSurvey: 'Y',
+              useDepthSurvey: 'N',
+              survey: { point: 1000 },
+              processState: 1, // 입장가능
+            },
+          ],
+          rawResponse: {},
+        };
+      }
+      return {
+        success: true,
+        items: [
+          {
+            seminarId: 8804,
+            seminarNm: '공지 우선순위 테스트 세미나',
+            startDt: `${todayStr} ${String(currentHour).padStart(2, '0')}:00:00`,
+            endDt: `${todayStr} ${String(currentHour + 1).padStart(2, '0')}:00:00`,
+            useSurvey: 'Y',
+            useDepthSurvey: 'N',
+            survey: { point: 1000 },
+            processState: 7, // 방송 종료
+            seminarCompleted: 1,
+          },
+        ],
+        rawResponse: {},
+      };
+    });
+
+    fetchSeminarDetailSpy.mockImplementation(async (id: number | string) => {
+      if (step === 1) {
+        return {
+          success: true,
+          seminarId: String(id),
+          survey: { point: 1000 },
+          surveyState: 5,
+          isPointExcluded: false,
+          hasEntryHistory: true,
+          rawResponse: { surveyState: 5, seminarDetail: { processState: 1 } },
+        };
+      }
+      return {
+        success: true,
+        seminarId: String(id),
+        survey: { point: 1000 },
+        surveyState: 3,
+        isPointExcluded: false,
+        hasEntryHistory: true,
+        rawResponse: { surveyState: 3, seminarDetail: { processState: 7 } },
+      };
+    });
+
+    const result = await monitorSeminars('점심', currentHour, currentHour + 2, {
+      context: mockContext,
+      pollIntervalMs: 10,
+      waitForSurveyClose: false,
+    });
+
+    expect(result).toBe(true);
+    expect(callOrder).toContain('channel_notice');
+    expect(callOrder).toContain('topic_subscriber');
+    const channelNoticeIndex = callOrder.indexOf('channel_notice');
+    const topicSubscriberIndex = callOrder.indexOf('topic_subscriber');
+    expect(channelNoticeIndex).toBeLessThan(topicSubscriberIndex);
   });
 });
