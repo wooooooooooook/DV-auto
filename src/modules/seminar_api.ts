@@ -302,7 +302,6 @@ export function convertApiItemToRawSeminar(item: FutureSeminarApiItem): RawSemin
       : undefined;
   const hasIcoApply = processStateNum === ProcessState.PROCESS_APPLY;
   const hiddenYn = typeof item.hiddenYn === 'string' ? item.hiddenYn : undefined;
-  const isClosed = hiddenYn === 'Y' || hiddenYn === 'y';
   const diseaseCategoryNm = typeof item.diseaseCategoryNm === 'string' ? item.diseaseCategoryNm : undefined;
 
   return {
@@ -320,7 +319,6 @@ export function convertApiItemToRawSeminar(item: FutureSeminarApiItem): RawSemin
     processState: processStateNum,
     cancelProcessState: cancelProcessStateNum,
     seminarCompleted: seminarCompletedNum,
-    isClosed,
     hiddenYn,
     diseaseCategoryNm,
   };
@@ -347,7 +345,6 @@ export function convertApiItemToSeminarListItem(item: FutureSeminarApiItem, refe
         : Number(item.seminarCompleted)
       : undefined;
   const hiddenYn = typeof item.hiddenYn === 'string' ? item.hiddenYn : undefined;
-  const isClosed = hiddenYn === 'Y' || hiddenYn === 'y';
   const diseaseCategoryNm = typeof item.diseaseCategoryNm === 'string' ? item.diseaseCategoryNm : undefined;
 
   return {
@@ -364,7 +361,6 @@ export function convertApiItemToSeminarListItem(item: FutureSeminarApiItem, refe
     processState: processStateNum,
     cancelProcessState: cancelProcessStateNum,
     seminarCompleted: seminarCompletedNum,
-    isClosed,
     hiddenYn,
     diseaseCategoryNm,
     detectedDate: nowIso,

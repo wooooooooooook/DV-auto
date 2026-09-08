@@ -1167,7 +1167,7 @@ export async function getTodaysSeminarsFromApi(
   // 3. 메인 미래 세미나 API에 빠져있지만 로컬 DB에 당일 해당 시간대로 저장되어 있는 세미나 보충 (fallback)
   for (const stored of storedList) {
     if (stored.date !== targetDate) continue;
-    if (stored.isClosed === true || stored.hiddenYn === 'Y') continue;
+    if (stored.isClosed === true) continue;
 
     const sid = stored.seminarId ? String(stored.seminarId).trim() : '';
     const fullUrl = stored.url || (sid ? `${SEMINAR_DETAIL_PAGE}${sid}` : '');
@@ -1232,6 +1232,7 @@ export async function checkSeminarEndStatusFromApi(seminarId: string): Promise<{
   surveyState?: number;
   isPointExcluded: boolean;
   hasEntryHistory: boolean;
+  isPrivate?: boolean;
   survey?: SeminarSurveyInfo | null;
   surveyMinutesLeft?: number | null;
   surveyEndDt?: string | null;
@@ -1256,6 +1257,7 @@ export async function checkSeminarEndStatusFromApi(seminarId: string): Promise<{
       isSurveyOpen: false,
       isPointExcluded: false,
       hasEntryHistory: false,
+      isPrivate: false,
       isDeletedOrNotFound: isNotFound,
       isClosedOrCancelled: false,
       errorType,
@@ -1269,7 +1271,9 @@ export async function checkSeminarEndStatusFromApi(seminarId: string): Promise<{
   const processState = detail?.processState !== undefined ? Number(detail.processState) : undefined;
   const seminarCompleted = detail?.seminarCompleted !== undefined ? Number(detail.seminarCompleted) : undefined;
   const hiddenYn = typeof detail?.hiddenYn === 'string' ? detail.hiddenYn : undefined;
-  const isClosed = detail?.isClosed === true || hiddenYn === 'Y' || hiddenYn === 'y';
+  const isPrivate = hiddenYn === 'Y' || hiddenYn === 'y';
+  // hiddenYn === 'Y'는 비공개 세미나일 뿐 삭제나 취소가 아님 (오직 명시적으로 취소된 경우만 판정)
+  const isClosed = detail?.isClosed === true && !isPrivate;
 
   const isClosedOrCancelled = isClosed;
   const isDeletedOrNotFound = !detail && typeof raw?.message === 'string' && raw.message.includes('찾을 수 없습니다');
@@ -1302,6 +1306,7 @@ export async function checkSeminarEndStatusFromApi(seminarId: string): Promise<{
     surveyState,
     isPointExcluded: detailRes.isPointExcluded,
     hasEntryHistory: detailRes.hasEntryHistory ?? false,
+    isPrivate,
     survey,
     surveyMinutesLeft,
     surveyEndDt: survey?.endDt || null,
@@ -2324,6 +2329,8 @@ async function monitorSeminars(
             hasStateChanged = true;
           } else if (detailCheck.errorType === 'network_or_server' || detailCheck.errorType === 'auth_expired') {
             console.warn(`[${periodName}] 세미나(${sid}) 상세 조회 일시 오류(timeout/5xx/auth), 기존 상태 유지`);
+          } else if (detailCheck.isPrivate) {
+            console.log(`[${periodName}] 비공개 세미나(${sid}) 확인 (mainFuture API 미포함), 정상 모니터링 유지`);
           }
         }
       }

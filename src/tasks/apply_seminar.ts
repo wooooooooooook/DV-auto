@@ -111,7 +111,7 @@ const MEANINGFUL_FIELDS: Array<{
   { key: 'totalCount', label: '총원' },
   { key: 'isPointExcluded', label: '포인트미지급' },
   { key: 'isAdvancedSurvey', label: '심화설문' },
-  { key: 'isClosed', label: '비공개' },
+  { key: 'hiddenYn', label: '비공개' },
 ];
 
 /**
@@ -212,7 +212,7 @@ export function logProcessStateDistribution(
   }
 }
 
-const BOOLEAN_FIELDS = new Set<keyof SeminarListItem>(['isPointExcluded', 'isAdvancedSurvey', 'isClosed']);
+const BOOLEAN_FIELDS = new Set<keyof SeminarListItem>(['isPointExcluded', 'isAdvancedSurvey']);
 
 export function getSeminarInfoChanges(existing: SeminarListItem, incoming: SeminarListItem): SeminarFieldChange[] {
   const changes: SeminarFieldChange[] = [];
@@ -226,6 +226,22 @@ export function getSeminarInfoChanges(existing: SeminarListItem, incoming: Semin
     // 이전에 상세 정보를 조회하지 못해 미확인 상태였다가 처음으로 값이 채워진 것이므로
     // "세미나 정보 변경" 알림 대상이 아님 (기존 값이 유효하게 존재했던 경우에만 변경 감지)
     if (oldVal === undefined || oldVal === '') continue;
+
+    if (key === 'hiddenYn') {
+      // 레거시 호환: 기존 DB 데이터에 hiddenYn이 마이그레이션되지 않았거나 'N'인 경우에도,
+      // 기존 세미나의 isClosed가 true였다면 과거에 비공개로 취급되었던 세미나이므로 기존 비공개로 인정하여 알림 오발송 방지
+      const oldIsPrivate = oldVal === 'Y' || oldVal === 'y' || existing.isClosed === true;
+      const newIsPrivate = newVal === 'Y' || newVal === 'y';
+      if (oldIsPrivate !== newIsPrivate) {
+        changes.push({
+          field: key,
+          label,
+          oldValue: oldIsPrivate,
+          newValue: newIsPrivate,
+        });
+      }
+      continue;
+    }
 
     if (BOOLEAN_FIELDS.has(key)) {
       if (oldVal !== newVal) {
@@ -502,7 +518,7 @@ export function buildNewSeminarsNoticeMessage(
     if (item.date || item.time) {
       tags.push(`[${item.date || ''}${item.date && item.time ? ' ' : ''}${item.time || ''}]`);
     }
-    if (item.isClosed || item.hiddenYn === 'Y') {
+    if (item.hiddenYn === 'Y') {
       tags.push('[비공개]');
       if (item.diseaseCategoryNm && item.diseaseCategoryNm.trim()) {
         tags.push(`[${item.diseaseCategoryNm.trim()}]`);
@@ -684,7 +700,6 @@ async function fetchAndPopulateSeminarInfo(
     }
 
     const hiddenYn = typeof d.hiddenYn === 'string' ? d.hiddenYn : undefined;
-    const isClosed = hiddenYn === 'Y' || hiddenYn === 'y';
     const diseaseCategoryNm = typeof d.diseaseCategoryNm === 'string' ? d.diseaseCategoryNm : undefined;
 
     return {
@@ -699,7 +714,6 @@ async function fetchAndPopulateSeminarInfo(
       processState: processStateNum,
       cancelProcessState: cancelProcessStateNum,
       seminarCompleted: seminarCompletedNum,
-      isClosed,
       hiddenYn,
       diseaseCategoryNm,
       detectedDate: detectedDate || '',
@@ -877,7 +891,6 @@ export async function discoverMissingGapSeminars(
                 processState: processStateNum,
                 cancelProcessState: cancelProcessStateNum,
                 seminarCompleted: seminarCompletedNum,
-                isClosed: true,
                 hiddenYn,
                 diseaseCategoryNm,
                 detectedDate: referenceDate,
@@ -1122,7 +1135,7 @@ export async function syncSeminars(options: ApplySeminarOptions = {}): Promise<S
       normalizedCurrentSeminars.map((s) => s.seminarId || getSeminarIdFromUrl(s.url)).filter(Boolean),
     );
     const pendingPrivateSeminars = storedSeminars.filter((s) => {
-      if (!s.isClosed && s.hiddenYn !== 'Y') return false;
+      if (s.hiddenYn !== 'Y') return false;
       const sid = s.seminarId || getSeminarIdFromUrl(s.url);
       if (!sid || currentIdSet.has(sid)) return false;
       // 이미 종료된 세미나는 제외
@@ -1432,7 +1445,23 @@ export async function applySeminars(
     }
 
     // 2단계: API로 신청 완료(isAppliedSeminar=true)가 확정되지 않은 세미나에 대해 Playwright 브라우저 폴백 실행
-    const fallbackTargets = targetSeminarIds.filter((id) => !confirmedAppliedIds.has(id));
+    // 단, 비공개 세미나는 API 신청 실패 시 브라우저 폴백을 수행하지 않고 패스
+    const fallbackTargets = targetSeminarIds.filter((id) => {
+      if (confirmedAppliedIds.has(id)) return false;
+
+      const item = currentSeminars.find((s) => (s.seminarId || getSeminarIdFromUrl(s.url)) === id);
+      const isPrivate =
+        (item && (item.hiddenYn === 'Y' || item.hiddenYn === 'y')) ||
+        Boolean(seminarRepo.getSeminarById(id)?.hiddenYn === 'Y');
+
+      if (isPrivate) {
+        console.log(
+          `[apply_seminar] seminarId ${id}는 비공개 세미나이므로 API 신청 실패 시 Playwright 폴백을 패스합니다.`,
+        );
+        return false;
+      }
+      return true;
+    });
 
     let page = ctx.page;
     let context = ctx.context;

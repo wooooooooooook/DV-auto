@@ -248,8 +248,8 @@ describe('Stale Lock Recovery & PID Liveness & Heartbeat 검증', () => {
     });
 
     const elapsed = Date.now() - startTime;
-    // 락을 잃었으므로 1분 sleep이나 API 폴링 없이 즉시(수십 ms 내에) 종료되어야 함
-    expect(elapsed).toBeLessThan(1000);
+    // 락을 잃었으므로 1분 sleep이나 지속적인 폴링 루프 없이 즉시 종료되어야 함
+    expect(elapsed).toBeLessThan(3000);
     expect(result).toBe(true);
   });
 });

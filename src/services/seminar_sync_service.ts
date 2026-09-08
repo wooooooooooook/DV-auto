@@ -55,7 +55,6 @@ export async function enrichSeminarsWithDetail(
                   : Number(d.seminarCompleted)
                 : item.seminarCompleted;
             const hiddenYn = typeof d.hiddenYn === 'string' ? d.hiddenYn : item.hiddenYn;
-            const isClosed = hiddenYn === 'Y' || hiddenYn === 'y' || item.isClosed;
             const diseaseCategoryNm =
               typeof d.diseaseCategoryNm === 'string' ? d.diseaseCategoryNm : item.diseaseCategoryNm;
 
@@ -70,7 +69,6 @@ export async function enrichSeminarsWithDetail(
               processState: processStateNum,
               cancelProcessState: cancelProcessStateNum,
               seminarCompleted: seminarCompletedNum,
-              isClosed,
               hiddenYn,
               diseaseCategoryNm,
             };

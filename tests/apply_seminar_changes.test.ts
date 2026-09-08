@@ -183,13 +183,39 @@ describe('apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스�
       assert.strictEqual(changesPointExcludedToFalse[0].newValue, false);
       console.log('  ✓ [Pass] 포인트미지급 true -> false 시 변경 감지 성공 (true → false)\n');
 
-      // 6-5. 비공개(isClosed) undefined -> false 시 변경 감지 없음
-      console.log('--- Case 6-5: 비공개(isClosed) undefined -> false 시 변경 감지 없음 ---');
-      const closedUndef: SeminarListItem = { ...sameA, isClosed: undefined };
-      const closedFalse: SeminarListItem = { ...sameA, isClosed: false };
-      const changesClosedDefault = getSeminarInfoChanges(closedUndef, closedFalse);
-      assert.strictEqual(changesClosedDefault.length, 0);
-      console.log('  ✓ [Pass] 비공개 undefined -> false 시 변경 알림 없음\n');
+      // 6-5. 비공개(hiddenYn) undefined -> N 시 변경 감지 없음
+      console.log('--- Case 6-5: 비공개(hiddenYn) undefined -> N 시 변경 감지 없음 ---');
+      const hiddenUndef: SeminarListItem = { ...sameA, hiddenYn: undefined };
+      const hiddenN: SeminarListItem = { ...sameA, hiddenYn: 'N' };
+      const changesHiddenDefault = getSeminarInfoChanges(hiddenUndef, hiddenN);
+      assert.strictEqual(changesHiddenDefault.length, 0);
+
+      const hiddenY: SeminarListItem = { ...sameA, hiddenYn: 'Y' };
+      const changesHiddenToY = getSeminarInfoChanges(hiddenN, hiddenY);
+      assert.strictEqual(changesHiddenToY.length, 1);
+      assert.strictEqual(changesHiddenToY[0].field, 'hiddenYn');
+      assert.strictEqual(changesHiddenToY[0].oldValue, false);
+      assert.strictEqual(changesHiddenToY[0].newValue, true);
+
+      // 6-5-2. 기존 DB의 isClosed=true(과거 비공개 마킹)였던 세미나는 hiddenYn='Y' 유입 시 변경 감지 없음
+      console.log('--- Case 6-5-2: 과거 isClosed=true였던 세미나 hiddenYn=Y 수신 시 변경 감지 없음 ---');
+      const legacyClosedSeminar: SeminarListItem = { ...sameA, isClosed: true, hiddenYn: 'N' };
+      const incomingPrivate: SeminarListItem = { ...sameA, isClosed: false, hiddenYn: 'Y' };
+      const changesLegacyClosed = getSeminarInfoChanges(legacyClosedSeminar, incomingPrivate);
+      assert.strictEqual(
+        changesLegacyClosed.length,
+        0,
+        '과거 isClosed=true 비공개 세미나는 변경 알림이 발생하지 않아야 함',
+      );
+
+      const legacyClosedUndef: SeminarListItem = { ...sameA, isClosed: true, hiddenYn: undefined };
+      const changesLegacyUndef = getSeminarInfoChanges(legacyClosedUndef, incomingPrivate);
+      assert.strictEqual(
+        changesLegacyUndef.length,
+        0,
+        '과거 isClosed=true 및 hiddenYn undefined 세미나는 변경 알림이 발생하지 않아야 함',
+      );
+      console.log('  ✓ [Pass] 과거 isClosed=true 세미나의 hiddenYn 전환 시 정보변경 알림 방지 성공\n');
 
       // 6-6. 심화설문(isAdvancedSurvey) undefined -> false 시 변경 감지 없음
       console.log('--- Case 6-6: 심화설문(isAdvancedSurvey) undefined -> false 시 변경 감지 없음 ---');

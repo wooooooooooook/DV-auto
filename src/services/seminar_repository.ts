@@ -55,6 +55,7 @@ export type SeminarDbRow = {
   detected_at: string | null;
   urgent_notified?: number;
   is_closed?: number;
+  hidden_yn?: string | null;
   disease_category_nm?: string | null;
   updated_at: number;
 };
@@ -85,7 +86,7 @@ export function rowToSeminarListItem(row: SeminarDbRow): SeminarListItem {
     detectedAt: row.detected_at ?? undefined,
     urgentNotified: row.urgent_notified === 1,
     isClosed: row.is_closed === 1,
-    hiddenYn: row.is_closed === 1 ? 'Y' : 'N',
+    hiddenYn: row.hidden_yn || (row.is_closed === 1 ? 'Y' : 'N'),
     diseaseCategoryNm: row.disease_category_nm ?? undefined,
   };
 }
@@ -116,8 +117,8 @@ export function mergeSeminarRecord(existing: SeminarListItem | undefined, incomi
   const isPointPaidExisting = existing.pointPaid === true;
   const pointPaid = isPointPaidExisting ? true : (incoming.pointPaid ?? existing.pointPaid ?? false);
 
-  const isClosed = incoming.isClosed ?? existing.isClosed ?? (incoming.hiddenYn === 'Y' || existing.hiddenYn === 'Y');
-  const hiddenYn = incoming.hiddenYn || existing.hiddenYn || (isClosed ? 'Y' : 'N');
+  const isClosed = incoming.isClosed ?? existing.isClosed ?? false;
+  const hiddenYn = incoming.hiddenYn || existing.hiddenYn || 'N';
   const diseaseCategoryNm = incoming.diseaseCategoryNm || existing.diseaseCategoryNm || undefined;
 
   return {
@@ -196,13 +197,13 @@ export function upsertSeminar(incoming: SeminarListItem): SeminarListItem {
         night_time, is_point_excluded, is_advanced_survey, process_state,
         cancel_process_state, seminar_completed, point_paid, point,
         point_text, point_date, point_content, point_checked_at,
-        detected_date, detected_at, urgent_notified, is_closed, disease_category_nm, updated_at
+        detected_date, detected_at, urgent_notified, is_closed, hidden_yn, disease_category_nm, updated_at
       ) VALUES (
         ?, ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?,
         ?, ?, ?, ?,
         ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?, ?, ?
       )
     `);
 
@@ -229,7 +230,8 @@ export function upsertSeminar(incoming: SeminarListItem): SeminarListItem {
       merged.detectedDate ?? null,
       merged.detectedAt ?? null,
       merged.urgentNotified ? 1 : 0,
-      merged.isClosed || merged.hiddenYn === 'Y' ? 1 : 0,
+      merged.isClosed ? 1 : 0,
+      merged.hiddenYn ?? 'N',
       merged.diseaseCategoryNm ?? null,
       now,
     );
@@ -256,13 +258,13 @@ export function upsertSeminars(incomingList: SeminarListItem[]): SeminarListItem
         night_time, is_point_excluded, is_advanced_survey, process_state,
         cancel_process_state, seminar_completed, point_paid, point,
         point_text, point_date, point_content, point_checked_at,
-        detected_date, detected_at, urgent_notified, is_closed, disease_category_nm, updated_at
+        detected_date, detected_at, urgent_notified, is_closed, hidden_yn, disease_category_nm, updated_at
       ) VALUES (
         ?, ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?,
         ?, ?, ?, ?,
         ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?, ?, ?
       )
     `);
 
@@ -298,7 +300,8 @@ export function upsertSeminars(incomingList: SeminarListItem[]): SeminarListItem
         merged.detectedDate ?? null,
         merged.detectedAt ?? null,
         merged.urgentNotified ? 1 : 0,
-        merged.isClosed || merged.hiddenYn === 'Y' ? 1 : 0,
+        merged.isClosed ? 1 : 0,
+        merged.hiddenYn ?? 'N',
         merged.diseaseCategoryNm ?? null,
         now,
       );

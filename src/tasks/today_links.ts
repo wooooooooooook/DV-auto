@@ -24,6 +24,7 @@ import {
   fetchSeminarDetail,
   parseSeminarDateTime,
   checkIsAdvancedSurvey,
+  ProcessState,
 } from '../modules/seminar_api';
 
 const QUIZ_LIST_URLS = [
@@ -79,6 +80,7 @@ type StoredNewSeminars = {
     seminarId: string | null;
     isPointExcluded?: boolean;
     isAdvancedSurvey?: boolean;
+    hiddenYn?: string;
     date?: string;
     time?: string;
     currentCount?: string;
@@ -404,6 +406,7 @@ function getYesterdayAddedSeminars(yesterdayIso: string): StoredNewSeminars['sem
       seminarId: seminar.seminarId,
       isPointExcluded: seminar.isPointExcluded,
       isAdvancedSurvey: seminar.isAdvancedSurvey,
+      hiddenYn: seminar.hiddenYn,
       date: seminar.date,
       time: seminar.time,
       currentCount: seminar.currentCount,
@@ -548,6 +551,7 @@ type ParsedSeminarItem = {
   classAttr: string;
   isAdvancedSurvey: boolean;
   isPointExcluded?: boolean;
+  hiddenYn?: string;
 };
 
 function isDateMatching(dateText: string, target: DateTarget): boolean {
@@ -663,6 +667,7 @@ async function collectTodaySeminarMessage(
         const seminarId = String(item.seminarId ?? '');
         const seminarLink = `https://m.doctorville.co.kr/cme/seminar/${seminarId}`;
         const isAdvancedSurvey = checkIsAdvancedSurvey(item.useDepthSurvey);
+        const hiddenYn = typeof item.hiddenYn === 'string' ? item.hiddenYn : undefined;
         parsedSeminars.push({
           title: item.seminarNm || '세미나',
           time,
@@ -671,6 +676,7 @@ async function collectTodaySeminarMessage(
           seminarId,
           classAttr: nightTime ? 'night_time' : '',
           isAdvancedSurvey,
+          hiddenYn,
         });
       }
     } else if (page) {
@@ -693,6 +699,57 @@ async function collectTodaySeminarMessage(
       );
     }
 
+    const storedSeminars = seminarRepo.getAllSeminars();
+
+    // 메인 미래 세미나 API에 노출되지 않는 당일 비공개 세미나(hiddenYn === 'Y') 등을 DB에서 보충
+    const parsedIdSet = new Set(parsedSeminars.map((s) => s.seminarId).filter(Boolean));
+    const parsedUrlSet = new Set(parsedSeminars.map((s) => s.fullUrl));
+    for (const stored of storedSeminars) {
+      if (!stored.date || !isDateMatching(stored.date, dateTarget)) continue;
+      const ps = stored.processState;
+      if (ps === ProcessState.PROCESS_END || ps === ProcessState.PROCESS_COMPLETED || stored.seminarCompleted === 1) {
+        continue;
+      }
+      const sid = stored.seminarId ? String(stored.seminarId).trim() : null;
+      const fullUrl = stored.url || (sid ? `${SEMINAR_DETAIL_PAGE}${sid}` : '');
+      if ((sid && parsedIdSet.has(sid)) || (fullUrl && parsedUrlSet.has(fullUrl))) continue;
+
+      let nightTime = stored.nightTime ?? false;
+      if (stored.time) {
+        const hourMatch = stored.time.match(/(\d{1,2})\s*:/);
+        if (hourMatch) {
+          const hour = Number(hourMatch[1]);
+          if (Number.isFinite(hour) && hour >= 16) nightTime = true;
+        }
+      }
+
+      parsedSeminars.push({
+        title: stored.name || '세미나',
+        time: stored.time || '',
+        seminarLink: fullUrl,
+        fullUrl,
+        seminarId: sid,
+        classAttr: nightTime ? 'night_time' : '',
+        isAdvancedSurvey: stored.isAdvancedSurvey ?? false,
+        isPointExcluded: stored.isPointExcluded,
+        hiddenYn: stored.hiddenYn,
+      });
+      if (sid) parsedIdSet.add(sid);
+      if (fullUrl) parsedUrlSet.add(fullUrl);
+    }
+
+    // 기존 parsedSeminars의 hiddenYn 필드를 DB 저장 데이터와 매칭하여 보강
+    for (const item of parsedSeminars) {
+      if (item.hiddenYn !== 'Y') {
+        const matched = storedSeminars.find(
+          (s) => (item.seminarId && s.seminarId === item.seminarId) || (s.url && s.url === item.fullUrl),
+        );
+        if (matched && (matched.hiddenYn === 'Y' || matched.hiddenYn === 'y')) {
+          item.hiddenYn = 'Y';
+        }
+      }
+    }
+
     if (!parsedSeminars || parsedSeminars.length === 0) {
       return {
         message: `<b>${seminarTitlePrefix} 세미나:</b> 세미나가 없습니다. ☕`,
@@ -704,7 +761,6 @@ async function collectTodaySeminarMessage(
 
     const lunchSeminars: string[] = [];
     const dinnerSeminars: string[] = [];
-    const storedSeminars = seminarRepo.getAllSeminars();
     const pointExcludedCache = new Map<string, boolean>();
 
     const isDinnerSeminar = (classAttr: string, time: string): boolean => {
@@ -752,10 +808,12 @@ async function collectTodaySeminarMessage(
     for (const item of parsedSeminars) {
       const pointExcludedKey = item.seminarId || item.fullUrl;
       const isPointExcluded = pointExcludedCache.get(pointExcludedKey) || false;
+      const isPrivate = item.hiddenYn === 'Y' || item.hiddenYn === 'y';
+      const privateSuffix = isPrivate ? ' 🔒<b>[비공개]</b>' : '';
       const pointExcludedSuffix = isPointExcluded ? ' 🚫<b>[포인트미지급]</b>' : '';
       const advancedSurveySuffix = item.isAdvancedSurvey ? ' 📝<b>[심화설문]</b>' : '';
       const titleDisplay = isPointExcluded ? `<s>${escapeHtml(item.title)}</s>` : escapeHtml(item.title);
-      const seminarInfo = ` ${item.time}. ${titleDisplay}${pointExcludedSuffix}${advancedSurveySuffix} ${item.seminarLink}`;
+      const seminarInfo = ` ${item.time}. ${titleDisplay}${privateSuffix}${pointExcludedSuffix}${advancedSurveySuffix} ${item.seminarLink}`;
 
       if (isDinnerSeminar(item.classAttr, item.time)) {
         dinnerSeminars.push(seminarInfo);
@@ -961,6 +1019,8 @@ function formatTodayLinksBroadcast(input: TodayLinksFormatInput): TodayLinksForm
     const newSeminarList = visibleNewSeminars
       .map((item, index) => {
         const link = item.seminarId ? `${SEMINAR_DETAIL_PAGE}${item.seminarId}` : item.url;
+        const isPrivate = item.hiddenYn === 'Y' || item.hiddenYn === 'y';
+        const privateSuffix = isPrivate ? ' 🔒<b>[비공개]</b>' : '';
         const pointExcludedSuffix = item.isPointExcluded ? ' 🚫[포인트미지급]' : '';
         const advancedSurveySuffix = item.isAdvancedSurvey ? ' ✨<b>[심화설문]</b>' : '';
         const dateTimePrefix = item.date || item.time ? `[${item.date}${item.time ? ' ' + item.time : ''}] ` : '';
@@ -968,7 +1028,7 @@ function formatTodayLinksBroadcast(input: TodayLinksFormatInput): TodayLinksForm
         const capacityInfo =
           item.currentCount || item.totalCount ? ` (${item.currentCount || '0'}/${item.totalCount || '0'})` : '';
         const nameDisplay = item.isPointExcluded ? `<s>${escapeHtml(truncatedName)}</s>` : escapeHtml(truncatedName);
-        return `${index + 1}. ${dateTimePrefix}${nameDisplay}${capacityInfo}${pointExcludedSuffix}${advancedSurveySuffix}\n${link}`;
+        return `${index + 1}. ${dateTimePrefix}${nameDisplay}${capacityInfo}${privateSuffix}${pointExcludedSuffix}${advancedSurveySuffix}\n${link}`;
       })
       .join('\n');
 

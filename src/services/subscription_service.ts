@@ -429,7 +429,7 @@ export function buildSingleNewSeminarMessage(item: SeminarListItem): {
   if (item.date || item.time) {
     tags.push(`[${item.date || ''}${item.date && item.time ? ' ' : ''}${item.time || ''}]`);
   }
-  if (item.isClosed || item.hiddenYn === 'Y') {
+  if (item.hiddenYn === 'Y') {
     tags.push('[비공개]');
   }
   if (item.diseaseCategoryNm && item.diseaseCategoryNm.trim()) {

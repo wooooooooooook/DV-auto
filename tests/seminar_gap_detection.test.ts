@@ -97,7 +97,6 @@ describe('세미나 ID 불연속(Gap) 탐색 및 비공개 세미나 발굴/알�
     assert.strictEqual(discovered.seminarId, '5652');
     assert.strictEqual(discovered.name, '개원의를 위한 고혈압 처방 팁 (비공개)');
     assert.strictEqual(discovered.totalCount, '4000');
-    assert.strictEqual(discovered.isClosed, true);
     assert.strictEqual(discovered.hiddenYn, 'Y');
     assert.strictEqual(discovered.diseaseCategoryNm, '심혈관질환');
     assert.strictEqual(discovered.date, '2026-09-08');
@@ -186,7 +185,6 @@ describe('세미나 ID 불연속(Gap) 탐색 및 비공개 세미나 발굴/알�
       currentCount: '995',
       totalCount: '4000',
       nightTime: false,
-      isClosed: true,
       hiddenYn: 'Y',
       diseaseCategoryNm: '심혈관질환',
       isPointExcluded: false,
@@ -319,7 +317,7 @@ describe('세미나 ID 불연속(Gap) 탐색 및 비공개 세미나 발굴/알�
     const saved5652 = seminarRepo.getSeminarById('5652');
     assert.ok(saved5652);
     assert.strictEqual(saved5652.name, '내과 전용 비공개 세미나');
-    assert.strictEqual(saved5652.isClosed, true);
+    assert.strictEqual(saved5652.isClosed, false);
     assert.strictEqual(saved5652.hiddenYn, 'Y');
     assert.strictEqual(saved5652.diseaseCategoryNm, '심혈관질환');
 

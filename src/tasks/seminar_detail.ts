@@ -191,7 +191,6 @@ export function convertDetailToSeminarListItem(data: SeminarDetail, _raw?: Semin
         : Number(data.seminarCompleted)
       : undefined;
   const hiddenYn = typeof data.hiddenYn === 'string' ? data.hiddenYn : undefined;
-  const isClosed = hiddenYn === 'Y' || hiddenYn === 'y';
   const diseaseCategoryNm = typeof data.diseaseCategoryNm === 'string' ? data.diseaseCategoryNm : undefined;
 
   let detectedDate = '';
@@ -218,7 +217,6 @@ export function convertDetailToSeminarListItem(data: SeminarDetail, _raw?: Semin
     processState: processStateNum,
     cancelProcessState: cancelProcessStateNum,
     seminarCompleted: seminarCompletedNum,
-    isClosed,
     hiddenYn,
     diseaseCategoryNm,
     detectedDate,

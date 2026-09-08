@@ -55,6 +55,7 @@ function initDatabase(db: Database.Database): void {
       detected_at TEXT,
       urgent_notified INTEGER DEFAULT 0,
       is_closed INTEGER DEFAULT 0,
+      hidden_yn TEXT DEFAULT 'N',
       disease_category_nm TEXT,
       updated_at INTEGER NOT NULL
     );
@@ -132,6 +133,13 @@ function initDatabase(db: Database.Database): void {
     }
     if (!colNames.includes('is_closed')) {
       db.exec(`ALTER TABLE seminars ADD COLUMN is_closed INTEGER DEFAULT 0;`);
+    }
+    if (!colNames.includes('hidden_yn')) {
+      db.exec(`ALTER TABLE seminars ADD COLUMN hidden_yn TEXT DEFAULT 'N';`);
+      // 과거 버전에서는 hiddenYn === 'Y'인 비공개 세미나를 is_closed = 1로 저장했음.
+      // 기존에 is_closed = 1로 저장되어 있던 비공개 세미나들의 hidden_yn을 'Y'로 마이그레이션하고 is_closed는 0으로 복원하여
+      // 배포 직후 첫 동기화 시 '비공개: false -> true' 정보변경알림이 오발송되는 현상을 원천 방지
+      db.exec(`UPDATE seminars SET hidden_yn = 'Y', is_closed = 0 WHERE is_closed = 1;`);
     }
     if (!colNames.includes('disease_category_nm')) {
       db.exec(`ALTER TABLE seminars ADD COLUMN disease_category_nm TEXT;`);
@@ -597,6 +605,7 @@ function get<T = unknown>(key: string, fallback: T | null = null): T | null {
       detectedAt: row.detected_at ?? undefined,
       urgentNotified: (row as unknown as { urgent_notified?: number }).urgent_notified === 1,
       isClosed: (row as unknown as { is_closed?: number }).is_closed === 1,
+      hiddenYn: (row as unknown as { hidden_yn?: string }).hidden_yn ?? undefined,
       diseaseCategoryNm: (row as unknown as { disease_category_nm?: string }).disease_category_nm ?? undefined,
     }));
     return items as unknown as T;
@@ -676,13 +685,13 @@ function set<T = unknown>(key: string, value: T): void {
           night_time, is_point_excluded, is_advanced_survey, process_state,
           cancel_process_state, seminar_completed, point_paid, point,
           point_text, point_date, point_content, point_checked_at,
-          detected_date, detected_at, is_closed, disease_category_nm, updated_at
+          detected_date, detected_at, is_closed, hidden_yn, disease_category_nm, updated_at
         ) VALUES (
           ?, ?, ?, ?, ?, ?, ?,
           ?, ?, ?, ?,
           ?, ?, ?, ?,
           ?, ?, ?, ?,
-          ?, ?, ?, ?, ?
+          ?, ?, ?, ?, ?, ?
         )
       `);
 
@@ -694,6 +703,8 @@ function set<T = unknown>(key: string, value: T): void {
           null;
 
         if (!sid) continue;
+
+        const hiddenYn = typeof item.hiddenYn === 'string' ? item.hiddenYn : 'N';
 
         insertStmt.run(
           sid,
@@ -718,6 +729,7 @@ function set<T = unknown>(key: string, value: T): void {
           typeof item.detectedDate === 'string' ? item.detectedDate : null,
           typeof item.detectedAt === 'string' ? item.detectedAt : null,
           item.isClosed ? 1 : 0,
+          hiddenYn,
           typeof item.diseaseCategoryNm === 'string' ? item.diseaseCategoryNm : null,
           now,
         );
