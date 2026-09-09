@@ -254,6 +254,12 @@ export function updateStoredSeminarFromDetail(data: SeminarDetail, raw?: Seminar
   const sid = String(data.seminarId);
   const incoming = convertDetailToSeminarListItem(data, raw);
   const referenceDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+  const existing = seminarRepo.getSeminarById(sid);
+  if (!existing) {
+    incoming.detectedDate = referenceDate;
+  } else if (existing.detectedDate) {
+    incoming.detectedDate = existing.detectedDate;
+  }
 
   // 60일 이상 지난 과거 세미나는 새로 추가하지 않음
   const isIncomingExpired = isSeminarExpired(incoming.date || data.startDt, referenceDate);
@@ -269,10 +275,88 @@ export function updateStoredSeminarFromDetail(data: SeminarDetail, raw?: Seminar
   return seminarRepo.getAllSeminars();
 }
 
+/**
+ * /seminar detail 등을 통해 처음 발견된 신규 세미나에 대해 채널 공지 및 구독자 알림을 발송하고,
+ * 신청 가능 상태(ProcessState.PROCESS_APPLY: 2)인 경우 자동 신청 태스크를 진행합니다.
+ */
+export async function handleNewSeminarFromDetail(
+  item: SeminarListItem,
+): Promise<{ notified: boolean; applied: boolean }> {
+  const sid = item.seminarId || getSeminarIdFromUrl(item.url);
+  if (!sid) return { notified: false, applied: false };
+
+  // 신청 가능 상태(PROCESS_APPLY)인 세미나만 알림 및 신청 진행
+  if (item.processState !== ProcessState.PROCESS_APPLY || item.seminarCompleted === 1 || item.isClosed === true) {
+    logger.info(
+      `[seminar_detail] 세미나 ${sid}는 신청 가능 상태가 아니므로 신규 알림 및 신청을 생략합니다. (processState: ${item.processState})`,
+    );
+    return { notified: false, applied: false };
+  }
+
+  const referenceDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+  if (isSeminarExpired(item.date, referenceDate)) {
+    logger.info(`[seminar_detail] 세미나 ${sid}는 만료된 세미나이므로 신규 알림 및 신청을 생략합니다.`);
+    return { notified: false, applied: false };
+  }
+
+  let notified = false;
+  let applied = false;
+
+  // 1. 채널 공지 및 구독자 알림 발송
+  try {
+    const { syncNewSeminarsNotice } = await import('./apply_seminar_notice');
+    await syncNewSeminarsNotice(referenceDate, [item]);
+  } catch (err) {
+    logger.warn(`[seminar_detail] 신규 세미나(${sid}) 채널 공지 동기화 실패:`, err);
+  }
+
+  try {
+    const { sendNewSeminarToSubscribers } = await import('../services/subscription_service');
+    await sendNewSeminarToSubscribers([item], [sid]);
+  } catch (err) {
+    logger.warn(`[seminar_detail] 신규 세미나(${sid}) 구독자 알림 발송 실패:`, err);
+  }
+
+  notified = true;
+  logger.info(`[seminar_detail] 신규 세미나(${sid}) 공지 및 구독자 알림 발송 완료: ${item.name}`);
+
+  // 2. 세미나 자동 신청 태스크 진행
+  try {
+    const { applySeminarWithTerms } = await import('../modules/seminar_api');
+    const applyRes = await applySeminarWithTerms(sid);
+    if (applyRes.success) {
+      applied = true;
+      logger.info(`[seminar_detail] 신규 세미나(${sid}) 자동 신청 성공: ${item.name}`);
+      const stored = seminarRepo.getSeminarById(sid);
+      if (stored) {
+        seminarRepo.upsertSeminar({
+          ...stored,
+          processState: applyRes.processState ?? ProcessState.PROCESS_CANCEL,
+          cancelProcessState: 0,
+        });
+      }
+    } else {
+      logger.warn(`[seminar_detail] 신규 세미나(${sid}) 자동 신청 실패: ${applyRes.errorMessage || '상태 미확정'}`);
+    }
+  } catch (err) {
+    logger.warn(`[seminar_detail] 신규 세미나(${sid}) 자동 신청 중 오류 발생:`, err);
+  }
+
+  return { notified, applied };
+}
+
+/**
+ * 하위 호환성을 위한 알림 헬퍼 함수
+ */
+export async function notifyNewSeminarFromDetail(item: SeminarListItem): Promise<boolean> {
+  const result = await handleNewSeminarFromDetail(item);
+  return result.notified;
+}
+
 export async function fetchSeminarDetail(
   seminarId: string,
-  options?: { updateList?: boolean },
-): Promise<{ success: boolean; data?: SeminarDetail; raw?: SeminarDetailResponse; error?: string }> {
+  options?: { updateList?: boolean; notifyIfNew?: boolean },
+): Promise<{ success: boolean; data?: SeminarDetail; raw?: SeminarDetailResponse; isNew?: boolean; error?: string }> {
   try {
     const url = `${SEMINAR_DETAIL_API}${seminarId}`;
     const response = await httpGetJson<SeminarDetailResponse>(url);
@@ -286,15 +370,28 @@ export async function fetchSeminarDetail(
       return { success: false, error: '세미나 정보를 찾을 수 없습니다.' };
     }
 
+    const sid = String(response.seminarDetail.seminarId);
+    const existing = seminarRepo.getSeminarById(sid);
+    const isNew = !existing;
+
     if (options?.updateList !== false) {
       try {
         updateStoredSeminarFromDetail(response.seminarDetail, response);
       } catch (err) {
         logger.warn(`Failed to update seminar list for seminar ${seminarId}:`, err);
       }
+
+      if (isNew && options?.notifyIfNew !== false) {
+        const incoming = convertDetailToSeminarListItem(response.seminarDetail, response);
+        const referenceDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+        incoming.detectedDate = referenceDate;
+        await handleNewSeminarFromDetail(incoming).catch((err) => {
+          logger.warn(`[seminar_detail] handleNewSeminarFromDetail error for ${sid}:`, err);
+        });
+      }
     }
 
-    return { success: true, data: response.seminarDetail, raw: response };
+    return { success: true, data: response.seminarDetail, raw: response, isNew };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
     logger.error('fetchSeminarDetail error', { seminarId, error: errorMsg });

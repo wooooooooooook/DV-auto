@@ -9,6 +9,9 @@ import {
   convertDetailToSeminarListItem,
   updateStoredSeminarFromDetail,
   extractSeminarIds,
+  notifyNewSeminarFromDetail,
+  handleNewSeminarFromDetail,
+  fetchSeminarDetail,
   run,
   type SeminarDetail,
   type SeminarDetailResponse,
@@ -732,6 +735,182 @@ describe('seminar_detail 단위 테스트', () => {
           '공지봇은 Raw Response를 전달하지 않아야 함',
         );
         console.log('  ✓ [Pass] 공지봇 캐시 우선 반환 및 Raw Response 제외 검증 성공');
+
+        // Case 17: 신규 세미나 감지 시 신청 가능(PROCESS_APPLY) 상태에만 알림 발송 검증
+        console.log('\n--- Case 17: 신규 세미나 감지 시 신청 가능(PROCESS_APPLY) 상태 알림 및 자동 신청 검증 ---');
+        const applySeminarNoticeModule = await import('../src/tasks/apply_seminar_notice');
+        const subscriptionServiceModule = await import('../src/services/subscription_service');
+        const seminarApiModule = await import('../src/modules/seminar_api');
+
+        const syncNoticeSpy = vi.spyOn(applySeminarNoticeModule, 'syncNewSeminarsNotice').mockResolvedValue(12345);
+        const sendSubscribersSpy = vi
+          .spyOn(subscriptionServiceModule, 'sendNewSeminarToSubscribers')
+          .mockResolvedValue({ successCount: 1, failCount: 0 });
+        const applySeminarSpy = vi
+          .spyOn(seminarApiModule, 'applySeminarWithTerms')
+          .mockResolvedValue({ success: true, processState: ProcessState.PROCESS_CANCEL, isAuthExpired: false });
+
+        // 17-1. 신청 가능 상태 (PROCESS_APPLY: 2) -> 알림 발송 및 신청 태스크 실행
+        const applySeminarItem: SeminarListItem = {
+          seminarId: '7701',
+          name: '신청 가능 신규 세미나',
+          url: 'https://m.doctorville.co.kr/cme/seminar/7701',
+          date: '2026-09-10',
+          time: '13:00~14:00',
+          currentCount: '10',
+          totalCount: '1000',
+          nightTime: false,
+          isAdvancedSurvey: false,
+          processState: ProcessState.PROCESS_APPLY,
+          isClosed: false,
+          seminarCompleted: 0,
+        };
+        const handleRes1 = await handleNewSeminarFromDetail(applySeminarItem);
+        assert(handleRes1.notified === true, '신청 가능(PROCESS_APPLY) 상태인 경우 알림이 발송되어야 함');
+        assert(handleRes1.applied === true, '신청 가능(PROCESS_APPLY) 상태인 경우 자동 신청이 실행되어야 함');
+        assert(syncNoticeSpy.mock.calls.length === 1, '채널 공지 동기화가 호출되어야 함');
+        assert(sendSubscribersSpy.mock.calls.length === 1, '구독자 알림이 호출되어야 함');
+        assert(applySeminarSpy.mock.calls.length === 1, 'applySeminarWithTerms 가 호출되어야 함');
+
+        // notifyNewSeminarFromDetail 하위호환 검증
+        const notifiedCompat = await notifyNewSeminarFromDetail(applySeminarItem);
+        assert(notifiedCompat === true, 'notifyNewSeminarFromDetail 하위 호환 래퍼 검증');
+
+        syncNoticeSpy.mockClear();
+        sendSubscribersSpy.mockClear();
+        applySeminarSpy.mockClear();
+
+        // 17-2. 방송 종료 상태 (PROCESS_END: 7) -> 알림 및 신청 생략
+        const endedSeminarItem: SeminarListItem = {
+          seminarId: '7702',
+          name: '종료된 세미나',
+          url: 'https://m.doctorville.co.kr/cme/seminar/7702',
+          date: '2026-09-08',
+          time: '13:00~14:00',
+          currentCount: '10',
+          totalCount: '1000',
+          nightTime: false,
+          isAdvancedSurvey: false,
+          processState: ProcessState.PROCESS_END,
+          isClosed: false,
+          seminarCompleted: 1,
+        };
+        const handleRes2 = await handleNewSeminarFromDetail(endedSeminarItem);
+        assert(handleRes2.notified === false, '종료(PROCESS_END) 상태인 경우 알림이 생략되어야 함');
+        assert(handleRes2.applied === false, '종료(PROCESS_END) 상태인 경우 신청이 생략되어야 함');
+        assert(syncNoticeSpy.mock.calls.length === 0, '종료 세미나는 채널 공지가 호출되지 않아야 함');
+        assert(sendSubscribersSpy.mock.calls.length === 0, '종료 세미나는 구독자 알림이 호출되지 않아야 함');
+        assert(applySeminarSpy.mock.calls.length === 0, '종료 세미나는 신청 API가 호출되지 않아야 함');
+
+        // 17-3. 정원 초과/신청 마감 (PROCESS_EXCESS: 5) -> 알림 및 신청 생략
+        const excessSeminarItem: SeminarListItem = {
+          seminarId: '7703',
+          name: '정원 초과 세미나',
+          url: 'https://m.doctorville.co.kr/cme/seminar/7703',
+          date: '2026-09-10',
+          time: '13:00~14:00',
+          currentCount: '1000',
+          totalCount: '1000',
+          nightTime: false,
+          isAdvancedSurvey: false,
+          processState: ProcessState.PROCESS_EXCESS,
+          isClosed: false,
+          seminarCompleted: 0,
+        };
+        const handleRes3 = await handleNewSeminarFromDetail(excessSeminarItem);
+        assert(handleRes3.notified === false, '정원 초과(PROCESS_EXCESS) 상태인 경우 알림이 생략되어야 함');
+        assert(handleRes3.applied === false, '정원 초과(PROCESS_EXCESS) 상태인 경우 신청이 생략되어야 함');
+        assert(syncNoticeSpy.mock.calls.length === 0, '정원 초과 세미나는 채널 공지가 호출되지 않아야 함');
+        assert(sendSubscribersSpy.mock.calls.length === 0, '정원 초과 세미나는 구독자 알림이 호출되지 않아야 함');
+        assert(applySeminarSpy.mock.calls.length === 0, '정원 초과 세미나는 신청 API가 호출되지 않아야 함');
+
+        // 17-4. fetchSeminarDetail 통합 검증: 기존에 없던 PROCESS_APPLY 세미나 조회 시 알림 및 자동 신청 트리거 확인
+        seminarRepo.clearSeminars();
+        const mockNewApplyDetail: SeminarDetailResponse = {
+          surveyState: 3,
+          isExistVod: false,
+          seminarDetail: {
+            seminarId: 7704,
+            seminarTy: 1,
+            seminarNm: '상세 조회로 발견된 신규 세미나',
+            regUsn: 0,
+            startDt: '2026-09-11 13:00:00.0',
+            endDt: '2026-09-11 14:00:00.0',
+            maxPeopleCnt: 1000,
+            intro: '',
+            tutorId: 0,
+            tutorNm: '강사',
+            surveyId: null,
+            categoryCd: 1,
+            createDt: '2026-09-09 10:00:00.0',
+            updateDt: null,
+            introImg: '',
+            attachFileOrigin: '',
+            viewCnt: 0,
+            applyCnt: 50,
+            scrapId: null,
+            userTy: 4,
+            memberCreateDt: null,
+            broadcastUrl: '',
+            broadcastUrl2: '',
+            broadcastTy: 10,
+            broadcastTy2: 10,
+            diseaseCategoryNm: '순환기',
+            diseaseCategoryCd: '',
+            hiddenYn: 'N',
+            allowUsn: null,
+            chattingRoom: '',
+            payPoint: null,
+            seminarVod: null,
+            seminarVodReplay: null,
+            seminarTutor: null,
+            regUser: null,
+            survey: null,
+            seminarMember: null,
+            tag: null,
+            regChk: 0,
+            showFg: null,
+            vodMarkerList: null,
+            seminarCompleted: 0,
+            useSurvey: 'N',
+            useDepthSurvey: 'N',
+            useVod: 'N',
+            useVodNotify: 'N',
+            keyMessage: '',
+            encIntroImg: '',
+            encAttachFilePath: '',
+            categoryCdNm: '',
+            processState: ProcessState.PROCESS_APPLY,
+            cancelProcessState: 0,
+            startMonthAndDay: '9/11',
+            startDayOfWeek: '금',
+            endTime: '14:00',
+            startTime: '13:00',
+          },
+          termsInfo: null,
+          timeDiff: 0,
+          isScraped: false,
+          seminarNotifyMember: {} as any,
+          accessAllowed: true,
+          replyCnt: 0,
+          seminarAggreeInfo: {} as any,
+        };
+
+        httpGetJsonSpy.mockImplementation(async (url: string) => {
+          if (url.includes('7704')) {
+            return mockNewApplyDetail;
+          }
+          throw new Error('Not found');
+        });
+
+        const fetchResult = await fetchSeminarDetail('7704');
+        assert(fetchResult.success === true, 'fetchSeminarDetail 성공');
+        assert(fetchResult.isNew === true, '기존에 없던 세미나이므로 isNew=true 여야 함');
+        assert(syncNoticeSpy.mock.calls.length === 1, '신규 세미나 상세 조회 시 채널 공지가 발송되어야 함');
+        assert(sendSubscribersSpy.mock.calls.length === 1, '신규 세미나 상세 조회 시 구독자 알림이 발송되어야 함');
+        assert(applySeminarSpy.mock.calls.length === 1, '신규 세미나 상세 조회 시 자동 신청이 실행되어야 함');
+
+        console.log('  ✓ [Pass] Case 17: 신규 세미나 감지 시 신청 가능 상태 알림 및 자동 신청 검증 성공');
       } finally {
         vi.restoreAllMocks();
       }
