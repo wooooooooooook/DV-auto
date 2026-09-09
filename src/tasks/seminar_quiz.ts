@@ -173,13 +173,20 @@ export function resolveBestKeywordMatch(
 export function findMinimalBranchOptionIndex(options: QuizQuestion['options']): number {
   if (options.length === 0) return 1;
 
-  const negativePatterns = [/^아니오$/, /^아닙니다$/, /해당\s*없음/, /^없음$/, /비대상/, /전공의\s*아님/, /기타/];
+  const negativePatterns = [/^아니오$/, /^아닙니다$/, /해당\s*없음/, /^없음$/, /비대상/, /전공의\s*아님/];
 
   for (const pattern of negativePatterns) {
     const matched = options.find((opt) => pattern.test(opt.text.trim()));
     if (matched) {
       return matched.index;
     }
+  }
+
+  // "기타"를 선택하면 추가 주관식 텍스트 입력창이 활성화되는 경우가 많으므로
+  // 기타가 아닌 첫 번째 유효 보기를 기본값으로 선택
+  const nonOtherOption = options.find((opt) => !/기타/.test(opt.text.trim()));
+  if (nonOtherOption) {
+    return nonOtherOption.index;
   }
 
   return 1;

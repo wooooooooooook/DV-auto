@@ -122,7 +122,7 @@ describe('seminar_survey_api (fetchSeminarSurveyQuizHttp)', () => {
     expect(result.quizSummaryMessage).toBe('퀴즈 정답 21 + 심화1');
   });
 
-  it('findMinimalBranchOptionIndex: 아니오/해당없음/기타 등 분기 최소화 옵션을 올바르게 우선 선택한다', async () => {
+  it('findMinimalBranchOptionIndex: 아니오/해당없음 등 분기 최소화 옵션을 올바르게 우선 선택하고, 기타는 제외한다', async () => {
     const { findMinimalBranchOptionIndex } = await import('../src/tasks/seminar_quiz');
 
     // Case 1: 1번 "네", 2번 "아니오" -> 2번 선택
@@ -145,6 +145,13 @@ describe('seminar_survey_api (fetchSeminarSurveyQuizHttp)', () => {
       { index: 2, text: '보통', value: '1' },
     ];
     expect(findMinimalBranchOptionIndex(options3)).toBe(1);
+
+    // Case 4: 1번이 "기타"이고 2번이 "만족"인 경우 -> 추가 텍스트창 방지를 위해 2번("만족") 선택
+    const options4 = [
+      { index: 1, text: '기타 (직접 입력)', value: '0' },
+      { index: 2, text: '만족', value: '1' },
+    ];
+    expect(findMinimalBranchOptionIndex(options4)).toBe(2);
   });
 
   it('markerKind: [퀴즈] 마커가 없거나 일반 설문인 경우 지문 패턴과 무관하게 poll로 정확히 분류한다', async () => {
