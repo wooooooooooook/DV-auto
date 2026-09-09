@@ -1,6 +1,6 @@
 import { type Context } from 'telegraf';
 import * as logger from '../logger';
-import { replyWithSplit } from '../../modules/utils';
+import { replyWithSplit, escapeHtml } from '../../modules/utils';
 import { extractSeminarIds } from '../../tasks/seminar_detail';
 import * as seminarRepo from '../seminar_repository';
 
@@ -31,21 +31,21 @@ export const createSeminarDeleteHandler = () => async (ctx: Context) => {
 
       if (isDeleted) {
         deletedCount++;
-        const nameStr = existing?.name ? ` - ${existing.name}` : '';
-        const dateStr = existing?.date ? ` (${existing.date})` : '';
-        results.push(`• \`${sid}\`${nameStr}${dateStr}: 삭제 완료 🗑️`);
+        const nameStr = existing?.name ? ` - ${escapeHtml(existing.name)}` : '';
+        const dateStr = existing?.date ? ` (${escapeHtml(existing.date)})` : '';
+        results.push(`• <code>${escapeHtml(sid)}</code>${nameStr}${dateStr}: 삭제 완료 🗑️`);
         logger.info(`[admin] Deleted seminar ${sid} from database`);
       } else {
-        results.push(`• \`${sid}\`: DB에 존재하지 않음 ⚠️`);
+        results.push(`• <code>${escapeHtml(sid)}</code>: DB에 존재하지 않음 ⚠️`);
       }
     }
 
-    let replyMessage = `*세미나 DB 삭제 결과 (총 ${deletedCount}/${seminarIds.length}개 삭제)*\n\n${results.join('\n')}`;
+    let replyMessage = `<b>세미나 DB 삭제 결과 (총 ${deletedCount}/${seminarIds.length}개 삭제)</b>\n\n${results.join('\n')}`;
     if (deletedCount > 0) {
-      replyMessage += `\n\n💡 _삭제된 세미나를 \`/seminar_detail <ID>\` 로 다시 조회하면 신규 세미나로 감지되어 공지/알림 및 자동 신청이 실행됩니다._`;
+      replyMessage += `\n\n💡 <i>삭제된 세미나를 <code>/seminar_detail &lt;ID&gt;</code> 로 다시 조회하면 신규 세미나로 감지되어 공지/알림 및 자동 신청이 실행됩니다.</i>`;
     }
 
-    await replyWithSplit(ctx, replyMessage, { parse_mode: 'Markdown' });
+    await replyWithSplit(ctx, replyMessage, { parse_mode: 'HTML' });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     logger.error('createSeminarDeleteHandler error', e);

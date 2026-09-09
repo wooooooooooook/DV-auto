@@ -62,7 +62,7 @@ describe('seminar_delete_handler 단위 테스트', () => {
 
     await handler(ctx);
     expect(replies[0]).toContain('세미나 DB 삭제 결과 (총 1/1개 삭제)');
-    expect(replies[0]).toContain('`8801` - 테스트 세미나 1 (2026-09-10): 삭제 완료');
+    expect(replies[0]).toContain('<code>8801</code> - 테스트 세미나 1 (2026-09-10): 삭제 완료');
     expect(seminarRepo.getSeminarById('8801')).toBeNull();
     expect(seminarRepo.getSeminarById('8802')).not.toBeNull();
   });
@@ -80,9 +80,9 @@ describe('seminar_delete_handler 단위 테스트', () => {
 
     await handler(ctx);
     expect(replies[0]).toContain('세미나 DB 삭제 결과 (총 2/3개 삭제)');
-    expect(replies[0]).toContain('`8801` - 테스트 세미나 1 (2026-09-10): 삭제 완료');
-    expect(replies[0]).toContain('`8802` - 테스트 세미나 2 (2026-09-11): 삭제 완료');
-    expect(replies[0]).toContain('`9999`: DB에 존재하지 않음');
+    expect(replies[0]).toContain('<code>8801</code> - 테스트 세미나 1 (2026-09-10): 삭제 완료');
+    expect(replies[0]).toContain('<code>8802</code> - 테스트 세미나 2 (2026-09-11): 삭제 완료');
+    expect(replies[0]).toContain('<code>9999</code>: DB에 존재하지 않음');
     expect(seminarRepo.getSeminarById('8801')).toBeNull();
     expect(seminarRepo.getSeminarById('8802')).toBeNull();
   });
