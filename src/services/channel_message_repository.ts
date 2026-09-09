@@ -597,6 +597,7 @@ export async function editChannelMessage(
     channelId?: string;
     parse_mode?: 'HTML' | 'MarkdownV2' | 'Markdown';
     reply_markup?: unknown;
+    link_preview_options?: unknown;
   } = {},
 ): Promise<{ success: boolean; message: string }> {
   const bot = getBot('notice');
@@ -613,14 +614,19 @@ export async function editChannelMessage(
     const existing = getChannelMessageById(messageId, targetChannelId);
     const isPhoto = existing?.mediaType === 'photo';
 
+    const parseMode = options.parse_mode !== undefined ? options.parse_mode : 'HTML';
+    const linkPreviewOptions =
+      options.link_preview_options !== undefined ? options.link_preview_options : { is_disabled: true };
+
     if (isPhoto) {
       const editOptions: Record<string, unknown> = {};
-      if (options.parse_mode) editOptions.parse_mode = options.parse_mode;
+      if (parseMode) editOptions.parse_mode = parseMode;
       if (options.reply_markup) editOptions.reply_markup = options.reply_markup;
       await bot.telegram.editMessageCaption(targetChannelId, messageId, undefined, newText, editOptions);
     } else {
       const editOptions: Record<string, unknown> = {};
-      if (options.parse_mode) editOptions.parse_mode = options.parse_mode;
+      if (parseMode) editOptions.parse_mode = parseMode;
+      if (linkPreviewOptions) editOptions.link_preview_options = linkPreviewOptions;
       if (options.reply_markup) editOptions.reply_markup = options.reply_markup;
       await bot.telegram.editMessageText(targetChannelId, messageId, undefined, newText, editOptions);
     }

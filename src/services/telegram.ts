@@ -27,12 +27,24 @@ const ipv4Agent = new https.Agent({ family: 4 });
 const adminBot = ADMIN_BOT_TOKEN ? new Telegraf(ADMIN_BOT_TOKEN, { telegram: { agent: ipv4Agent } }) : null;
 const noticeBot = NOTICE_BOT_TOKEN ? new Telegraf(NOTICE_BOT_TOKEN, { telegram: { agent: ipv4Agent } }) : null;
 
+function attachGlobalLinkPreviewDisabled(bot: Telegraf): void {
+  const origCallApi = bot.telegram.callApi.bind(bot.telegram);
+  bot.telegram.callApi = async function (method, data, options) {
+    if (data && typeof data === 'object' && !('link_preview_options' in data)) {
+      (data as Record<string, unknown>).link_preview_options = { is_disabled: true };
+    }
+    return origCallApi(method, data, options);
+  };
+}
+
 if (adminBot) {
+  attachGlobalLinkPreviewDisabled(adminBot);
   setBot('admin', adminBot);
   setupAdminBot(adminBot);
 }
 
 if (noticeBot) {
+  attachGlobalLinkPreviewDisabled(noticeBot);
   setBot('notice', noticeBot);
   noticeBot.catch((err, ctx) => {
     logger.error(`Notice Bot Error for ${ctx.updateType}`, err);

@@ -25,7 +25,10 @@ describe('today_links 캐시 및 공지봇 전용 핸들러 테스트', () => {
       const sampleCache = {
         date: '2026-08-24',
         message: '📌 [2026-08-24] 오늘의 링크 모음\n1. 세미나 A\n2. 퀴즈 B',
-        options: { parse_mode: 'HTML' as const },
+        options: {
+          parse_mode: 'HTML' as const,
+          link_preview_options: { is_disabled: true },
+        },
         cachedAt: new Date().toISOString(),
       };
 

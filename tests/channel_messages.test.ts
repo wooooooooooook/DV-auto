@@ -113,19 +113,36 @@ describe('공지방 텔레그램 메시지 ID 일자별 추적 및 수정/삭제
 
     // --- 4. Mock Bot 환경에서 editChannelMessage 검증 ---
     console.log('4. editChannelMessage (텍스트 & 포토) 연동 검증');
-    const editMessageTextCalls: Array<{ channelId: string; messageId: number; text: string }> = [];
-    const editMessageCaptionCalls: Array<{ channelId: string; messageId: number; caption: string }> = [];
+    const editMessageTextCalls: Array<{ channelId: string; messageId: number; text: string; options?: unknown }> = [];
+    const editMessageCaptionCalls: Array<{
+      channelId: string;
+      messageId: number;
+      caption: string;
+      options?: unknown;
+    }> = [];
     const deleteMessageCalls: Array<{ channelId: string; messageId: number }> = [];
 
     const mockNoticeBot = {
       command: () => {},
       telegram: {
-        editMessageText: async (channelId: string, messageId: number, _inlineId: unknown, text: string) => {
-          editMessageTextCalls.push({ channelId, messageId, text });
+        editMessageText: async (
+          channelId: string,
+          messageId: number,
+          _inlineId: unknown,
+          text: string,
+          options?: unknown,
+        ) => {
+          editMessageTextCalls.push({ channelId, messageId, text, options });
           return true;
         },
-        editMessageCaption: async (channelId: string, messageId: number, _inlineId: unknown, caption: string) => {
-          editMessageCaptionCalls.push({ channelId, messageId, caption });
+        editMessageCaption: async (
+          channelId: string,
+          messageId: number,
+          _inlineId: unknown,
+          caption: string,
+          options?: unknown,
+        ) => {
+          editMessageCaptionCalls.push({ channelId, messageId, caption, options });
           return true;
         },
         deleteMessage: async (channelId: string, messageId: number) => {
@@ -143,6 +160,7 @@ describe('공지방 텔레그램 메시지 ID 일자별 추적 및 수정/삭제
     assert.strictEqual(editMessageTextCalls.length, 1);
     assert.strictEqual(editMessageTextCalls[0].messageId, 1002);
     assert.strictEqual(editMessageTextCalls[0].text, '수정된 두 번째 공지');
+    assert.deepStrictEqual((editMessageTextCalls[0].options as Record<string, unknown>)?.parse_mode, 'HTML');
 
     const editedRecord = getChannelMessageById(1002);
     assert.strictEqual(editedRecord?.status, 'edited');
@@ -164,6 +182,7 @@ describe('공지방 텔레그램 메시지 ID 일자별 추적 및 수정/삭제
     assert.strictEqual(editMessageCaptionCalls.length, 1);
     assert.strictEqual(editMessageCaptionCalls[0].messageId, 2001);
     assert.strictEqual(editMessageCaptionCalls[0].caption, '수정된 사진 캡션');
+    assert.deepStrictEqual((editMessageCaptionCalls[0].options as Record<string, unknown>)?.parse_mode, 'HTML');
     console.log('  ✓ editChannelMessage 텍스트 및 캡션 수정 연동 성공');
 
     // --- 5. deleteChannelMessage 및 deleteChannelMessagesByDate 검증 ---

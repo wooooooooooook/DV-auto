@@ -762,7 +762,10 @@ export async function syncChannelSeminarStatusOnQuizRegister(
     }
 
     if (hasReplacements) {
-      const editRes = await editChannelMessage(existingMsg.messageId, updatedText);
+      const editRes = await editChannelMessage(existingMsg.messageId, updatedText, {
+        channelId: existingMsg.channelId,
+        parse_mode: 'HTML',
+      });
       return { success: editRes.success, modified: true, message: editRes.message };
     }
 
