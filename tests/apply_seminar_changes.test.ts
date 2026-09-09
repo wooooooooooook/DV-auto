@@ -337,20 +337,31 @@ describe('apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스�
         rawResponse: {},
       });
 
-      vi.spyOn(seminarApiModule, 'fetchSeminarDetail').mockResolvedValue({
-        success: true,
-        seminarId: '100',
-        hasEntryHistory: false,
-        isPointExcluded: false,
-        rawResponse: {
-          seminarDetail: {
-            seminarId: 100,
-            seminarNm: '테스트 세미나',
-            applyCnt: 15,
-            maxPeopleCnt: 100,
-            processState: seminarApiModule.ProcessState.PROCESS_CANCEL,
-          },
-        },
+      vi.spyOn(seminarApiModule, 'fetchSeminarDetail').mockImplementation(async (id: number | string) => {
+        const sid = String(id);
+        if (sid === '100') {
+          return {
+            success: true,
+            seminarId: '100',
+            hasEntryHistory: false,
+            isPointExcluded: false,
+            rawResponse: {
+              seminarDetail: {
+                seminarId: 100,
+                seminarNm: '테스트 세미나',
+                applyCnt: 15,
+                maxPeopleCnt: 100,
+                processState: seminarApiModule.ProcessState.PROCESS_CANCEL,
+              },
+            },
+          };
+        }
+        return {
+          success: false,
+          seminarId: sid,
+          isAuthExpired: false,
+          errorMessage: '404 Not Found',
+        };
       });
 
       // Mock page with minimal locator implementations
@@ -522,21 +533,32 @@ describe('apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스�
         rawResponse: {},
       });
 
-      vi.spyOn(seminarApiModule, 'fetchSeminarDetail').mockResolvedValue({
-        success: true,
-        seminarId: '600',
-        hasEntryHistory: false,
-        isPointExcluded: true, // 포인트 미지급 세미나
-        rawResponse: {
-          seminarDetail: {
-            seminarId: 600,
-            seminarNm: '신규 포인트 미지급 세미나',
-            intro: '본 세미나는 포인트가 지급되지 않는 세미나입니다.',
-            applyCnt: 0,
-            maxPeopleCnt: 500,
-            processState: seminarApiModule.ProcessState.PROCESS_APPLY,
-          },
-        },
+      vi.spyOn(seminarApiModule, 'fetchSeminarDetail').mockImplementation(async (id: number | string) => {
+        const sid = String(id);
+        if (sid === '600') {
+          return {
+            success: true,
+            seminarId: '600',
+            hasEntryHistory: false,
+            isPointExcluded: true, // 포인트 미지급 세미나
+            rawResponse: {
+              seminarDetail: {
+                seminarId: 600,
+                seminarNm: '신규 포인트 미지급 세미나',
+                intro: '본 세미나는 포인트가 지급되지 않는 세미나입니다.',
+                applyCnt: 0,
+                maxPeopleCnt: 500,
+                processState: seminarApiModule.ProcessState.PROCESS_APPLY,
+              },
+            },
+          };
+        }
+        return {
+          success: false,
+          seminarId: sid,
+          isAuthExpired: false,
+          errorMessage: '404 Not Found',
+        };
       });
 
       seminarRepo.setAllSeminars([]);

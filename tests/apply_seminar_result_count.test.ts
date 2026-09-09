@@ -60,22 +60,33 @@ describe('apply_seminar 신청 결과 집계 정확성 테스트', () => {
       return true;
     });
 
-    vi.spyOn(seminarApiModule, 'fetchSeminarDetail').mockResolvedValue({
-      success: true,
-      seminarId: '100',
-      hasEntryHistory: false,
-      isPointExcluded: false,
-      rawResponse: {
-        seminarDetail: {
-          seminarId: 100,
-          seminarNm: `세미나 100`,
-          intro: '',
-          applyCnt: 10,
-          maxPeopleCnt: 100,
-          useDepthSurvey: false,
-          processState: 2,
-        },
-      },
+    vi.spyOn(seminarApiModule, 'fetchSeminarDetail').mockImplementation(async (id: number | string) => {
+      const sid = String(id);
+      if (sid === '100') {
+        return {
+          success: true,
+          seminarId: '100',
+          hasEntryHistory: false,
+          isPointExcluded: false,
+          rawResponse: {
+            seminarDetail: {
+              seminarId: 100,
+              seminarNm: `세미나 100`,
+              intro: '',
+              applyCnt: 10,
+              maxPeopleCnt: 100,
+              useDepthSurvey: false,
+              processState: 2,
+            },
+          },
+        };
+      }
+      return {
+        success: false,
+        seminarId: sid,
+        isAuthExpired: false,
+        errorMessage: '404 Not Found',
+      };
     });
 
     vi.spyOn(checkSeminarPointModule, 'searchSeminarPoints').mockResolvedValue({

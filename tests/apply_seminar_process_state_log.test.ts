@@ -12,6 +12,12 @@ import * as checkSeminarPointModule from '../src/tasks/check_seminar_point';
 describe('sync_seminars processState 상태 분포 로그 테스트', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.spyOn(seminarApiModule, 'fetchSeminarDetail').mockResolvedValue({
+      success: false,
+      seminarId: '0',
+      isAuthExpired: false,
+      errorMessage: '404 Not Found',
+    });
   });
 
   describe('formatProcessStateDistribution', () => {
@@ -186,6 +192,7 @@ describe('sync_seminars processState 상태 분포 로그 테스트', () => {
             seminarCompleted: 0,
           },
         ],
+        rawResponse: {},
       });
 
       const res = await syncSeminars({ silentIfNoNew: true, forceEnrich: false });
@@ -226,6 +233,7 @@ describe('sync_seminars processState 상태 분포 로그 테스트', () => {
             seminarCompleted: 0,
           },
         ],
+        rawResponse: {},
       });
 
       const res = await syncSeminarsTask.run({});
@@ -251,6 +259,7 @@ describe('sync_seminars processState 상태 분포 로그 테스트', () => {
       });
       vi.spyOn(seminarApiModule, 'applySeminarWithTerms').mockResolvedValue({
         success: true,
+        isAuthExpired: false,
         processState: ProcessState.PROCESS_CANCEL,
       });
 
@@ -269,6 +278,7 @@ describe('sync_seminars processState 상태 분포 로그 테스트', () => {
             seminarCompleted: 0,
           },
         ],
+        rawResponse: {},
       });
 
       const res = await syncSeminars({ silentIfNoNew: true, forceEnrich: false });

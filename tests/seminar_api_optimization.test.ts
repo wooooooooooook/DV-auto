@@ -162,18 +162,27 @@ describe('닥터빌 API 과다 호출 방지 및 라이브 모니터링 최적�
 
     let detailApiCallCount = 0;
     vi.spyOn(seminarApiModule, 'fetchSeminarDetail').mockImplementation(async (id: number | string) => {
-      detailApiCallCount++;
-      return {
-        success: true,
-        seminarId: String(id),
-        hasEntryHistory: false,
-        isPointExcluded: false,
-        rawResponse: {
-          seminarDetail: {
-            seminarId: Number(id),
-            seminarNm: `상세세미나${id}`,
+      const sid = String(id);
+      if (sid === '201') {
+        detailApiCallCount++;
+        return {
+          success: true,
+          seminarId: '201',
+          hasEntryHistory: false,
+          isPointExcluded: false,
+          rawResponse: {
+            seminarDetail: {
+              seminarId: 201,
+              seminarNm: '상세세미나201',
+            },
           },
-        },
+        };
+      }
+      return {
+        success: false,
+        seminarId: sid,
+        isAuthExpired: false,
+        errorMessage: '404 Not Found',
       };
     });
 
