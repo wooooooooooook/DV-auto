@@ -25,6 +25,7 @@ export const adminCommands = [
   { command: 'check_point', description: '현재 포인트 확인' },
   { command: 'check_seminar_point', description: '세미나 번호로 포인트 지급 확인' },
   { command: 'check_advanced_seminars', description: '최근 2주 심화 세미나 포인트 일괄 확인 (방장 계정 기준)' },
+  { command: 'point_exchange', description: '포인트교환 실행 (URL/guid, [횟수])' },
   { command: 'naverpay_point_exchange', description: '네이버페이포인트교환 실행' },
   { command: 'baemin_point_exchange', description: '배민포인트교환 실행' },
   { command: 'kakaopay_point_exchange', description: '카카오페이포인트교환 실행 (1만원)' },

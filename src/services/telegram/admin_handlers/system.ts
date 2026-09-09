@@ -270,6 +270,7 @@ export function setupSystemCommands(adminBot: Telegraf): void {
 - /check_point: 현재 포인트를 확인합니다.
 - /check_seminar_point: 세미나 번호로 포인트 지급 확인
 - /check_advanced_seminars: 최근 2주 심화 세미나 포인트 일괄 확인 (방장 계정 기준)
+- /point_exchange <URL/guid> [횟수]: 상품 URL 또는 guid로 포인트교환을 실행합니다. (기본값: 1)
 - /naverpay_point_exchange [횟수]: 네이버페이포인트교환 작업을 실행합니다. (기본값: 10)
 - /baemin_point_exchange [횟수]: 배민포인트교환 작업을 실행합니다. (기본값: 1)
 - /kakaopay_point_exchange [횟수]: 카카오페이 1만원권 포인트교환 작업을 실행합니다. (기본값: 1)

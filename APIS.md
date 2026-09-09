@@ -137,7 +137,7 @@
 ### 2.7 회원 포인트 조회
 - **Method / URL**: `GET https://m-api.doctorville.co.kr/api/mw/my/point`
 - **호출 위치**: `src/tasks/check_point.ts` (`getPoint`)
-- **주요 사용 태스크**: `check_point`, `baemin_point_exchange`, `naverpay_point_exchange`
+- **주요 사용 태스크**: `check_point`, `point_exchange`
 - **헤더**:
   - `Accept`: `application/json, text/plain, */*`
 - **주요 응답 데이터**:
@@ -303,7 +303,7 @@
 | `https://www.doctorville.co.kr/product/medicineList` | `GET` (Playwright / Cheerio) | 오늘의 퀴즈 대상 의약품 목록 조회 | `today_quiz.ts`, `today_links.ts` |
 | `https://www.doctorville.co.kr/product/instrumentList` | `GET` (Playwright / Cheerio) | 오늘의 퀴즈 대상 의료기기 목록 조회 | `today_quiz.ts`, `today_links.ts` |
 | `https://m.doctorville.co.kr/cme/seminar/{seminarId}` | `GET` (Playwright) | 세미나 라이브 방송 입장, 실시간 퀴즈 및 설문 응답 | `seminar_quiz.ts`, `run_seminar_quiz.ts` |
-| `https://www.doctorville.co.kr/entertainment/main` | `GET` (Playwright) | 엠서클 비즈마켓 포인트몰 브릿지 이동 | `baemin_point_exchange.ts`, `naverpay_point_exchange.ts` |
+| `https://www.doctorville.co.kr/entertainment/main` | `GET` (Playwright) | 엠서클 비즈마켓 포인트몰 브릿지 이동 | `point_exchange.ts` |
 
 ---
 

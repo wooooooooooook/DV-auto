@@ -5,11 +5,7 @@ import {
   parsePriceFromBodyText,
   parsePriceFromSummaryText,
 } from '../src/modules/point_exchange_utils';
-import * as kakaopayTask from '../src/tasks/kakaopay_point_exchange';
-import * as kakaopay5kTask from '../src/tasks/kakaopay5k_point_exchange';
-import * as kakaopay3kTask from '../src/tasks/kakaopay3k_point_exchange';
-import * as naverpayTask from '../src/tasks/naverpay_point_exchange';
-import * as baeminTask from '../src/tasks/baemin_point_exchange';
+import * as pointExchangeTask from '../src/tasks/point_exchange';
 
 describe('point_exchange_utils', () => {
   describe('parsePriceFromSummaryText', () => {
@@ -126,13 +122,39 @@ describe('point_exchange_utils', () => {
   });
 });
 
-describe('Point Exchange Tasks export check', () => {
-  it('모든 교환 태스크 모듈에 run 함수가 정의되어 있어야 한다', () => {
-    expect(typeof naverpayTask.run).toBe('function');
-    expect(typeof baeminTask.run).toBe('function');
-    expect(typeof kakaopayTask.run).toBe('function');
-    expect(typeof kakaopay5kTask.run).toBe('function');
-    expect(typeof kakaopay3kTask.run).toBe('function');
+describe('point_exchange URL and guid helpers', () => {
+  it('guid 문자열이 입력되면 올바른 포인트몰 URL을 생성한다', () => {
+    const url = pointExchangeTask.resolveTargetUrl('14131415');
+    expect(url).toBe('https://mcircle.bizmarketb2b.com/Goods/Content.aspx?guid=14131415&catecode=14592');
+  });
+
+  it('전체 URL이 입력되면 그대로 반환한다', () => {
+    const fullUrl = 'https://mcircle.bizmarketb2b.com/Goods/Content.aspx?guid=14152303&catecode=14592&eventuid=21006';
+    const url = pointExchangeTask.resolveTargetUrl(fullUrl);
+    expect(url).toBe(fullUrl);
+  });
+
+  it('URL에서 guid를 정확히 추출한다', () => {
+    expect(
+      pointExchangeTask.extractGuidFromUrl(
+        'https://mcircle.bizmarketb2b.com/Goods/Content.aspx?guid=14627547&catecode=14592',
+      ),
+    ).toBe('14627547');
+    expect(pointExchangeTask.extractGuidFromUrl('14627547')).toBe('14627547');
+  });
+});
+
+describe('Point Exchange Task execution check', () => {
+  it('point_exchange 모듈에 run 함수가 정의되어 있어야 한다', () => {
+    expect(typeof pointExchangeTask.run).toBe('function');
+  });
+
+  it('상품 대상(URL 또는 guid)이 지정되지 않으면 실패해야 한다', async () => {
+    const mockPage = {} as unknown as Page;
+    const mockContext = {} as unknown as BrowserContext;
+
+    const res = await pointExchangeTask.run({ page: mockPage, context: mockContext });
+    expect(res.success).toBe(false);
   });
 
   it('환경변수가 없으면 태스크 실행 시 실패를 반환해야 한다', async () => {
@@ -144,14 +166,12 @@ describe('Point Exchange Tasks export check', () => {
       const mockPage = {} as unknown as Page;
       const mockContext = {} as unknown as BrowserContext;
 
-      const resKakaopay = await kakaopayTask.run({ page: mockPage, context: mockContext });
-      expect(resKakaopay.success).toBe(false);
-
-      const resKakaopay5k = await kakaopay5kTask.run({ page: mockPage, context: mockContext });
-      expect(resKakaopay5k.success).toBe(false);
-
-      const resKakaopay3k = await kakaopay3kTask.run({ page: mockPage, context: mockContext });
-      expect(resKakaopay3k.success).toBe(false);
+      const res = await pointExchangeTask.run({
+        page: mockPage,
+        context: mockContext,
+        args: { guid: '14131415' },
+      });
+      expect(res.success).toBe(false);
     } finally {
       process.env = originalEnv;
     }

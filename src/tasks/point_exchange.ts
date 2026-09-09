@@ -5,26 +5,54 @@ import { ensureLoggedIn, safeGoto, sendTelegram, sleep } from '../modules/utils'
 import { getProductPrice } from '../modules/point_exchange_utils';
 import { getPoint } from './check_point';
 
-const TARGET_URL = 'https://mcircle.bizmarketb2b.com/Goods/Content.aspx?guid=14627533&catecode=14592';
 const ENTERTAINMENT_URL = 'https://www.doctorville.co.kr/entertainment/main';
 const SUCCESS_TEXT = '주문이 완료되었습니다.';
-const DEFAULT_POINT = '3000';
 
-async function run({ page, context, maxIterations }: PlaywrightRunArgs): Promise<TaskResult> {
+export function resolveTargetUrl(input: string, catecode = '14592'): string {
+  const trimmed = input.trim();
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    return trimmed;
+  }
+  return `https://mcircle.bizmarketb2b.com/Goods/Content.aspx?guid=${trimmed}&catecode=${catecode}`;
+}
+
+export function extractGuidFromUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const guid = parsed.searchParams.get('guid');
+    if (guid) return guid;
+  } catch {
+    // ignore
+  }
+  const match = url.match(/[?&]guid=(\d+)/i);
+  return match ? match[1] : url;
+}
+
+export async function run({ page, context, maxIterations, args }: PlaywrightRunArgs): Promise<TaskResult> {
+  const rawInput = args?.url || args?.guid || args?.item || '';
+  if (!rawInput) {
+    const message = '포인트교환 실패: 대상 상품 URL 또는 guid가 지정되지 않았습니다.';
+    await sendTelegram(`❗ ${message}`).catch(() => {});
+    return { success: false, message };
+  }
+
+  const catecode = args?.catecode || '14592';
+  const targetUrl = resolveTargetUrl(rawInput, catecode);
+  const guid = extractGuidFromUrl(targetUrl);
+  const taskTitle = args?.name ? `${args.name} 포인트교환` : `포인트교환 (${guid})`;
+
   const name = process.env.USER_NAME?.trim();
   const phone1 = process.env.USER_PHONE_1?.trim();
   const phone2 = process.env.USER_PHONE_2?.trim();
   const phone3 = process.env.USER_PHONE_3?.trim();
+
   const finalMaxIterations =
-    maxIterations !== undefined
-      ? maxIterations
-      : process.env.KAKAOPAY3K_MAX_ITERATIONS !== undefined
-        ? Number(process.env.KAKAOPAY3K_MAX_ITERATIONS)
-        : 1;
-  const refreshEvery = Number(process.env.KAKAOPAY3K_REFRESH_EVERY || process.env.NAVERPAY_REFRESH_EVERY || '3'); // 새 페이지로 리프레시할 주기
+    maxIterations !== undefined ? maxIterations : args?.maxIterations !== undefined ? Number(args.maxIterations) : 1;
+
+  const refreshEvery = Number(process.env.POINT_EXCHANGE_REFRESH_EVERY || process.env.NAVERPAY_REFRESH_EVERY || '3');
   const iterationDelayMs = Number(
-    process.env.KAKAOPAY3K_ITERATION_DELAY_MS || process.env.NAVERPAY_ITERATION_DELAY_MS || '500',
-  ); // 반복 간 대기 시간
+    process.env.POINT_EXCHANGE_ITERATION_DELAY_MS || process.env.NAVERPAY_ITERATION_DELAY_MS || '500',
+  );
 
   if (!name || !phone1 || !phone2 || !phone3) {
     const missing = [
@@ -35,28 +63,29 @@ async function run({ page, context, maxIterations }: PlaywrightRunArgs): Promise
     ]
       .filter(Boolean)
       .join(', ');
-    const message = `카카오페이3k포인트교환 실패: 환경변수(${missing})를 확인해주세요.`;
+    const message = `${taskTitle} 실패: 환경변수(${missing})를 확인해주세요.`;
     await sendTelegram(`❗ ${message}`).catch(() => {});
-    return { success: false };
+    return { success: false, message };
   }
 
   let workPage = page;
 
   if (!context) {
-    const message = '카카오페이3k포인트교환 실패: 로그인 확인을 위해 context가 필요합니다.';
+    const message = `${taskTitle} 실패: 로그인 확인을 위해 context가 필요합니다.`;
     await sendTelegram(`❗ ${message}`).catch(() => {});
-    return { success: false };
+    return { success: false, message };
   }
 
   await ensureLoggedIn({ page: workPage, context }).catch(() => {});
 
   const startPoint = await getPoint(context);
-  console.log(`[kakaopay3k_point_exchange] 시작 전 남은 포인트: ${startPoint}`);
-  await sendTelegram(`💳 카카오페이3k포인트교환 시작 전 남은 포인트: ${startPoint}`).catch(() => {});
+  console.log(`[point_exchange] 시작 전 남은 포인트: ${startPoint} (${taskTitle})`);
+  await sendTelegram(`💳 ${taskTitle} 시작 전 남은 포인트: ${startPoint}`).catch(() => {});
 
   await fs.mkdir(path.join(process.cwd(), 'screenshot'), { recursive: true });
   let successCount = 0;
   let iteration = 0;
+
   const prepareShopPage = async () => {
     await ensureLoggedIn({ page: workPage, context }).catch(() => {});
     await safeGoto(workPage, ENTERTAINMENT_URL, { waitUntil: 'load', timeout: 20000 }, 2);
@@ -89,7 +118,7 @@ async function run({ page, context, maxIterations }: PlaywrightRunArgs): Promise
         await prepareShopPage();
       }
 
-      await safeGoto(workPage, TARGET_URL, { waitUntil: 'load', timeout: 30000 }, 2);
+      await safeGoto(workPage, targetUrl, { waitUntil: 'load', timeout: 30000 }, 2);
 
       iteration += 1; // 타깃 URL 진입 후에 이터레이션을 증가시켜 실제 시도 횟수만 센다
 
@@ -98,9 +127,9 @@ async function run({ page, context, maxIterations }: PlaywrightRunArgs): Promise
       await buyNowButton.click();
 
       await workPage.waitForSelector('#rcvName', { timeout: 10000 });
-      const productPrice = await getProductPrice(workPage, DEFAULT_POINT, 3000);
-      if (productPrice !== DEFAULT_POINT) {
-        console.log(`[kakaopay3k_point_exchange] 상품금액 추출 성공: ${productPrice}원`);
+      const productPrice = await getProductPrice(workPage, '0');
+      if (productPrice && productPrice !== '0') {
+        console.log(`[point_exchange] 상품금액 추출 성공: ${productPrice}원`);
       }
 
       await workPage.fill('#rcvName', name);
@@ -141,40 +170,36 @@ async function run({ page, context, maxIterations }: PlaywrightRunArgs): Promise
 
       if (orderCompleted) {
         successCount += 1;
-        await sendTelegram(`✅ 카카오페이3k포인트교환 성공 (${successCount}회 누적, 시도 ${iteration}회)`).catch(
-          () => {},
-        );
+        await sendTelegram(`✅ ${taskTitle} 성공 (${successCount}회 누적, 시도 ${iteration}회)`).catch(() => {});
         if (iterationDelayMs > 0) {
           await sleep(iterationDelayMs);
         }
         continue;
       }
 
-      const failureShot = path.join(process.cwd(), 'screenshot', 'kakaopay3k_point_exchange_failure.png');
+      const failureShot = path.join(process.cwd(), 'screenshot', `point_exchange_${guid}_failure.png`);
       await workPage.screenshot({ path: failureShot, fullPage: true }).catch(() => {});
       const endPoint = await getPoint(context);
-      const message = `카카오페이3k포인트교환 실패 (시도 ${iteration}회, 성공 ${successCount}회). '${SUCCESS_TEXT}' 문구를 찾지 못했습니다.\n종료 후 남은 포인트: ${endPoint}`;
+      const message = `${taskTitle} 실패 (시도 ${iteration}회, 성공 ${successCount}회). '${SUCCESS_TEXT}' 문구를 찾지 못했습니다.\n종료 후 남은 포인트: ${endPoint}`;
       await sendTelegram(`❗ ${message}`, failureShot).catch(() => {});
-      return { success: false };
+      return { success: false, message, imagePath: failureShot };
     }
 
     const endPoint = await getPoint(context);
     const message =
       finalMaxIterations > 0
-        ? `카카오페이3k포인트교환 완료: 설정된 ${finalMaxIterations}회 반복 종료 (성공 ${successCount}회).\n종료 후 남은 포인트: ${endPoint}`
-        : `카카오페이3k포인트교환 종료: 성공 ${successCount}회 후 반복이 중단되었습니다.\n종료 후 남은 포인트: ${endPoint}`;
+        ? `${taskTitle} 완료: 설정된 ${finalMaxIterations}회 반복 종료 (성공 ${successCount}회).\n종료 후 남은 포인트: ${endPoint}`
+        : `${taskTitle} 종료: 성공 ${successCount}회 후 반복이 중단되었습니다.\n종료 후 남은 포인트: ${endPoint}`;
     await sendTelegram(`✅ ${message}`).catch(() => {});
-    return { success: true };
+    return { success: true, message };
   } catch (error) {
-    const errorShot = path.join(process.cwd(), 'screenshot', 'kakaopay3k_point_exchange_error.png');
+    const errorShot = path.join(process.cwd(), 'screenshot', `point_exchange_${guid}_error.png`);
     await workPage.screenshot({ path: errorShot, fullPage: true }).catch(() => {});
     const endPoint = await getPoint(context);
-    const message = `카카오페이3k포인트교환 오류 발생 (성공 ${successCount}회): ${
+    const message = `${taskTitle} 오류 발생 (성공 ${successCount}회): ${
       error instanceof Error ? error.message : String(error)
     }\n종료 후 남은 포인트: ${endPoint}`;
     await sendTelegram(`❗ ${message}`, errorShot).catch(() => {});
-    return { success: false };
+    return { success: false, message, imagePath: errorShot };
   }
 }
-
-export { run };
