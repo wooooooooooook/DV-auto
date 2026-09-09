@@ -279,7 +279,7 @@ describe('setSeminarQuizAnswer 통합 동작', () => {
 
   describe('Telegram Command Registration Tests', () => {
     it('adminCommands에 set_seminar_quiz가 등록되어 있어야 함', async () => {
-      const { adminCommands } = await import('../src/services/telegram');
+      const { adminCommands } = await import('../src/services/telegram/command_definitions');
       const cmd = adminCommands.find((c) => c.command === 'set_seminar_quiz');
       expect(cmd).toBeDefined();
       expect(cmd?.description).toContain('퀴즈 정답');

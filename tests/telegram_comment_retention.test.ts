@@ -5,7 +5,7 @@ import * as channelRepoModule from '../src/services/channel_message_repository';
 import { publishSeminarStatusNotice, type MonitoredSeminarItem } from '../src/tasks/monitor_seminars_notice';
 import { publishNewSeminarsNotice } from '../src/tasks/apply_seminar_notice';
 import type { SeminarListItem } from '../src/services/seminar_repository';
-import { extractParentMessageId } from '../src/services/telegram';
+import { extractParentMessageId } from '../src/services/telegram/notice_handlers';
 import { getDatabase } from '../src/services/storage';
 
 describe('Telegram 댓글 보존 및 공지 메시지 교체 (Comment Retention & Safe Replacement) 단위 테스트', () => {

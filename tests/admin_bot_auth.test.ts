@@ -1,6 +1,6 @@
 import assert from 'assert';
 import { describe, it, vi } from 'vitest';
-import { isAuthorizedAdmin } from '../src/services/telegram';
+import { isAuthorizedAdmin } from '../src/services/telegram/auth';
 
 describe('Admin Bot 인가(Authorization) 가드 테스트', () => {
   describe('isAuthorizedAdmin 단위 테스트', () => {

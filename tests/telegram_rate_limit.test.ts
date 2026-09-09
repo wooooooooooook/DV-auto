@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import { isTelegram429Error, getTelegramRetryAfter, sendTelegram } from '../src/modules/utils';
-import { syncBotCommands, loadBotCommandsCache, BOT_COMMANDS_CACHE_PATH } from '../src/services/telegram';
+import { syncBotCommands, loadBotCommandsCache, BOT_COMMANDS_CACHE_PATH } from '../src/services/telegram/command_sync';
 import { setBot } from '../src/services/bot_instance';
 import type { Telegraf } from 'telegraf';
 

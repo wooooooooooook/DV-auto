@@ -17,7 +17,7 @@ import { ProcessState, SurveyState } from '../src/modules/seminar_api';
 import * as seminarRepo from '../src/services/seminar_repository';
 import type { SeminarListItem } from '../src/services/seminar_repository';
 import * as httpClient from '../src/modules/http_client';
-import { createSeminarDetailHandler } from '../src/services/telegram';
+import { createSeminarDetailHandler } from '../src/services/telegram/seminar_detail_handler';
 import type { Context } from 'telegraf';
 import { describe, it, vi } from 'vitest';
 

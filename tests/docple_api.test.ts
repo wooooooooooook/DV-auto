@@ -340,7 +340,7 @@ describe('Docple Plus API & Daily Task Tests', () => {
     });
 
     it('parseQuizQuestionsFromText: 닥플 포맷 및 세미나 포맷 파싱 검증', async () => {
-      const { parseQuizQuestionsFromText } = await import('../src/services/telegram');
+      const { parseQuizQuestionsFromText } = await import('../src/services/telegram/quiz_cheatsheet');
 
       // 1. 닥플 퀴즈 포맷 (이모지 포함)
       const docpleMsg = `
@@ -628,7 +628,7 @@ Q2: 복용 방법은?
 
   describe('Telegram Command Registration Tests', () => {
     it('adminCommands에 run_docple_daily_now가 등록되어 있어야 함', async () => {
-      const { adminCommands } = await import('../src/services/telegram');
+      const { adminCommands } = await import('../src/services/telegram/command_definitions');
       const docpleCmd = adminCommands.find((c) => c.command === 'run_docple_daily_now');
       expect(docpleCmd).toBeDefined();
       expect(docpleCmd?.description).toContain('닥플');

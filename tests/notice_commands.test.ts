@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import { describe, it, beforeEach, afterEach } from 'vitest';
-import { noticeCommands, adminCommands } from '../src/services/telegram';
+import { noticeCommands, adminCommands } from '../src/services/telegram/command_definitions';
 import { setBot, clearNoticeCooldowns } from '../src/services/bot_instance';
 import * as storage from '../src/services/storage';
 import type { Telegraf } from 'telegraf';
