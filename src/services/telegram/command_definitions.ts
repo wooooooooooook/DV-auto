@@ -21,6 +21,7 @@ export const adminCommands = [
   { command: 'list_quiz', description: 'quiz.json 등록 제품 목록' },
   { command: 'delete_quiz', description: 'quiz.json 항목 삭제' },
   { command: 'seminar_detail', description: '세미나 번호로 상세 정보 실시간 조회' },
+  { command: 'delete_seminar', description: '세미나 DB 항목 삭제 (seminarId [seminarId...])' },
   // 3. 포인트 & 교환
   { command: 'check_point', description: '현재 포인트 확인' },
   { command: 'check_seminar_point', description: '세미나 번호로 포인트 지급 확인' },
