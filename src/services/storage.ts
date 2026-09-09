@@ -3,7 +3,6 @@ import path from 'path';
 import Database from 'better-sqlite3';
 import type { TaskLockData } from '../types';
 
-const DEFAULT_STATE_FILE = path.join(process.cwd(), 'data', 'state.json');
 const DEFAULT_PROD_DB_PATH = path.join(process.cwd(), 'data', 'app.db');
 const DEFAULT_TEST_DB_PATH = path.join(process.cwd(), 'data', 'test.db');
 
@@ -94,12 +93,19 @@ function initDatabase(db: Database.Database): void {
       created_at INTEGER NOT NULL
     );
 
+    CREATE INDEX IF NOT EXISTS idx_channel_comments_date ON channel_comments(date);
+    CREATE INDEX IF NOT EXISTS idx_channel_comments_msg ON channel_comments(channel_id, message_id);
+    CREATE INDEX IF NOT EXISTS idx_channel_comments_parent ON channel_comments(parent_message_id);
+    CREATE INDEX IF NOT EXISTS idx_channel_comments_attached ON channel_comments(attached_to_message_id);
+
     CREATE TABLE IF NOT EXISTS channel_discussion_threads (
       thread_id INTEGER PRIMARY KEY,
       channel_id TEXT NOT NULL,
       channel_message_id INTEGER NOT NULL,
       created_at INTEGER NOT NULL
     );
+
+    CREATE INDEX IF NOT EXISTS idx_discussion_threads_channel_msg ON channel_discussion_threads(channel_id, channel_message_id);
 
     CREATE TABLE IF NOT EXISTS subscriptions (
       chat_id INTEGER PRIMARY KEY,
@@ -117,356 +123,7 @@ function initDatabase(db: Database.Database): void {
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
-
-    CREATE TABLE IF NOT EXISTS _migration_meta (
-      name TEXT PRIMARY KEY,
-      migrated_at INTEGER NOT NULL
-    );
   `);
-
-  // seminars 테이블 컬럼 안전 마이그레이션 (기존 DB 호환)
-  try {
-    const seminarColumns = db.prepare(`PRAGMA table_info(seminars)`).all() as Array<{ name: string }>;
-    const colNames = seminarColumns.map((c) => c.name);
-    if (!colNames.includes('urgent_notified')) {
-      db.exec(`ALTER TABLE seminars ADD COLUMN urgent_notified INTEGER DEFAULT 0;`);
-    }
-    if (!colNames.includes('is_closed')) {
-      db.exec(`ALTER TABLE seminars ADD COLUMN is_closed INTEGER DEFAULT 0;`);
-    }
-    if (!colNames.includes('hidden_yn')) {
-      db.exec(`ALTER TABLE seminars ADD COLUMN hidden_yn TEXT DEFAULT 'N';`);
-      // 과거 버전에서는 hiddenYn === 'Y'인 비공개 세미나를 is_closed = 1로 저장했음.
-      // 기존에 is_closed = 1로 저장되어 있던 비공개 세미나들의 hidden_yn을 'Y'로 마이그레이션하고 is_closed는 0으로 복원하여
-      // 배포 직후 첫 동기화 시 '비공개: false -> true' 정보변경알림이 오발송되는 현상을 원천 방지
-      db.exec(`UPDATE seminars SET hidden_yn = 'Y', is_closed = 0 WHERE is_closed = 1;`);
-    }
-    if (!colNames.includes('disease_category_nm')) {
-      db.exec(`ALTER TABLE seminars ADD COLUMN disease_category_nm TEXT;`);
-    }
-  } catch (_e) {
-    // ignore
-  }
-
-  // subscriptions 테이블 컬럼 안전 마이그레이션 (기존 DB 호환)
-  try {
-    const subColumns = db.prepare(`PRAGMA table_info(subscriptions)`).all() as Array<{ name: string }>;
-    const colNames = subColumns.map((c) => c.name);
-    if (!colNames.includes('today_links_time')) {
-      db.exec(`ALTER TABLE subscriptions ADD COLUMN today_links_time TEXT DEFAULT '09:00';`);
-    }
-    if (!colNames.includes('today_links_sent_date')) {
-      db.exec(`ALTER TABLE subscriptions ADD COLUMN today_links_sent_date TEXT;`);
-    }
-    if (!colNames.includes('new_seminar')) {
-      db.exec(`ALTER TABLE subscriptions ADD COLUMN new_seminar TEXT DEFAULT 'off';`);
-    }
-    if (!colNames.includes('new_seminar_include_point_excluded')) {
-      db.exec(`ALTER TABLE subscriptions ADD COLUMN new_seminar_include_point_excluded INTEGER DEFAULT 0;`);
-    }
-    if (!colNames.includes('seminar_live')) {
-      db.exec(`ALTER TABLE subscriptions ADD COLUMN seminar_live INTEGER DEFAULT 0;`);
-    }
-    if (!colNames.includes('survey_closing_20')) {
-      db.exec(`ALTER TABLE subscriptions ADD COLUMN survey_closing_20 INTEGER DEFAULT 0;`);
-    }
-    if (!colNames.includes('survey_closing_10')) {
-      db.exec(`ALTER TABLE subscriptions ADD COLUMN survey_closing_10 INTEGER DEFAULT 0;`);
-    }
-    if (!colNames.includes('point_conversion')) {
-      db.exec(`ALTER TABLE subscriptions ADD COLUMN point_conversion INTEGER DEFAULT 0;`);
-    }
-  } catch (_e) {
-    // ignore
-  }
-
-  // channel_comments 테이블 컬럼 안전 마이그레이션 (기존 DB 호환)
-  try {
-    const commentColumns = db.prepare(`PRAGMA table_info(channel_comments)`).all() as Array<{ name: string }>;
-    const colNames = commentColumns.map((c) => c.name);
-    if (!colNames.includes('parent_message_id')) {
-      db.exec(`ALTER TABLE channel_comments ADD COLUMN parent_message_id INTEGER;`);
-    }
-    if (!colNames.includes('attached_to_message_id')) {
-      db.exec(`ALTER TABLE channel_comments ADD COLUMN attached_to_message_id INTEGER;`);
-    }
-  } catch (_e) {
-    // ignore
-  }
-
-  // 인덱스 생성 (마이그레이션 컬럼 추가 후 안전하게 생성)
-  db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_channel_comments_date ON channel_comments(date);
-    CREATE INDEX IF NOT EXISTS idx_channel_comments_msg ON channel_comments(channel_id, message_id);
-    CREATE INDEX IF NOT EXISTS idx_channel_comments_parent ON channel_comments(parent_message_id);
-    CREATE INDEX IF NOT EXISTS idx_channel_comments_attached ON channel_comments(attached_to_message_id);
-    CREATE INDEX IF NOT EXISTS idx_discussion_threads_channel_msg ON channel_discussion_threads(channel_id, channel_message_id);
-  `);
-}
-
-/**
- * state.json 파일에서 SQLite DB로 데이터를 안전하게 이관합니다.
- * - Transaction 성공 후에만 .bak 백업 파일 생성
- * - Migration 중 오류 발생 시 원본 state.json 절대 변경/삭제하지 않음
- * - 이미 DB에 데이터가 있거나 이관 완료 기록이 있으면 재이관 건너뜀
- */
-export function migrateFromJsonIfNeeded(db: Database.Database, jsonFilePath: string = DEFAULT_STATE_FILE): boolean {
-  if (!fs.existsSync(jsonFilePath)) {
-    return false;
-  }
-
-  // 1. 이미 마이그레이션이 완료되었는지 확인
-  const metaCheck = db.prepare('SELECT name FROM _migration_meta WHERE name = ?').get('state_json_migration') as
-    | { name: string }
-    | undefined;
-
-  if (metaCheck) {
-    return false;
-  }
-
-  // 2. DB에 이미 데이터가 존재하는지 확인 (기존 DB 존재 시 무조건 재이관 방지)
-  const countRow = db.prepare('SELECT count(*) as count FROM kv_store').get() as { count: number } | undefined;
-  if (countRow && countRow.count > 0) {
-    db.prepare('INSERT OR IGNORE INTO _migration_meta (name, migrated_at) VALUES (?, ?)').run(
-      'state_json_migration',
-      Date.now(),
-    );
-    return false;
-  }
-
-  // 3. JSON 파일 파싱 검증 (파싱 실패 시 원본 보존 및 예외 발생)
-  let rawContent: string;
-  let parsed: Record<string, unknown>;
-  try {
-    rawContent = fs.readFileSync(jsonFilePath, 'utf8');
-    parsed = JSON.parse(rawContent || '{}') as Record<string, unknown>;
-  } catch (readErr) {
-    throw new Error(
-      `Migration failed: unable to read/parse ${jsonFilePath}: ${readErr instanceof Error ? readErr.message : String(readErr)}`,
-    );
-  }
-
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    throw new Error(`Migration failed: JSON in ${jsonFilePath} must be an object.`);
-  }
-
-  const entries = Object.entries(parsed);
-  const now = Date.now();
-
-  // 4. 트랜잭션 정의: 전체 데이터 삽입 및 메타데이터 기록
-  const migrateTx = db.transaction(() => {
-    const insertStmt = db.prepare(`
-      INSERT OR REPLACE INTO kv_store (key, value, updated_at)
-      VALUES (?, ?, ?)
-    `);
-
-    for (const [key, val] of entries) {
-      insertStmt.run(key, JSON.stringify(val), now);
-    }
-
-    db.prepare(
-      `
-      INSERT OR REPLACE INTO _migration_meta (name, migrated_at)
-      VALUES (?, ?)
-    `,
-    ).run('state_json_migration', now);
-  });
-
-  // 5. 트랜잭션 실행 (오류 시 rollback되고 아래 백업 로직으로 가지 않음)
-  migrateTx();
-
-  // 6. 트랜잭션 성공 후에만 .bak 파일 생성 및 원본 파일 이동/백업
-  const backupPath = `${jsonFilePath}.bak`;
-  try {
-    fs.copyFileSync(jsonFilePath, backupPath);
-    fs.unlinkSync(jsonFilePath);
-  } catch (backupErr) {
-    console.warn(
-      `Migration succeeded, but failed to create backup file ${backupPath}: ${backupErr instanceof Error ? backupErr.message : String(backupErr)}`,
-    );
-  }
-
-  return true;
-}
-
-/**
- * kv_store의 apply_seminar:seminar_list 데이터를 SQLite seminars 테이블로 단일 트랜잭션으로 안전하게 이관합니다.
- */
-export function migrateSeminarListTableIfNeeded(db: Database.Database): boolean {
-  const metaCheck = db.prepare('SELECT name FROM _migration_meta WHERE name = ?').get('seminar_table_migration') as
-    | { name: string }
-    | undefined;
-
-  if (metaCheck) {
-    return false;
-  }
-
-  const row = db.prepare('SELECT value FROM kv_store WHERE key = ?').get('apply_seminar:seminar_list') as
-    | { value: string }
-    | undefined;
-
-  if (!row || !row.value) {
-    db.prepare('INSERT OR IGNORE INTO _migration_meta (name, migrated_at) VALUES (?, ?)').run(
-      'seminar_table_migration',
-      Date.now(),
-    );
-    return false;
-  }
-
-  let items: Array<Record<string, unknown>>;
-  try {
-    items = JSON.parse(row.value) as Array<Record<string, unknown>>;
-  } catch (err) {
-    throw new Error(
-      `Seminar table migration failed: unable to parse seminar_list JSON: ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
-
-  if (!Array.isArray(items)) {
-    throw new Error('Seminar table migration failed: seminar_list must be an array.');
-  }
-
-  const now = Date.now();
-  const migrateTx = db.transaction(() => {
-    const insertStmt = db.prepare(`
-      INSERT OR REPLACE INTO seminars (
-        seminar_id, name, url, date, time, current_count, total_count,
-        night_time, is_point_excluded, is_advanced_survey, process_state,
-        cancel_process_state, seminar_completed, point_paid, point,
-        point_text, point_date, point_content, point_checked_at,
-        detected_date, detected_at, updated_at
-      ) VALUES (
-        ?, ?, ?, ?, ?, ?, ?,
-        ?, ?, ?, ?,
-        ?, ?, ?, ?,
-        ?, ?, ?, ?,
-        ?, ?, ?
-      )
-    `);
-
-    for (const item of items) {
-      const seminarId =
-        (typeof item.seminarId === 'string' && item.seminarId) ||
-        (typeof item.url === 'string' && item.url.match(/(?:seminarId=|\/)(\d+)$/)?.[1]) ||
-        (typeof item.url === 'string' && item.url) ||
-        null;
-
-      if (!seminarId) continue;
-
-      insertStmt.run(
-        seminarId,
-        typeof item.name === 'string' ? item.name : '',
-        typeof item.url === 'string' ? item.url : `https://m.doctorville.co.kr/cme/seminar/${seminarId}`,
-        typeof item.date === 'string' ? item.date : null,
-        typeof item.time === 'string' ? item.time : '',
-        typeof item.currentCount === 'string' ? item.currentCount : '',
-        typeof item.totalCount === 'string' ? item.totalCount : '',
-        item.nightTime ? 1 : 0,
-        typeof item.isPointExcluded === 'boolean' ? (item.isPointExcluded ? 1 : 0) : null,
-        item.isAdvancedSurvey ? 1 : 0,
-        typeof item.processState === 'number' ? item.processState : null,
-        typeof item.cancelProcessState === 'number' ? item.cancelProcessState : null,
-        typeof item.seminarCompleted === 'number' ? item.seminarCompleted : null,
-        item.pointPaid ? 1 : 0,
-        typeof item.point === 'number' ? item.point : null,
-        typeof item.pointText === 'string' ? item.pointText : null,
-        typeof item.pointDate === 'string' ? item.pointDate : null,
-        typeof item.pointContent === 'string' ? item.pointContent : null,
-        typeof item.pointCheckedAt === 'string' ? item.pointCheckedAt : null,
-        typeof item.detectedDate === 'string' ? item.detectedDate : null,
-        typeof item.detectedAt === 'string' ? item.detectedAt : null,
-        now,
-      );
-    }
-
-    db.prepare('DELETE FROM kv_store WHERE key = ?').run('apply_seminar:seminar_list');
-    db.prepare('INSERT OR REPLACE INTO _migration_meta (name, migrated_at) VALUES (?, ?)').run(
-      'seminar_table_migration',
-      now,
-    );
-  });
-
-  migrateTx();
-  return true;
-}
-
-/**
- * kv_store의 intermd_quiz_subscribers와 seminar_change_subscribers 데이터를 subscriptions 테이블로 안전하게 이관합니다.
- */
-export function migrateSubscriptionsTableIfNeeded(db: Database.Database): boolean {
-  const metaCheck = db
-    .prepare('SELECT name FROM _migration_meta WHERE name = ?')
-    .get('subscriptions_table_migration') as { name: string } | undefined;
-
-  if (metaCheck) {
-    return false;
-  }
-
-  const now = Date.now();
-  const intermdRow = db.prepare('SELECT value FROM kv_store WHERE key = ?').get('intermd_quiz_subscribers') as
-    | { value: string }
-    | undefined;
-  const seminarRow = db.prepare('SELECT value FROM kv_store WHERE key = ?').get('seminar_change_subscribers') as
-    | { value: string }
-    | undefined;
-
-  let intermdIds: number[] = [];
-  let seminarIds: number[] = [];
-
-  if (intermdRow && intermdRow.value) {
-    try {
-      const parsed = JSON.parse(intermdRow.value);
-      if (Array.isArray(parsed)) intermdIds = parsed.map(Number).filter((n) => !Number.isNaN(n));
-    } catch (_e) {
-      // ignore
-    }
-  }
-
-  if (seminarRow && seminarRow.value) {
-    try {
-      const parsed = JSON.parse(seminarRow.value);
-      if (Array.isArray(parsed)) seminarIds = parsed.map(Number).filter((n) => !Number.isNaN(n));
-    } catch (_e) {
-      // ignore
-    }
-  }
-
-  const allChatIds = Array.from(new Set([...intermdIds, ...seminarIds]));
-
-  const migrateTx = db.transaction(() => {
-    const insertOrUpdateStmt = db.prepare(`
-      INSERT INTO subscriptions (
-        chat_id, today_links, today_links_time, today_links_sent_date,
-        new_seminar, intermd_quiz, seminar_changes, seminar_live, point_conversion,
-        created_at, updated_at
-      ) VALUES (
-        @chatId, 0, '09:00', NULL,
-        'off', @intermdQuiz, @seminarChanges, 0, 0,
-        @now, @now
-      )
-      ON CONFLICT(chat_id) DO UPDATE SET
-        intermd_quiz = CASE WHEN excluded.intermd_quiz = 1 THEN 1 ELSE subscriptions.intermd_quiz END,
-        seminar_changes = CASE WHEN excluded.seminar_changes = 1 THEN 1 ELSE subscriptions.seminar_changes END,
-        updated_at = excluded.updated_at
-    `);
-
-    for (const chatId of allChatIds) {
-      insertOrUpdateStmt.run({
-        chatId,
-        intermdQuiz: intermdIds.includes(chatId) ? 1 : 0,
-        seminarChanges: seminarIds.includes(chatId) ? 1 : 0,
-        now,
-      });
-    }
-
-    db.prepare('INSERT OR REPLACE INTO _migration_meta (name, migrated_at) VALUES (?, ?)').run(
-      'subscriptions_table_migration',
-      now,
-    );
-  });
-
-  migrateTx();
-  return true;
 }
 
 function getDb(): Database.Database {
@@ -479,12 +136,6 @@ function getDb(): Database.Database {
     }
     dbInstance = new Database(currentDbPath);
     initDatabase(dbInstance);
-    // state.json이 존재하면 자동 마이그레이션 수행
-    migrateFromJsonIfNeeded(dbInstance);
-    // kv_store에 남은 seminar_list가 있으면 seminars 테이블로 자동 마이그레이션
-    migrateSeminarListTableIfNeeded(dbInstance);
-    // kv_store에 남은 구독자 데이터가 있으면 subscriptions 테이블로 자동 마이그레이션
-    migrateSubscriptionsTableIfNeeded(dbInstance);
   }
   return dbInstance;
 }
@@ -492,7 +143,7 @@ function getDb(): Database.Database {
 /**
  * DB 파일 경로를 변경합니다 (테스트 시 :memory: 또는 별도 파일 지정용)
  */
-export function setDatabasePath(dbPath: string, autoMigrate: boolean = false): void {
+export function setDatabasePath(dbPath: string): void {
   closeDatabase();
   currentDbPath = dbPath;
   if (dbPath !== ':memory:') {
@@ -503,11 +154,6 @@ export function setDatabasePath(dbPath: string, autoMigrate: boolean = false): v
   }
   dbInstance = new Database(currentDbPath);
   initDatabase(dbInstance);
-  if (autoMigrate) {
-    migrateFromJsonIfNeeded(dbInstance);
-  }
-  migrateSeminarListTableIfNeeded(dbInstance);
-  migrateSubscriptionsTableIfNeeded(dbInstance);
 }
 
 /**

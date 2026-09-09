@@ -191,98 +191,12 @@ describe('Seminar Repository & SQLite Table Migration', () => {
     console.log('  ✓ [Pass] deleteExpiredSeminars 만료 정리 검증 완료\n');
 
     // ----------------------------------------------------
-    // Test 5: kv_store -> seminars 단일 SQLite 트랜잭션 마이그레이션 검증 (핵심 요구사항)
+    // Test 5: storage.get / storage.set 호환 레이어 검증
     // ----------------------------------------------------
-    console.log('--- [Test 5] kv_store 단일 SQLite 트랜잭션 자동 마이그레이션 검증 ---');
-
-    const migrationDbPath = path.join(testDbDir, 'test_migration.db');
-    if (fs.existsSync(migrationDbPath)) {
-      try {
-        storage.closeDatabase();
-        fs.unlinkSync(migrationDbPath);
-      } catch (_e) {
-        /* ignore */
-      }
-    }
-
-    // 레거시 DB 환경 구성: kv_store에 apply_seminar:seminar_list 데이터만 들어있는 상태 시뮬레이션
-    const Database = (await import('better-sqlite3')).default;
-    const rawDb = new Database(migrationDbPath);
-    rawDb.exec(`
-    CREATE TABLE kv_store (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-    CREATE TABLE _migration_meta (
-      name TEXT PRIMARY KEY,
-      migrated_at INTEGER NOT NULL
-    );
-  `);
-
-    const legacyList = [
-      {
-        seminarId: '9001',
-        name: '레거시 세미나 1',
-        url: 'https://m.doctorville.co.kr/cme/seminar/9001',
-        date: '2026-08-25',
-        time: '20:00',
-        currentCount: '3',
-        totalCount: '10',
-        nightTime: true,
-        isAdvancedSurvey: true,
-        pointPaid: true,
-        point: 1000,
-        pointDate: '2026-08-25',
-      },
-      {
-        seminarId: '9002',
-        name: '레거시 세미나 2',
-        url: 'https://m.doctorville.co.kr/cme/seminar/9002',
-        date: '2026-08-26',
-        time: '19:00',
-        currentCount: '1',
-        totalCount: '20',
-        nightTime: false,
-        isAdvancedSurvey: false,
-      },
-    ];
-
-    rawDb
-      .prepare('INSERT INTO kv_store (key, value, updated_at) VALUES (?, ?, ?)')
-      .run('apply_seminar:seminar_list', JSON.stringify(legacyList), Date.now());
-    rawDb.close();
-
-    // storage 모듈로 해당 DB 열기 -> 자동 마이그레이션(migrateSeminarListTableIfNeeded) 트리거
-    storage.setDatabasePath(migrationDbPath);
-
-    // 검증 1: seminars 테이블로 이관되었는지 확인
-    const migratedSeminars = seminarRepo.getAllSeminars();
-    assert.strictEqual(migratedSeminars.length, 2, '2건의 세미나가 seminars 테이블로 이관됨');
-    const m1 = seminarRepo.getSeminarById('9001');
-    assert.ok(m1, '9001 이관 확인');
-    assert.strictEqual(m1?.name, '레거시 세미나 1');
-    assert.strictEqual(m1?.pointPaid, true);
-    assert.strictEqual(m1?.point, 1000);
-
-    // 검증 2: kv_store에서는 apply_seminar:seminar_list 키가 삭제되었는지 확인
-    const dbInst = storage.getDatabase();
-    const kvRow = dbInst.prepare('SELECT value FROM kv_store WHERE key = ?').get('apply_seminar:seminar_list');
-    assert.strictEqual(kvRow, undefined, 'kv_store에서 apply_seminar:seminar_list가 성공적으로 삭제됨');
-
-    // 검증 3: _migration_meta에 seminar_table_migration 기록이 남았는지 확인
-    const metaRow = dbInst.prepare('SELECT * FROM _migration_meta WHERE name = ?').get('seminar_table_migration');
-    assert.ok(metaRow, '_migration_meta에 seminar_table_migration 기록 완료');
-
-    console.log('  ✓ [Pass] 단일 SQLite 트랜잭션 마이그레이션 및 메타데이터 기록 검증 완료\n');
-
-    // ----------------------------------------------------
-    // Test 6: storage.get / storage.set 호환 레이어 검증
-    // ----------------------------------------------------
-    console.log('--- [Test 6] storage.get / storage.set 호환 레이어 검증 ---');
+    console.log('--- [Test 5] storage.get / storage.set 호환 레이어 검증 ---');
 
     const compatList = storage.get<SeminarListItem[]>('apply_seminar:seminar_list', []);
-    assert.strictEqual(compatList?.length, 2, 'storage.get으로 seminars 테이블 데이터 정상 조회');
+    assert.strictEqual(compatList?.length, 3, 'storage.get으로 seminars 테이블 데이터 정상 조회');
 
     storage.set('apply_seminar:seminar_list', [
       {
@@ -308,7 +222,6 @@ describe('Seminar Repository & SQLite Table Migration', () => {
     // 정리
     storage.closeDatabase();
     if (fs.existsSync(testDbPath)) fs.unlinkSync(testDbPath);
-    if (fs.existsSync(migrationDbPath)) fs.unlinkSync(migrationDbPath);
 
     console.log('🎉 모든 Seminar Repository 및 SQLite 테이블 승격 테스트 성공적으로 통과!\n');
   });

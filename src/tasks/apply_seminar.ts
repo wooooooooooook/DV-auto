@@ -37,20 +37,7 @@ export const mergeSeminar = seminarRepo.mergeSeminarRecord;
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
 export const SEMINAR_LIST_KEY = 'apply_seminar:seminar_list';
-const LEGACY_NEW_SEMINAR_KEY = 'apply_seminar:new_seminars';
-const LEGACY_HISTORY_KEY = 'apply_seminar:new_seminars_history';
 const SEMINAR_RETENTION_DAYS = 60;
-
-type LegacyHistoryEntry = {
-  detectedDate?: string;
-  detectedAt?: string;
-  seminar?: SeminarListItem;
-};
-
-type LegacyNewSeminars = {
-  date?: string;
-  seminars?: SeminarListItem[];
-};
 
 export type RawSeminarData = {
   seminarId?: string | null;
@@ -258,36 +245,7 @@ function seminarKey(seminar: Pick<SeminarListItem, 'url' | 'seminarId'>): string
   return seminar.seminarId || seminar.url;
 }
 
-function migrateLegacySeminarStorage(referenceDate: string): SeminarListItem[] {
-  const legacyHistory = storage.get<LegacyHistoryEntry[]>(LEGACY_HISTORY_KEY, []) || [];
-  const legacyNew = storage.get<LegacyNewSeminars>(LEGACY_NEW_SEMINAR_KEY);
-
-  if (legacyHistory.length > 0 || legacyNew?.seminars?.length) {
-    const toUpsert: SeminarListItem[] = [];
-
-    for (const entry of legacyHistory) {
-      if (!entry.seminar) continue;
-      toUpsert.push({
-        ...entry.seminar,
-        detectedDate: entry.seminar.detectedDate ?? entry.detectedDate,
-        detectedAt: entry.seminar.detectedAt ?? entry.detectedAt,
-      });
-    }
-
-    for (const seminar of legacyNew?.seminars || []) {
-      toUpsert.push({
-        ...seminar,
-        detectedDate: seminar.detectedDate ?? legacyNew?.date,
-      });
-    }
-
-    if (toUpsert.length > 0) {
-      seminarRepo.upsertSeminars(toUpsert);
-    }
-    storage.deleteKey(LEGACY_NEW_SEMINAR_KEY);
-    storage.deleteKey(LEGACY_HISTORY_KEY);
-  }
-
+function getStoredSeminars(referenceDate: string): SeminarListItem[] {
   seminarRepo.deleteExpiredSeminars(referenceDate, SEMINAR_RETENTION_DAYS);
   return seminarRepo.getAllSeminars();
 }
@@ -483,7 +441,7 @@ export async function syncSeminars(options: ApplySeminarOptions = {}): Promise<S
     currentSeminars = apiRes.items.map(convertApiItemToRawSeminar);
     normalizedCurrentSeminars = apiRes.items.map((item) => convertApiItemToSeminarListItem(item, referenceDate));
 
-    let storedSeminars = migrateLegacySeminarStorage(referenceDate);
+    let storedSeminars = getStoredSeminars(referenceDate);
 
     // 최근 세미나 ID 불연속(Gap) 탐색으로 정원 100명 이상 비공개 세미나 발굴
     const { gapSeminars, isAuthExpired: gapAuthExpired } = await discoverMissingGapSeminars(
