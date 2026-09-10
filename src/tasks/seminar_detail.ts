@@ -10,6 +10,7 @@ import {
 import { type SeminarListItem } from '../services/seminar_repository';
 import * as seminarRepo from '../services/seminar_repository';
 import { getSeminarIdFromUrl } from '../modules/utils';
+import { clearCache as clearAdvancedSeminarsCache } from './check_advanced_seminars';
 
 const SEMINAR_DETAIL_API = 'https://m-api.doctorville.co.kr/api/mw/seminars/';
 
@@ -266,6 +267,7 @@ export function updateStoredSeminarFromDetail(data: SeminarDetail, raw?: Seminar
 
   if (!isIncomingExpired) {
     seminarRepo.upsertSeminar(incoming);
+    clearAdvancedSeminarsCache();
     logger.info(`Updated seminar_list with seminar ${sid} from detail inquiry`);
   } else {
     logger.info(`세미나 ${sid}는 60일 이상 지난 세미나이므로 seminar_list에 저장하지 않았습니다.`);

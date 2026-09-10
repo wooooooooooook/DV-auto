@@ -11,6 +11,7 @@ import {
   checkIsAdvancedSurvey,
   checkIsPointExcluded,
 } from '../modules/seminar_api';
+import { clearCache as clearAdvancedSeminarsCache } from '../tasks/check_advanced_seminars';
 
 export async function fetchAndPopulateSeminarInfo(
   seminarId: string,
@@ -211,6 +212,7 @@ export async function refreshSeminarPointStatus(
 
   if (changedSeminars.length > 0) {
     seminarRepo.upsertSeminars(changedSeminars);
+    clearAdvancedSeminarsCache();
   }
   return { seminars: updatedSeminars, pointChanges };
 }

@@ -3,7 +3,7 @@ import * as seminarRepo from '../src/services/seminar_repository';
 import * as checkAdvancedSeminarsModule from '../src/tasks/check_advanced_seminars';
 import { setBot } from '../src/services/bot_instance';
 import type { Telegraf } from 'telegraf';
-import { describe, it } from 'vitest';
+import { describe, it, vi } from 'vitest';
 
 describe('check_advanced_seminars Cache & NoticeBot Support Tests', () => {
   it('캐시 및 공지봇 연동 종합 테스트', async () => {
@@ -95,6 +95,58 @@ describe('check_advanced_seminars Cache & NoticeBot Support Tests', () => {
         '핸들러 실행 시 방장 계정 기준 문구가 포함된 응답이 전송되어야 함',
       );
       console.log('  ✓ [Pass] noticeBot 명령어 핸들러 등록 및 응답 동작 검증 (/check_advanced_seminars)');
+
+      // 6. refreshSeminarPointStatus 포인트 지급 변경 시 캐시 무효화 검증
+      const { refreshSeminarPointStatus } = await import('../src/services/seminar_point_sync');
+      const checkPointModule = await import('../src/tasks/check_seminar_point');
+
+      // 미지급 상태 세미나 등록 후 캐시 생성
+      seminarRepo.setAllSeminars([
+        {
+          seminarId: '5608',
+          name: 'BEYOND Web Symposium',
+          url: 'https://m.doctorville.co.kr/cme/seminar/5608',
+          date: todayStr,
+          time: '19:00',
+          currentCount: '10',
+          totalCount: '100',
+          nightTime: false,
+          isAdvancedSurvey: true,
+          pointPaid: false,
+          pointCheckedAt: new Date().toISOString(),
+        },
+      ]);
+      checkAdvancedSeminarsModule.clearCache();
+      const beforePointRes = checkAdvancedSeminarsModule.runCached();
+      assert(beforePointRes.message.includes('❌ 미지급'), '포인트 지급 전에는 미지급으로 표시되어야 함');
+
+      // searchSeminarPoints를 모킹하여 5608 포인트 지급 발생 시뮬레이션
+      const pointsMap = new Map();
+      pointsMap.set('5608', {
+        found: true,
+        type: '적립',
+        point: 2000,
+        pointText: '2,000P',
+        date: '2026-09-10 10:37:42',
+        content: 'BEYOND Web Symposium',
+      });
+      const searchSpy = vi.spyOn(checkPointModule, 'searchSeminarPoints').mockImplementation(async () => ({
+        success: true,
+        points: pointsMap,
+      }));
+
+      try {
+        await refreshSeminarPointStatus(undefined, seminarRepo.getAllSeminars());
+        // 별도의 clearCache 호출 없이도 runCached() 결과가 즉시 갱신되어야 함
+        const afterPointRes = checkAdvancedSeminarsModule.runCached();
+        assert(
+          afterPointRes.message.includes('✅ 2,000P 지급됨'),
+          '포인트 지급 감지 후 캐시가 무효화되어 지급됨으로 표시되어야 함',
+        );
+        console.log('  ✓ [Pass] 포인트 지급 변경 감지 시 check_advanced_seminars 캐시 자동 무효화 검증');
+      } finally {
+        searchSpy.mockRestore();
+      }
 
       console.log('\n🎉 모든 check_advanced_seminars 캐시 및 공지봇 연동 테스트 통과!');
     } finally {

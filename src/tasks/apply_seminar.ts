@@ -31,6 +31,7 @@ import { discoverMissingGapSeminars } from '../services/seminar_gap_service';
 import { refreshSeminarPointStatus } from '../services/seminar_point_sync';
 import type { SeminarListItem } from '../services/seminar_repository';
 import { enrichSeminarsWithDetail, isPastSeminar, isUncompletedSeminar } from '../services/seminar_sync_service';
+import { clearCache as clearAdvancedSeminarsCache } from './check_advanced_seminars';
 
 export const mergeSeminar = seminarRepo.mergeSeminarRecord;
 
@@ -639,8 +640,11 @@ export async function syncSeminars(options: ApplySeminarOptions = {}): Promise<S
 
     const changeNotificationText = formatSeminarChangeNotification(infoChanges, pointChanges);
     if (changeNotificationText) {
+      clearAdvancedSeminarsCache();
       await sendTelegram(changeNotificationText).catch(() => {});
       await sendSeminarChangesToSubscribers(changeNotificationText).catch(() => {});
+    } else if (newlyAdded.length > 0) {
+      clearAdvancedSeminarsCache();
     }
 
     // 10분 실행 1회당 processState 상태 분포 출력 (total 및 future 목록 분리 로깅)
