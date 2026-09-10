@@ -39,9 +39,9 @@ const INTERMD_QUIZ_CRON = process.env.INTERMD_QUIZ_CRON || '1 8 * * *';
 const DOCPLE_DAILY_CRON = process.env.DOCPLE_DAILY_CRON || '4 7 * * *';
 const KEYMEDI_ATTENDANCE_CRON = process.env.KEYMEDI_ATTENDANCE_CRON || '5 7 * * *';
 const HMP_ATTENDANCE_CRON = process.env.HMP_ATTENDANCE_CRON || '7 7 * * *';
-const BROADCAST_TODAY_LINKS_CRON = '0 9 * * *';
-const HOURLY_TODAY_LINKS_EARLY_CRON = '2 0 * * *';
-const HOURLY_TODAY_LINKS_CRON = '0 1-12 * * *';
+const BROADCAST_TODAY_LINKS_CRON = '0 0 9 * * *';
+const HOURLY_TODAY_LINKS_EARLY_CRON = '0 2 0 * * *';
+const HOURLY_TODAY_LINKS_CRON = '5 0 1-12 * * *';
 const SYNC_SEMINARS_CRON = '*/10 6-23 * * *';
 const POINT_CONVERSION_STATE_KEY = 'point_conversion:last_available';
 let isFastPolling = false;
@@ -229,7 +229,7 @@ const syncSeminarsTask: Task = {
 };
 taskRegistry.registerTask(syncSeminarsTask);
 scheduler.scheduleTaskCron(syncSeminarsTask);
-const POINT_CONVERSION_CHECK_CRON = '0 9-16 * * *';
+const POINT_CONVERSION_CHECK_CRON = '10 0 9-16 * * *';
 const pointConversionCheckTask: Task = {
   name: 'point_conversion_check',
   schedule: POINT_CONVERSION_CHECK_CRON,

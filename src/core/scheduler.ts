@@ -9,7 +9,10 @@ const scheduledTasks: ScheduledTask[] = [];
 
 function scheduleTaskCron(task: Task): cron.ScheduledTask {
   if (!task || !task.schedule) throw new Error('task.schedule is required for cron scheduling');
-  const opts: cron.ScheduleOptions = { scheduled: true };
+  const opts: cron.ScheduleOptions = {
+    scheduled: true,
+    recoverMissedExecutions: true,
+  };
   // Allow explicit timezone on the task, or fall back to process TZ env
   if (task.timezone) opts.timezone = task.timezone;
   else if (process.env.TZ) opts.timezone = process.env.TZ;
