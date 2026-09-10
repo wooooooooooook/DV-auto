@@ -15,7 +15,7 @@ async function run({ page }: PlaywrightRunArgs, options?: Record<string, unknown
   const fromCtx: Record<string, string> = opts;
   const envFallback = process.env as Record<string, string>;
   const seminarId = fromCtx.SEMINAR_ID || fromCtx.seminarId || envFallback.SEMINAR_ID || '';
-  const isAdvancedSurvey =
+  let isAdvancedSurvey =
     String(
       fromCtx.IS_ADVANCED_SURVEY ?? fromCtx.isAdvancedSurvey ?? envFallback.IS_ADVANCED_SURVEY ?? '',
     ).toLowerCase() === 'true';
@@ -25,6 +25,37 @@ async function run({ page }: PlaywrightRunArgs, options?: Record<string, unknown
       success: false,
       message: 'seminarId 가 비어 있습니다. 사용법: /run_seminar_quiz <seminarId> [advanced]',
     };
+  }
+
+  // 사용자가 명시적으로 지정하지 않은 경우 DB(seminars 테이블) 및 세미나 상세 API에서 useDepthSurvey 조회 fallback
+  if (!isAdvancedSurvey) {
+    try {
+      const { getDb } = await import('../services/storage');
+      const row = getDb().prepare('SELECT is_advanced_survey FROM seminars WHERE seminar_id = ?').get(seminarId) as
+        | { is_advanced_survey: number }
+        | undefined;
+      if (row && row.is_advanced_survey === 1) {
+        isAdvancedSurvey = true;
+        console.log(`[run_seminar_quiz] DB에서 심화설문 감지 (seminarId=${seminarId})`);
+      }
+    } catch {
+      // DB 조회 실패 시 무시
+    }
+
+    if (!isAdvancedSurvey) {
+      try {
+        const { fetchSeminarDetail, checkIsAdvancedSurvey } = await import('../modules/seminar_api');
+        const detailRes = await fetchSeminarDetail(seminarId);
+        if (detailRes.success && detailRes.rawResponse?.seminarDetail) {
+          if (checkIsAdvancedSurvey(detailRes.rawResponse.seminarDetail.useDepthSurvey)) {
+            isAdvancedSurvey = true;
+            console.log(`[run_seminar_quiz] 세미나 상세 API에서 심화설문 감지 (seminarId=${seminarId})`);
+          }
+        }
+      } catch {
+        // API 조회 실패 시 무시
+      }
+    }
   }
 
   const targetUrl = `https://m.doctorville.co.kr/cme/seminar/${seminarId}`;

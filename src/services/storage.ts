@@ -503,4 +503,4 @@ export function clearStaleLocks(currentPid: number = process.pid): number {
   return cleared;
 }
 
-export { get, set, deleteKey, getAll, clear };
+export { get, set, deleteKey, getAll, clear, getDb };

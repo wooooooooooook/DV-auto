@@ -491,7 +491,24 @@ async function processSeminarQuiz(
       }
     }
 
-    const effectiveIsAdvancedSurvey = Boolean(isAdvancedSurvey) || Boolean(httpQuizResult?.isAdvancedSurvey);
+    let isDbAdvanced = false;
+    if (seminarId && !isAdvancedSurvey) {
+      try {
+        const { getDb } = await import('../services/storage');
+        const row = getDb().prepare('SELECT is_advanced_survey FROM seminars WHERE seminar_id = ?').get(seminarId) as
+          | { is_advanced_survey: number }
+          | undefined;
+        if (row && row.is_advanced_survey === 1) {
+          isDbAdvanced = true;
+          console.log(`[seminar_quiz] DB에서 심화설문 감지 (seminarId=${seminarId})`);
+        }
+      } catch {
+        // DB 조회 실패 시 무시
+      }
+    }
+
+    const effectiveIsAdvancedSurvey =
+      Boolean(isAdvancedSurvey) || Boolean(httpQuizResult?.isAdvancedSurvey) || isDbAdvanced;
 
     // 채널 송신 자격: quiz ONLY ([퀴즈] 마커 및 퀴즈 문항)
     const CHANNEL_ELIGIBLE_KINDS: ReadonlySet<QuizQuestion['kind']> = new Set(['quiz']);
@@ -501,16 +518,14 @@ async function processSeminarQuiz(
     let _hasUnknown = false;
     let _hasMultipleMatches = false;
 
-    const targetTotalPages =
-      httpQuizResult?.totalPageCnt && httpQuizResult.totalPageCnt > 0 ? httpQuizResult.totalPageCnt : 2;
-    const maxLoopPages = effectiveIsAdvancedSurvey ? targetTotalPages : 10;
+    const maxLoopPages = 10;
     let currentPageNum = 1;
     let lastPageQuestionCount = 0;
 
     // ── 다중 페이지 탐색 및 응답 루프 ───────────────────────────────────────────────
     while (currentPageNum <= maxLoopPages) {
       console.log(
-        `[seminar_quiz] 설문 페이지 ${currentPageNum}/${effectiveIsAdvancedSurvey ? targetTotalPages : maxLoopPages} 탐색 시작 (${seminarName ?? 'unknown'})`,
+        `[seminar_quiz] 설문 페이지 ${currentPageNum} 탐색 시작 (${seminarName ?? 'unknown'}, 심화설문: ${effectiveIsAdvancedSurvey})`,
       );
 
       // 마커 또는 일반 설문 문항 감지 (렌더링 안정화 대기)
@@ -634,24 +649,26 @@ async function processSeminarQuiz(
 
       // 동적 분기로 새로 나타난 미선택 라디오 또는 빈 주관식 입력 보완
       try {
-        // 1) 아직 체크되지 않은 라디오가 있는 문항들 1번째 옵션 체크
-        const unselectedRadios = page.locator('li[data-question-number]:not(:has(input[type="radio"]:checked))');
-        const unselectedCount = await unselectedRadios.count().catch(() => 0);
-        for (let j = 0; j < unselectedCount; j++) {
-          const item = unselectedRadios.nth(j);
+        // 1) 아직 체크되지 않은 라디오가 있는 문항들 1번째 옵션 체크 (all()로 인덱스 스킵 방지)
+        const unselectedItems = await page
+          .locator('li[data-question-number]:not(:has(input[type="radio"]:checked))')
+          .all();
+        for (const item of unselectedItems) {
           const firstRadio = item.locator('input[type="radio"]').first();
           if (await firstRadio.isVisible().catch(() => false)) {
             await firstRadio.check({ force: true }).catch(() => {});
+            const label = item.locator('label').first();
+            if (await label.isVisible().catch(() => false)) {
+              await label.click({ force: true }).catch(() => {});
+            }
           }
         }
 
         // 2) 빈 주관식 단답형/장문형 텍스트 필드 채우기
-        const emptyInputs = page.locator(
-          'li[data-question-number] input[type="text"], li[data-question-number] textarea',
-        );
-        const inputCount = await emptyInputs.count().catch(() => 0);
-        for (let j = 0; j < inputCount; j++) {
-          const inp = emptyInputs.nth(j);
+        const emptyInputs = await page
+          .locator('li[data-question-number] input[type="text"], li[data-question-number] textarea')
+          .all();
+        for (const inp of emptyInputs) {
           const val = await inp.inputValue().catch(() => '');
           if (!val && (await inp.isVisible().catch(() => false))) {
             await inp.fill('좋습니다').catch(() => {});
@@ -663,99 +680,57 @@ async function processSeminarQuiz(
 
       await page.waitForTimeout(500);
 
-      if (effectiveIsAdvancedSurvey) {
-        // ── [심화 세미나]: API 획득 총 페이지 수(targetTotalPages) 기반 이동 ──
-        if (currentPageNum >= targetTotalPages) {
-          console.log(
-            `[seminar_quiz] [심화설문] 마지막 설문 페이지 도달 (현재 페이지: ${currentPageNum}/${targetTotalPages})`,
-          );
-          break;
+      // ── 버튼 탐색: "다음" 버튼 및 "제출하기/설문완료" 버튼 ──
+      let nextBtn = page.locator('button:text-matches("^다음$|^다음\\s*단계$|^Next$", "i"):not([disabled])').first();
+      let hasNext = await nextBtn.isVisible({ timeout: 2000 }).catch(() => false);
+
+      if (!hasNext) {
+        nextBtn = page.locator('button:text-matches("다음|Next", "i"):not([disabled])').first();
+        hasNext = await nextBtn.isVisible({ timeout: 1500 }).catch(() => false);
+      }
+
+      const submitBtn = page
+        .locator(
+          'input[type="submit"].btn-primary, button:text-matches("제출하기|설문완료|응답완료", "i"):not([disabled])',
+        )
+        .first();
+      const hasSubmit = await submitBtn.isVisible({ timeout: 2000 }).catch(() => false);
+
+      // 제출하기 버튼이 있으면 심화설문이든 일반설문이든 마지막 페이지에 도달한 것이므로 루프 종료
+      if (hasSubmit) {
+        console.log(
+          `[seminar_quiz] "제출하기" 버튼 감지 -> 마지막 설문 페이지 도달 (현재 페이지: ${currentPageNum}, 심화설문: ${effectiveIsAdvancedSurvey})`,
+        );
+        break;
+      }
+
+      if (hasNext) {
+        console.log(`[seminar_quiz] 다음 페이지 이동 버튼 감지 (현재 페이지: ${currentPageNum}) -> 클릭`);
+        const prevFirstQ = pageQuestions[0]?.questionNumber;
+        await nextBtn.scrollIntoViewIfNeeded().catch(() => {});
+        await nextBtn.click({ force: true }).catch(() => {});
+        await page.waitForLoadState('networkidle', { timeout: 6000 }).catch(() => {});
+
+        // 다음 페이지 렌더링 대기
+        if (prevFirstQ !== undefined) {
+          await page
+            .waitForFunction(
+              (prev) => {
+                const firstLi = document.querySelector('li[data-question-number]');
+                if (!firstLi) return false;
+                const qNum = parseInt(firstLi.getAttribute('data-question-number') || '0', 10);
+                return qNum !== prev;
+              },
+              prevFirstQ,
+              { timeout: 4000 },
+            )
+            .catch(() => {});
         }
-
-        // 제출하기, 설문완료는 제외하고 명시적인 "다음" 버튼 탐색
-        let nextBtn = page.locator('button:text-matches("^다음$|^다음\\s*단계$|^Next$", "i"):not([disabled])').first();
-        let hasNext = await nextBtn.isVisible({ timeout: 2000 }).catch(() => false);
-
-        if (!hasNext) {
-          // 폴백: "다음" 또는 "Next" 텍스트 포함 버튼
-          nextBtn = page.locator('button:text-matches("다음|Next", "i"):not([disabled])').first();
-          hasNext = await nextBtn.isVisible({ timeout: 1500 }).catch(() => false);
-        }
-
-        if (hasNext) {
-          console.log(
-            `[seminar_quiz] [심화설문] 다음 페이지 이동 버튼 감지 (현재 페이지: ${currentPageNum}/${targetTotalPages}) -> 클릭`,
-          );
-          const prevFirstQ = pageQuestions[0]?.questionNumber;
-          await nextBtn.scrollIntoViewIfNeeded().catch(() => {});
-          await nextBtn.click({ force: true }).catch(() => {});
-          await page.waitForLoadState('networkidle', { timeout: 6000 }).catch(() => {});
-
-          // 다음 페이지 렌더링 대기
-          if (prevFirstQ !== undefined) {
-            await page
-              .waitForFunction(
-                (prev) => {
-                  const firstLi = document.querySelector('li[data-question-number]');
-                  if (!firstLi) return false;
-                  const qNum = parseInt(firstLi.getAttribute('data-question-number') || '0', 10);
-                  return qNum !== prev;
-                },
-                prevFirstQ,
-                { timeout: 4000 },
-              )
-              .catch(() => {});
-          }
-          await page.waitForTimeout(1500);
-          currentPageNum++;
-        } else {
-          console.warn(
-            `[seminar_quiz] [심화설문] 다음 페이지 이동 버튼 미발견 (현재 페이지: ${currentPageNum}/${targetTotalPages}) -> 탐색 종료`,
-          );
-          break;
-        }
+        await page.waitForTimeout(1500);
+        currentPageNum++;
       } else {
-        // ── [일반 세미나]: 기존 정상 동작 로직 유지 (hasNext && !hasSubmit 확인) ──
-        const nextBtn = page
-          .locator('button:text-matches("^다음$|^다음\\s*단계$|^Next$", "i"):not([disabled])')
-          .first();
-        const hasNext = await nextBtn.isVisible({ timeout: 2000 }).catch(() => false);
-
-        const submitBtn = page
-          .locator(
-            'input[type="submit"].btn-primary, button:text-matches("제출하기|설문완료|응답완료", "i"):not([disabled])',
-          )
-          .first();
-        const hasSubmit = await submitBtn.isVisible({ timeout: 2000 }).catch(() => false);
-
-        if (hasNext && !hasSubmit) {
-          console.log(`[seminar_quiz] 다음 페이지 이동 버튼 감지 (현재 페이지: ${currentPageNum}) -> 클릭`);
-          const prevFirstQ = pageQuestions[0]?.questionNumber;
-          await nextBtn.scrollIntoViewIfNeeded().catch(() => {});
-          await nextBtn.click({ force: true }).catch(() => {});
-          await page.waitForLoadState('networkidle', { timeout: 6000 }).catch(() => {});
-
-          // 다음 페이지 렌더링 대기
-          if (prevFirstQ !== undefined) {
-            await page
-              .waitForFunction(
-                (prev) => {
-                  const firstLi = document.querySelector('li[data-question-number]');
-                  if (!firstLi) return false;
-                  const qNum = parseInt(firstLi.getAttribute('data-question-number') || '0', 10);
-                  return qNum !== prev;
-                },
-                prevFirstQ,
-                { timeout: 4000 },
-              )
-              .catch(() => {});
-          }
-          await page.waitForTimeout(1500);
-          currentPageNum++;
-        } else {
-          console.log(`[seminar_quiz] 마지막 설문 페이지 도달 (총 탐색 페이지: ${currentPageNum})`);
-          break;
-        }
+        console.log(`[seminar_quiz] 마지막 설문 페이지 도달 (총 탐색 페이지: ${currentPageNum})`);
+        break;
       }
     }
     // ── 다중 페이지 탐색 및 응답 루프 끝 ─────────────────────────────────────────
@@ -801,6 +776,9 @@ async function processSeminarQuiz(
     // ── 심화설문인 경우: 제출 금지 ───────────────────────────────────────
     if (effectiveIsAdvancedSurvey) {
       console.log(`[seminar_quiz] ⚠️ 심화설문 세미나(${seminarName})이므로 퀴즈 정답 추출 후 제출을 생략합니다.`);
+
+      // 마지막 페이지(2페이지) UI 렌더링 안정화 대기
+      await page.waitForTimeout(1000);
 
       const initialUrl = page.url();
       const seminarPageUrl = seminarId ? `https://m.doctorville.co.kr/cme/seminar/${seminarId}` : initialUrl;

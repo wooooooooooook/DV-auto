@@ -87,4 +87,57 @@ describe('run_seminar_quiz 태스크 단위 테스트', () => {
     expect(res.success).toBe(true);
     expect(res.message).toContain('ℹ️ 설문 페이지에서 퀴즈를 찾지 못했습니다.');
   });
+
+  it('isAdvancedSurvey 인자가 없더라도 DB에 심화설문(1)으로 저장되어 있으면 isAdvancedSurvey=true로 processSeminarQuiz를 호출한다', async () => {
+    const storageModule = await import('../src/services/storage');
+    const mockGet = vi.fn().mockReturnValue({ is_advanced_survey: 1 });
+    vi.spyOn(storageModule, 'getDb').mockReturnValue({
+      prepare: vi.fn().mockReturnValue({ get: mockGet }),
+    } as unknown as ReturnType<typeof storageModule.getDb>);
+
+    const processQuizSpy = vi.spyOn(seminarQuizModule, 'processSeminarQuiz').mockResolvedValue({
+      success: true,
+      hasQuizResult: true,
+      message: '[퀴즈]정답 133 + 심화2',
+    });
+
+    const res = await run({ page: mockPage as Page }, { args: { seminarId: '5642' } });
+
+    expect(processQuizSpy).toHaveBeenCalledWith(expect.anything(), '5642', true);
+    expect(res.success).toBe(true);
+    expect(res.message).toContain('[수동세미나 5642 (심화)]');
+  });
+
+  it('DB에 없더라도 닥터빌 세미나 상세 API에서 useDepthSurvey가 감지되면 isAdvancedSurvey=true로 processSeminarQuiz를 호출한다', async () => {
+    const storageModule = await import('../src/services/storage');
+    vi.spyOn(storageModule, 'getDb').mockReturnValue({
+      prepare: vi.fn().mockReturnValue({ get: vi.fn().mockReturnValue(null) }),
+    } as unknown as ReturnType<typeof storageModule.getDb>);
+
+    const seminarApiModule = await import('../src/modules/seminar_api');
+    vi.spyOn(seminarApiModule, 'fetchSeminarDetail').mockResolvedValue({
+      success: true,
+      seminarId: '5642',
+      isPointExcluded: false,
+      hasEntryHistory: false,
+      rawResponse: {
+        seminarDetail: {
+          seminarId: 5642,
+          useDepthSurvey: 'Y',
+        },
+      },
+    });
+
+    const processQuizSpy = vi.spyOn(seminarQuizModule, 'processSeminarQuiz').mockResolvedValue({
+      success: true,
+      hasQuizResult: true,
+      message: '[퀴즈]정답 133 + 심화2',
+    });
+
+    const res = await run({ page: mockPage as Page }, { args: { seminarId: '5642' } });
+
+    expect(processQuizSpy).toHaveBeenCalledWith(expect.anything(), '5642', true);
+    expect(res.success).toBe(true);
+    expect(res.message).toContain('[수동세미나 5642 (심화)]');
+  });
 });

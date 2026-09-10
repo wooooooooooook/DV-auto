@@ -1,4 +1,5 @@
 Always respond in Korean.
+The server running the instance is isolated from the development environment. Do not attempt to query or inspect databases, logs, or running processes.
 
 pnpm
 typescript
