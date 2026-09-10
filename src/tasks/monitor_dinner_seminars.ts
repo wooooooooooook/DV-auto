@@ -5,7 +5,7 @@ import { monitorSeminars } from './monitor_seminars';
 async function run(ctx: TaskContext & { page?: Page; context?: BrowserContext } = {}) {
   const { page, context, isAutoResume } = ctx;
   //                      periodName, startHour, endHour
-  return monitorSeminars('저녁', 17, 22, { isAutoResume, page, context, taskContext: ctx });
+  return monitorSeminars('저녁', 17, 23, { isAutoResume, page, context, taskContext: ctx });
 }
 
 export { run };
