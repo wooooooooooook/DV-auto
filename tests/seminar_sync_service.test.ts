@@ -161,7 +161,7 @@ describe('seminar_sync_service', () => {
           seminarCompleted: 1,
         },
         // 미래 날짜 -> 제외
-        { seminarId: '103', date: '2026-09-10', time: '18:30 ~ 20:00', processState: ProcessState.PROCESS_CANCEL },
+        { seminarId: '103', date: '2099-09-10', time: '18:30 ~ 20:00', processState: ProcessState.PROCESS_CANCEL },
       ];
 
       vi.spyOn(seminarRepo, 'getAllSeminars').mockReturnValue(mockAll as SeminarListItem[]);

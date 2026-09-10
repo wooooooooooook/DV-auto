@@ -72,12 +72,17 @@ describe('seminar_quiz 다중 페이지 탐색 및 제출하기 감지 테스트
         });
 
         // [다음] 버튼 locator
-        if (selector.includes('다음') || selector.includes('Next')) {
+        if (selector.includes('btn-next') || selector.includes('다음') || selector.includes('Next')) {
           return createLocatorObj({ isNext: true });
         }
 
         // [제출하기] 버튼 locator
-        if (selector.includes('제출하기') || selector.includes('설문완료') || selector.includes('응답완료')) {
+        if (
+          selector.includes('btn-primary') ||
+          selector.includes('제출하기') ||
+          selector.includes('설문완료') ||
+          selector.includes('응답완료')
+        ) {
           return createLocatorObj({ isSubmit: true });
         }
 

@@ -681,37 +681,52 @@ async function processSeminarQuiz(
       await page.waitForTimeout(500);
 
       // ── 버튼 탐색: "다음" 버튼 및 "제출하기/설문완료" 버튼 ──
-      let nextBtn = page.locator('button:text-matches("^다음$|^다음\\s*단계$|^Next$", "i"):not([disabled])').first();
+      let nextBtn = page
+        .locator(
+          'button.btn-next, .btn-next, button:text-matches("^다음$|^다음\\s*단계$|^Next$", "i"):not([disabled]), input[type="button"][value*="다음"]:not([disabled]), input[type="submit"][value*="다음"]:not([disabled])',
+        )
+        .first();
       let hasNext = await nextBtn.isVisible({ timeout: 2000 }).catch(() => false);
 
       if (!hasNext) {
-        nextBtn = page.locator('button:text-matches("다음|Next", "i"):not([disabled])').first();
+        nextBtn = page
+          .locator(
+            'button:text-matches("다음|Next", "i"):not([disabled]), [role="button"]:text-matches("다음|Next", "i"):not([disabled])',
+          )
+          .first();
         hasNext = await nextBtn.isVisible({ timeout: 1500 }).catch(() => false);
       }
 
       const submitBtn = page
         .locator(
-          'input[type="submit"].btn-primary, button:text-matches("제출하기|설문완료|응답완료", "i"):not([disabled])',
+          'button.btn-primary:text-matches("제출|완료|Submit", "i"):not([disabled]), button:text-matches("^제출하기$|^설문완료$|^응답완료$|^제출$|^Submit$", "i"):not([disabled]), input[type="submit"][value*="제출"]:not([disabled]), input[type="submit"][value*="완료"]:not([disabled])',
         )
         .first();
       const hasSubmit = await submitBtn.isVisible({ timeout: 2000 }).catch(() => false);
-
-      // 제출하기 버튼이 있으면 심화설문이든 일반설문이든 마지막 페이지에 도달한 것이므로 루프 종료
-      if (hasSubmit) {
-        console.log(
-          `[seminar_quiz] "제출하기" 버튼 감지 -> 마지막 설문 페이지 도달 (현재 페이지: ${currentPageNum}, 심화설문: ${effectiveIsAdvancedSurvey})`,
-        );
-        break;
-      }
 
       if (hasNext) {
         console.log(`[seminar_quiz] 다음 페이지 이동 버튼 감지 (현재 페이지: ${currentPageNum}) -> 클릭`);
         const prevFirstQ = pageQuestions[0]?.questionNumber;
         await nextBtn.scrollIntoViewIfNeeded().catch(() => {});
         await nextBtn.click({ force: true }).catch(() => {});
+
+        // 1) 로딩 스피너 대기 (스피너가 나타나면 사라질 때까지 대기)
+        const spinner = page.locator('svg.animate-spin, [class*="loading"], [class*="spinner"], [class*="dim"]');
+        await spinner
+          .first()
+          .waitFor({ state: 'visible', timeout: 1000 })
+          .catch(() => {});
+        await spinner
+          .first()
+          .waitFor({ state: 'hidden', timeout: 5000 })
+          .catch(() => {});
+
+        // 2) 이전 [다음] 버튼이 화면에서 사라질 때까지 대기
+        await nextBtn.waitFor({ state: 'hidden', timeout: 3000 }).catch(() => {});
+
         await page.waitForLoadState('networkidle', { timeout: 6000 }).catch(() => {});
 
-        // 다음 페이지 렌더링 대기
+        // 3) 다음 페이지 렌더링 대기
         if (prevFirstQ !== undefined) {
           await page
             .waitForFunction(
@@ -726,8 +741,22 @@ async function processSeminarQuiz(
             )
             .catch(() => {});
         }
-        await page.waitForTimeout(1500);
+
+        // 4) 2페이지 질문 또는 제출하기 버튼이 나타날 때까지 명시적 대기
+        await page
+          .waitForSelector('li[data-question-number], button.btn-primary, button:text-matches("제출|완료", "i")', {
+            state: 'visible',
+            timeout: 4000,
+          })
+          .catch(() => {});
+
+        await page.waitForTimeout(1000);
         currentPageNum++;
+      } else if (hasSubmit) {
+        console.log(
+          `[seminar_quiz] "제출하기" 버튼 감지 -> 마지막 설문 페이지 도달 (현재 페이지: ${currentPageNum}, 심화설문: ${effectiveIsAdvancedSurvey})`,
+        );
+        break;
       } else {
         console.log(`[seminar_quiz] 마지막 설문 페이지 도달 (총 탐색 페이지: ${currentPageNum})`);
         break;
@@ -817,7 +846,7 @@ async function processSeminarQuiz(
     const initialUrl = page.url();
     const submitBtn = page
       .locator(
-        'input[type="submit"].btn-primary, button:text-matches("제출하기|설문완료|응답완료", "i"):not([disabled])',
+        'button.btn-primary:text-matches("제출|완료|Submit", "i"):not([disabled]), button:text-matches("^제출하기$|^설문완료$|^응답완료$|^제출$|^Submit$", "i"):not([disabled]), input[type="submit"][value*="제출"]:not([disabled]), input[type="submit"][value*="완료"]:not([disabled])',
       )
       .first();
     const submitVisible = await submitBtn.isVisible({ timeout: 3000 }).catch(() => false);
