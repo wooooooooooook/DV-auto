@@ -1,4 +1,5 @@
 import { getDatabase } from './storage';
+import { enrichSeminarFromDetail } from './seminar_enrichment';
 
 export type SeminarPointStatus = {
   pointPaid?: boolean;
@@ -318,6 +319,156 @@ export function upsertSeminars(incomingList: SeminarListItem[]): SeminarListItem
 export function markSeminarUrgentNotified(seminarId: string): void {
   const db = getDatabase();
   db.prepare('UPDATE seminars SET urgent_notified = 1, updated_at = ? WHERE seminar_id = ?').run(Date.now(), seminarId);
+}
+
+export interface UpdateSeminarPointStatusOptions {
+  pointPaid: boolean;
+  point?: number | null;
+  pointText?: string | null;
+  pointDate?: string | null;
+  pointContent?: string | null;
+  pointCheckedAt?: string;
+  initialData?: Partial<SeminarListItem>;
+}
+
+/**
+ * 특정 세미나의 포인트 지급 상태를 수동/직접 갱신합니다.
+ * - mergeSeminarRecord의 pointPaid 보존 로직을 무시하고 강제로 전달받은 pointPaid(true 또는 false)를 적용합니다.
+ * - pointPaid가 false인 경우 관련 포인트 데이터(point, pointText, pointDate, pointContent)를 null로 초기화합니다.
+ * - DB에 세미나가 존재하지 않는 경우 seminar detail API(fetchAndPopulateSeminarInfo)로 메타데이터를 enrich하여 등록합니다.
+ */
+export async function updateSeminarPointStatus(
+  seminarId: string,
+  options: UpdateSeminarPointStatusOptions,
+): Promise<SeminarListItem> {
+  if (!seminarId) {
+    throw new Error('updateSeminarPointStatus: seminarId is required.');
+  }
+
+  const db = getDatabase();
+  const now = Date.now();
+  const checkedAt = options.pointCheckedAt || new Date().toISOString();
+
+  let existingRow = db.prepare('SELECT * FROM seminars WHERE seminar_id = ?').get(seminarId) as
+    | SeminarDbRow
+    | undefined;
+
+  let initial: Partial<SeminarListItem> = { ...(options.initialData || {}) };
+
+  // DB에 세미나가 존재하지 않는 경우 seminar detail API로 메타데이터 enrich
+  if (!existingRow) {
+    try {
+      const detailInfo = await enrichSeminarFromDetail(seminarId, options.pointDate || undefined);
+      initial = {
+        ...detailInfo,
+        ...initial,
+      };
+    } catch {
+      // detail 조회 실패 시 fallback 유지
+    }
+  }
+
+  let updatedRecord: SeminarListItem;
+
+  const tx = db.transaction(() => {
+    existingRow = db.prepare('SELECT * FROM seminars WHERE seminar_id = ?').get(seminarId) as SeminarDbRow | undefined;
+
+    if (existingRow) {
+      const existing = rowToSeminarListItem(existingRow);
+      const isPaid = options.pointPaid;
+
+      const newPoint = isPaid ? (options.point !== undefined ? options.point : (existing.point ?? null)) : null;
+      const newPointText = isPaid
+        ? options.pointText !== undefined
+          ? options.pointText
+          : (existing.pointText ?? null)
+        : null;
+      const newPointDate = isPaid
+        ? options.pointDate !== undefined
+          ? options.pointDate
+          : (existing.pointDate ?? null)
+        : null;
+      const newPointContent = isPaid
+        ? options.pointContent !== undefined
+          ? options.pointContent
+          : (existing.pointContent ?? null)
+        : null;
+
+      db.prepare(
+        `
+        UPDATE seminars
+        SET point_paid = ?,
+            point = ?,
+            point_text = ?,
+            point_date = ?,
+            point_content = ?,
+            point_checked_at = ?,
+            updated_at = ?
+        WHERE seminar_id = ?
+      `,
+      ).run(isPaid ? 1 : 0, newPoint, newPointText, newPointDate, newPointContent, checkedAt, now, seminarId);
+
+      const refreshedRow = db.prepare('SELECT * FROM seminars WHERE seminar_id = ?').get(seminarId) as SeminarDbRow;
+      updatedRecord = rowToSeminarListItem(refreshedRow);
+    } else {
+      const isPaid = options.pointPaid;
+      const newPoint = isPaid ? (options.point ?? null) : null;
+      const newPointText = isPaid ? (options.pointText ?? null) : null;
+      const newPointDate = isPaid ? (options.pointDate ?? null) : null;
+      const newPointContent = isPaid ? (options.pointContent ?? null) : null;
+
+      const stmt = db.prepare(`
+        INSERT INTO seminars (
+          seminar_id, name, url, date, time, current_count, total_count,
+          night_time, is_point_excluded, is_advanced_survey, process_state,
+          cancel_process_state, seminar_completed, point_paid, point,
+          point_text, point_date, point_content, point_checked_at,
+          detected_date, detected_at, urgent_notified, is_closed, hidden_yn, disease_category_nm, updated_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?,
+          ?, ?, ?, ?,
+          ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?, ?
+        )
+      `);
+
+      stmt.run(
+        seminarId,
+        initial.name || '',
+        initial.url || `https://m.doctorville.co.kr/cme/seminar/${seminarId}`,
+        initial.date ?? null,
+        initial.time || '',
+        initial.currentCount || '',
+        initial.totalCount || '',
+        initial.nightTime ? 1 : 0,
+        typeof initial.isPointExcluded === 'boolean' ? (initial.isPointExcluded ? 1 : 0) : null,
+        initial.isAdvancedSurvey ? 1 : 0,
+        typeof initial.processState === 'number' ? initial.processState : null,
+        typeof initial.cancelProcessState === 'number' ? initial.cancelProcessState : null,
+        typeof initial.seminarCompleted === 'number' ? initial.seminarCompleted : null,
+        isPaid ? 1 : 0,
+        newPoint,
+        newPointText,
+        newPointDate,
+        newPointContent,
+        checkedAt,
+        initial.detectedDate ?? null,
+        initial.detectedAt ?? null,
+        initial.urgentNotified ? 1 : 0,
+        initial.isClosed ? 1 : 0,
+        initial.hiddenYn ?? 'N',
+        initial.diseaseCategoryNm ?? null,
+        now,
+      );
+
+      const insertedRow = db.prepare('SELECT * FROM seminars WHERE seminar_id = ?').get(seminarId) as SeminarDbRow;
+      updatedRecord = rowToSeminarListItem(insertedRow);
+    }
+  });
+
+  tx();
+  return updatedRecord!;
 }
 
 /**

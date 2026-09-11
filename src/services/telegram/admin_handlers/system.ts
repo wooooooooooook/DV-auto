@@ -268,7 +268,8 @@ export function setupSystemCommands(adminBot: Telegraf): void {
 
 💰 포인트 & 교환:
 - /check_point: 현재 포인트를 확인합니다.
-- /check_seminar_point: 세미나 번호로 포인트 지급 확인
+- /check_seminar_point <세미나번호>: 세미나 번호로 포인트 지급 확인 및 DB 동기화
+- /set_seminar_point <세미나번호> [paid|unpaid] [포인트] [내용]: 세미나 포인트 지급 상태 수동 갱신 (기본: 지급완료)
 - /check_advanced_seminars: 최근 2주 심화 세미나 포인트 일괄 확인 (방장 계정 기준)
 - /point_exchange <URL/guid> [횟수]: 상품 URL 또는 guid로 포인트교환을 실행합니다. (기본값: 1)
 - /naverpay_point_exchange [횟수]: 네이버페이포인트교환 작업을 실행합니다. (기본값: 10)

@@ -185,10 +185,67 @@ export async function searchSeminarPoints(
   }
 }
 
+/**
+ * 세미나 포인트 조회 결과를 로컬 DB(seminar_repository)에 동기화합니다.
+ * - 적립된 포인트가 확인된 경우(found && type === '적립'):
+ *   DB에 세미나가 없으면 fetchAndPopulateSeminarInfo로 세미나 정보를 채워 생성하고,
+ *   updateSeminarPointStatus로 pointPaid=true 및 포인트 정보를 저장합니다.
+ * - 미지급(not found)인 경우:
+ *   DB에 세미나가 존재하면 pointCheckedAt을 갱신합니다. (기존 pointPaid=true는 보존)
+ */
+export async function syncSeminarPointResultToDb(
+  seminarId: string,
+  result?: SeminarPointResult,
+): Promise<{ updated: boolean; pointPaid?: boolean; isNew?: boolean }> {
+  if (!seminarId) return { updated: false };
+  const checkedAt = new Date().toISOString();
+
+  // 순환 참조 방지를 위해 동적 import 사용
+  const seminarRepo = await import('../services/seminar_repository');
+  const { clearCache: clearAdvancedSeminarsCache } = await import('./check_advanced_seminars');
+
+  if (result?.found && result.type === '적립') {
+    const existing = seminarRepo.getSeminarById(seminarId);
+    let isNew = false;
+
+    if (!existing) {
+      isNew = true;
+    }
+
+    await seminarRepo.updateSeminarPointStatus(seminarId, {
+      pointPaid: true,
+      point: result.point,
+      pointText: result.pointText,
+      pointDate: result.date,
+      pointContent: result.content,
+      pointCheckedAt: checkedAt,
+    });
+
+    try {
+      clearAdvancedSeminarsCache();
+    } catch {
+      // ignore
+    }
+
+    return { updated: true, pointPaid: true, isNew };
+  } else {
+    const existing = seminarRepo.getSeminarById(seminarId);
+    if (existing) {
+      await seminarRepo.updateSeminarPointStatus(seminarId, {
+        pointPaid: existing.pointPaid ?? false,
+        pointCheckedAt: checkedAt,
+      });
+      return { updated: true, pointPaid: existing.pointPaid ?? false };
+    }
+  }
+
+  return { updated: false };
+}
+
 export async function run(
   ctxOrId?: TaskContext | string,
   seminarIdArg?: string,
-): Promise<TaskResult & { pointResult?: SeminarPointResult }> {
+): Promise<TaskResult & { pointResult?: SeminarPointResult; dbUpdated?: boolean }> {
   let seminarId = '';
   if (typeof ctxOrId === 'string') {
     seminarId = ctxOrId;
@@ -205,17 +262,23 @@ export async function run(
       return { success: false, message: `세미나 포인트 조회 중 오류: ${searchRes.error || '조회 실패'}` };
     }
     const result = searchRes.points.get(seminarId);
+    const syncRes = await syncSeminarPointResultToDb(seminarId, result);
+
     if (result?.found) {
+      const syncText = syncRes.updated ? ' (DB 갱신 완료)' : '';
       return {
         success: true,
-        message: `세미나 ${seminarId} 포인트 지급됨: ${result.pointText} (${result.date} / ${result.content})`,
+        message: `세미나 ${seminarId} 포인트 ${result.type === '적립' ? '지급됨' : '사용됨'}: ${result.pointText} (${result.date} / ${result.content})${syncText}`,
         pointResult: result,
+        dbUpdated: syncRes.updated,
       };
     }
+    const syncText = syncRes.updated ? ' (확인일시 갱신)' : '';
     return {
       success: true,
-      message: `세미나 ${seminarId} 포인트 내역을 찾을 수 없습니다 (최근 60일간).`,
+      message: `세미나 ${seminarId} 포인트 내역을 찾을 수 없습니다 (최근 60일간).${syncText}`,
       pointResult: result,
+      dbUpdated: syncRes.updated,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

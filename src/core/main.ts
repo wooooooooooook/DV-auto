@@ -302,11 +302,16 @@ const checkSeminarPointTask: Task = {
     const messages: string[] = [];
     for (const seminarId of seminarIds) {
       const r = results.get(seminarId);
-      if (r?.found)
+      const syncRes = await checkSeminarPointTaskModule.syncSeminarPointResultToDb(seminarId, r);
+      if (r?.found) {
+        const syncText = syncRes.updated ? ' (DB 갱신 완료)' : '';
         messages.push(
-          `[${seminarId}] 세미나 ${seminarId} 포인트 ${r.type === '적립' ? '지급됨' : '사용됨'}: ${r.pointText} (${r.date} / ${r.content})`,
+          `[${seminarId}] 세미나 ${seminarId} 포인트 ${r.type === '적립' ? '지급됨' : '사용됨'}: ${r.pointText} (${r.date} / ${r.content})${syncText}`,
         );
-      else messages.push(`[${seminarId}] 세미나 ${seminarId} 포인트 내역을 찾을 수 없습니다 (최근 60일간).`);
+      } else {
+        const syncText = syncRes.updated ? ' (확인일시 갱신)' : '';
+        messages.push(`[${seminarId}] 세미나 ${seminarId} 포인트 내역을 찾을 수 없습니다 (최근 60일간).${syncText}`);
+      }
     }
     return { success: true, message: messages.join('\n') };
   },

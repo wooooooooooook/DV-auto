@@ -2,75 +2,15 @@ import type { TaskContext } from '../types';
 import type { SeminarListItem } from './seminar_repository';
 import type { SeminarPointChange } from '../tasks/apply_seminar_notice';
 import * as seminarRepo from './seminar_repository';
-import * as logger from './logger';
 import { getSeminarIdFromUrl } from '../modules/utils';
 import { searchSeminarPoints } from '../tasks/check_seminar_point';
-import {
-  fetchSeminarDetail,
-  parseSeminarDateTime,
-  checkIsAdvancedSurvey,
-  checkIsPointExcluded,
-} from '../modules/seminar_api';
 import { clearCache as clearAdvancedSeminarsCache } from '../tasks/check_advanced_seminars';
+import { enrichSeminarFromDetail } from './seminar_enrichment';
 
-export async function fetchAndPopulateSeminarInfo(
-  seminarId: string,
-  fallbackDate?: string,
-): Promise<Partial<SeminarListItem>> {
-  try {
-    const detailRes = await fetchSeminarDetail(seminarId);
-    if (!detailRes.success || !detailRes.rawResponse?.seminarDetail) {
-      return {};
-    }
-    const d = detailRes.rawResponse.seminarDetail;
-    const startDt = typeof d.startDt === 'string' ? d.startDt : undefined;
-    const endDt = typeof d.endDt === 'string' ? d.endDt : undefined;
-    const { date, time, nightTime } = parseSeminarDateTime(startDt, endDt);
-    const isAdvancedSurvey = checkIsAdvancedSurvey(d.useDepthSurvey);
-    const isPointExcluded = detailRes.isPointExcluded ?? checkIsPointExcluded(d.intro);
-    const processStateNum = d.processState !== undefined ? Number(d.processState) : undefined;
-    const cancelProcessStateNum = d.cancelProcessState !== undefined ? Number(d.cancelProcessState) : undefined;
-    const seminarCompletedNum =
-      d.seminarCompleted !== undefined
-        ? typeof d.seminarCompleted === 'boolean'
-          ? d.seminarCompleted
-            ? 1
-            : 0
-          : Number(d.seminarCompleted)
-        : undefined;
-
-    let detectedDate = date;
-    if (!detectedDate && typeof d.createDt === 'string') {
-      detectedDate = d.createDt.split(' ')[0] || '';
-    }
-    if (!detectedDate && fallbackDate) {
-      detectedDate = fallbackDate;
-    }
-
-    const hiddenYn = typeof d.hiddenYn === 'string' ? d.hiddenYn : undefined;
-    const diseaseCategoryNm = typeof d.diseaseCategoryNm === 'string' ? d.diseaseCategoryNm : undefined;
-
-    return {
-      name: typeof d.seminarNm === 'string' ? d.seminarNm : '',
-      date,
-      time,
-      nightTime,
-      currentCount: d.applyCnt !== undefined && d.applyCnt !== null ? String(d.applyCnt) : '',
-      totalCount: d.maxPeopleCnt !== undefined && d.maxPeopleCnt !== null ? String(d.maxPeopleCnt) : '',
-      isAdvancedSurvey,
-      isPointExcluded,
-      processState: processStateNum,
-      cancelProcessState: cancelProcessStateNum,
-      seminarCompleted: seminarCompletedNum,
-      hiddenYn,
-      diseaseCategoryNm,
-      detectedDate: detectedDate || '',
-    };
-  } catch (err) {
-    logger.warn(`Failed to fetch seminar detail for ID ${seminarId}:`, err);
-    return {};
-  }
-}
+/**
+ * 하위 호환성을 위해 유지 (seminar_enrichment 모듈의 enrichSeminarFromDetail 연결)
+ */
+export const fetchAndPopulateSeminarInfo = enrichSeminarFromDetail;
 
 export async function refreshSeminarPointStatus(
   _context?: TaskContext['context'],

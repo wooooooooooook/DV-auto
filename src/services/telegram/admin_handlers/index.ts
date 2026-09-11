@@ -4,6 +4,7 @@ import { replyWithSplit } from '../../../modules/utils';
 import { isAuthorizedAdmin } from '../auth';
 import { createSeminarDetailHandler } from '../seminar_detail_handler';
 import { createSeminarDeleteHandler } from '../seminar_delete_handler';
+import { createSeminarPointHandler } from '../seminar_point_handler';
 import { setupExecutionCommands } from './execution';
 import { setupQuizCommands } from './quiz';
 import { setupPointsCommands } from './points';
@@ -35,9 +36,10 @@ export function setupAdminBotCommands(adminBot: Telegraf): void {
   setupQuizCommands(adminBot);
   setupPointsCommands(adminBot);
 
-  // 세미나 상세 정보 조회 및 수동 DB 삭제
+  // 세미나 상세 정보 조회 및 수동 DB 삭제/포인트 갱신
   adminBot.command('seminar_detail', createSeminarDetailHandler({ alwaysRefresh: true, showRawMessages: true }));
   adminBot.command(['delete_seminar', 'seminar_delete'], createSeminarDeleteHandler());
+  adminBot.command(['set_seminar_point', 'seminar_point_set'], createSeminarPointHandler());
 
   setupSystemCommands(adminBot);
 }
