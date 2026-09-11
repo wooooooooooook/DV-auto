@@ -438,6 +438,45 @@ export function setupExecutionCommands(adminBot: Telegraf): void {
     }
   });
 
+  adminBot.command(
+    ['run_etc_daily_quests_now', 'etc_daily_quests_now', 'etc_daily_quests', '기타일일퀘스트'],
+    async (ctx) => {
+      logger.info('User requested to run etc_daily_quests now', { from: ctx.from?.username });
+      const task = taskRegistry.getByName('기타일일퀘스트') || taskRegistry.getByName('etc_daily_quests');
+      if (!task) {
+        logger.error('기타일일퀘스트 task not found, cannot run');
+        return replyWithSplit(ctx, '기타일일퀘스트 task not found!');
+      }
+
+      try {
+        runner
+          .runTask(task)
+          .then(async (result) => {
+            if (result && typeof result === 'object' && (result as { message?: string }).message) {
+              await replyWithSplit(
+                ctx,
+                (result as { message: string }).message,
+                (result as { options?: Record<string, unknown> }).options as Parameters<Context['reply']>[1],
+              );
+            } else if (typeof result === 'string') {
+              await replyWithSplit(ctx, result);
+            } else if (result === true) {
+              await replyWithSplit(ctx, '기타 일일 퀘스트 작업이 성공적으로 완료되었습니다.');
+            } else {
+              await replyWithSplit(ctx, '기타 일일 퀘스트 작업이 완료되었습니다.');
+            }
+          })
+          .catch((e) => {
+            const message = e instanceof Error ? e.message : String(e);
+            replyWithSplit(ctx, `기타일일퀘스트 failed: ${message}`);
+          });
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        replyWithSplit(ctx, `Failed to start 기타일일퀘스트: ${message}`);
+      }
+    },
+  );
+
   adminBot.command('monitor_lunch_seminar_now', async (ctx) => {
     logger.info('User requested to run monitor_lunch_seminars now', { from: ctx.from?.username });
     const task = taskRegistry.getByName('monitor_lunch_seminars');

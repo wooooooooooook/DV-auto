@@ -438,6 +438,81 @@ export class MedigateClient {
   }
 
   /**
+   * 라이브 심포지움 시청 URL 획득 (방송 진행 중 상태일 때 발급 가능)
+   */
+  async getSymposiumWatchUrl(
+    webinarIdx: number,
+  ): Promise<{ success: boolean; watchUrl?: string; message?: string; status?: number }> {
+    const res = await this.authenticatedRequest<{
+      code: number;
+      message: string;
+      data?: { watchUrl?: string };
+    }>(`w/symposium/${webinarIdx}/watch-url`, {
+      method: 'GET',
+    });
+
+    if (res.status === 200 && res.data?.data?.watchUrl) {
+      return {
+        success: true,
+        watchUrl: res.data.data.watchUrl,
+        message: '시청 URL 획득 성공',
+        status: 200,
+      };
+    }
+
+    return {
+      success: false,
+      message: res.error || res.data?.message || '시청 URL 획득 실패 (방송 시작 전이거나 신청되지 않음)',
+      status: res.status,
+    };
+  }
+
+  /**
+   * 라이브 심포지움 시청 이력 기록
+   */
+  async recordSymposiumView(webinarIdx: number): Promise<boolean> {
+    const res = await this.authenticatedRequest<{ code: number }>(`w/symposium/${webinarIdx}/view`, {
+      method: 'POST',
+    });
+    return res.status === 200;
+  }
+
+  /**
+   * VOD 심포지움 상세 및 비디오 URL 조회
+   */
+  async getVodDetail(webinarIdx: number): Promise<{ success: boolean; vodUrl?: string; data?: unknown }> {
+    const res = await this.authenticatedRequest<{
+      code: number;
+      data?: { webinar?: { vodUrl?: string; [key: string]: unknown }; [key: string]: unknown };
+    }>(`w/symposium/me/vods/${webinarIdx}`, {
+      method: 'GET',
+    });
+
+    if (res.status === 200 && res.data?.data?.webinar?.vodUrl) {
+      return {
+        success: true,
+        vodUrl: res.data.data.webinar.vodUrl,
+        data: res.data.data,
+      };
+    }
+
+    return {
+      success: false,
+      data: res.data,
+    };
+  }
+
+  /**
+   * VOD 심포지움 시청 이력 기록
+   */
+  async recordVodView(webinarIdx: number): Promise<boolean> {
+    const res = await this.authenticatedRequest<{ code: number }>(`w/symposium/${webinarIdx}/vod/view`, {
+      method: 'POST',
+    });
+    return res.status === 200;
+  }
+
+  /**
    * 신청 가능한 모든 심포지움 일괄 자동 신청 워크플로우
    */
   async applyAllAvailableSymposiums(): Promise<MedigateApplyWorkflowResult> {

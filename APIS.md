@@ -620,14 +620,93 @@
     ```
 
 - **라이브 시청 URL 발급 (`/w/symposium/{webinarIdx}/watch-url`)**:
-  - `GET https://apis.medigate.net/w/symposium/{webinarIdx}/watch-url`
-  - 응답: `data: { "watchUrl": "https://..." }`
+  - **Method / URL**: `GET https://apis.medigate.net/w/symposium/{webinarIdx}/watch-url`
+  - **호출 위치**: `src/modules/medigate_api.ts` (`getSymposiumWatchUrl`)
+  - **헤더**:
+    - `Authorization`: `Bearer <accessToken>`
+    - `Origin`: `https://new.medigate.net`
+    - `Referer`: `https://new.medigate.net/symposium/{webinarIdx}`
+  - **시청 조건**: 심포지움 상태가 `status === 'ING'`(진행중)이며, 로그인 회원이 사전 신청 완료(`applyFlag === 'Y'`) 상태여야 함.
+  - **성공 응답 (200 OK)**:
+    ```json
+    {
+      "code": 200,
+      "message": "성공",
+      "data": {
+        "watchUrl": "https://..."
+      }
+    }
+    ```
+  - **실패 응답 (406 Not Acceptable)**:
+    - 방송 시작 전: `{"status": 406, "error": "SYMPOSIUM_NOT_WATCHABLE", "message": "아직 시청할 수 없습니다."}`
+    - 미신청 상태: `{"status": 406, "error": "Not Acceptable", "message": "사전신청 완료 후 진행중인 웨비나만 시청할 수 있습니다."}`
 
 - **라이브 시청 이력 로깅 (`/w/symposium/{webinarIdx}/view`)**:
-  - `POST https://apis.medigate.net/w/symposium/{webinarIdx}/view`
+  - **Method / URL**: `POST https://apis.medigate.net/w/symposium/{webinarIdx}/view`
+  - **호출 위치**: `src/modules/medigate_api.ts` (`recordSymposiumView`)
+  - **설명**: 프론트엔드에서 `watchUrl`로 이동하기 직전에 호출되어 회원의 실시간 방송 시청 참여 이력을 서버에 기록합니다.
+
+- **VOD 심포지움 상세 및 영상 URL 조회 (`/w/symposium/me/vods/{webinarIdx}`)**:
+  - **Method / URL**: `GET https://apis.medigate.net/w/symposium/me/vods/{webinarIdx}`
+  - **호출 위치**: `src/modules/medigate_api.ts` (`getVodDetail`)
+  - **응답 (JSON)**:
+    ```json
+    {
+      "code": 200,
+      "data": {
+        "webinar": {
+          "webinarIdx": 4941,
+          "subject": "...",
+          "vodUrl": "https://mvod.medigate.net/vod/2026/09/sample_W.mp4",
+          "vodHtml": "..."
+        },
+        "instructors": [ ... ]
+      }
+    }
+    ```
+  - **미디어 스트림**: PC는 `mvod.medigate.net` (`_W.mp4`), 모바일은 `m.mvod.medigate.net` (`_I.mp4`) 규격 사용.
+
+- **VOD 시청 이력 로깅 (`/w/symposium/{webinarIdx}/vod/view`)**:
+  - **Method / URL**: `POST https://apis.medigate.net/w/symposium/{webinarIdx}/vod/view`
+  - **호출 위치**: `src/modules/medigate_api.ts` (`recordVodView`)
+  - **설명**: VOD 영상 재생 시작 시 1회 호출되어 VOD 시청 완료/이력을 기록합니다.
 
 - **사전설문 참여 (`/w/symposium/{webinarIdx}/pre-poll`)**:
-  - `POST https://apis.medigate.net/w/symposium/{webinarIdx}/pre-poll`
+  - **Method / URL**: `POST https://apis.medigate.net/w/symposium/{webinarIdx}/pre-poll`
+  - **설명**: 사전 설문 답변 제출 시 호출합니다.
+
+---
+
+### 6.5 실시간(On-Air) 웨비나 시청 세션 분석 가이드 (Next Step)
+> **목적**: 웨비나가 실제로 On-Air(`status === 'ING'`) 진행 중일 때, 시청 시간(체류 시간)이 기록되는 플레이어 세션 메커니즘을 분석하고 자동화하기 위한 단계별 수행 절차입니다.
+
+#### [분석 대상 일정]
+- 가장 가까운 신청 완료 심포지움:
+  - **Idx 4941**: `2026.09.14 (월) 18:00 ~ 20:50` (Xeljanz in AS)
+  - **Idx 5011**: `2026.09.14 (월) 19:00 ~ 20:30` (Semaglutide)
+
+#### [단계별 분석 작업]
+1. **On-Air 상태 확인 및 `watchUrl` 획득**:
+   - 방송 시작 약 10~15분 전부터 심포지움 상태가 `APPLY`에서 `ING`(On-Air)로 변경됨.
+   - `GET https://apis.medigate.net/w/symposium/{webinarIdx}/watch-url` 호출하여 `data.watchUrl` 획득.
+   - 발급된 URL의 도메인(예: `live.medigate.net`, 스트리밍 전문 솔루션 등) 및 쿼리 파라미터(인증 토큰, 회원 식별값) 구조 기록.
+2. **네트워크 트래픽(HAR/DevTools) 캡처**:
+   - 브라우저 개발자 도구(F12) Network 탭 설정:
+     - `Preserve log` 체크 (페이지 이동 시에도 로그 유지)
+     - `Disable cache` 체크
+   - `watchUrl`로 진입한 뒤 5~10분간 시청을 유지하며 발생하는 요청 관찰:
+     - **WebSocket(WS)**: 연결된 소켓이 있는지, 주기적 ping/pong 또는 시청 시간 측정 프레임이 오가는지 확인.
+     - **Heartbeat/Ping (Fetch/XHR)**: `/heartbeat`, `/ping`, `/stay`, `/watch-time`, `/log` 등 30초~1분 주기의 HTTP 주기적 요청 필터링.
+     - **종료 이벤트 (Beacon/Unload)**: 브라우저 탭/창을 닫을 때 `navigator.sendBeacon`이나 `/leave`, `/exit`, `/duration` 요청 발생 여부 확인.
+3. **플레이어 스크립트(JS) 리버스 엔지니어링**:
+   - 플레이어 페이지의 소스코드 및 핵심 자바스크립트 번들 파일 다운로드.
+   - 키워드 검색: `interval`, `heartbeat`, `sendBeacon`, `ws`, `socket`, `watchTime`, `duration`, `timeUpdate`, `progress`.
+   - 시청시간을 로컬 브라우저에서 측정해 서버로 보고하는지, 서버 측 소켓 연결 시간으로 계산하는지 규명.
+4. **자동화 태스크 구현 연동**:
+   - 분석 결과 유형에 따라 `src/tasks/medigate_watch_symposium.ts` 구현:
+     - **유형 A (주기적 Heartbeat HTTP API)**: Node.js 타이머로 일정 시간 동안 주기적 HTTP 요청 전송.
+     - **유형 B (WebSocket 세션 유지)**: Node.js `ws` 클라이언트로 접속 후 지정된 시간(예: 30분~1시간) 동안 소켓 연결 유지.
+     - **유형 C (입장/퇴장 시각 기반)**: 입장 API 호출 후 일정 대기 시간 뒤 퇴장 API 호출.
 
 ---
 

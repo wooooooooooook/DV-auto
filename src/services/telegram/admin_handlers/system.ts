@@ -253,6 +253,8 @@ export function setupSystemCommands(adminBot: Telegraf): void {
 - /run_docple_daily_now: 즉시 닥플 일일 자동화(docple_daily)를 실행합니다.
 - /run_keymedi_attendance_now: 즉시 키메디 출석체크 & 포인트 확인(keymedi_attendance)을 실행합니다.
 - /run_hmp_attendance_now: 즉시 HMP 출석체크 & 보유 캡슐 확인(hmp_attendance)을 실행합니다.
+- /run_medigate_apply_now: 즉시 메디게이트 심포지움 자동 신청(medigate_apply)을 실행합니다.
+- /run_etc_daily_quests_now: 즉시 기타일일퀘스트(키메디/HMP/메디게이트 순차 실행)를 실행합니다.
 - /monitor_lunch_seminar_now: 즉시 점심 세미나 모니터링을 시작합니다.
 - /monitor_dinner_seminar_now: 즉시 저녁 세미나 모니터링을 시작합니다.
 

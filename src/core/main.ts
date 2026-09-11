@@ -25,6 +25,7 @@ import * as keymediAttendanceTaskModule from '../tasks/keymedi_attendance';
 import * as hmpAttendanceTaskModule from '../tasks/hmp_attendance';
 import * as docpleDailyTaskModule from '../tasks/docple_daily';
 import * as medigateApplyTaskModule from '../tasks/medigate_apply_symposium';
+import * as etcDailyQuestsTaskModule from '../tasks/etc_daily_quests';
 import { sendOrUpdateTodayLinksNotification } from '../services/broadcast_today_links';
 import { sendToTopicSubscribers, sendHourlyTodayLinksToSubscribers } from '../services/subscription_service';
 import { shouldResumeSeminarMonitor } from '../services/channel_message_repository';
@@ -38,9 +39,11 @@ const TIMEZONE = process.env.SCHEDULE_TZ || 'Asia/Seoul';
 const DAILY_ROUTINE_CRON = process.env.DAILY_CRON || '1 0 * * *';
 const INTERMD_QUIZ_CRON = process.env.INTERMD_QUIZ_CRON || '1 8 * * *';
 const DOCPLE_DAILY_CRON = process.env.DOCPLE_DAILY_CRON || '4 7 * * *';
-const KEYMEDI_ATTENDANCE_CRON = process.env.KEYMEDI_ATTENDANCE_CRON || '5 7 * * *';
-const HMP_ATTENDANCE_CRON = process.env.HMP_ATTENDANCE_CRON || '7 7 * * *';
-const MEDIGATE_APPLY_CRON = process.env.MEDIGATE_APPLY_CRON || '15 7 * * *';
+const ETC_DAILY_QUESTS_CRON =
+  process.env.ETC_DAILY_QUESTS_CRON ||
+  process.env.OTHER_DAILY_QUESTS_CRON ||
+  process.env.KEYMEDI_ATTENDANCE_CRON ||
+  '5 7 * * *';
 const BROADCAST_TODAY_LINKS_CRON = '0 0 9 * * *';
 const HOURLY_TODAY_LINKS_EARLY_CRON = '0 2 0 * * *';
 const HOURLY_TODAY_LINKS_CRON = '5 0 1-12 * * *';
@@ -466,38 +469,46 @@ const docpleDailyTask: Task = {
 taskRegistry.registerTask(docpleDailyTask);
 scheduler.scheduleTaskCron(docpleDailyTask);
 
+// 기타일일퀘스트 통합 태스크 (키메디 -> HMP -> 메디게이트 순차 실행)
+const etcDailyQuestsTask: Task = {
+  name: '기타일일퀘스트',
+  schedule: ETC_DAILY_QUESTS_CRON,
+  timezone: TIMEZONE,
+  run: async (ctx) => {
+    return await etcDailyQuestsTaskModule.run(ctx);
+  },
+};
+taskRegistry.registerTask(etcDailyQuestsTask);
+taskRegistry.registerTask({
+  name: 'etc_daily_quests',
+  run: async (ctx) => etcDailyQuestsTask.run(ctx),
+});
+scheduler.scheduleTaskCron(etcDailyQuestsTask);
+
+// 개별 실행을 위한 태스크 등록 (스케줄 크론은 기타일일퀘스트로 통합)
 const keymediAttendanceTask: Task = {
   name: 'keymedi_attendance',
-  schedule: KEYMEDI_ATTENDANCE_CRON,
-  timezone: TIMEZONE,
   run: async (ctx) => {
     return await keymediAttendanceTaskModule.run(ctx);
   },
 };
 taskRegistry.registerTask(keymediAttendanceTask);
-scheduler.scheduleTaskCron(keymediAttendanceTask);
 
 const hmpAttendanceTask: Task = {
   name: 'hmp_attendance',
-  schedule: HMP_ATTENDANCE_CRON,
-  timezone: TIMEZONE,
   run: async (ctx) => {
     return await hmpAttendanceTaskModule.run(ctx);
   },
 };
 taskRegistry.registerTask(hmpAttendanceTask);
-scheduler.scheduleTaskCron(hmpAttendanceTask);
 
 const medigateApplyTask: Task = {
   name: 'medigate_apply_symposium',
-  schedule: MEDIGATE_APPLY_CRON,
-  timezone: TIMEZONE,
   run: async (ctx) => {
     return await medigateApplyTaskModule.run(ctx);
   },
 };
 taskRegistry.registerTask(medigateApplyTask);
-scheduler.scheduleTaskCron(medigateApplyTask);
 
 // 별칭 태스크 등록 (/medigate_apply)
 taskRegistry.registerTask({

@@ -41,7 +41,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['eslint.config.mjs'],
+    files: ['eslint.config.mjs', 'scripts/**/*.mjs'],
     languageOptions: {
       sourceType: 'module',
       globals: {

@@ -11,6 +11,7 @@ export const adminCommands = [
   { command: 'run_keymedi_attendance_now', description: '즉시 키메디 출석체크(keymedi_attendance) 실행' },
   { command: 'run_hmp_attendance_now', description: '즉시 HMP 출석체크(hmp_attendance) 실행' },
   { command: 'run_medigate_apply_now', description: '즉시 메디게이트 심포지움 자동 신청(medigate_apply) 실행' },
+  { command: 'run_etc_daily_quests_now', description: '즉시 기타일일퀘스트(키메디/HMP/메디게이트) 실행' },
   { command: 'monitor_lunch_seminar_now', description: '즉시 점심 세미나 모니터링 시작' },
   { command: 'monitor_dinner_seminar_now', description: '즉시 저녁 세미나 모니터링 시작' },
   // 2. 세미나 & 퀴즈 족보
