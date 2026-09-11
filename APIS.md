@@ -480,9 +480,160 @@
 
 ---
 
-## 6. 주요 상태 코드 및 Enum 정리
+## 6. 메디게이트 (Medigate) API
 
-### 6.1 세미나 진행 상태 (`ProcessState`)
+### 6.1 인증 메커니즘 (JWT & Session)
+- **베이스 도메인**: `https://apis.medigate.net` (웹: `https://new.medigate.net`)
+- **인증 토큰**: 로그인 성공 시 반환되는 `accessToken` (JWT)을 `Authorization: Bearer <accessToken>` 헤더로 전송합니다.
+- **토큰 갱신**: 만료 또는 401 수신 시 `POST https://apis.medigate.net/token/refresh` 엔드포인트를 호출하여 갱신합니다.
+- **웹 세션 쿠키**: 웹 페이지(Next.js) 접근 시 도메인(`.medigate.net`) 쿠키 `accessToken`, `refreshToken`, `user`, `MeDiPkg`, `MeDiAuthVer=1`을 설정합니다.
+
+---
+
+### 6.2 로그인 및 토큰 (`/signin`, `/token/refresh`)
+- **로그인 (`/signin`)**:
+  - **Method / URL**: `POST https://apis.medigate.net/signin`
+  - **호출 위치**: `src/modules/medigate_api.ts` (`MedigateClient.login`)
+  - **헤더**:
+    - `Content-Type`: `application/x-www-form-urlencoded`
+    - `Origin`: `https://new.medigate.net`
+    - `Referer`: `https://new.medigate.net/auth/login`
+  - **Body (URL-encoded)**: `username={MEDIGATE_USER}&password={MEDIGATE_PASS}`
+  - **응답 (JSON)**:
+    ```json
+    {
+      "accessToken": "eyJhbGciOiJIUzI1Ni...",
+      "refreshToken": "...",
+      "user": {
+        "uId": "nubiz",
+        "uName": "김영욱",
+        "uKind": "UKD001",
+        "uSpcCode": "..."
+      },
+      "pkg": "...",
+      "isTestUser": "N"
+    }
+    ```
+
+- **토큰 갱신 (`/token/refresh`)**:
+  - **Method / URL**: `POST https://apis.medigate.net/token/refresh`
+  - **호출 위치**: `src/modules/medigate_api.ts` (`MedigateClient.refreshToken`)
+  - **Body (JSON)**: `{"refreshToken": "<refreshToken>"}`
+  - **응답**: `{"accessToken": "..."}`
+
+---
+
+### 6.3 심포지움 목록 및 프로모션 API
+- **심포지움 메인 목록 조회 (`/w/symposium/main/list`)**:
+  - **Method / URL**: `GET https://apis.medigate.net/w/symposium/main/list`
+  - **호출 위치**: `src/modules/medigate_api.ts` (`getSymposiumList`)
+  - **주요 사용 태스크**: `medigate_apply_symposium`
+  - **헤더**:
+    - `Authorization`: `Bearer <accessToken>`
+    - `Origin`: `https://new.medigate.net`
+    - `Referer`: `https://new.medigate.net/symposium`
+  - **Query Params**: `diseaseCodes` (선택, 특정 질환 필터링)
+  - **응답 (JSON)**:
+    ```json
+    {
+      "code": 200,
+      "message": "성공",
+      "data": {
+        "items": [
+          {
+            "webinarIdx": 4941,
+            "webinarType": "O",
+            "subject": "Xeljanz in AS: Expanding Treatment Options in Clinical Practice",
+            "instructorSummary": "박영재 교수(가톨릭의대)",
+            "clientName": "Pfizer",
+            "logoDesc": "젤잔즈 웹 심포지움에 초대합니다.",
+            "startDate": "2026-09-14 18:00",
+            "endDate": "2026-09-14 20:50",
+            "dateDesc": "2026.09.14 (월) 18:00 ~ 20:50",
+            "status": "APPLY",
+            "applyFlag": "N",
+            "applyCnt": 1157,
+            "diseaseCode": "MGDC0120005",
+            "diseaseCodeName": "강직척추염",
+            "brandNames": "젤잔즈AS"
+          }
+        ]
+      }
+    }
+    ```
+
+- **심포지움 프로모션/슬라이드 (`/w/symposium/promotions`)**:
+  - `GET https://apis.medigate.net/w/symposium/promotions`
+  - 응답: `data: { "slideList": [ ... ] }`
+
+- **다가오는 심포지움 (`/w/symposium/upcoming`)**:
+  - `GET https://apis.medigate.net/w/symposium/upcoming`
+  - 응답: `data: { "items": [ ... ] }`
+
+- **심포지움 캘린더 (`/w/symposium/calendar`)**:
+  - `GET https://apis.medigate.net/w/symposium/calendar?year=2026&month=9`
+
+- **내가 신청한 심포지움 (`/w/symposium/me/applied`)**:
+  - `GET https://apis.medigate.net/w/symposium/me/applied`
+
+---
+
+### 6.4 심포지움 상세 및 신청 API
+- **심포지움 상세 정보 및 약관 조회 (`/w/symposium/{webinarIdx}`)**:
+  - **Method / URL**: `GET https://apis.medigate.net/w/symposium/{webinarIdx}`
+  - **호출 위치**: `src/modules/medigate_api.ts` (`getSymposiumDetail`)
+  - **헤더**: `Authorization: Bearer <accessToken>`
+  - **주요 응답 데이터**:
+    - `data.webinar`: 기본 정보, `status` (`APPLY`, `ING`, `CLOSED`), `dateDesc`, `timeline`, `guide`
+    - `data.applyInfo`: `applyFlag` (`Y`/`N`), `pollAnsweredFlag`
+    - `data.agreements`: 약관 목록 (`required[]`, `optional[]` - 각 약관의 `idx`, `title`, `content`)
+    - `data.instructors`: 연자/좌장 프로필 정보
+    - `data.polls`: 사전 설문 목록
+
+- **심포지움 신청 (`/w/symposium/{webinarIdx}/apply`)**:
+  - **Method / URL**: `POST https://apis.medigate.net/w/symposium/{webinarIdx}/apply`
+  - **호출 위치**: `src/modules/medigate_api.ts` (`applySymposium`)
+  - **주요 사용 태스크**: `medigate_apply_symposium`
+  - **헤더**:
+    - `Authorization`: `Bearer <accessToken>`
+    - `Content-Type`: `application/json`
+  - **Body (JSON)**:
+    ```json
+    {
+      "agreements": [
+        {
+          "agreeIdx": 2065,
+          "agreeFlag": "Y"
+        }
+      ]
+    }
+    ```
+  - **응답 (JSON)**:
+    ```json
+    {
+      "code": 200,
+      "message": "성공",
+      "data": {
+        "completeType": "NONE"
+      }
+    }
+    ```
+
+- **라이브 시청 URL 발급 (`/w/symposium/{webinarIdx}/watch-url`)**:
+  - `GET https://apis.medigate.net/w/symposium/{webinarIdx}/watch-url`
+  - 응답: `data: { "watchUrl": "https://..." }`
+
+- **라이브 시청 이력 로깅 (`/w/symposium/{webinarIdx}/view`)**:
+  - `POST https://apis.medigate.net/w/symposium/{webinarIdx}/view`
+
+- **사전설문 참여 (`/w/symposium/{webinarIdx}/pre-poll`)**:
+  - `POST https://apis.medigate.net/w/symposium/{webinarIdx}/pre-poll`
+
+---
+
+## 7. 주요 상태 코드 및 Enum 정리
+
+### 7.1 세미나 진행 상태 (`ProcessState`)
 | 코드 | 상수명 | 설명 |
 | :---: | :--- | :--- |
 | `1` | `PROCESS_ENTER` | 입장하기 (라이브 방송 입장 가능) |
@@ -494,11 +645,12 @@
 | `7` | `PROCESS_END` | 방송 종료 |
 | `8` | `PROCESS_COMPLETED` | 세미나 진행 완료 |
 
-### 6.2 설문 상태 (`SurveyState`)
+### 7.2 설문 상태 (`SurveyState`)
 | 코드 | 상수명 | 설명 |
 | :---: | :--- | :--- |
 | `1` | `SURVEY_PROGRESS` | 설문 진행 중 (참여 가능) |
 | `2` | `SURVEY_COMPLETED` | 설문 참여 완료 |
 | `3` | `SURVEY_CLOSED` | 설문 마감 / 미제공 / 대상 아님 |
 | `5` | `SURVEY_UNOPENED` | 설문 미오픈 (진행 예정 / 설문 없음) |
+
 

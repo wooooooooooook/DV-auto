@@ -24,6 +24,7 @@ import * as intermdQuizTaskModule from '../tasks/intermd_quiz';
 import * as keymediAttendanceTaskModule from '../tasks/keymedi_attendance';
 import * as hmpAttendanceTaskModule from '../tasks/hmp_attendance';
 import * as docpleDailyTaskModule from '../tasks/docple_daily';
+import * as medigateApplyTaskModule from '../tasks/medigate_apply_symposium';
 import { sendOrUpdateTodayLinksNotification } from '../services/broadcast_today_links';
 import { sendToTopicSubscribers, sendHourlyTodayLinksToSubscribers } from '../services/subscription_service';
 import { shouldResumeSeminarMonitor } from '../services/channel_message_repository';
@@ -39,6 +40,7 @@ const INTERMD_QUIZ_CRON = process.env.INTERMD_QUIZ_CRON || '1 8 * * *';
 const DOCPLE_DAILY_CRON = process.env.DOCPLE_DAILY_CRON || '4 7 * * *';
 const KEYMEDI_ATTENDANCE_CRON = process.env.KEYMEDI_ATTENDANCE_CRON || '5 7 * * *';
 const HMP_ATTENDANCE_CRON = process.env.HMP_ATTENDANCE_CRON || '7 7 * * *';
+const MEDIGATE_APPLY_CRON = process.env.MEDIGATE_APPLY_CRON || '15 7 * * *';
 const BROADCAST_TODAY_LINKS_CRON = '0 0 9 * * *';
 const HOURLY_TODAY_LINKS_EARLY_CRON = '0 2 0 * * *';
 const HOURLY_TODAY_LINKS_CRON = '5 0 1-12 * * *';
@@ -485,6 +487,23 @@ const hmpAttendanceTask: Task = {
 };
 taskRegistry.registerTask(hmpAttendanceTask);
 scheduler.scheduleTaskCron(hmpAttendanceTask);
+
+const medigateApplyTask: Task = {
+  name: 'medigate_apply_symposium',
+  schedule: MEDIGATE_APPLY_CRON,
+  timezone: TIMEZONE,
+  run: async (ctx) => {
+    return await medigateApplyTaskModule.run(ctx);
+  },
+};
+taskRegistry.registerTask(medigateApplyTask);
+scheduler.scheduleTaskCron(medigateApplyTask);
+
+// 별칭 태스크 등록 (/medigate_apply)
+taskRegistry.registerTask({
+  name: 'medigate_apply',
+  run: async (ctx) => medigateApplyTask.run(ctx),
+});
 
 process.stdin.resume();
 function checkAndResumeTasks(): void {
