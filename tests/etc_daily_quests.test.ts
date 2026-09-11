@@ -118,4 +118,38 @@ describe('기타일일퀘스트 (etc_daily_quests) 통합 태스크 테스트', 
     expect(telegramSpy).toHaveBeenNthCalledWith(1, '🔑 [키메디 출석체크]');
     expect(telegramSpy).toHaveBeenNthCalledWith(2, '💊 [HMP 출석체크]');
   });
+
+  it('각 태스크의 포인트/캡슐 정보가 정상 집계되어 최종 요약 메시지에 포함되어야 한다', async () => {
+    vi.spyOn(keymediAttendanceTaskModule, 'run').mockResolvedValue({
+      success: true,
+      message: '🔑 [키메디 출석체크]',
+      options: { totalPoint: 5200 },
+    });
+
+    vi.spyOn(hmpAttendanceTaskModule, 'run').mockResolvedValue({
+      success: true,
+      message: '💊 [HMP 출석체크]',
+      options: { capsules: 350 },
+    });
+
+    vi.spyOn(medigateApplyTaskModule, 'run').mockResolvedValue({
+      success: true,
+      message: '🩺 [메디게이트]',
+      options: { usablePoint: 1000 },
+    });
+
+    vi.spyOn(utils, 'sendTelegram').mockResolvedValue(true);
+
+    const result = await etcDailyQuestsTask.run();
+
+    expect(result.success).toBe(true);
+    expect(result.message).toContain('키메디: ✅ 성공 (5,200P)');
+    expect(result.message).toContain('HMP: ✅ 성공 (350 캡슐)');
+    expect(result.message).toContain('메디게이트: ✅ 성공 (1,000P)');
+
+    const opts = result.options as { results: etcDailyQuestsTask.EtcDailyQuestsResults };
+    expect(opts.results.keymedi.point).toBe(5200);
+    expect(opts.results.hmp.capsules).toBe(350);
+    expect(opts.results.medigate.point).toBe(1000);
+  });
 });

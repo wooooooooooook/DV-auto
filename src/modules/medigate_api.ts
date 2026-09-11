@@ -103,6 +103,39 @@ export interface MedigateApplyItemResult {
   completeType?: string;
 }
 
+export interface MedigatePointSummary {
+  usablePoint: number;
+  usableMgPoint: number;
+  usableResearchPoint: number;
+  expiringPoint: number;
+  expiringStartYear?: string;
+  expiringEndYear?: string;
+  expiringBaseYear?: string;
+  [key: string]: unknown;
+}
+
+export interface MedigatePointHistoryItem {
+  grantDate?: string;
+  useDate?: string;
+  title?: string;
+  point?: number;
+  category?: string;
+  [key: string]: unknown;
+}
+
+export interface MedigatePointHistoryResult {
+  totalItems: number;
+  totalPages: number;
+  items: MedigatePointHistoryItem[];
+  [key: string]: unknown;
+}
+
+export interface MedigatePointFlowChartItem {
+  yyyymm: string;
+  grantPoint: number;
+  usedPoint: number;
+}
+
 export interface MedigateApplyWorkflowResult {
   success: boolean;
   message: string;
@@ -113,6 +146,7 @@ export interface MedigateApplyWorkflowResult {
   appliedCount: number;
   alreadyCount: number;
   failedCount: number;
+  pointSummary?: MedigatePointSummary | null;
   results: MedigateApplyItemResult[];
 }
 
@@ -579,6 +613,14 @@ export class MedigateClient {
       await new Promise((resolve) => setTimeout(resolve, 300));
     }
 
+    // MG포인트 요약 정보 조회
+    let pointSummary: MedigatePointSummary | null = null;
+    try {
+      pointSummary = await this.getPointSummary();
+    } catch (err) {
+      logger.warn('[Medigate] 포인트 요약 조회 실패:', err);
+    }
+
     return {
       success: true,
       message: '심포지움 신청 작업 완료',
@@ -589,7 +631,98 @@ export class MedigateClient {
       appliedCount,
       alreadyCount,
       failedCount,
+      pointSummary,
       results,
     };
+  }
+
+  /**
+   * MG포인트 요약 정보 조회 (총 사용가능, MG포인트, 리서치포인트, 소멸예정 등)
+   */
+  async getPointSummary(): Promise<MedigatePointSummary | null> {
+    const res = await this.authenticatedRequest<{
+      code: number;
+      message: string;
+      data?: MedigatePointSummary;
+    }>('w/point/mg/summary', {
+      method: 'GET',
+    });
+
+    if (res.status === 200 && res.data?.data) {
+      return res.data.data;
+    }
+    return null;
+  }
+
+  /**
+   * MG포인트 지급/적립 내역 조회
+   */
+  async getPointGrantHistory(
+    year: number = new Date().getFullYear(),
+    pageNo: number = 1,
+    pageSize: number = 20,
+  ): Promise<MedigatePointHistoryResult | null> {
+    const res = await this.authenticatedRequest<{
+      code: number;
+      message: string;
+      data?: MedigatePointHistoryResult;
+    }>('w/point/mg/grant', {
+      method: 'GET',
+      searchParams: {
+        year,
+        pageNo,
+        pageSize,
+      },
+    });
+
+    if (res.status === 200 && res.data?.data) {
+      return res.data.data;
+    }
+    return null;
+  }
+
+  /**
+   * MG포인트 사용 내역 조회
+   */
+  async getPointUsedHistory(
+    year: number = new Date().getFullYear(),
+    pageNo: number = 1,
+    pageSize: number = 20,
+  ): Promise<MedigatePointHistoryResult | null> {
+    const res = await this.authenticatedRequest<{
+      code: number;
+      message: string;
+      data?: MedigatePointHistoryResult;
+    }>('w/point/mg/used', {
+      method: 'GET',
+      searchParams: {
+        year,
+        pageNo,
+        pageSize,
+      },
+    });
+
+    if (res.status === 200 && res.data?.data) {
+      return res.data.data;
+    }
+    return null;
+  }
+
+  /**
+   * MG포인트 월별 추이 플로우 차트 조회
+   */
+  async getPointFlowChart(): Promise<MedigatePointFlowChartItem[]> {
+    const res = await this.authenticatedRequest<{
+      code: number;
+      message: string;
+      data?: { items?: MedigatePointFlowChartItem[] };
+    }>('w/point/mg/flow_chart', {
+      method: 'GET',
+    });
+
+    if (res.status === 200 && res.data?.data?.items) {
+      return res.data.data.items;
+    }
+    return [];
   }
 }

@@ -6,9 +6,9 @@ import * as logger from '../services/logger';
 import * as utils from '../modules/utils';
 
 export interface EtcDailyQuestsResults {
-  keymedi: { ok: boolean; error: string | null };
-  hmp: { ok: boolean; error: string | null };
-  medigate: { ok: boolean; error: string | null };
+  keymedi: { ok: boolean; error: string | null; point?: number };
+  hmp: { ok: boolean; error: string | null; capsules?: number };
+  medigate: { ok: boolean; error: string | null; point?: number };
 }
 
 /**
@@ -29,6 +29,9 @@ export async function run(ctx?: TaskContext): Promise<TaskResult> {
     logger.info('[기타일일퀘스트] 1/3 키메디 출석체크 시작');
     const keymediRes = await keymediAttendanceTaskModule.run(ctx);
     results.keymedi.ok = keymediRes.success !== false;
+    if (typeof keymediRes.options?.totalPoint === 'number') {
+      results.keymedi.point = keymediRes.options.totalPoint as number;
+    }
     if (keymediRes?.message) {
       await utils
         .sendTelegram(keymediRes.message)
@@ -48,6 +51,9 @@ export async function run(ctx?: TaskContext): Promise<TaskResult> {
     logger.info('[기타일일퀘스트] 2/3 HMP 출석체크 시작');
     const hmpRes = await hmpAttendanceTaskModule.run(ctx);
     results.hmp.ok = hmpRes.success !== false;
+    if (typeof hmpRes.options?.capsules === 'number') {
+      results.hmp.capsules = hmpRes.options.capsules as number;
+    }
     if (hmpRes?.message) {
       await utils
         .sendTelegram(hmpRes.message)
@@ -62,11 +68,14 @@ export async function run(ctx?: TaskContext): Promise<TaskResult> {
       .catch((e) => logger.error('[기타일일퀘스트] HMP 오류 텔레그램 발송 실패:', e));
   }
 
-  // 3. 메디게이트 심포지움 자동 신청
+  // 3. 메디게이트 심포지움 자동 신청 & 포인트 현황
   try {
     logger.info('[기타일일퀘스트] 3/3 메디게이트 심포지움 자동 신청 시작');
     const medigateRes = await medigateApplyTaskModule.run(ctx);
     results.medigate.ok = medigateRes.success !== false;
+    if (typeof medigateRes.options?.usablePoint === 'number') {
+      results.medigate.point = medigateRes.options.usablePoint as number;
+    }
     if (medigateRes?.message && !medigateRes.silent) {
       await utils
         .sendTelegram(medigateRes.message)
@@ -82,11 +91,18 @@ export async function run(ctx?: TaskContext): Promise<TaskResult> {
   }
 
   const allSuccess = results.keymedi.ok && results.hmp.ok && results.medigate.ok;
-  const statusSummary = [
-    `키메디: ${results.keymedi.ok ? '✅ 성공' : '❌ 실패'}`,
-    `HMP: ${results.hmp.ok ? '✅ 성공' : '❌ 실패'}`,
-    `메디게이트: ${results.medigate.ok ? '✅ 성공' : '❌ 실패'}`,
-  ].join(' | ');
+
+  const keymediStatus = results.keymedi.ok
+    ? `키메디: ✅ 성공${results.keymedi.point !== undefined ? ` (${results.keymedi.point.toLocaleString()}P)` : ''}`
+    : '키메디: ❌ 실패';
+  const hmpStatus = results.hmp.ok
+    ? `HMP: ✅ 성공${results.hmp.capsules !== undefined ? ` (${results.hmp.capsules.toLocaleString()} 캡슐)` : ''}`
+    : 'HMP: ❌ 실패';
+  const medigateStatus = results.medigate.ok
+    ? `메디게이트: ✅ 성공${results.medigate.point !== undefined ? ` (${results.medigate.point.toLocaleString()}P)` : ''}`
+    : '메디게이트: ❌ 실패';
+
+  const statusSummary = [keymediStatus, hmpStatus, medigateStatus].join(' | ');
 
   const summaryMsg = allSuccess
     ? `🏁 기타 일일 퀘스트(키메디, HMP, 메디게이트)가 모두 성공적으로 완료되었습니다.\n(${statusSummary})`

@@ -30,8 +30,22 @@ export function formatMedigateApplyMessage(result: MedigateApplyWorkflowResult):
     '🩺 [메디게이트 웹 심포지움 자동 신청]',
     `📅 일시: ${kstDateStr}`,
     userText ? `👤 계정: ${userText}` : '',
-    `📊 현황: 전체 ${result.totalFound}개 중 신청가능 ${result.targetCount}개 (신규 신청 ${result.appliedCount}건 / 기신청 ${result.alreadyCount}건 / 실패 ${result.failedCount}건)`,
   ].filter(Boolean);
+
+  if (result.pointSummary) {
+    const usable = result.pointSummary.usablePoint.toLocaleString();
+    const mg = result.pointSummary.usableMgPoint.toLocaleString();
+    const resP = result.pointSummary.usableResearchPoint.toLocaleString();
+    let pointLine = `💰 보유 포인트: ${usable} P (MG: ${mg}P / 리서치: ${resP}P)`;
+    if (result.pointSummary.expiringPoint > 0) {
+      pointLine += ` (소멸예정: ${result.pointSummary.expiringPoint.toLocaleString()}P)`;
+    }
+    lines.push(pointLine);
+  }
+
+  lines.push(
+    `📊 현황: 전체 ${result.totalFound}개 중 신청가능 ${result.targetCount}개 (신규 신청 ${result.appliedCount}건 / 기신청 ${result.alreadyCount}건 / 실패 ${result.failedCount}건)`,
+  );
 
   // 새로 신청된 심포지움 목록
   const newlyApplied = result.results.filter((r) => r.success && !r.alreadyApplied);
@@ -86,6 +100,7 @@ export async function run(ctx?: TaskContext): Promise<TaskResult> {
       alreadyCount: result.alreadyCount,
       failedCount: result.failedCount,
       targetCount: result.targetCount,
+      usablePoint: result.pointSummary?.usablePoint,
       shouldNotify,
     },
     silent: !shouldNotify,

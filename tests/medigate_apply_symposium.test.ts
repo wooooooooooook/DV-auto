@@ -53,6 +53,17 @@ describe('Medigate Apply Symposium Tests', () => {
     expect(msg).toContain('✅ [신규 신청 완료: 2건]');
     expect(msg).toContain('Xeljanz in AS: Expanding Treatment Options in Clinical Practice');
     expect(msg).toContain('https://new.medigate.net/symposium/4941');
+
+    const msgWithPoint = formatMedigateApplyMessage({
+      ...mockResult,
+      pointSummary: {
+        usablePoint: 5000,
+        usableMgPoint: 3000,
+        usableResearchPoint: 2000,
+        expiringPoint: 0,
+      },
+    });
+    expect(msgWithPoint).toContain('💰 보유 포인트: 5,000 P (MG: 3,000P / 리서치: 2,000P)');
   });
 
   it('메디게이트 심포지움 신청 결과 메시지 포맷팅 테스트 - 모두 기신청된 경우', () => {
@@ -125,5 +136,88 @@ describe('Medigate Apply Symposium Tests', () => {
     expect(res.message).toContain('테스트 심포지움');
     expect(res.options?.appliedCount).toBe(1);
     expect(res.silent).toBe(false);
+  });
+
+  it('MedigateClient 포인트 조회 메서드 단위 테스트', async () => {
+    const client = new MedigateClient({
+      accessToken: 'test-token',
+      user: {
+        uId: 'testuser',
+        uName: '테스터',
+      },
+    });
+
+    vi.spyOn(
+      client as unknown as { authenticatedRequest: (...args: unknown[]) => Promise<unknown> },
+      'authenticatedRequest',
+    ).mockImplementation(async (...args: unknown[]) => {
+      const path = args[0] as string;
+      if (path === 'w/point/mg/summary') {
+        return {
+          status: 200,
+          data: {
+            code: 200,
+            data: {
+              usablePoint: 5000,
+              usableMgPoint: 3000,
+              usableResearchPoint: 2000,
+              expiringPoint: 0,
+            },
+          },
+        };
+      }
+      if (path === 'w/point/mg/grant') {
+        return {
+          status: 200,
+          data: {
+            code: 200,
+            data: {
+              totalItems: 1,
+              totalPages: 1,
+              items: [
+                {
+                  grantDate: '2026-09-10',
+                  title: '심포지움 설문 참여',
+                  point: 1000,
+                },
+              ],
+            },
+          },
+        };
+      }
+      if (path === 'w/point/mg/flow_chart') {
+        return {
+          status: 200,
+          data: {
+            code: 200,
+            data: {
+              items: [
+                {
+                  yyyymm: '2026.09',
+                  grantPoint: 1000,
+                  usedPoint: 0,
+                },
+              ],
+            },
+          },
+        };
+      }
+      return { status: 404 };
+    });
+
+    const summary = await client.getPointSummary();
+    expect(summary).not.toBeNull();
+    expect(summary?.usablePoint).toBe(5000);
+    expect(summary?.usableMgPoint).toBe(3000);
+    expect(summary?.usableResearchPoint).toBe(2000);
+
+    const grants = await client.getPointGrantHistory(2026, 1, 20);
+    expect(grants).not.toBeNull();
+    expect(grants?.totalItems).toBe(1);
+    expect(grants?.items[0]?.point).toBe(1000);
+
+    const flowChart = await client.getPointFlowChart();
+    expect(flowChart).toHaveLength(1);
+    expect(flowChart[0]?.yyyymm).toBe('2026.09');
   });
 });

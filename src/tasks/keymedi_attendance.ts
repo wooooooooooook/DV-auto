@@ -108,6 +108,9 @@ export async function run(ctx?: TaskContext): Promise<TaskResult> {
     return {
       success: result.success && result.attendance.status !== 'FAILED',
       message,
+      options: {
+        totalPoint: result.totalPoint,
+      },
     };
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);

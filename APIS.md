@@ -706,7 +706,105 @@
    - 분석 결과 유형에 따라 `src/tasks/medigate_watch_symposium.ts` 구현:
      - **유형 A (주기적 Heartbeat HTTP API)**: Node.js 타이머로 일정 시간 동안 주기적 HTTP 요청 전송.
      - **유형 B (WebSocket 세션 유지)**: Node.js `ws` 클라이언트로 접속 후 지정된 시간(예: 30분~1시간) 동안 소켓 연결 유지.
-     - **유형 C (입장/퇴장 시각 기반)**: 입장 API 호출 후 일정 대기 시간 뒤 퇴장 API 호출.
+---
+
+### 6.6 포인트 (MG포인트) API
+- **마이페이지 포인트 URL**: `https://new.medigate.net/mypage/mgpoint`
+- **공통 인증 헤더**: `Authorization: Bearer <accessToken>`
+
+#### 1) MG포인트 요약 조회 (`/w/point/mg/summary`)
+- **Method / URL**: `GET https://apis.medigate.net/w/point/mg/summary`
+- **호출 위치**: `src/modules/medigate_api.ts` (`getPointSummary`)
+- **헤더**:
+  - `Authorization`: `Bearer <accessToken>`
+  - `Origin`: `https://new.medigate.net`
+  - `Referer`: `https://new.medigate.net/mypage/mgpoint`
+- **응답 (JSON)**:
+  ```json
+  {
+    "code": 200,
+    "data": {
+      "usablePoint": 0,
+      "usableMgPoint": 0,
+      "usableResearchPoint": 0,
+      "expiringPoint": 0,
+      "expiringStartYear": "2021",
+      "expiringEndYear": "2021",
+      "expiringBaseYear": "2027"
+    }
+  }
+  ```
+- **주요 필드**:
+  - `usablePoint`: 총 사용 가능 포인트 (`usableMgPoint` + `usableResearchPoint`)
+  - `usableMgPoint`: 사용 가능 MG포인트 (이벤트/웨비나/활동 등)
+  - `usableResearchPoint`: 사용 가능 서베이/리서치 포인트
+  - `expiringPoint`: 당해 소멸 예정 포인트
+
+#### 2) MG포인트 지급/적립 내역 (`/w/point/mg/grant`)
+- **Method / URL**: `GET https://apis.medigate.net/w/point/mg/grant?year={year}&pageSize={pageSize}&pageNo={pageNo}`
+- **호출 위치**: `src/modules/medigate_api.ts` (`getPointGrantHistory`)
+- **Query Params**:
+  - `year`: 조회 연도 (기본값: 현재 KST 연도)
+  - `pageSize`: 페이지당 건수 (기본값: `20`)
+  - `pageNo`: 페이지 번호 (기본값: `1`)
+- **응답 (JSON)**:
+  ```json
+  {
+    "code": 200,
+    "data": {
+      "totalItems": 0,
+      "totalPages": 0,
+      "items": [
+        {
+          "grantDate": "2026-09-01",
+          "title": "...",
+          "point": 1000,
+          "category": "..."
+        }
+      ]
+    }
+  }
+  ```
+
+#### 3) MG포인트 사용 내역 (`/w/point/mg/used`)
+- **Method / URL**: `GET https://apis.medigate.net/w/point/mg/used?year={year}&pageSize={pageSize}&pageNo={pageNo}`
+- **호출 위치**: `src/modules/medigate_api.ts` (`getPointUsedHistory`)
+- **Query Params**: `year`, `pageSize`, `pageNo`
+- **응답 (JSON)**:
+  ```json
+  {
+    "code": 200,
+    "data": {
+      "totalItems": 0,
+      "totalPages": 0,
+      "items": []
+    }
+  }
+  ```
+
+#### 4) MG포인트 전환/교환 내역 (`/w/point/mg/exchange`)
+- **Method / URL**: `GET https://apis.medigate.net/w/point/mg/exchange?pageSize={pageSize}&pageNo={pageNo}`
+- **호출 위치**: `src/modules/medigate_api.ts` (`getPointExchangeHistory`)
+- **Query Params**: `pageSize`, `pageNo`
+
+#### 5) MG포인트 월별 추이 플로우차트 (`/w/point/mg/flow_chart`)
+- **Method / URL**: `GET https://apis.medigate.net/w/point/mg/flow_chart`
+- **호출 위치**: `src/modules/medigate_api.ts` (`getPointFlowChart`)
+- **응답 (JSON)**:
+  ```json
+  {
+    "code": 200,
+    "data": {
+      "items": [
+        {
+          "yyyymm": "2026.09",
+          "grantPoint": 0,
+          "usedPoint": 0
+        }
+      ]
+    }
+  }
+  ```
 
 ---
 

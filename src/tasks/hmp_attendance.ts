@@ -59,6 +59,9 @@ export async function run(_ctx?: TaskContext): Promise<TaskResult> {
     return {
       success: result.success && result.attendance.status !== 'FAILED',
       message,
+      options: {
+        capsules: result.userInfo?.capsules,
+      },
     };
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);
