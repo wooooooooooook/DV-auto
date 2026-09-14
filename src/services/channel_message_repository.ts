@@ -225,7 +225,9 @@ export function isSeminarStatusMessageText(text?: string | null, periodName?: st
 
   return (
     (text.includes('🔔') || text.includes('🏁')) &&
-    (text.includes('점심세미나') ||
+    (text.includes('아침세미나') ||
+      text.includes('아침 세미나') ||
+      text.includes('점심세미나') ||
       text.includes('점심 세미나') ||
       text.includes('저녁세미나') ||
       text.includes('저녁 세미나'))

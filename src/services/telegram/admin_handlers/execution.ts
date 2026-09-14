@@ -528,6 +528,45 @@ export function setupExecutionCommands(adminBot: Telegraf): void {
     },
   );
 
+  adminBot.command('monitor_morning_seminar_now', async (ctx) => {
+    logger.info('User requested to run monitor_morning_seminars now', { from: ctx.from?.username });
+    const task = taskRegistry.getByName('monitor_morning_seminars');
+    if (!task) {
+      logger.error('monitor_morning_seminars task not found, cannot run');
+      return replyWithSplit(ctx, 'monitor_morning_seminars task not found!');
+    }
+
+    try {
+      runner
+        .runTask(task)
+        .then(async (result) => {
+          if (result && typeof result === 'object' && (result as { message?: string }).message) {
+            await replyWithSplit(
+              ctx,
+              (result as { message: string }).message,
+              (result as { options?: Record<string, unknown> }).options as Parameters<Context['reply']>[1],
+            );
+            if (
+              (result as { imagePath?: string }).imagePath &&
+              fsSync.existsSync((result as { imagePath: string }).imagePath)
+            ) {
+              await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
+              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
+            }
+          } else if (typeof result === 'string') {
+            await replyWithSplit(ctx, result);
+          }
+        })
+        .catch((e) => {
+          const message = e instanceof Error ? e.message : String(e);
+          replyWithSplit(ctx, `monitor_morning_seminars failed: ${message}`);
+        });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      replyWithSplit(ctx, `Failed to start monitor_morning_seminars: ${message}`);
+    }
+  });
+
   adminBot.command('monitor_lunch_seminar_now', async (ctx) => {
     logger.info('User requested to run monitor_lunch_seminars now', { from: ctx.from?.username });
     const task = taskRegistry.getByName('monitor_lunch_seminars');

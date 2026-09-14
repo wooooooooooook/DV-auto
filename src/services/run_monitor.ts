@@ -3,16 +3,18 @@ import dotenv from 'dotenv';
 import { chromium, type Browser, type BrowserContext } from 'playwright';
 import * as utils from '../modules/utils';
 import * as telegram from './telegram';
+import * as monitorMorningTask from '../tasks/monitor_morning_seminars';
 import * as monitorLunchTask from '../tasks/monitor_lunch_seminars';
 import * as monitorDinnerTask from '../tasks/monitor_dinner_seminars';
 
 dns.setDefaultResultOrder('ipv4first');
 dotenv.config();
 
-type MonitorTaskKey = 'lunch' | 'dinner';
+type MonitorTaskKey = 'morning' | 'lunch' | 'dinner';
 
 const HEADLESS = (process.env.HEADLESS || 'true').toLowerCase() === 'true';
 const MONITOR_TASKS: Record<MonitorTaskKey, typeof monitorLunchTask> = {
+  morning: monitorMorningTask,
   lunch: monitorLunchTask,
   dinner: monitorDinnerTask,
 };
@@ -78,8 +80,8 @@ async function runMonitor(taskKey: MonitorTaskKey): Promise<void> {
 }
 
 const taskKey = process.argv[2];
-if (taskKey !== 'lunch' && taskKey !== 'dinner') {
-  console.error('Usage: ts-node src/services/run_monitor.ts <lunch|dinner>');
+if (taskKey !== 'morning' && taskKey !== 'lunch' && taskKey !== 'dinner') {
+  console.error('Usage: ts-node src/services/run_monitor.ts <morning|lunch|dinner>');
   process.exit(1);
 }
 

@@ -12,6 +12,7 @@ import * as attendanceTask from '../tasks/attendance';
 import * as applySeminarTask from '../tasks/apply_seminar';
 import * as todayQuizTaskModule from '../tasks/today_quiz';
 import * as todayLinksTaskModule from '../tasks/today_links';
+import * as monitorMorningSeminars from '../tasks/monitor_morning_seminars';
 import * as monitorLunchSeminars from '../tasks/monitor_lunch_seminars';
 import * as monitorDinnerSeminars from '../tasks/monitor_dinner_seminars';
 import * as pointExchangeTask from '../tasks/point_exchange';
@@ -350,6 +351,19 @@ const runSeminarQuizTask: Task = {
   },
 };
 taskRegistry.registerTask(runSeminarQuizTask);
+const monitorMorningSeminarsTask: Task = {
+  name: 'monitor_morning_seminars',
+  run: async (ctx) => {
+    await applySeminarTask
+      .applySeminars()
+      .catch((err) =>
+        logger.warn('monitor_morning_seminars: apply_seminars 선실행 실패, 모니터링은 계속 진행합니다', err),
+      );
+    return await monitorMorningSeminars.run(ctx);
+  },
+};
+taskRegistry.registerTask(monitorMorningSeminarsTask);
+
 const monitorLunchSeminarsTask: Task = {
   name: 'monitor_lunch_seminars',
   run: async (ctx) => {
@@ -533,6 +547,12 @@ taskRegistry.registerTask({
 
 process.stdin.resume();
 function checkAndResumeTasks(): void {
+  if (shouldResumeSeminarMonitor('아침')) {
+    logger.info('공지방 상태 감지: 아침 세미나 모니터링을 autoResume합니다.');
+    runTask(monitorMorningSeminarsTask, { isAutoResume: true }).catch((err) =>
+      logger.error('아침 세미나 모니터링 autoResume 실패:', err),
+    );
+  }
   if (shouldResumeSeminarMonitor('점심')) {
     logger.info('공지방 상태 감지: 점심 세미나 모니터링을 autoResume합니다.');
     runTask(monitorLunchSeminarsTask, { isAutoResume: true }).catch((err) =>

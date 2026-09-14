@@ -68,19 +68,17 @@ export function isSeminarActiveOrEnded(seminar: SeminarListItem | RawSeminarData
 }
 
 /**
- * 세미나 시간대(점심/저녁)를 판별합니다.
+ * 세미나 시간대(아침/점심/저녁)를 판별합니다.
  */
-export function getSeminarPeriod(seminar: SeminarListItem | RawSeminarData): '점심' | '저녁' {
-  if (seminar.nightTime !== undefined) {
-    return seminar.nightTime ? '저녁' : '점심';
-  }
-
+export function getSeminarPeriod(seminar: SeminarListItem | RawSeminarData): '아침' | '점심' | '저녁' {
   if (seminar.time) {
     const startHM = seminar.time.split('~')[0]?.trim();
     if (startHM && startHM.includes(':')) {
       const startHour = parseInt(startHM.split(':')[0], 10);
       if (Number.isFinite(startHour)) {
-        return startHour >= 16 ? '저녁' : '점심';
+        if (startHour >= 16) return '저녁';
+        if (startHour >= 11) return '점심';
+        return '아침';
       }
     }
   }
@@ -92,11 +90,17 @@ export function getSeminarPeriod(seminar: SeminarListItem | RawSeminarData): '�
       const iso = clean.includes('+') || clean.endsWith('Z') ? clean : `${clean.replace(' ', 'T')}+09:00`;
       const hour = new Date(iso).getHours();
       if (Number.isFinite(hour)) {
-        return hour >= 16 ? '저녁' : '점심';
+        if (hour >= 16) return '저녁';
+        if (hour >= 11) return '점심';
+        return '아침';
       }
     } catch {
       /* ignore */
     }
+  }
+
+  if (seminar.nightTime !== undefined) {
+    return seminar.nightTime ? '저녁' : '점심';
   }
 
   return '점심';
@@ -115,20 +119,50 @@ export function isTaskRunning(taskName: string, ttlMs = DEFAULT_LOCK_TTL_MS): bo
 }
 
 /**
- * 세미나 목록을 검사하여 점심/저녁 세미나 모니터링이 필요한 경우 백그라운드로 트리거합니다.
+ * 세미나 목록을 검사하여 아침/점심/저녁 세미나 모니터링이 필요한 경우 백그라운드로 트리거합니다.
  */
 export async function checkAndTriggerSeminarMonitors(
   seminars: (SeminarListItem | RawSeminarData)[],
   options: { now?: Date; targetDate?: string } = {},
-): Promise<{ triggeredLunch: boolean; triggeredDinner: boolean }> {
+): Promise<{ triggeredMorning: boolean; triggeredLunch: boolean; triggeredDinner: boolean }> {
   const targetDate = options.targetDate || (options.now ? getSeoulDateString(options.now) : getSeoulDateString());
   const nowMs = options.now ? options.now.getTime() : Date.now();
 
   const todaySeminars = seminars.filter((s) => s.date === targetDate);
+  let triggeredMorning = false;
   let triggeredLunch = false;
   let triggeredDinner = false;
 
-  // 1. 점심 세미나 트리거 검사
+  // 1. 아침 세미나 트리거 검사
+  const morningSeminars = todaySeminars.filter((s) => getSeminarPeriod(s) === '아침');
+  const hasActiveOrEndedMorning = morningSeminars.some((s) => isSeminarActiveOrEnded(s, nowMs));
+  const isMorningNoticeCompleted = isSeminarNoticeCompleted('아침', targetDate);
+  const isMorningRunning = isTaskRunning('monitor_morning_seminars');
+
+  if (morningSeminars.length > 0) {
+    if (hasActiveOrEndedMorning && !isMorningNoticeCompleted && !isMorningRunning) {
+      const morningTask = taskRegistry.getByName('monitor_morning_seminars');
+      if (morningTask) {
+        logger.info(
+          `[아침세미나 트리거] 입장 가능/진행 중인 세미나 감지 -> monitor_morning_seminars 시작 (세미나: ${morningSeminars.length}건, activeOrEnded: true, noticeCompleted: false, running: false)`,
+        );
+        triggeredMorning = true;
+        runTask(morningTask).catch((err) => {
+          logger.error('monitor_morning_seminars 비동기 트리거 실패:', err);
+        });
+      }
+    } else if (hasActiveOrEndedMorning) {
+      if (isMorningRunning && isMorningNoticeCompleted) {
+        logger.info(`[아침세미나 트리거 스킵] 이미 실행 중 + 공지 완료 (running: true, noticeCompleted: true)`);
+      } else if (isMorningRunning) {
+        logger.info(`[아침세미나 트리거 스킵] 이미 실행 중 (running: true, noticeCompleted: false)`);
+      } else if (isMorningNoticeCompleted) {
+        logger.info(`[아침세미나 트리거 스킵] 공지 이미 완료됨 (running: false, noticeCompleted: true)`);
+      }
+    }
+  }
+
+  // 2. 점심 세미나 트리거 검사
   const lunchSeminars = todaySeminars.filter((s) => getSeminarPeriod(s) === '점심');
   const hasActiveOrEndedLunch = lunchSeminars.some((s) => isSeminarActiveOrEnded(s, nowMs));
   const isLunchNoticeCompleted = isSeminarNoticeCompleted('점심', targetDate);
@@ -157,7 +191,7 @@ export async function checkAndTriggerSeminarMonitors(
     }
   }
 
-  // 2. 저녁 세미나 트리거 검사
+  // 3. 저녁 세미나 트리거 검사
   const dinnerSeminars = todaySeminars.filter((s) => getSeminarPeriod(s) === '저녁');
   const hasActiveOrEndedDinner = dinnerSeminars.some((s) => isSeminarActiveOrEnded(s, nowMs));
   const isDinnerNoticeCompleted = isSeminarNoticeCompleted('저녁', targetDate);
@@ -186,5 +220,5 @@ export async function checkAndTriggerSeminarMonitors(
     }
   }
 
-  return { triggeredLunch, triggeredDinner };
+  return { triggeredMorning, triggeredLunch, triggeredDinner };
 }

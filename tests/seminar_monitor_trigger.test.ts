@@ -202,7 +202,48 @@ describe('seminar_monitor_trigger (10분 주기 모니터링 트리거 및 상�
     ).toBe(false);
   });
 
-  it('getSeminarPeriod 시간대 판정 검증', () => {
+  it('getSeminarPeriod 시간대 판정 검증 (아침/점심/저녁)', () => {
+    // 1. 아침 세미나 (06:00 ~ 10:59)
+    expect(
+      getSeminarPeriod({
+        url: '',
+        name: '',
+        date: '2026-08-28',
+        time: '07:00~08:00',
+        currentCount: '0',
+        totalCount: '0',
+        nightTime: false,
+        isAdvancedSurvey: false,
+      }),
+    ).toBe('아침');
+
+    expect(
+      getSeminarPeriod({
+        url: '',
+        name: '',
+        date: '2026-08-28',
+        time: '09:30~10:30',
+        currentCount: '0',
+        totalCount: '0',
+        nightTime: false,
+        isAdvancedSurvey: false,
+      }),
+    ).toBe('아침');
+
+    expect(
+      getSeminarPeriod({
+        url: '',
+        name: '',
+        date: '2026-08-28',
+        startDt: '2026-08-28 10:00:00',
+        currentCount: '0',
+        totalCount: '0',
+        nightTime: false,
+        isAdvancedSurvey: false,
+      }),
+    ).toBe('아침');
+
+    // 2. 점심 세미나 (11:00 ~ 15:59)
     expect(
       getSeminarPeriod({
         url: '',
@@ -216,6 +257,7 @@ describe('seminar_monitor_trigger (10분 주기 모니터링 트리거 및 상�
       }),
     ).toBe('점심');
 
+    // 3. 저녁 세미나 (16:00 ~ 또는 nightTime: true)
     expect(
       getSeminarPeriod({
         url: '',
@@ -228,11 +270,33 @@ describe('seminar_monitor_trigger (10분 주기 모니터링 트리거 및 상�
         isAdvancedSurvey: false,
       }),
     ).toBe('저녁');
+
+    expect(
+      getSeminarPeriod({
+        url: '',
+        name: '',
+        date: '2026-08-28',
+        time: '19:00~20:00',
+        currentCount: '0',
+        totalCount: '0',
+        nightTime: false,
+        isAdvancedSurvey: false,
+      }),
+    ).toBe('저녁');
   });
 
-  it('checkAndTriggerSeminarMonitors가 입장 가능 세미나 감지 시 점심/저녁 모니터를 시작해야 한다', async () => {
+  it('checkAndTriggerSeminarMonitors가 입장 가능 세미나 감지 시 아침/점심/저녁 모니터를 시작해야 한다', async () => {
+    let _morningRan = false;
     let _lunchRan = false;
     let _dinnerRan = false;
+
+    taskRegistry.registerTask({
+      name: 'monitor_morning_seminars',
+      run: async () => {
+        _morningRan = true;
+        return true;
+      },
+    });
 
     taskRegistry.registerTask({
       name: 'monitor_lunch_seminars',
@@ -252,8 +316,20 @@ describe('seminar_monitor_trigger (10분 주기 모니터링 트리거 및 상�
 
     const mockSeminars: SeminarListItem[] = [
       {
+        seminarId: '300',
+        name: '아침 라이브 세미나',
+        url: 'https://example.com/300',
+        date: '2026-08-28',
+        time: '08:00~09:00',
+        currentCount: '10',
+        totalCount: '100',
+        nightTime: false,
+        isAdvancedSurvey: false,
+        processState: ProcessState.PROCESS_ENTER, // 입장가능
+      },
+      {
         seminarId: '301',
-        name: '점심 라이브 세미나',
+        name: '점심 미래 세미나',
         url: 'https://example.com/301',
         date: '2026-08-28',
         time: '12:30~13:30',
@@ -261,7 +337,7 @@ describe('seminar_monitor_trigger (10분 주기 모니터링 트리거 및 상�
         totalCount: '100',
         nightTime: false,
         isAdvancedSurvey: false,
-        processState: ProcessState.PROCESS_ENTER, // 입장가능
+        processState: ProcessState.PROCESS_CANCEL, // 아직 미시작
       },
       {
         seminarId: '302',
@@ -277,10 +353,11 @@ describe('seminar_monitor_trigger (10분 주기 모니터링 트리거 및 상�
       },
     ];
 
-    const testNow = new Date('2026-08-28T12:30:00+09:00');
+    const testNow = new Date('2026-08-28T08:05:00+09:00');
     const result = await checkAndTriggerSeminarMonitors(mockSeminars, { now: testNow, targetDate: '2026-08-28' });
 
-    expect(result.triggeredLunch).toBe(true);
+    expect(result.triggeredMorning).toBe(true);
+    expect(result.triggeredLunch).toBe(false);
     expect(result.triggeredDinner).toBe(false);
   });
 
