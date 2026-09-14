@@ -1124,6 +1124,20 @@ export class MedigateClient {
       } else {
         logger.warn(`[Medigate] [${webinarIdx}] Heartbeat 전송 실패: ${hbRes.message}`);
       }
+
+      // 세미나 방송 종료 여부 검사 (On-Air 상태 해제 시 안전하게 조기 종료)
+      try {
+        const currentDetail = await this.getSymposiumDetail(webinarIdx);
+        if (!currentDetail || currentDetail.webinar?.status !== 'ING') {
+          const statusDesc = currentDetail?.webinar?.status || '종료(CLOSED)';
+          logger.info(
+            `[Medigate] [${webinarIdx}] 심포지움 방송 종료 감지 (상태: ${statusDesc}). 시청 세션을 즉시 안전하게 종료합니다.`,
+          );
+          break;
+        }
+      } catch {
+        // 일시적 네트워크 오류 시 루프 유지
+      }
     }
 
     // 4. 퇴장 Heartbeat (beforeunload 이벤트에 상응)

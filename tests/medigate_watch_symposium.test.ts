@@ -264,4 +264,39 @@ describe('Medigate Watch Symposium Tests', () => {
     expect(res.success).toBe(true);
     expect(watchSpy).toHaveBeenCalledWith(5011, expect.objectContaining({ durationMinutes: 20 }));
   });
+
+  it('MedigateClient.watchSymposiumLive 방송 도중 종료 시 조기 종료 테스트', async () => {
+    const client = new MedigateClient({
+      accessToken: 'test-token',
+    });
+
+    vi.spyOn(client, 'enterSymposiumLive').mockResolvedValueOnce({
+      success: true,
+      message: '세션 초기화 성공',
+      session: {
+        webinarIdx: 5011,
+        subject: 'Semaglutide 웨비나',
+        watchUrl: 'https://sem-live.nownnow.com',
+        platform: 'nownnow',
+      },
+    });
+
+    vi.spyOn(client, 'sendSymposiumHeartbeat').mockResolvedValue({
+      success: true,
+      status: 200,
+      message: '성공',
+    });
+
+    // 루프 내 첫 Heartbeat 후 방송 종료 상태(CLOSED 또는 null) 반환
+    vi.spyOn(client, 'getSymposiumDetail').mockResolvedValue(null);
+
+    const watchRes = await client.watchSymposiumLive(5011, {
+      durationMinutes: 60,
+      intervalSeconds: 0.02,
+    });
+
+    expect(watchRes.success).toBe(true);
+    expect(watchRes.webinarIdx).toBe(5011);
+    expect(watchRes.durationMinutes).toBeLessThan(1);
+  });
 });
