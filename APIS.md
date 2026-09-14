@@ -677,35 +677,53 @@
 
 ---
 
-### 6.5 실시간(On-Air) 웨비나 시청 세션 분석 가이드 (Next Step)
-> **목적**: 웨비나가 실제로 On-Air(`status === 'ING'`) 진행 중일 때, 시청 시간(체류 시간)이 기록되는 플레이어 세션 메커니즘을 분석하고 자동화하기 위한 단계별 수행 절차입니다.
+### 6.5 실시간(On-Air) 웨비나 시청 세션 및 체류시간(Heartbeat) 기록 API
+> **설명**: 메디게이트 웹 심포지움이 On-Air(`status === 'ING'`) 진행 중일 때 시청 세션을 발급받고, 실제 체류 시간(시청 시간)을 증명하는 Heartbeat를 주기적으로 전송하여 출석 및 시청을 자동 완료하는 메커니즘입니다.
 
-#### [분석 대상 일정]
-- 가장 가까운 신청 완료 심포지움:
-  - **Idx 4941**: `2026.09.14 (월) 18:00 ~ 20:50` (Xeljanz in AS)
-  - **Idx 5011**: `2026.09.14 (월) 19:00 ~ 20:30` (Semaglutide)
+#### 1) nownnow 스트리밍 플랫폼 세션 획득
+- **시청 URL 구조**:
+  - `GET https://apis.medigate.net/w/symposium/{webinarIdx}/watch-url`에서 반환되는 URL:
+    - 예: `https://{aspCode}.nownnow.com?ememer_seq={ememer_seq}&webinar_seq={webinar_seq}`
+- **세션 진입 흐름**:
+  1. `GET https://{aspCode}.nownnow.com?...` 호출 -> `302 Found` 리다이렉트
+  2. `Location: https://webinar.nownnow.com/aspservice/aspController.php?...` 이동 및 세션 쿠키(`Set-Cookie: webinar=...; domain=.nownnow.com`) 수신
+  3. `aspController.php`에서 `location.href='./include/webinar/room/room_{aspCode}.php?play_type=live'` 수신
+  4. `room_{aspCode}.php` 페이지 HTML에서 Heartbeat 추적 파라미터 및 설문 iframe URL 파싱:
+     - `agent`: "medigate"
+     - `nAspNo`: 웨비나 번호 (예: "477")
+     - `hAspCode`: ASP 코드 (예: "sem-live")
+     - `userid`: 고유 식별자 (예: "477_1789380106890")
+     - `username`: 회원 식별 번호 (예: "0167538")
+     - `connType`: "PC"
+     - `sess_id`: 세션 아이디 (쿠키 webinar 값)
+     - `nUserIdn`: 유저 식별 인덱스 (예: "1716398")
+     - `webinar_seq`: 심포지움 인덱스 (예: "5011")
+     - `webinarTitle`: "live" (다시보기: "replay")
+     - 설문 iframe URL: `//att.nownsurvey.com/att/intro/{aspCode}/eno/{username}`
 
-#### [단계별 분석 작업]
-1. **On-Air 상태 확인 및 `watchUrl` 획득**:
-   - 방송 시작 약 10~15분 전부터 심포지움 상태가 `APPLY`에서 `ING`(On-Air)로 변경됨.
-   - `GET https://apis.medigate.net/w/symposium/{webinarIdx}/watch-url` 호출하여 `data.watchUrl` 획득.
-   - 발급된 URL의 도메인(예: `live.medigate.net`, 스트리밍 전문 솔루션 등) 및 쿼리 파라미터(인증 토큰, 회원 식별값) 구조 기록.
-2. **네트워크 트래픽(HAR/DevTools) 캡처**:
-   - 브라우저 개발자 도구(F12) Network 탭 설정:
-     - `Preserve log` 체크 (페이지 이동 시에도 로그 유지)
-     - `Disable cache` 체크
-   - `watchUrl`로 진입한 뒤 5~10분간 시청을 유지하며 발생하는 요청 관찰:
-     - **WebSocket(WS)**: 연결된 소켓이 있는지, 주기적 ping/pong 또는 시청 시간 측정 프레임이 오가는지 확인.
-     - **Heartbeat/Ping (Fetch/XHR)**: `/heartbeat`, `/ping`, `/stay`, `/watch-time`, `/log` 등 30초~1분 주기의 HTTP 주기적 요청 필터링.
-     - **종료 이벤트 (Beacon/Unload)**: 브라우저 탭/창을 닫을 때 `navigator.sendBeacon`이나 `/leave`, `/exit`, `/duration` 요청 발생 여부 확인.
-3. **플레이어 스크립트(JS) 리버스 엔지니어링**:
-   - 플레이어 페이지의 소스코드 및 핵심 자바스크립트 번들 파일 다운로드.
-   - 키워드 검색: `interval`, `heartbeat`, `sendBeacon`, `ws`, `socket`, `watchTime`, `duration`, `timeUpdate`, `progress`.
-   - 시청시간을 로컬 브라우저에서 측정해 서버로 보고하는지, 서버 측 소켓 연결 시간으로 계산하는지 규명.
-4. **자동화 태스크 구현 연동**:
-   - 분석 결과 유형에 따라 `src/tasks/medigate_watch_symposium.ts` 구현:
-     - **유형 A (주기적 Heartbeat HTTP API)**: Node.js 타이머로 일정 시간 동안 주기적 HTTP 요청 전송.
-     - **유형 B (WebSocket 세션 유지)**: Node.js `ws` 클라이언트로 접속 후 지정된 시간(예: 30분~1시간) 동안 소켓 연결 유지.
+#### 2) 체류시간 Heartbeat 전송 (`videoClose_mj.php`)
+- **Method / URL**: `POST https://webinar.nownnow.com/aspservice/include/webinar/room/videoClose_mj.php`
+- **호출 위치**: `src/modules/medigate_api.ts` (`sendSymposiumHeartbeat`, `watchSymposiumLive`), `src/tasks/medigate_watch_symposium.ts`
+- **호출 주기**:
+  - 세션 최초 진입 시 즉시 1회 (`movieChk()`)
+  - 이후 2분(120초)마다 주기적 전송 (`setInterval("form_chk()", "120000")`)
+  - 세션 종료/퇴장 시 1회 전송 (`beforeunload`)
+- **헤더**:
+  - `Content-Type`: `application/x-www-form-urlencoded; charset=UTF-8`
+  - `Cookie`: `webinar=<sess_id>`
+  - `Referer`: `https://webinar.nownnow.com/aspservice/include/webinar/room/room_{aspCode}.php?play_type=live`
+  - `Origin`: `https://webinar.nownnow.com`
+- **요청 Body (URL-encoded Form)**:
+  ```
+  agent=medigate&nAspNo=477&hAspCode=sem-live&userid=477_1789380106890&username=0167538&connType=PC&emailaddr=&sess_id=...&nUserIdn=1716398&webinar_seq=5011&webinarTitle=live
+  ```
+- **응답 (HTTP 200 OK)**:
+  - 일반 성공 시: 빈 문자열 또는 공백 (체류시간 누적 기록됨)
+  - 설문 트리거 시: `survey` 문자열 포함 응답 수신
+  - 공지/새로고침 명령: `alert|||...` 또는 `reload|||...`
+- **주요 사용 태스크 / 명령어**:
+  - 태스크: `medigate_watch_symposium` (별칭: `medigate_watch`)
+  - 텔레그램 명령어: `/run_medigate_watch_now [webinarIdx] [duration]` (지정 세미나 또는 On-Air 전체 자동 시청)
 ---
 
 ### 6.6 포인트 (MG포인트) API

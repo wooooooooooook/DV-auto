@@ -25,6 +25,7 @@ import * as keymediAttendanceTaskModule from '../tasks/keymedi_attendance';
 import * as hmpAttendanceTaskModule from '../tasks/hmp_attendance';
 import * as docpleDailyTaskModule from '../tasks/docple_daily';
 import * as medigateApplyTaskModule from '../tasks/medigate_apply_symposium';
+import * as medigateWatchTaskModule from '../tasks/medigate_watch_symposium';
 import * as etcDailyQuestsTaskModule from '../tasks/etc_daily_quests';
 import { sendOrUpdateTodayLinksNotification } from '../services/broadcast_today_links';
 import { sendToTopicSubscribers, sendHourlyTodayLinksToSubscribers } from '../services/subscription_service';
@@ -514,6 +515,20 @@ taskRegistry.registerTask(medigateApplyTask);
 taskRegistry.registerTask({
   name: 'medigate_apply',
   run: async (ctx) => medigateApplyTask.run(ctx),
+});
+
+const medigateWatchTask: Task = {
+  name: 'medigate_watch_symposium',
+  run: async (ctx) => {
+    return await medigateWatchTaskModule.run(ctx);
+  },
+};
+taskRegistry.registerTask(medigateWatchTask);
+
+// 별칭 태스크 등록 (/medigate_watch)
+taskRegistry.registerTask({
+  name: 'medigate_watch',
+  run: async (ctx) => medigateWatchTask.run(ctx),
 });
 
 process.stdin.resume();

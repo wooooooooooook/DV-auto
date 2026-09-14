@@ -136,6 +136,51 @@ export interface MedigatePointFlowChartItem {
   usedPoint: number;
 }
 
+export interface MedigateLiveSession {
+  webinarIdx: number;
+  subject?: string;
+  watchUrl: string;
+  platform: 'nownnow' | 'custom' | 'unknown';
+  cookieHeader?: string;
+  roomUrl?: string;
+  heartbeatUrl?: string;
+  heartbeatParams?: Record<string, string>;
+  surveyUrl?: string;
+}
+
+export interface MedigateHeartbeatResult {
+  success: boolean;
+  status?: number;
+  body?: string;
+  surveyTriggered?: boolean;
+  surveyUrl?: string;
+  message?: string;
+}
+
+export interface MedigateWatchResult {
+  webinarIdx: number;
+  subject: string;
+  success: boolean;
+  message: string;
+  startedAt: string;
+  endedAt: string;
+  durationMinutes: number;
+  heartbeatCount: number;
+  surveyUrl?: string;
+  platform: string;
+}
+
+export interface MedigateWatchWorkflowResult {
+  success: boolean;
+  message: string;
+  userName?: string;
+  userId?: string;
+  totalOnAir: number;
+  watchedCount: number;
+  failedCount: number;
+  results: MedigateWatchResult[];
+}
+
 export interface MedigateApplyWorkflowResult {
   success: boolean;
   message: string;
@@ -724,5 +769,431 @@ export class MedigateClient {
       return res.data.data.items;
     }
     return [];
+  }
+
+  /**
+   * 실시간(On-Air) 심포지움 시청 세션 초기화 및 파싱
+   */
+  async enterSymposiumLive(
+    webinarIdx: number,
+  ): Promise<{ success: boolean; session?: MedigateLiveSession; message: string }> {
+    // 1. 상세 정보 조회
+    const detail = await this.getSymposiumDetail(webinarIdx);
+    const subject = detail?.webinar?.subject || `심포지움 #${webinarIdx}`;
+
+    // 2. 메디게이트 자체 서버 시청 이력 로깅 (선행 필수 호출)
+    const viewLogged = await this.recordSymposiumView(webinarIdx);
+    if (!viewLogged) {
+      logger.warn(`[Medigate] 시청 시작 로깅(recordSymposiumView) 실패 (webinarIdx: ${webinarIdx})`);
+    }
+
+    // 3. 시청 URL 획득
+    const watchUrlRes = await this.getSymposiumWatchUrl(webinarIdx);
+    if (!watchUrlRes.success || !watchUrlRes.watchUrl) {
+      return {
+        success: false,
+        message: watchUrlRes.message || '시청 URL을 발급받을 수 없습니다. (방송 진행 중이 아니거나 미신청 상태)',
+      };
+    }
+
+    const watchUrl = watchUrlRes.watchUrl;
+    logger.info(`[Medigate] [${webinarIdx}] 시청 URL 획득: ${watchUrl}`);
+
+    // nownnow 플랫폼 검사
+    if (watchUrl.includes('nownnow.com')) {
+      try {
+        const parsed = await this.setupNownnowSession(webinarIdx, subject, watchUrl);
+        if (parsed) {
+          return {
+            success: true,
+            session: parsed,
+            message: 'nownnow 스트리밍 시청 세션 초기화 성공',
+          };
+        }
+      } catch (err) {
+        logger.error(`[Medigate] nownnow 세션 초기화 예외:`, err);
+      }
+    }
+
+    // fallback: 일반 플랫폼 세션
+    return {
+      success: true,
+      session: {
+        webinarIdx,
+        subject,
+        watchUrl,
+        platform: 'unknown',
+      },
+      message: '일반 시청 세션 초기화 완료',
+    };
+  }
+
+  /**
+   * nownnow 플랫폼 세션 연결, 리다이렉트 추적 및 Heartbeat 파라미터 파싱
+   */
+  private async setupNownnowSession(
+    webinarIdx: number,
+    subject: string,
+    watchUrl: string,
+  ): Promise<MedigateLiveSession | null> {
+    const cookies: Record<string, string> = {};
+    const mergeCookies = (setCookieHeaders?: string | string[]) => {
+      if (!setCookieHeaders) return;
+      const arr = Array.isArray(setCookieHeaders) ? setCookieHeaders : [setCookieHeaders];
+      for (const str of arr) {
+        const parts = str.split(';')[0].trim();
+        const eqIdx = parts.indexOf('=');
+        if (eqIdx > 0) {
+          const k = parts.substring(0, eqIdx).trim();
+          const v = parts.substring(eqIdx + 1).trim();
+          cookies[k] = v;
+        }
+      }
+    };
+    const getCookieHeader = () =>
+      Object.entries(cookies)
+        .map(([k, v]) => `${k}=${v}`)
+        .join('; ');
+
+    // 1단계: watchUrl GET (302 리다이렉트 추적)
+    let currentUrl = watchUrl;
+    let res = await request(currentUrl, {
+      method: 'GET',
+      headers: {
+        'User-Agent': this.userAgent,
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      },
+    });
+    mergeCookies(res.headers['set-cookie']);
+
+    let redirectCount = 0;
+    while ([301, 302, 303, 307, 308].includes(res.statusCode) && redirectCount < 5) {
+      redirectCount++;
+      const locHeader = res.headers['location'];
+      const loc = Array.isArray(locHeader) ? locHeader[0] : locHeader;
+      if (!loc) break;
+      currentUrl = new URL(loc, currentUrl).toString();
+      res = await request(currentUrl, {
+        method: 'GET',
+        headers: {
+          'User-Agent': this.userAgent,
+          Cookie: getCookieHeader(),
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        },
+      });
+      mergeCookies(res.headers['set-cookie']);
+    }
+
+    let html = await res.body.text();
+
+    // 2단계: JS location.href 리다이렉트 검사
+    const hrefMatch = html.match(/location\.href\s*=\s*['"]([^'"]+)['"]/);
+    let roomUrl = currentUrl;
+    if (hrefMatch && hrefMatch[1]) {
+      roomUrl = new URL(hrefMatch[1], currentUrl).toString();
+      const roomRes = await request(roomUrl, {
+        method: 'GET',
+        headers: {
+          'User-Agent': this.userAgent,
+          Cookie: getCookieHeader(),
+          Referer: currentUrl,
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        },
+      });
+      mergeCookies(roomRes.headers['set-cookie']);
+      html = await roomRes.body.text();
+    }
+
+    // 3단계: room HTML에서 videoClose_mj.php Heartbeat 파라미터 추출
+    const postMatch = html.match(/\$\.post\s*\(\s*['"](\.[^'"]*videoClose_mj\.php)['"]\s*,\s*\{([\s\S]*?)\}/);
+    let heartbeatUrl = '';
+    const heartbeatParams: Record<string, string> = {};
+
+    if (postMatch) {
+      heartbeatUrl = new URL(postMatch[1], roomUrl).toString();
+      const paramsBlock = postMatch[2];
+      const paramRegex = /['"]?([a-zA-Z0-9_]+)['"]?\s*:\s*['"]([^'"]*)['"]/g;
+      let m: RegExpExecArray | null;
+      while ((m = paramRegex.exec(paramsBlock)) !== null) {
+        heartbeatParams[m[1]] = m[2];
+      }
+    } else {
+      const keys = [
+        'agent',
+        'nAspNo',
+        'hAspCode',
+        'userid',
+        'username',
+        'connType',
+        'emailaddr',
+        'sess_id',
+        'nUserIdn',
+        'webinar_seq',
+        'webinarTitle',
+      ];
+      for (const k of keys) {
+        const kMatch = html.match(new RegExp(`['"]?${k}['"]?\\s*:\\s*['"]([^'"]*)['"]`));
+        if (kMatch) heartbeatParams[k] = kMatch[1];
+      }
+      heartbeatUrl = new URL('./videoClose_mj.php', roomUrl).toString();
+    }
+
+    // 기본 필수값 보정
+    if (!heartbeatParams['agent']) heartbeatParams['agent'] = 'medigate';
+    if (!heartbeatParams['webinar_seq']) heartbeatParams['webinar_seq'] = String(webinarIdx);
+    if (!heartbeatParams['connType']) heartbeatParams['connType'] = 'PC';
+    if (!heartbeatParams['webinarTitle']) heartbeatParams['webinarTitle'] = 'live';
+
+    // 4단계: 설문 iframe URL 파싱
+    let surveyUrl: string | undefined;
+    const surveyMatch =
+      html.match(/const\s+iframeUrl\s*=\s*['"]([^'"]+)['"]/i) ||
+      html.match(/<iframe[^>]+src=['"]([^'"]+)['"][^>]*id=['"]iframe-survey['"]/i);
+    if (surveyMatch && surveyMatch[1]) {
+      surveyUrl = surveyMatch[1].trim();
+      if (surveyUrl.startsWith('//')) {
+        surveyUrl = `https:${surveyUrl}`;
+      }
+    }
+
+    return {
+      webinarIdx,
+      subject,
+      watchUrl,
+      platform: 'nownnow',
+      cookieHeader: getCookieHeader(),
+      roomUrl,
+      heartbeatUrl,
+      heartbeatParams,
+      surveyUrl,
+    };
+  }
+
+  /**
+   * 심포지움 시청 Heartbeat(체류 시간) 1회 전송
+   */
+  async sendSymposiumHeartbeat(session: MedigateLiveSession): Promise<MedigateHeartbeatResult> {
+    if (session.platform === 'nownnow' && session.heartbeatUrl && session.heartbeatParams) {
+      try {
+        const bodyStr = new URLSearchParams(session.heartbeatParams).toString();
+        const res = await request(session.heartbeatUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+            'User-Agent': this.userAgent,
+            Referer: session.roomUrl || session.watchUrl,
+            Origin: new URL(session.heartbeatUrl).origin,
+            Cookie: session.cookieHeader || '',
+          },
+          body: bodyStr,
+        });
+
+        const resText = await res.body.text();
+        const isSurveyTriggered = resText.includes('survey');
+
+        return {
+          success: res.statusCode === 200,
+          status: res.statusCode,
+          body: resText.trim(),
+          surveyTriggered: isSurveyTriggered,
+          surveyUrl: session.surveyUrl,
+          message: res.statusCode === 200 ? 'Heartbeat 전송 성공' : `HTTP 상태: ${res.statusCode}`,
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          success: false,
+          message: `Heartbeat 전송 오류: ${msg}`,
+        };
+      }
+    }
+
+    // fallback: 메디게이트 자체 view 로깅
+    const ok = await this.recordSymposiumView(session.webinarIdx);
+    return {
+      success: ok,
+      message: ok ? '메디게이트 뷰 로깅 성공' : '메디게이트 뷰 로깅 실패',
+    };
+  }
+
+  /**
+   * 실시간 심포지움 시청 루프 실행 (지정 시간 동안 주기적 Heartbeat 전송 및 세션 유지)
+   */
+  async watchSymposiumLive(
+    webinarIdx: number,
+    options: {
+      durationMinutes?: number;
+      intervalSeconds?: number;
+      onHeartbeat?: (count: number, elapsedMinutes: number) => void;
+    } = {},
+  ): Promise<MedigateWatchResult> {
+    const durationMinutes = options.durationMinutes ?? 20;
+    const intervalSeconds = options.intervalSeconds ?? 120; // 2분 주기
+    const startedAt = new Date().toISOString();
+
+    logger.info(
+      `[Medigate] [${webinarIdx}] 실시간 심포지움 시청 시작 (목표: ${durationMinutes}분, 주기: ${intervalSeconds}초)`,
+    );
+
+    // 1. 세션 진입
+    const enterRes = await this.enterSymposiumLive(webinarIdx);
+    if (!enterRes.success || !enterRes.session) {
+      return {
+        webinarIdx,
+        subject: `심포지움 #${webinarIdx}`,
+        success: false,
+        message: enterRes.message,
+        startedAt,
+        endedAt: new Date().toISOString(),
+        durationMinutes: 0,
+        heartbeatCount: 0,
+        platform: 'unknown',
+      };
+    }
+
+    const session = enterRes.session;
+    const subject = session.subject || `심포지움 #${webinarIdx}`;
+
+    // 2. 초기 1회 Heartbeat 전송
+    let heartbeatCount = 0;
+    const firstHb = await this.sendSymposiumHeartbeat(session);
+    if (firstHb.success) {
+      heartbeatCount++;
+      logger.info(`[Medigate] [${webinarIdx}] 초기 Heartbeat 전송 완료`);
+    } else {
+      logger.warn(`[Medigate] [${webinarIdx}] 초기 Heartbeat 전송 경고: ${firstHb.message}`);
+    }
+
+    const startTimeMs = Date.now();
+    const totalDurationMs = durationMinutes * 60 * 1000;
+    const intervalMs = intervalSeconds * 1000;
+
+    // 3. 주기적 Heartbeat 전송 루프
+    while (Date.now() - startTimeMs < totalDurationMs) {
+      const remainingMs = totalDurationMs - (Date.now() - startTimeMs);
+      const sleepMs = Math.min(intervalMs, remainingMs);
+      if (sleepMs <= 0) break;
+
+      await new Promise((resolve) => setTimeout(resolve, sleepMs));
+
+      // Heartbeat 전송
+      const hbRes = await this.sendSymposiumHeartbeat(session);
+      if (hbRes.success) {
+        heartbeatCount++;
+        const elapsedMinutes = Math.round(((Date.now() - startTimeMs) / 60000) * 10) / 10;
+        logger.info(
+          `[Medigate] [${webinarIdx}] Heartbeat #${heartbeatCount} 전송 완료 (${elapsedMinutes}/${durationMinutes}분)`,
+        );
+        if (options.onHeartbeat) {
+          options.onHeartbeat(heartbeatCount, elapsedMinutes);
+        }
+      } else {
+        logger.warn(`[Medigate] [${webinarIdx}] Heartbeat 전송 실패: ${hbRes.message}`);
+      }
+    }
+
+    // 4. 퇴장 Heartbeat (beforeunload 이벤트에 상응)
+    try {
+      await this.sendSymposiumHeartbeat(session);
+      logger.info(`[Medigate] [${webinarIdx}] 퇴장 Heartbeat 전송 완료`);
+    } catch {
+      // 무시
+    }
+
+    const endedAt = new Date().toISOString();
+    const actualDurationMinutes = Math.round(((Date.now() - startTimeMs) / 60000) * 10) / 10;
+
+    logger.info(
+      `[Medigate] [${webinarIdx}] 심포지움 시청 완료: ${subject} (${actualDurationMinutes}분 시청, Heartbeat ${heartbeatCount}회)`,
+    );
+
+    return {
+      webinarIdx,
+      subject,
+      success: true,
+      message: `성공적으로 ${actualDurationMinutes}분 동안 시청(Heartbeat ${heartbeatCount}회)을 완료했습니다.`,
+      startedAt,
+      endedAt,
+      durationMinutes: actualDurationMinutes,
+      heartbeatCount,
+      surveyUrl: session.surveyUrl,
+      platform: session.platform,
+    };
+  }
+
+  /**
+   * 현재 진행 중인(On-Air) 모든 심포지움 자동 시청
+   */
+  async watchAllOnAirSymposiums(
+    options: {
+      durationMinutes?: number;
+      intervalSeconds?: number;
+    } = {},
+  ): Promise<MedigateWatchWorkflowResult> {
+    const loginRes = await this.login();
+    if (!loginRes.success) {
+      return {
+        success: false,
+        message: loginRes.message,
+        totalOnAir: 0,
+        watchedCount: 0,
+        failedCount: 0,
+        results: [],
+      };
+    }
+
+    const userName = this.currentUser?.uName;
+    const userId = this.currentUser?.uId;
+
+    const list = await this.getSymposiumList();
+    // status === 'ING' 인 심포지움 필터링
+    const onAirList = list.filter((item) => item.status === 'ING');
+
+    if (onAirList.length === 0) {
+      return {
+        success: true,
+        message: '현재 On-Air(진행 중)인 심포지움이 없습니다.',
+        userName,
+        userId,
+        totalOnAir: 0,
+        watchedCount: 0,
+        failedCount: 0,
+        results: [],
+      };
+    }
+
+    logger.info(`[Medigate] 현재 On-Air 심포지움 ${onAirList.length}건 감지`);
+    const results: MedigateWatchResult[] = [];
+    let watchedCount = 0;
+    let failedCount = 0;
+
+    for (const item of onAirList) {
+      // 미신청 상태인 경우 사전 신청 시도
+      if (item.applyFlag !== 'Y') {
+        logger.info(`[Medigate] [${item.webinarIdx}] 미신청 심포지움, 신청 시도...`);
+        await this.applySymposium(item.webinarIdx);
+      }
+
+      logger.info(`[Medigate] [${item.webinarIdx}] ${item.subject} 시청 작업 시작`);
+      const watchRes = await this.watchSymposiumLive(item.webinarIdx, options);
+      results.push(watchRes);
+
+      if (watchRes.success) {
+        watchedCount++;
+      } else {
+        failedCount++;
+      }
+    }
+
+    return {
+      success: watchedCount > 0 || onAirList.length === 0,
+      message: `On-Air 심포지움 시청 완료 (성공 ${watchedCount}건, 실패 ${failedCount}건)`,
+      userName,
+      userId,
+      totalOnAir: onAirList.length,
+      watchedCount,
+      failedCount,
+      results,
+    };
   }
 }

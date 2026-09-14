@@ -438,6 +438,52 @@ export function setupExecutionCommands(adminBot: Telegraf): void {
     }
   });
 
+  adminBot.command(['run_medigate_watch_now', 'medigate_watch_now', 'medigate_watch'], async (ctx) => {
+    logger.info('User requested to run medigate_watch_symposium now', { from: ctx.from?.username });
+    const task = taskRegistry.getByName('medigate_watch_symposium');
+    if (!task) {
+      logger.error('medigate_watch_symposium task not found, cannot run');
+      return replyWithSplit(ctx, 'medigate_watch_symposium task not found!');
+    }
+
+    const text = 'message' in ctx && ctx.message && 'text' in ctx.message ? ctx.message.text : '';
+    const parts = text.trim().split(/\s+/);
+    const taskArgs: Record<string, string> = {};
+    if (parts[1]) {
+      taskArgs.webinarIdx = parts[1];
+    }
+    if (parts[2]) {
+      taskArgs.duration = parts[2];
+    }
+
+    try {
+      runner
+        .runTask(task, taskArgs)
+        .then(async (result) => {
+          if (result && typeof result === 'object' && (result as { message?: string }).message) {
+            await replyWithSplit(
+              ctx,
+              (result as { message: string }).message,
+              (result as { options?: Record<string, unknown> }).options as Parameters<Context['reply']>[1],
+            );
+          } else if (typeof result === 'string') {
+            await replyWithSplit(ctx, result);
+          } else if (result === true) {
+            await replyWithSplit(ctx, '메디게이트 심포지움 시청 작업이 성공적으로 완료되었습니다.');
+          } else {
+            await replyWithSplit(ctx, '메디게이트 심포지움 시청 작업이 완료되었습니다.');
+          }
+        })
+        .catch((e) => {
+          const message = e instanceof Error ? e.message : String(e);
+          replyWithSplit(ctx, `medigate_watch_symposium failed: ${message}`);
+        });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      replyWithSplit(ctx, `Failed to start medigate_watch_symposium: ${message}`);
+    }
+  });
+
   adminBot.command(
     ['run_etc_daily_quests_now', 'etc_daily_quests_now', 'etc_daily_quests', '기타일일퀘스트'],
     async (ctx) => {
