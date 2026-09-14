@@ -551,20 +551,35 @@ export async function updateStatusBoardNotice(
   } else {
     const editRes = await editChannelMessage(messageId, statusText).catch(() => null);
     if (!editRes || !editRes.success) {
-      if (editRes) {
-        logger.warn(
-          `[${periodName}] 채널 메시지(ID: ${messageId}) 인플레이스 수정 실패 -> 재발행 진행: ${editRes.message}`,
+      const isNotFound =
+        editRes?.isNotFound ||
+        (typeof editRes?.message === 'string' &&
+          (editRes.message.includes('message to edit not found') ||
+            editRes.message.includes('message not found') ||
+            editRes.message.includes('MESSAGE_ID_INVALID')));
+
+      if (isNotFound) {
+        if (editRes) {
+          logger.warn(
+            `[${periodName}] 채널 메시지(ID: ${messageId}) 찾을 수 없음(삭제됨) -> 재발행 진행: ${editRes.message}`,
+          );
+        }
+        messageId = await publishSeminarStatusNotice(
+          periodName,
+          currentList,
+          lastStatusNoticeMessageId,
+          options.isAllCompleted ?? false,
+          options.isAutoResume ?? false,
+          attachedComments,
+          options.timeExpiredMessage,
         );
+      } else {
+        if (editRes) {
+          logger.warn(
+            `[${periodName}] 채널 메시지(ID: ${messageId}) 인플레이스 수정 실패 (기존 메시지 유지): ${editRes.message}`,
+          );
+        }
       }
-      messageId = await publishSeminarStatusNotice(
-        periodName,
-        currentList,
-        lastStatusNoticeMessageId,
-        options.isAllCompleted ?? false,
-        options.isAutoResume ?? false,
-        attachedComments,
-        options.timeExpiredMessage,
-      );
     }
   }
 

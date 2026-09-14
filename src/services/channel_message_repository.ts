@@ -1,6 +1,7 @@
 import { getDatabase } from './storage';
 import { getBot } from './bot_instance';
 import * as logger from './logger';
+import { isTelegram429Error, getTelegramRetryAfter } from '../modules/utils';
 
 export interface ChannelMessageRecord {
   id?: number;
@@ -601,7 +602,7 @@ export async function editChannelMessage(
     reply_markup?: unknown;
     link_preview_options?: unknown;
   } = {},
-): Promise<{ success: boolean; message: string }> {
+): Promise<{ success: boolean; message: string; isNotFound?: boolean; is429?: boolean }> {
   const bot = getBot('notice');
   if (!bot) {
     return { success: false, message: 'Notice 봇이 초기화되지 않았습니다.' };
@@ -641,8 +642,20 @@ export async function editChannelMessage(
       updateChannelMessageStatus(messageId, 'edited', newText, targetChannelId);
       return { success: true, message: `메시지(ID: ${messageId}) 내용 동일 (수정 불필요)` };
     }
-    logger.error(`공지방 메시지(ID: ${messageId}) 수정 실패:`, error);
-    return { success: false, message: `메시지 수정 실패: ${errMsg}` };
+    const is429 = isTelegram429Error(error);
+    const isNotFound =
+      errMsg.includes('message to edit not found') ||
+      errMsg.includes('message not found') ||
+      errMsg.includes('MESSAGE_ID_INVALID');
+
+    if (is429) {
+      const retryAfter = getTelegramRetryAfter(error);
+      const retryInfo = retryAfter ? ` (retry after ${retryAfter}s)` : '';
+      logger.warn(`공지방 메시지(ID: ${messageId}) 수정 Rate limit (429)${retryInfo}: ${errMsg}`);
+    } else {
+      logger.error(`공지방 메시지(ID: ${messageId}) 수정 실패:`, error);
+    }
+    return { success: false, message: `메시지 수정 실패: ${errMsg}`, isNotFound, is429 };
   }
 }
 

@@ -70,8 +70,32 @@ export async function sendOrUpdateTodayLinksNotification(
       };
     }
 
+    if (editRes.is429) {
+      console.warn(
+        `broadcast_today_links: 기존 메시지(ID: ${existingRecord.messageId}) 수정 Rate Limit (${editRes.message}), 새 메시지 발송을 건너뜁니다.`,
+      );
+      return {
+        success: false,
+        action: 'edited',
+        messageId: existingRecord.messageId,
+        message: `기존 공지 메시지(ID: ${existingRecord.messageId}) 수정 실패 (Rate limit): ${editRes.message}`,
+      };
+    }
+
+    if (!editRes.isNotFound) {
+      console.warn(
+        `broadcast_today_links: 기존 메시지(ID: ${existingRecord.messageId}) 수정 실패 (${editRes.message}), 기존 메시지 ID를 유지합니다.`,
+      );
+      return {
+        success: false,
+        action: 'edited',
+        messageId: existingRecord.messageId,
+        message: `기존 공지 메시지(ID: ${existingRecord.messageId}) 수정 실패: ${editRes.message}`,
+      };
+    }
+
     console.warn(
-      `broadcast_today_links: 기존 메시지(ID: ${existingRecord.messageId}) 수정 실패 (${editRes.message}), 새 메시지로 발송합니다.`,
+      `broadcast_today_links: 기존 메시지(ID: ${existingRecord.messageId})가 삭제됨 (${editRes.message}), 새 메시지로 발송합니다.`,
     );
   }
 

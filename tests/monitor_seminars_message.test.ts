@@ -395,4 +395,48 @@ describe('buildSeminarMonitorStatusMessage 세미나 모니터 현황 메시지 
     const sorted = sortSeminarsByStartTime(sameTimeSeminars);
     expect(sorted.map((s) => s.seminarId)).toEqual(['5500', '5510', '5580']);
   });
+
+  it('updateStatusBoardNotice: 429 에러 시 재발행하지 않고 기존 messageId 유지 검증', async () => {
+    process.env.NOTICE_CHANNEL_ID = '-1001234567890';
+    const { updateStatusBoardNotice } = await import('../src/tasks/monitor_seminars');
+    const { setBot } = await import('../src/services/bot_instance');
+
+    let editCalls = 0;
+    let sendCalls = 0;
+
+    const mockBot = {
+      command: () => {},
+      telegram: {
+        editMessageText: async () => {
+          editCalls++;
+          const err = new Error('429: Too Many Requests: retry after 6');
+          (err as unknown as { response?: { error_code?: number; parameters?: { retry_after?: number } } }).response = {
+            error_code: 429,
+            parameters: { retry_after: 6 },
+          };
+          throw err;
+        },
+        sendMessage: async () => {
+          sendCalls++;
+          return { message_id: 9999 };
+        },
+      },
+    } as unknown as Telegraf;
+
+    setBot('notice', mockBot);
+
+    const map = new Map();
+    map.set('5580', {
+      seminarId: '5580',
+      url: 'https://m.doctorville.co.kr/cme/seminar/5580',
+      name: '테스트 세미나',
+      status: '대기',
+    });
+
+    const result = await updateStatusBoardNotice('저녁', map, 2644);
+    // 429 시 재발행(sendMessage)을 시도하지 않고 기존 messageId(2644)를 그대로 유지해야 함
+    expect(editCalls).toBe(1);
+    expect(sendCalls).toBe(0);
+    expect(result.messageId).toBe(2644);
+  });
 });

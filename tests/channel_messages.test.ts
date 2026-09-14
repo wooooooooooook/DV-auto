@@ -371,4 +371,45 @@ https://m.doctorville.co.kr/cme/seminar/101`;
     const dinnerStatusFound = getSeminarStatusChannelMessage('저녁', testDate, mockChannelId);
     assert.strictEqual(dinnerStatusFound, null, '저녁 세미나 현황은 아직 없으므로 null이어야 함');
   });
+
+  it('429 Rate limit 또는 메시지 부재 시 editChannelMessage 플래그 검증', async () => {
+    // 1. 429 Too Many Requests 에러 Mock
+    const mockRateLimitBot = {
+      command: () => {},
+      telegram: {
+        editMessageText: async () => {
+          const err = new Error('429: Too Many Requests: retry after 6');
+          (err as unknown as { response?: { error_code?: number; parameters?: { retry_after?: number } } }).response = {
+            error_code: 429,
+            parameters: { retry_after: 6 },
+          };
+          throw err;
+        },
+      },
+    } as unknown as Telegraf;
+
+    setBot('notice', mockRateLimitBot);
+
+    const rateLimitRes = await editChannelMessage(2644, '테스트 수정 텍스트');
+    assert.strictEqual(rateLimitRes.success, false);
+    assert.strictEqual(rateLimitRes.is429, true);
+    assert.strictEqual(rateLimitRes.isNotFound, false);
+
+    // 2. 메시지 부재 (message to edit not found) 에러 Mock
+    const mockNotFoundBot = {
+      command: () => {},
+      telegram: {
+        editMessageText: async () => {
+          throw new Error('400: Bad Request: message to edit not found');
+        },
+      },
+    } as unknown as Telegraf;
+
+    setBot('notice', mockNotFoundBot);
+
+    const notFoundRes = await editChannelMessage(2644, '테스트 수정 텍스트');
+    assert.strictEqual(notFoundRes.success, false);
+    assert.strictEqual(notFoundRes.is429, false);
+    assert.strictEqual(notFoundRes.isNotFound, true);
+  });
 });
