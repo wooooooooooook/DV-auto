@@ -1025,6 +1025,14 @@ export class MedigateClient {
       durationMinutes?: number;
       intervalSeconds?: number;
       onHeartbeat?: (count: number, elapsedMinutes: number) => void;
+      onStart?: (info: { webinarIdx: number; subject: string; durationMinutes: number }) => Promise<void> | void;
+      onProgress?: (info: {
+        webinarIdx: number;
+        subject: string;
+        elapsedMinutes: number;
+        durationMinutes: number;
+        heartbeatCount: number;
+      }) => Promise<void> | void;
     } = {},
   ): Promise<MedigateWatchResult> {
     const durationMinutes = options.durationMinutes ?? 20;
@@ -1054,6 +1062,15 @@ export class MedigateClient {
     const session = enterRes.session;
     const subject = session.subject || `심포지움 #${webinarIdx}`;
 
+    // 시작 콜백 호출
+    if (options.onStart) {
+      try {
+        await options.onStart({ webinarIdx, subject, durationMinutes });
+      } catch (err) {
+        logger.warn(`[Medigate] onStart 콜백 실행 중 오류:`, err);
+      }
+    }
+
     // 2. 초기 1회 Heartbeat 전송
     let heartbeatCount = 0;
     const firstHb = await this.sendSymposiumHeartbeat(session);
@@ -1067,6 +1084,7 @@ export class MedigateClient {
     const startTimeMs = Date.now();
     const totalDurationMs = durationMinutes * 60 * 1000;
     const intervalMs = intervalSeconds * 1000;
+    let lastReportedMinutes = 0;
 
     // 3. 주기적 Heartbeat 전송 루프
     while (Date.now() - startTimeMs < totalDurationMs) {
@@ -1086,6 +1104,22 @@ export class MedigateClient {
         );
         if (options.onHeartbeat) {
           options.onHeartbeat(heartbeatCount, elapsedMinutes);
+        }
+
+        // 매 5분(5, 10, 15분 등) 경과 시 onProgress 콜백 호출
+        if (options.onProgress && elapsedMinutes - lastReportedMinutes >= 4.9 && elapsedMinutes < durationMinutes) {
+          lastReportedMinutes = elapsedMinutes;
+          try {
+            await options.onProgress({
+              webinarIdx,
+              subject,
+              elapsedMinutes,
+              durationMinutes,
+              heartbeatCount,
+            });
+          } catch (progressErr) {
+            logger.warn(`[Medigate] onProgress 콜백 실행 중 오류:`, progressErr);
+          }
         }
       } else {
         logger.warn(`[Medigate] [${webinarIdx}] Heartbeat 전송 실패: ${hbRes.message}`);
@@ -1128,6 +1162,14 @@ export class MedigateClient {
     options: {
       durationMinutes?: number;
       intervalSeconds?: number;
+      onStart?: (info: { webinarIdx: number; subject: string; durationMinutes: number }) => Promise<void> | void;
+      onProgress?: (info: {
+        webinarIdx: number;
+        subject: string;
+        elapsedMinutes: number;
+        durationMinutes: number;
+        heartbeatCount: number;
+      }) => Promise<void> | void;
     } = {},
   ): Promise<MedigateWatchWorkflowResult> {
     const loginRes = await this.login();

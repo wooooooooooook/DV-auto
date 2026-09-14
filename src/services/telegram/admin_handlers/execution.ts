@@ -411,6 +411,7 @@ export function setupExecutionCommands(adminBot: Telegraf): void {
     }
 
     try {
+      await replyWithSplit(ctx, '🩺 메디게이트 심포지움 자동 신청 작업을 시작합니다...');
       runner
         .runTask(task)
         .then(async (result) => {
@@ -457,6 +458,10 @@ export function setupExecutionCommands(adminBot: Telegraf): void {
     }
 
     try {
+      const targetDesc = taskArgs.webinarIdx
+        ? `[${taskArgs.webinarIdx}] (시간: ${taskArgs.duration || 20}분)`
+        : 'On-Air 심포지움';
+      await replyWithSplit(ctx, `🩺 메디게이트 심포지움 시청(${targetDesc})을 시작합니다... (5분 간격 진행 보고)`);
       runner
         .runTask(task, taskArgs)
         .then(async (result) => {

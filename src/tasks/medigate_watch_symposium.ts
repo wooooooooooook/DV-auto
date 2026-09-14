@@ -83,6 +83,8 @@ export function formatMedigateWatchMessage(result: MedigateWatchResult | Medigat
   return lines.join('\n');
 }
 
+import { sendTelegram } from '../modules/utils';
+
 /**
  * 메디게이트 심포지움 시청 태스크 실행기
  */
@@ -101,11 +103,39 @@ export async function run(ctx?: TaskContext): Promise<TaskResult> {
     intervalSeconds,
   });
 
+  // 시작 알림 콜백
+  const handleStart = async (info: { webinarIdx: number; subject: string; durationMinutes: number }) => {
+    const startMsg = [
+      '🩺 [메디게이트 심포지움 시청 시작]',
+      `📌 [${info.webinarIdx}] ${info.subject}`,
+      `⏱️ 목표 시청 시간: ${info.durationMinutes}분 (5분 간격 진행 보고)`,
+    ].join('\n');
+    await sendTelegram(startMsg).catch(() => {});
+  };
+
+  // 5분 주기 진행 알림 콜백
+  const handleProgress = async (info: {
+    webinarIdx: number;
+    subject: string;
+    elapsedMinutes: number;
+    durationMinutes: number;
+    heartbeatCount: number;
+  }) => {
+    const progressMsg = [
+      '🩺 [메디게이트 심포지움 시청 진행 중]',
+      `📌 [${info.webinarIdx}] ${info.subject}`,
+      `⏱️ ${info.elapsedMinutes}/${info.durationMinutes}분 시청 중 (Heartbeat ${info.heartbeatCount}회 전송)`,
+    ].join('\n');
+    await sendTelegram(progressMsg).catch(() => {});
+  };
+
   if (targetIdx) {
     const webinarIdx = parseInt(String(targetIdx), 10);
     const result = await client.watchSymposiumLive(webinarIdx, {
       durationMinutes,
       intervalSeconds,
+      onStart: handleStart,
+      onProgress: handleProgress,
     });
 
     const formattedMsg = formatMedigateWatchMessage(result);
@@ -126,6 +156,8 @@ export async function run(ctx?: TaskContext): Promise<TaskResult> {
   const result = await client.watchAllOnAirSymposiums({
     durationMinutes,
     intervalSeconds,
+    onStart: handleStart,
+    onProgress: handleProgress,
   });
 
   const formattedMsg = formatMedigateWatchMessage(result);
