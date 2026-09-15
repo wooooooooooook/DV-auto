@@ -69,6 +69,16 @@ export function formatMedigateApplyMessage(result: MedigateApplyWorkflowResult):
     }
   }
 
+  // 오늘 예정된 심포지움 안내
+  if (result.todaySymposiums && result.todaySymposiums.length > 0) {
+    lines.push('');
+    lines.push(`⏰ [오늘 예정된 심포지움: ${result.todaySymposiums.length}건 - On-Air 시 자동 시청]`);
+    for (const item of result.todaySymposiums) {
+      const dateText = item.dateDesc ? ` (${item.dateDesc})` : '';
+      lines.push(`  • [${item.webinarIdx}] ${item.subject}${dateText}`);
+    }
+  }
+
   if (newlyApplied.length === 0 && failed.length === 0) {
     lines.push('');
     lines.push('ℹ️ 모든 신청 가능한 심포지움이 이미 신청 완료된 상태입니다.');
@@ -90,7 +100,8 @@ export async function run(ctx?: TaskContext): Promise<TaskResult> {
   const formattedMsg = formatMedigateApplyMessage(result);
 
   const silentIfNoNew = options.silentIfNoNew === 'true';
-  const shouldNotify = !silentIfNoNew || result.appliedCount > 0 || !result.success;
+  const hasTodaySymposiums = (result.todaySymposiums?.length ?? 0) > 0;
+  const shouldNotify = !silentIfNoNew || result.appliedCount > 0 || hasTodaySymposiums || !result.success;
 
   return {
     success: result.success,
@@ -100,6 +111,7 @@ export async function run(ctx?: TaskContext): Promise<TaskResult> {
       alreadyCount: result.alreadyCount,
       failedCount: result.failedCount,
       targetCount: result.targetCount,
+      todayCount: result.todaySymposiums?.length ?? 0,
       usablePoint: result.pointSummary?.usablePoint,
       shouldNotify,
     },

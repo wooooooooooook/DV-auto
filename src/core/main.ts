@@ -32,6 +32,7 @@ import { sendOrUpdateTodayLinksNotification } from '../services/broadcast_today_
 import { sendToTopicSubscribers, sendHourlyTodayLinksToSubscribers } from '../services/subscription_service';
 import { shouldResumeSeminarMonitor } from '../services/channel_message_repository';
 import { refreshPastUncompletedSeminars } from '../services/seminar_sync_service';
+import { checkAndWatchMedigateSymposiums } from '../services/medigate_monitor_service';
 import type { Task } from '../types';
 
 dns.setDefaultResultOrder('ipv4first');
@@ -49,6 +50,7 @@ const BROADCAST_TODAY_LINKS_CRON = '0 0 9 * * *';
 const HOURLY_TODAY_LINKS_EARLY_CRON = '0 2 0 * * *';
 const HOURLY_TODAY_LINKS_CRON = '5 0 1-12 * * *';
 const SYNC_SEMINARS_CRON = process.env.SYNC_SEMINARS_CRON || '10 */10 6-23 * * *';
+const MEDIGATE_MONITOR_CRON = process.env.MEDIGATE_MONITOR_CRON || '15 */10 11-22 * * *';
 const POINT_CONVERSION_STATE_KEY = 'point_conversion:last_available';
 let isFastPolling = false;
 let fastPollingInterval: NodeJS.Timeout | null = null;
@@ -541,6 +543,17 @@ taskRegistry.registerTask({
   run: async (ctx) => medigateWatchTask.run(ctx),
 });
 
+const medigateSymposiumMonitorTask: Task = {
+  name: 'medigate_symposium_monitor',
+  schedule: MEDIGATE_MONITOR_CRON,
+  timezone: TIMEZONE,
+  run: async () => {
+    return await checkAndWatchMedigateSymposiums();
+  },
+};
+taskRegistry.registerTask(medigateSymposiumMonitorTask);
+scheduler.scheduleTaskCron(medigateSymposiumMonitorTask);
+
 process.stdin.resume();
 function checkAndResumeTasks(): void {
   if (shouldResumeSeminarMonitor('아침')) {
@@ -609,3 +622,4 @@ refreshPastUncompletedSeminars(3, 250).catch((err) =>
 checkAndNotifyPointConversion().catch((err) => logger.error('Startup point-conversion check failed:', err));
 checkAndResumeTasks();
 runTask(syncSeminarsTask).catch((err) => logger.error('Startup sync_seminars check failed:', err));
+checkAndWatchMedigateSymposiums().catch((err) => logger.error('Startup medigate monitor check failed:', err));

@@ -1,6 +1,7 @@
 import type { TaskContext, TaskResult } from '../types';
 import { MedigateClient, type MedigateWatchResult, type MedigateWatchWorkflowResult } from '../modules/medigate_api';
 import * as logger from '../services/logger';
+import { markSymposiumWatchedToday } from '../services/medigate_monitor_service';
 
 /**
  * 텔레그램 전송용 메디게이트 심포지움 시청 결과 메시지 포맷팅
@@ -139,6 +140,17 @@ export async function run(ctx?: TaskContext): Promise<TaskResult> {
     });
 
     const formattedMsg = formatMedigateWatchMessage(result);
+    if (result.success) {
+      markSymposiumWatchedToday(result.webinarIdx, {
+        subject: result.subject,
+        watchedAt: result.endedAt,
+        durationMinutes: result.durationMinutes,
+        heartbeatCount: result.heartbeatCount,
+        success: true,
+        surveyUrl: result.surveyUrl,
+      });
+    }
+
     return {
       success: result.success,
       message: formattedMsg,
@@ -159,6 +171,19 @@ export async function run(ctx?: TaskContext): Promise<TaskResult> {
     onStart: handleStart,
     onProgress: handleProgress,
   });
+
+  for (const item of result.results) {
+    if (item.success) {
+      markSymposiumWatchedToday(item.webinarIdx, {
+        subject: item.subject,
+        watchedAt: item.endedAt,
+        durationMinutes: item.durationMinutes,
+        heartbeatCount: item.heartbeatCount,
+        success: true,
+        surveyUrl: item.surveyUrl,
+      });
+    }
+  }
 
   const formattedMsg = formatMedigateWatchMessage(result);
   const shouldNotify = !silentIfNoLive || result.totalOnAir > 0 || !result.success;

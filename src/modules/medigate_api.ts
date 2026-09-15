@@ -193,6 +193,7 @@ export interface MedigateApplyWorkflowResult {
   failedCount: number;
   pointSummary?: MedigatePointSummary | null;
   results: MedigateApplyItemResult[];
+  todaySymposiums?: MedigateSymposiumItem[];
 }
 
 export class MedigateClient {
@@ -658,6 +659,20 @@ export class MedigateClient {
       await new Promise((resolve) => setTimeout(resolve, 300));
     }
 
+    // 오늘 예정된 심포지움 목록 추출
+    const todayKst = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Seoul',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
+    const todayKstDots = todayKst.replace(/-/g, '.');
+    const todaySymposiums = list.filter((item) => {
+      if (item.startDate && item.startDate.startsWith(todayKst)) return true;
+      if (item.dateDesc && (item.dateDesc.includes(todayKst) || item.dateDesc.includes(todayKstDots))) return true;
+      return false;
+    });
+
     // MG포인트 요약 정보 조회
     let pointSummary: MedigatePointSummary | null = null;
     try {
@@ -678,6 +693,7 @@ export class MedigateClient {
       failedCount,
       pointSummary,
       results,
+      todaySymposiums,
     };
   }
 
