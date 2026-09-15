@@ -4,6 +4,7 @@ import {
   parseSeminarDateTime,
   checkIsAdvancedSurvey,
   checkIsPointExcluded,
+  isLowCapacitySeminar,
   ProcessState,
   SurveyState,
 } from '../modules/seminar_api';
@@ -286,6 +287,12 @@ export async function handleNewSeminarFromDetail(
 ): Promise<{ notified: boolean; applied: boolean }> {
   const sid = item.seminarId || getSeminarIdFromUrl(item.url);
   if (!sid) return { notified: false, applied: false };
+
+  // 정원 100명 미만 세미나는 공지/알림/신청 대상에서 완전 제외
+  if (isLowCapacitySeminar(item)) {
+    logger.info(`[seminar_detail] 세미나 ${sid}는 정원 100명 미만이므로 공지 및 자동 신청 대상에서 제외합니다.`);
+    return { notified: false, applied: false };
+  }
 
   // 신청 가능 상태(PROCESS_APPLY)인 세미나만 알림 및 신청 진행
   if (item.processState !== ProcessState.PROCESS_APPLY || item.seminarCompleted === 1 || item.isClosed === true) {

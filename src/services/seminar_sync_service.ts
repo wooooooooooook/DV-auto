@@ -1,7 +1,13 @@
 import * as logger from './logger';
 import * as seminarRepo from './seminar_repository';
 import type { SeminarListItem } from './seminar_repository';
-import { ProcessState, fetchSeminarDetail, checkIsPointExcluded, checkIsAdvancedSurvey } from '../modules/seminar_api';
+import {
+  ProcessState,
+  fetchSeminarDetail,
+  checkIsPointExcluded,
+  checkIsAdvancedSurvey,
+  isLowCapacitySeminar,
+} from '../modules/seminar_api';
 import { getSeminarIdFromUrl } from '../modules/utils';
 
 /**
@@ -251,7 +257,9 @@ export async function refreshPastUncompletedSeminars(
     const allSeminars = seminarRepo.getAllSeminars();
     const nowMs = Date.now();
 
-    const targets = allSeminars.filter((s) => isPastSeminar(s, nowMs) && isUncompletedSeminar(s));
+    const targets = allSeminars.filter(
+      (s) => isPastSeminar(s, nowMs) && isUncompletedSeminar(s) && !isLowCapacitySeminar(s),
+    );
 
     if (targets.length === 0) {
       logger.info(`[startup] 지나간 세미나 중 미완료 세미나가 없습니다. (전체 DB 세미나: ${allSeminars.length}개)`);

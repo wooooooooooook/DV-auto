@@ -9,6 +9,7 @@ import {
   formatSeminarDisplayName,
 } from '../modules/utils';
 import { DEFAULT_NOTICE_OPTIONS, formatRecentCommentsSection } from '../services/channel_notice_service';
+import { isLowCapacitySeminar } from '../modules/seminar_api';
 
 export { truncateSeminarName, formatPrivateSeminarTag, formatSeminarDisplayName };
 
@@ -53,6 +54,9 @@ export const MEANINGFUL_FIELDS: Array<{
 export const BOOLEAN_FIELDS = new Set<keyof SeminarListItem>(['isPointExcluded', 'isAdvancedSurvey']);
 
 export function getSeminarInfoChanges(existing: SeminarListItem, incoming: SeminarListItem): SeminarFieldChange[] {
+  if (isLowCapacitySeminar(existing) || isLowCapacitySeminar(incoming)) {
+    return [];
+  }
   const changes: SeminarFieldChange[] = [];
   for (const { key, label } of MEANINGFUL_FIELDS) {
     const oldVal = existing[key];
@@ -165,7 +169,7 @@ export function formatSeminarChangeNotification(
 /**
  * 신규 세미나 모음 채널 공지 메시지 빌더
  * - 헤더: 🆕 오늘 추가된 세미나 모음 (누적 ${count}건)
- * - 정원 10명 미만 세미나는 표시에서 제외
+ * - 정원 100명 미만 세미나는 표시에서 제외
  * - 세미나명: 20글자 초과 시 truncation
  * - 이번 회차 신규 세미나(newlyAddedIds)는 '✨ 방금 추가됨' 구분선(━ ✨ 방금 추가됨 ━━━━━)으로 감싸 강조
  * - 토론방 이전 댓글 섹션(최대 5개) 첨부
@@ -176,13 +180,9 @@ export function buildNewSeminarsNoticeMessage(
   newlyAddedIds?: string[] | Set<string>,
   comments: Array<{ userName: string; text: string }> = [],
 ): { text: string; options: Record<string, unknown> } {
-  // 정원 10명 미만인 세미나는 공지 목록에서 제외하고, 발견 순서(detectedAt 오름차순)대로 정렬
+  // 정원 100명 미만인 세미나는 공지 목록에서 제외하고, 발견 순서(detectedAt 오름차순)대로 정렬
   const visibleSeminars = seminars
-    .filter((item) => {
-      if (!item.totalCount || item.totalCount.trim() === '') return true;
-      const parsed = parseInt(item.totalCount.replace(/[^0-9]/g, ''), 10);
-      return isNaN(parsed) || parsed >= 10;
-    })
+    .filter((item) => !isLowCapacitySeminar(item))
     .sort((a, b) => {
       if (a.detectedAt && b.detectedAt) {
         return a.detectedAt.localeCompare(b.detectedAt);
@@ -240,11 +240,7 @@ export async function publishNewSeminarsNotice(
   _date?: string,
   channelId?: string,
 ): Promise<number | null> {
-  const visibleSeminars = seminars.filter((item) => {
-    if (!item.totalCount || item.totalCount.trim() === '') return true;
-    const parsed = parseInt(item.totalCount.replace(/[^0-9]/g, ''), 10);
-    return isNaN(parsed) || parsed >= 10;
-  });
+  const visibleSeminars = seminars.filter((item) => !isLowCapacitySeminar(item));
 
   if (visibleSeminars.length === 0) return prevMessageId;
 
@@ -293,11 +289,14 @@ export async function syncNewSeminarsNotice(
 ): Promise<number | null> {
   const targetChannelId = channelId || process.env.NOTICE_CHANNEL_ID;
   const prevMsg = channelRepo.getNewSeminarsChannelMessage(referenceDate, targetChannelId);
-  const todayNewSeminars = seminarRepo.getSeminarsByDetectedDate(referenceDate);
+  const todayNewSeminars = seminarRepo.getSeminarsByDetectedDate(referenceDate).filter((s) => !isLowCapacitySeminar(s));
+  const filteredNewlyAdded = newlyAdded.filter((s) => !isLowCapacitySeminar(s));
 
-  if (newlyAdded.length > 0) {
-    const targetSeminars = todayNewSeminars.length > 0 ? todayNewSeminars : newlyAdded;
-    const newlyAddedIds = newlyAdded.map((s) => s.seminarId || getSeminarIdFromUrl(s.url)).filter(Boolean) as string[];
+  if (filteredNewlyAdded.length > 0) {
+    const targetSeminars = todayNewSeminars.length > 0 ? todayNewSeminars : filteredNewlyAdded;
+    const newlyAddedIds = filteredNewlyAdded
+      .map((s) => s.seminarId || getSeminarIdFromUrl(s.url))
+      .filter(Boolean) as string[];
     return await publishNewSeminarsNotice(
       targetSeminars,
       prevMsg ? prevMsg.messageId : null,

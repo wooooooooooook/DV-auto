@@ -116,7 +116,7 @@ describe('Telegram 댓글 보존 및 공지 메시지 교체 (Comment Retention 
         url: 'https://m.doctorville.co.kr/cme/seminar/10',
         time: '19:00',
         currentCount: '10',
-        totalCount: '50',
+        totalCount: '500',
         nightTime: false,
         isAdvancedSurvey: false,
       },

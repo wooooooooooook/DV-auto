@@ -4,6 +4,7 @@ import { splitTelegramMessage, TELEGRAM_SAFE_MESSAGE_LENGTH } from '../modules/t
 import { sleep, formatSeminarDisplayName } from '../modules/utils';
 import * as logger from './logger';
 import type { SeminarListItem } from './seminar_repository';
+import { isLowCapacitySeminar } from '../modules/seminar_api';
 
 export type SubscriptionTopic =
   | 'today_links'
@@ -92,10 +93,11 @@ export function parseCapacityNumbers(item: { currentCount?: string; totalCount?:
 
 export function matchesNewSeminarFilter(
   filter: NewSeminarFilter,
-  seminar: { currentCount?: string; totalCount?: string; isPointExcluded?: boolean },
+  seminar: { currentCount?: string; totalCount?: string; isPointExcluded?: boolean; maxPeopleCnt?: number | string },
   includePointExcluded: boolean = false,
 ): boolean {
   if (filter === 'off') return false;
+  if (isLowCapacitySeminar(seminar)) return false;
   if (seminar.isPointExcluded === true && !includePointExcluded) {
     return false;
   }
@@ -542,7 +544,8 @@ export async function sendNewSeminarToSubscribers(
 export async function sendUrgentSeminarsToSubscribers(
   urgentSeminars: SeminarListItem[],
 ): Promise<{ successCount: number; failCount: number }> {
-  if (urgentSeminars.length === 0) return { successCount: 0, failCount: 0 };
+  const visibleUrgent = urgentSeminars.filter((s) => !isLowCapacitySeminar(s));
+  if (visibleUrgent.length === 0) return { successCount: 0, failCount: 0 };
 
   const db = getDatabase();
   const rows = db.prepare("SELECT chat_id FROM subscriptions WHERE new_seminar = 'urgent_1000'").all() as Array<{
@@ -560,8 +563,8 @@ export async function sendUrgentSeminarsToSubscribers(
   }
 
   const formattedItems: string[] = [];
-  for (let i = 0; i < urgentSeminars.length; i++) {
-    const s = urgentSeminars[i];
+  for (let i = 0; i < visibleUrgent.length; i++) {
+    const s = visibleUrgent[i];
     const { current, total, remaining } = parseCapacityNumbers(s);
     const dateStr = s.date || s.time ? `[${s.date || ''}${s.date && s.time ? ' ' : ''}${s.time || ''}] ` : '';
     const capInfo = total > 0 ? ` (${current}/${total}) ⚡ 잔여 ${remaining}명` : '';

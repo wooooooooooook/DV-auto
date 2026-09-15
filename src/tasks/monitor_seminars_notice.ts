@@ -1,4 +1,4 @@
-import { ProcessState, SurveyState } from '../modules/seminar_api';
+import { ProcessState, SurveyState, isLowCapacitySeminar } from '../modules/seminar_api';
 import {
   editChannelMessage,
   getSeminarStatusChannelMessage,
@@ -48,6 +48,8 @@ export interface MonitoredSeminarItem {
   seminarCompleted?: number;
   surveyState?: number;
   hiddenYn?: string;
+  totalCount?: string | number;
+  maxPeopleCnt?: string | number;
   diseaseCategoryNm?: string;
   startNotified?: boolean;
   endNotified?: boolean;
@@ -507,14 +509,15 @@ export function buildSeminarStatusMessage(
   nowMs = Date.now(),
   timeExpiredMessage?: string | null,
 ): { text: string; options: Record<string, unknown> } {
-  if (seminars.length === 0) {
+  const visibleList = seminars.filter((s) => !isLowCapacitySeminar(s));
+  if (visibleList.length === 0) {
     return {
       text: `🔔 ${periodName}세미나\n\n예정된 세미나가 없습니다.`,
       options: { link_preview_options: { is_disabled: true } },
     };
   }
 
-  const sortedList = sortSeminarsByStartTime(seminars);
+  const sortedList = sortSeminarsByStartTime(visibleList);
 
   let text = `🔔 ${periodName}세미나\n\n`;
 
@@ -607,6 +610,7 @@ export function buildSeminarLiveStartMessage(seminar: MonitoredSeminarItem): {
 export async function sendSeminarLiveStartNotice(
   seminar: MonitoredSeminarItem,
 ): Promise<{ successCount: number; failCount: number }> {
+  if (isLowCapacitySeminar(seminar)) return { successCount: 0, failCount: 0 };
   const { text, options } = buildSeminarLiveStartMessage(seminar);
   return sendToTopicSubscribers('seminar_live', text, options);
 }
@@ -650,6 +654,7 @@ export function buildSeminarLiveEndMessage(seminar: MonitoredSeminarItem): {
 export async function sendSeminarLiveEndNotice(
   seminar: MonitoredSeminarItem,
 ): Promise<{ successCount: number; failCount: number }> {
+  if (isLowCapacitySeminar(seminar)) return { successCount: 0, failCount: 0 };
   const { text, options } = buildSeminarLiveEndMessage(seminar);
   return sendToTopicSubscribers('seminar_live', text, options);
 }
@@ -694,6 +699,7 @@ export async function sendSurveyClosingNotice(
   seminar: MonitoredSeminarItem,
   minutesLeft: 20 | 10,
 ): Promise<{ successCount: number; failCount: number }> {
+  if (isLowCapacitySeminar(seminar)) return { successCount: 0, failCount: 0 };
   const topic: SubscriptionTopic = minutesLeft === 20 ? 'survey_closing_20' : 'survey_closing_10';
   const { text, options } = buildSurveyClosingMessage(seminar, minutesLeft);
   return sendToTopicSubscribers(topic, text, options);
@@ -714,10 +720,18 @@ export async function publishSeminarStatusNotice(
   comments?: Array<{ userName: string; text: string }>,
   timeExpiredMessage?: string | null,
 ): Promise<number | null> {
+  const visibleSeminars = seminars.filter((s) => !isLowCapacitySeminar(s));
   const result = await publishAndReplaceChannelNotice({
     prevMessageId,
     buildMessageFn: (commentsToAttach) =>
-      buildSeminarStatusMessage(periodName, seminars, isAllCompleted, commentsToAttach, undefined, timeExpiredMessage),
+      buildSeminarStatusMessage(
+        periodName,
+        visibleSeminars,
+        isAllCompleted,
+        commentsToAttach,
+        undefined,
+        timeExpiredMessage,
+      ),
     customComments: comments,
     logPrefix: periodName,
     skipIfSameContent: isAutoResume,

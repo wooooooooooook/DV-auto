@@ -3,6 +3,7 @@ import { getPointConversionAvailabilityHttp, formatSeminarDisplayName } from '..
 import * as storage from '../services/storage';
 import * as seminarRepo from '../services/seminar_repository';
 import { TODAY_QUIZ_INFO_KEY, type CachedTodayQuizInfo } from './today_quiz';
+import { isLowCapacitySeminar } from '../modules/seminar_api';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
@@ -163,11 +164,7 @@ function getYesterdayAddedSeminars(yesterdayIso: string): StoredNewSeminars['sem
   const storedSeminars = seminarRepo.getSeminarsByDetectedDate(yesterdayIso);
 
   return storedSeminars
-    .filter((seminar) => {
-      if (!seminar.totalCount || seminar.totalCount.trim() === '') return true;
-      const parsed = parseInt(seminar.totalCount.replace(/[^0-9]/g, ''), 10);
-      return isNaN(parsed) || parsed >= 10;
-    })
+    .filter((seminar) => !isLowCapacitySeminar(seminar))
     .map((seminar) => ({
       name: seminar.name,
       url: seminar.url,
@@ -282,12 +279,9 @@ async function collectTodaySeminarMessage(
     for (const stored of storedSeminars) {
       if (!stored.date || !isDateMatching(stored.date, dateTarget)) continue;
 
-      // 정원 10명 미만 세미나는 표시하지 않음
-      if (stored.totalCount && stored.totalCount.trim() !== '') {
-        const parsedCapacity = parseInt(stored.totalCount.replace(/[^0-9]/g, ''), 10);
-        if (!isNaN(parsedCapacity) && parsedCapacity < 10) {
-          continue;
-        }
+      // 정원 100명 미만 세미나는 표시하지 않음
+      if (isLowCapacitySeminar(stored)) {
+        continue;
       }
 
       const sid = stored.seminarId ? String(stored.seminarId).trim() : null;

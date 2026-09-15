@@ -236,7 +236,7 @@ describe('apply_seminar HTTP pre-check 및 조건부 Playwright 실행 테스트
         success: true,
         items: [
           createFutureSeminarApiItem(100, ProcessState.PROCESS_CANCEL, 10, 100),
-          createFutureSeminarApiItem(200, ProcessState.PROCESS_APPLY, 5, 50),
+          createFutureSeminarApiItem(200, ProcessState.PROCESS_APPLY, 5, 500),
         ],
         rawResponse: { futureSeminarList: { items: [] } },
       });
@@ -295,7 +295,7 @@ describe('apply_seminar HTTP pre-check 및 조건부 Playwright 실행 테스트
         success: true,
         items: [
           createFutureSeminarApiItem(100, ProcessState.PROCESS_CANCEL, 10, 100),
-          createFutureSeminarApiItem(200, ProcessState.PROCESS_CANCEL, 5, 50),
+          createFutureSeminarApiItem(200, ProcessState.PROCESS_CANCEL, 5, 500),
         ],
         rawResponse: { futureSeminarList: { items: [] } },
       });

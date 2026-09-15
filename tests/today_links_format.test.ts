@@ -324,7 +324,7 @@ function testYesterdayAddedSeminarsFilter() {
       time: '13:00~14:00',
     },
     {
-      name: '어제 세미나 (정원 5명 미만으로 제외됨)',
+      name: '어제 세미나 (정원 100명 미만으로 제외됨)',
       url: 'https://m.doctorville.co.kr/cme/seminar/5575',
       seminarId: '5575',
       isPointExcluded: false,
@@ -344,8 +344,8 @@ function testYesterdayAddedSeminarsFilter() {
   // 실행
   const result = getYesterdayAddedSeminars(yesterdayIso);
 
-  // 검증: 전날(detectedDate === yesterdayIso)이며 정원 10명 이상인 것만 2건 포함
-  assert.strictEqual(result.length, 2, '전날 detectedDate 세미나 중 정원 10명 이상 2개만 포함되어야 함');
+  // 검증: 전날(detectedDate === yesterdayIso)이며 정원 100명 이상인 것만 2건 포함
+  assert.strictEqual(result.length, 2, '전날 detectedDate 세미나 중 정원 100명 이상 2개만 포함되어야 함');
   assert.strictEqual(result[0].seminarId, '5570', 'seminarId 순으로 오름차순 정렬되어야 함');
   assert.strictEqual(result[0].currentCount, '0', 'currentCount가 정상 유지되어야 함');
   assert.strictEqual(result[0].totalCount, '100', 'totalCount가 정상 유지되어야 함');
@@ -623,27 +623,27 @@ async function testCollectTodaySeminarMessageExcludesSmallCapacitySeminars() {
     },
     {
       seminarId: '9102',
-      name: '정원 9명 세미나 (제외대상)',
+      name: '정원 99명 세미나 (제외대상)',
       url: 'https://m.doctorville.co.kr/cme/seminar/9102',
       date: '2026-09-08',
       time: '12:30~13:30',
-      totalCount: '9',
+      totalCount: '99',
     },
     {
       seminarId: '9103',
-      name: '정원 10명 세미나 (표시대상)',
+      name: '정원 100명 세미나 (표시대상)',
       url: 'https://m.doctorville.co.kr/cme/seminar/9103',
       date: '2026-09-08',
       time: '12:30~13:30',
-      totalCount: '10',
+      totalCount: '100',
     },
     {
       seminarId: '9104',
-      name: '정원 100명 세미나 (표시대상)',
+      name: '정원 3000명 세미나 (표시대상)',
       url: 'https://m.doctorville.co.kr/cme/seminar/9104',
       date: '2026-09-08',
       time: '18:00~19:00',
-      totalCount: '100',
+      totalCount: '3000',
     },
     {
       seminarId: '9105',
@@ -655,10 +655,10 @@ async function testCollectTodaySeminarMessageExcludesSmallCapacitySeminars() {
   ]);
 
   const res = await collectTodaySeminarMessage(undefined, '2026-09-08');
-  assert.ok(!res.message.includes('정원 5명 세미나'), '정원 10명 미만 세미나는 제외되어야 함');
-  assert.ok(!res.message.includes('정원 9명 세미나'), '정원 10명 미만 세미나는 제외되어야 함');
-  assert.ok(res.message.includes('정원 10명 세미나'), '정원 10명 이상 세미나는 포함되어야 함');
+  assert.ok(!res.message.includes('정원 5명 세미나'), '정원 100명 미만 세미나는 제외되어야 함');
+  assert.ok(!res.message.includes('정원 99명 세미나'), '정원 100명 미만 세미나는 제외되어야 함');
   assert.ok(res.message.includes('정원 100명 세미나'), '정원 100명 세미나는 포함되어야 함');
+  assert.ok(res.message.includes('정원 3000명 세미나'), '정원 3000명 세미나는 포함되어야 함');
   assert.ok(res.message.includes('정원 미지정 세미나'), '정원 미지정 세미나는 포함되어야 함');
   assert.deepStrictEqual(res.lunchSeminarIds, ['9103']);
   assert.deepStrictEqual(res.dinnerSeminarIds, ['9104', '9105']);

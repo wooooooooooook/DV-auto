@@ -368,6 +368,34 @@ export function convertApiItemToSeminarListItem(item: FutureSeminarApiItem, refe
   };
 }
 
+export const MIN_SEMINAR_CAPACITY = 100;
+
+/**
+ * 정원(maxPeopleCnt 또는 totalCount)이 100명 미만인지 판별합니다.
+ * 정원 100명 미만인 세미나는 모니터링/공지/신청 등 모든 시스템에서 없는 세미나로 취급됩니다.
+ */
+export function isLowCapacitySeminar(
+  item?: {
+    maxPeopleCnt?: number | string | null;
+    totalCount?: string | number | null;
+  } | null,
+): boolean {
+  if (!item) return false;
+  if (item.maxPeopleCnt !== undefined && item.maxPeopleCnt !== null && item.maxPeopleCnt !== '') {
+    const num = parseInt(String(item.maxPeopleCnt).replace(/[^0-9]/g, ''), 10);
+    if (!Number.isNaN(num) && num < MIN_SEMINAR_CAPACITY) {
+      return true;
+    }
+  }
+  if (item.totalCount !== undefined && item.totalCount !== null && item.totalCount !== '') {
+    const num = parseInt(String(item.totalCount).replace(/[^0-9]/g, ''), 10);
+    if (!Number.isNaN(num) && num < MIN_SEMINAR_CAPACITY) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * 메인 세미나 리스트 API (GET /api/mw/seminars/mainFuture) 호출
  */
@@ -427,9 +455,11 @@ export async function fetchMainFutureSeminars(
       };
     }
 
+    const filteredItems = items.filter((item) => !isLowCapacitySeminar(item));
+
     return {
       success: true,
-      items,
+      items: filteredItems,
       rawResponse: parsed,
     };
   } catch (err) {

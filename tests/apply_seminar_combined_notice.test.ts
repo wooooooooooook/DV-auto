@@ -50,7 +50,7 @@ describe('신규 세미나 모음 통합 공지 (삭제/재발송) 단위 테스
         date: '2026-08-28',
         time: '19:00',
         currentCount: '5',
-        totalCount: '50',
+        totalCount: '500',
         nightTime: true,
         isPointExcluded: true,
         isAdvancedSurvey: true,
@@ -75,7 +75,7 @@ describe('신규 세미나 모음 통합 공지 (삭제/재발송) 단위 테스
     // 3. 102번 세미나 포맷 (20자 트렁케이션 + 태그 + 구분자 강조 + 2. 순번)
     assert.ok(
       text.includes(
-        '━ ✨ 방금 추가됨 ━━━━━\n2. [2026-08-28 19:00] 🚫<b>[포인트미지급]</b> ✨<b>[심화설문]</b> <s>이번에새롭게추가된매우긴제목의심화설문세...</s> (5/50)',
+        '━ ✨ 방금 추가됨 ━━━━━\n2. [2026-08-28 19:00] 🚫<b>[포인트미지급]</b> ✨<b>[심화설문]</b> <s>이번에새롭게추가된매우긴제목의심화설문세...</s> (5/500)',
       ),
     );
     assert.ok(text.includes('https://m.doctorville.co.kr/cme/seminar/102\n━━━━━━━━━━━━━━━━'));
@@ -157,7 +157,7 @@ describe('신규 세미나 모음 통합 공지 (삭제/재발송) 단위 테스
     assert.ok(!text.includes('[내분비질환]'), '공개 세미나의 질환분류명은 표시되지 않아야 함');
   });
 
-  it('buildNewSeminarsNoticeMessage: 정원 10명 미만 세미나 제외 검증', () => {
+  it('buildNewSeminarsNoticeMessage: 정원 100명 미만 세미나 제외 검증', () => {
     const list: SeminarListItem[] = [
       {
         seminarId: '901',
@@ -171,12 +171,12 @@ describe('신규 세미나 모음 통합 공지 (삭제/재발송) 단위 테스
       },
       {
         seminarId: '902',
-        name: '정원 10명 일반 세미나',
+        name: '정원 50명 세미나',
         url: 'https://m.doctorville.co.kr/cme/seminar/902',
         time: '13:00',
         nightTime: false,
         isAdvancedSurvey: false,
-        totalCount: '10',
+        totalCount: '50',
         currentCount: '2',
       },
       {
@@ -191,12 +191,12 @@ describe('신규 세미나 모음 통합 공지 (삭제/재발송) 단위 테스
       },
       {
         seminarId: '904',
-        name: '정원 9명 세미나',
+        name: '정원 99명 세미나',
         url: 'https://m.doctorville.co.kr/cme/seminar/904',
         time: '13:00',
         nightTime: false,
         isAdvancedSurvey: false,
-        totalCount: '9',
+        totalCount: '99',
         currentCount: '0',
       },
       {
@@ -213,17 +213,17 @@ describe('신규 세미나 모음 통합 공지 (삭제/재발송) 단위 테스
 
     const { text } = buildNewSeminarsNoticeMessage(list);
 
-    // 1. 헤더 카운트: 5명, 9명 제외되어 총 3건 (10명, 100명, 미정)
-    assert.ok(text.startsWith('🆕 오늘 추가된 세미나 모음 (누적 3건)\n\n'));
+    // 1. 헤더 카운트: 5명, 50명, 99명 제외되어 총 2건 (100명, 미정)
+    assert.ok(text.startsWith('🆕 오늘 추가된 세미나 모음 (누적 2건)\n\n'));
 
-    // 2. 5명, 9명 세미나는 미포함
+    // 2. 5명, 50명, 99명 세미나는 미포함
     assert.ok(!text.includes('정원 5명 소규모 세미나'));
-    assert.ok(!text.includes('정원 9명 세미나'));
+    assert.ok(!text.includes('정원 50명 세미나'));
+    assert.ok(!text.includes('정원 99명 세미나'));
 
-    // 3. 10명, 100명, 미정 세미나는 포함
-    assert.ok(text.includes('1. [13:00] 정원 10명 일반 세미나'));
-    assert.ok(text.includes('2. [13:00] 정원 100명 대규모 세미나'));
-    assert.ok(text.includes('3. [13:00] 정원 미정 세미나'));
+    // 3. 100명, 미정 세미나는 포함
+    assert.ok(text.includes('1. [13:00] 정원 100명 대규모 세미나'));
+    assert.ok(text.includes('2. [13:00] 정원 미정 세미나'));
   });
 
   it('buildNewSeminarsNoticeMessage & seminarRepo: 발견된 순서(detectedAt 오름차순) 정렬 및 순번 검증', () => {
@@ -456,7 +456,7 @@ describe('신규 세미나 모음 통합 공지 (삭제/재발송) 단위 테스
       date: '2026-08-29',
       time: '13:00',
       currentCount: '5',
-      totalCount: '50',
+      totalCount: '500',
       nightTime: false,
       isAdvancedSurvey: true,
       detectedDate: targetDate,
@@ -477,7 +477,7 @@ describe('신규 세미나 모음 통합 공지 (삭제/재발송) 단위 테스
     // 103번에만 구분자가 적용되었는지 검증
     assert.ok(
       sentHistory[1].text.includes(
-        '━ ✨ 방금 추가됨 ━━━━━\n3. [2026-08-29 13:00] ✨<b>[심화설문]</b> 103번 신규 세미나 (5/50)',
+        '━ ✨ 방금 추가됨 ━━━━━\n3. [2026-08-29 13:00] ✨<b>[심화설문]</b> 103번 신규 세미나 (5/500)',
       ),
     );
     // 이전 메시지 ID 1001이 삭제되었는지 검증
@@ -498,24 +498,26 @@ describe('신규 세미나 모음 통합 공지 (삭제/재발송) 단위 테스
 https://m.doctorville.co.kr/cme/seminar/101
 
 ━ ✨ 방금 추가됨 ━━━━━
-2. [2026-08-28 19:00] 신규 세미나 (5/50)
+2. [2026-08-28 19:00] 신규 세미나 (5/500)
 https://m.doctorville.co.kr/cme/seminar/102
 ━━━━━━━━━━━━━━━━`;
     assert.deepStrictEqual(extractHighlightedSeminarIds(singleMsg), ['102']);
 
-    // 3. 복수 강조 항목
-    const multiMsg = `🆕 오늘 추가된 세미나 모음 (누적 2건)
+    // 3. 다중 강조 항목
+    const multiMsg = `🆕 오늘 추가된 세미나 모음 (누적 3건)
+
+1. [2026-08-27 13:00] 일반 세미나 (15/100)
+https://m.doctorville.co.kr/cme/seminar/101
 
 ━ ✨ 방금 추가됨 ━━━━━
-1. [2026-08-27 13:00] 첫번째 신규 세미나 (15/100)
-https://m.doctorville.co.kr/cme/seminar/201
+2. [2026-08-28 19:00] 신규 세미나 1 (5/500)
+https://m.doctorville.co.kr/cme/seminar/102
 ━━━━━━━━━━━━━━━━
-
 ━ ✨ 방금 추가됨 ━━━━━
-2. [2026-08-28 19:00] 두번째 신규 세미나 (5/50)
-https://m.doctorville.co.kr/cme/seminar/202
+3. [2026-08-29 13:00] 신규 세미나 2 (0/100)
+https://m.doctorville.co.kr/cme/seminar/103
 ━━━━━━━━━━━━━━━━`;
-    assert.deepStrictEqual(extractHighlightedSeminarIds(multiMsg), ['201', '202']);
+    assert.deepStrictEqual(extractHighlightedSeminarIds(multiMsg), ['102', '103']);
   });
 
   it('syncNewSeminarsNotice: 신규 세미나 없이 정원/인원 수치 변경 시 기존 강조 표시 유지하며 editChannelMessage 호출 검증', async () => {
@@ -523,7 +525,7 @@ https://m.doctorville.co.kr/cme/seminar/202
     const targetDate = '2026-08-27';
     const channelId = '-100999888777';
 
-    // 1. 초기 세미나 2개 등록 (101은 일반, 102는 신규 강조)
+    // 1. 초기 2개 세미나 추가
     const initialSeminars: SeminarListItem[] = [
       {
         seminarId: '101',
@@ -531,7 +533,7 @@ https://m.doctorville.co.kr/cme/seminar/202
         url: 'https://m.doctorville.co.kr/cme/seminar/101',
         date: targetDate,
         time: '13:00',
-        currentCount: '10',
+        currentCount: '15',
         totalCount: '100',
         nightTime: false,
         isAdvancedSurvey: false,
@@ -545,7 +547,7 @@ https://m.doctorville.co.kr/cme/seminar/202
         date: targetDate,
         time: '19:00',
         currentCount: '5',
-        totalCount: '50',
+        totalCount: '500',
         nightTime: true,
         isAdvancedSurvey: false,
         detectedDate: targetDate,
@@ -554,18 +556,18 @@ https://m.doctorville.co.kr/cme/seminar/202
     ];
     seminarRepo.upsertSeminars(initialSeminars);
 
-    // 2. 초기 공지 메시지 모의 생성 및 DB 저장
+    // 2. 1차 발행 시뮬레이션: 102번이 신규 강조되어 발행됨
     const initialNoticeText = buildNewSeminarsNoticeMessage(initialSeminars, ['102']).text;
     channelRepoModule.recordChannelMessage({
       channelId,
       messageId: 5001,
-      text: initialNoticeText,
       date: targetDate,
+      text: initialNoticeText,
       mediaType: 'text',
       status: 'sent',
     });
 
-    // 3. 세미나 인원 변경 (101번: 10/100 -> 35/100, 102번: 5/50 -> 40/50)
+    // 3. 인원 수치 변동 발생 (101번: 15->35, 102번: 5->40)
     const updatedSeminars: SeminarListItem[] = [
       {
         ...initialSeminars[0],
@@ -600,7 +602,7 @@ https://m.doctorville.co.kr/cme/seminar/202
     // - 102번 세미나의 "━ ✨ 방금 추가됨 ━━━━━" 강조 표시가 그대로 유지됨
     assert.ok(
       editedNewText.includes(
-        '━ ✨ 방금 추가됨 ━━━━━\n2. [2026-08-27 19:00] 102번 세미나 (신규 강조) (40/50)\nhttps://m.doctorville.co.kr/cme/seminar/102\n━━━━━━━━━━━━━━━━',
+        '━ ✨ 방금 추가됨 ━━━━━\n2. [2026-08-27 19:00] 102번 세미나 (신규 강조) (40/500)\nhttps://m.doctorville.co.kr/cme/seminar/102\n━━━━━━━━━━━━━━━━',
       ),
     );
 

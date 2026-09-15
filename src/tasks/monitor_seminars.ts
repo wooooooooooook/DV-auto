@@ -8,6 +8,7 @@ import {
   parseSeminarDateTime,
   checkIsAdvancedSurvey,
   checkIsPointExcluded,
+  isLowCapacitySeminar,
   ProcessState,
   SurveyState,
   type FutureSeminarApiItem,
@@ -89,6 +90,7 @@ export async function getTodaysSeminarsFromApi(
   const items = apiRes.items || [];
 
   for (const item of items) {
+    if (isLowCapacitySeminar(item)) continue;
     const { date, startHour: itemStartHour, time } = parseSeminarDateTime(item.startDt, item.endDt);
 
     // 날짜가 오늘(targetDate)이고 모니터링 시간대(startHour <= h < endHour)인지 확인
@@ -159,6 +161,7 @@ export async function getTodaysSeminarsFromApi(
 
   // 3. 메인 미래 세미나 API에 빠져있지만 로컬 DB에 당일 해당 시간대로 저장되어 있는 세미나 보충 (fallback)
   for (const stored of storedList) {
+    if (isLowCapacitySeminar(stored)) continue;
     if (stored.date !== targetDate) continue;
     if (stored.isClosed === true) continue;
 
@@ -263,6 +266,20 @@ export async function checkSeminarEndStatusFromApi(seminarId: string): Promise<{
 
   const raw = detailRes.rawResponse as Record<string, unknown> | undefined;
   const detail = raw?.seminarDetail as Record<string, unknown> | undefined;
+
+  if (detail && isLowCapacitySeminar(detail)) {
+    return {
+      isEnded: false,
+      isSurveyOpen: false,
+      isPointExcluded: false,
+      hasEntryHistory: false,
+      isPrivate: false,
+      isDeletedOrNotFound: true,
+      isClosedOrCancelled: true,
+      errorType: 'not_found',
+    };
+  }
+
   const survey = (detail?.survey ?? raw?.survey ?? detailRes.survey ?? null) as SeminarSurveyInfo | null;
   const surveyState = detailRes.surveyState;
   const processState = detail?.processState !== undefined ? Number(detail.processState) : undefined;
@@ -335,6 +352,11 @@ export async function setupMonitoredSeminarItem(
 ): Promise<{ trackingKey: string; item: MonitoredSeminarItem | null }> {
   const { isAutoResume = false, isNewDiscovery = false, providedContext } = options;
   const trackingKey = getSeminarTrackingKey(info.url, info.seminarId) || key;
+
+  if (isLowCapacitySeminar(info)) {
+    excludedSeminarKeys.add(trackingKey);
+    return { trackingKey, item: null };
+  }
   const seminarId = info.seminarId ? String(info.seminarId).trim() : null;
   const targetUrl = seminarId ? `${SEMINAR_DETAIL_PAGE}${seminarId}` : info.url;
 

@@ -8,6 +8,7 @@ import {
   applySeminarWithTerms,
   convertApiItemToRawSeminar,
   convertApiItemToSeminarListItem,
+  isLowCapacitySeminar,
   ProcessState,
 } from '../modules/seminar_api';
 import * as storage from '../services/storage';
@@ -91,12 +92,15 @@ export function isEligibleApplyTarget(
     processState?: number;
     isClosed?: boolean;
     hiddenYn?: string;
+    totalCount?: string;
+    maxPeopleCnt?: number | string;
   },
   options: {
     newlyAddedIds?: Set<string>;
     initialStoredIdSet?: Set<string>;
   } = {},
 ): boolean {
+  if (isLowCapacitySeminar(seminar)) return false;
   if (isAppliedSeminar(seminar.processState)) return false;
   if (seminar.processState !== ProcessState.PROCESS_APPLY) return false;
   if (seminar.isClosed) return false;
@@ -613,10 +617,11 @@ export async function syncSeminars(options: ApplySeminarOptions = {}): Promise<S
     // 마감 임박(잔여 1,000명 이하) 진입 세미나 감지 및 알림 발송
     const newUrgentSeminars: SeminarListItem[] = [];
     for (const s of enrichedSeminars) {
+      if (isLowCapacitySeminar(s)) continue;
       const sid = s.seminarId || getSeminarIdFromUrl(s.url);
       if (!sid) continue;
       const { total, remaining } = parseCapacityNumbers(s);
-      if (total > 0 && remaining <= 1000) {
+      if (total >= 100 && remaining <= 1000) {
         const stored = storedSeminars.find((item) => (item.seminarId || getSeminarIdFromUrl(item.url)) === sid);
         if (!stored?.urgentNotified) {
           newUrgentSeminars.push(s);

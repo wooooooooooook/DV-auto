@@ -1,5 +1,6 @@
 import * as seminarRepo from '../services/seminar_repository';
 import type { SeminarListItem } from '../services/seminar_repository';
+import { isLowCapacitySeminar } from '../modules/seminar_api';
 
 const LOOKBACK_DAYS = 14;
 
@@ -62,6 +63,7 @@ export function run(): { success: boolean; message: string } {
     const unique = new Map<string, { date: string; seminar: SeminarRecord }>();
 
     for (const stored of seminarList) {
+      if (isLowCapacitySeminar(stored)) continue;
       const seminarId = stored.seminarId || getSeminarId(stored);
       const normalizedDate = normalizeSeminarDate(stored.date || stored.detectedDate, todayStr);
       if (!seminarId || !normalizedDate || normalizedDate < pastStr || normalizedDate > todayStr) continue;
