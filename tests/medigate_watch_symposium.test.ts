@@ -245,6 +245,25 @@ describe('Medigate Watch Symposium Tests', () => {
     expect(res.success).toBe(true);
     expect(res.message).toContain('On-Air 심포지움 자동 시청');
     expect(res.options?.watchedCount).toBe(1);
+    expect(res.silent).toBe(false);
+  });
+
+  it('run 태스크 실행 테스트 - On-Air 없을 때 silent: true 적용', async () => {
+    vi.spyOn(MedigateClient.prototype, 'watchAllOnAirSymposiums').mockResolvedValueOnce({
+      success: true,
+      message: '현재 On-Air(진행 중)인 심포지움이 없습니다.',
+      userName: '테스터',
+      userId: 'testuser',
+      totalOnAir: 0,
+      watchedCount: 0,
+      failedCount: 0,
+      results: [],
+    });
+
+    const res = await runMedigateWatch();
+    expect(res.success).toBe(true);
+    expect(res.silent).toBe(true);
+    expect(res.options?.shouldNotify).toBe(false);
   });
 
   it('run 태스크 실행 테스트 - duration 미지정 시 기본 20분 적용', async () => {

@@ -58,6 +58,7 @@ describe('Medigate Monitor Service Tests', () => {
     expect(res.totalOnAir).toBe(0);
     expect(res.targets).toHaveLength(0);
     expect(res.message).toContain('On-Air 심포지움 없음');
+    expect(res.silent).toBe(true);
   });
 
   it('checkAndWatchMedigateSymposiums - On-Air 심포지움 발견 시 태스크 트리거 테스트', async () => {

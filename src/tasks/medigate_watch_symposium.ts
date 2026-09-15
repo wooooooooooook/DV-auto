@@ -96,7 +96,7 @@ export async function run(ctx?: TaskContext): Promise<TaskResult> {
   const targetIdx = options.webinarIdx || options.idx || options.id;
   const durationMinutes = options.duration ? parseInt(String(options.duration), 10) : 20;
   const intervalSeconds = options.interval ? parseInt(String(options.interval), 10) : 120;
-  const silentIfNoLive = options.silentIfNoLive === 'true';
+  const silentIfNoLive = options.silentIfNoLive !== 'false';
 
   logger.info('[Medigate Task] 심포지움 시청 태스크 시작', {
     targetIdx,

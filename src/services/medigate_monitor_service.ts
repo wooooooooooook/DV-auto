@@ -56,6 +56,7 @@ export interface CheckAndWatchResult {
   failedCount: number;
   results: MedigateWatchResult[];
   message?: string;
+  silent?: boolean;
 }
 
 /**
@@ -82,6 +83,7 @@ export async function checkAndWatchMedigateSymposiums(
       failedCount: 0,
       results: [],
       message: '이미 시청 태스크가 실행 중입니다.',
+      silent: true,
     };
   }
 
@@ -98,6 +100,7 @@ export async function checkAndWatchMedigateSymposiums(
       failedCount: 0,
       results: [],
       message: `로그인 실패: ${loginRes.message}`,
+      silent: true,
     };
   }
 
@@ -115,6 +118,7 @@ export async function checkAndWatchMedigateSymposiums(
       failedCount: 0,
       results: [],
       message: '현재 On-Air 심포지움 없음',
+      silent: true,
     };
   }
 
@@ -146,6 +150,7 @@ export async function checkAndWatchMedigateSymposiums(
       failedCount: 0,
       results: [],
       message: '모든 On-Air 심포지움 시청 완료 상태',
+      silent: true,
     };
   }
 
@@ -170,5 +175,6 @@ export async function checkAndWatchMedigateSymposiums(
     failedCount: 0,
     results: [],
     message: `${unwatchedTargets.length}건의 On-Air 심포지움 시청 태스크 트리거됨`,
+    silent: true,
   };
 }
