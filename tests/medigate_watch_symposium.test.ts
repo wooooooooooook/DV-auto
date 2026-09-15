@@ -8,9 +8,19 @@ import {
 } from '../src/modules/medigate_api';
 import { formatMedigateWatchMessage, run as runMedigateWatch } from '../src/tasks/medigate_watch_symposium';
 
+import * as utils from '../src/modules/utils';
+
 vi.mock('undici', () => ({
   request: vi.fn(),
 }));
+
+vi.mock('../src/modules/utils', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/modules/utils')>();
+  return {
+    ...actual,
+    sendTelegram: vi.fn().mockResolvedValue(true),
+  };
+});
 
 const mockRequest = vi.mocked(request);
 
@@ -266,22 +276,23 @@ describe('Medigate Watch Symposium Tests', () => {
     expect(res.options?.shouldNotify).toBe(false);
   });
 
-  it('run 태스크 실행 테스트 - duration 미지정 시 기본 20분 적용', async () => {
+  it('run 태스크 실행 테스트 - duration 미지정 시 기본 22분 적용', async () => {
     const watchSpy = vi.spyOn(MedigateClient.prototype, 'watchSymposiumLive').mockResolvedValueOnce({
       webinarIdx: 5011,
       subject: 'Semaglutide 웨비나',
       success: true,
       message: '시청 완료',
       startedAt: '2026-09-14T19:00:00.000Z',
-      endedAt: '2026-09-14T19:20:00.000Z',
-      durationMinutes: 20,
-      heartbeatCount: 10,
+      endedAt: '2026-09-14T19:22:00.000Z',
+      durationMinutes: 22,
+      heartbeatCount: 11,
       platform: 'nownnow',
     });
 
     const res = await runMedigateWatch({ args: { webinarIdx: '5011' } });
     expect(res.success).toBe(true);
-    expect(watchSpy).toHaveBeenCalledWith(5011, expect.objectContaining({ durationMinutes: 20 }));
+    expect(watchSpy).toHaveBeenCalledWith(5011, expect.objectContaining({ durationMinutes: 22 }));
+    expect(utils.sendTelegram).toHaveBeenCalled();
   });
 
   it('MedigateClient.watchSymposiumLive 방송 도중 종료 시 조기 종료 테스트', async () => {

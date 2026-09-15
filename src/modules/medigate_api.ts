@@ -1051,7 +1051,7 @@ export class MedigateClient {
       }) => Promise<void> | void;
     } = {},
   ): Promise<MedigateWatchResult> {
-    const durationMinutes = options.durationMinutes ?? 20;
+    const durationMinutes = options.durationMinutes ?? 22;
     const intervalSeconds = options.intervalSeconds ?? 120; // 2분 주기
     const startedAt = new Date().toISOString();
 
