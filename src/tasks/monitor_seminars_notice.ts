@@ -16,6 +16,7 @@ export { formatPrivateSeminarTag, truncateSeminarName, formatSeminarDisplayName 
 
 export const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
 export const SEMINAR_DETAIL_PC_PAGE = 'https://www.doctorville.co.kr/seminar/seminarDetail';
+export const SEMINAR_NOTICE_CHANNEL_INVITE_URL = 'https://t.me/+66PEMrlt-XljZTA1';
 
 export const seoulDateString = (): string => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
 
@@ -627,6 +628,9 @@ export function buildSeminarLiveEndMessage(seminar: MonitoredSeminarItem): {
 
   if (seminar.quizResultMessage) {
     text += `\n\n${escapeHtml(seminar.quizResultMessage.trim())}`;
+    if (seminar.quizResultMessage.includes('미해결')) {
+      text += `\n\n💡 <b>정답은 채널에 업데이트됩니다.</b>\n${SEMINAR_NOTICE_CHANNEL_INVITE_URL}`;
+    }
   } else if (seminar.hasSurvey === false) {
     text += `\n\n(설문이 없는 세미나)`;
   }

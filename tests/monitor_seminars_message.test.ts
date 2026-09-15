@@ -143,7 +143,7 @@ describe('buildSeminarMonitorStatusMessage 세미나 모니터 현황 메시지 
     assert(startMsg.text.includes('✨<b>[심화설문]</b> ENVLO WEB SYMPOSIUM'));
     assert(startMsg.text.includes('https://m.doctorville.co.kr/cme/seminar/5580'));
 
-    // 2. 종료 알림 (퀴즈 결과 포함)
+    // 2. 종료 알림 (퀴즈 결과 포함 - 완료된 경우)
     const endMsgWithQuiz = buildSeminarLiveEndMessage({
       seminarId: '5580',
       url: 'https://m.doctorville.co.kr/cme/seminar/5580',
@@ -155,6 +155,21 @@ describe('buildSeminarMonitorStatusMessage 세미나 모니터 현황 메시지 
     });
     assert(endMsgWithQuiz.text.includes('🔴 <b>[세미나 종료]</b>'));
     assert(endMsgWithQuiz.text.includes('📋 퀴즈 정답\n1. O\n2. X'));
+    assert(!endMsgWithQuiz.text.includes('https://t.me/+66PEMrlt-XljZTA1'));
+
+    // 2-1. 종료 알림 (퀴즈 결과 포함 - 일부 미해결인 경우)
+    const endMsgWithUnsolvedQuiz = buildSeminarLiveEndMessage({
+      seminarId: '5581',
+      url: 'https://m.doctorville.co.kr/cme/seminar/5581',
+      name: '당뇨 세미나',
+      status: '종료',
+      time: '18:00~19:00',
+      quizResultMessage: '퀴즈 정답 1- (일부 미해결)\n\n❓ Q2: 당뇨병 진단 기준\n   → 족보 미등록 (답변 번호 미확인)',
+    });
+    assert(endMsgWithUnsolvedQuiz.text.includes('🔴 <b>[세미나 종료]</b>'));
+    assert(endMsgWithUnsolvedQuiz.text.includes('퀴즈 정답 1- (일부 미해결)'));
+    assert(endMsgWithUnsolvedQuiz.text.includes('💡 <b>정답은 채널에 업데이트됩니다.</b>'));
+    assert(endMsgWithUnsolvedQuiz.text.includes('https://t.me/+66PEMrlt-XljZTA1'));
 
     // 3. 종료 알림 (설문 없는 세미나)
     const endMsgNoSurvey = buildSeminarLiveEndMessage({
