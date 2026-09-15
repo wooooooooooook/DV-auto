@@ -188,10 +188,12 @@ describe('seminar_quiz 다중 페이지 탐색 및 제출하기 감지 테스트
     expect(sendTelegramSpy).toHaveBeenCalled();
     const sentMsg = sendTelegramSpy.mock.calls[0]?.[0] as string;
     expect(sentMsg).toContain('[심화설문] 퀴즈 정답 추출 완료 (자동 제출 제외)');
-    expect(sentMsg).toContain('```text');
+    expect(sentMsg).toContain('<pre><code class="language-text">');
     expect(sentMsg).toContain('10년 차 로컬의원');
     expect(sentMsg).toContain('강의 내용에 만족하십니까?');
     expect(sentMsg).toContain('향후 추가 희망 주제가 있으십니까?');
+    const sentOptions = sendTelegramSpy.mock.calls[0]?.[2] as Record<string, unknown> | undefined;
+    expect(sentOptions?.parse_mode).toBe('HTML');
   });
 
   it('일반설문: 1페이지에서 [다음] 클릭 -> 2페이지에서 [제출하기] 감지 시 루프 탈출 후 [제출하기]를 클릭한다', async () => {

@@ -394,6 +394,10 @@ export function formatQuizResults(
   return message;
 }
 
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 export interface SurveyQuestionForPrompt {
   questionNumber: number;
   questionText: string;
@@ -411,9 +415,17 @@ export function formatAdvancedSurveyPrompt(questions: SurveyQuestionForPrompt[])
 
   const questionLines = questions.map((q, idx) => {
     const qNum = q.questionNumber || idx + 1;
-    let text = `${qNum}. Q${qNum}: ${q.questionText.trim()}`;
-    if (q.options && q.options.length > 0) {
-      const optStr = q.options.map((o) => `   ${o.index}) ${o.text}`).join('\n');
+    // 번호 중복 방지 (Q숫자: 만 사용)
+    let text = `Q${qNum}: ${q.questionText.trim()}`;
+
+    // 주관식 더미 옵션("[주관식]", "주관식" 등) 및 빈 옵션 필터링
+    const validOptions = (q.options || []).filter((o) => {
+      const t = o.text.trim();
+      return t.length > 0 && !/^\[?\s*주관식\s*\]?$/i.test(t);
+    });
+
+    if (validOptions.length > 0) {
+      const optStr = validOptions.map((o) => `   ${o.index}) ${o.text}`).join('\n');
       text += `\n${optStr}`;
     }
     return text;
@@ -423,7 +435,7 @@ export function formatAdvancedSurveyPrompt(questions: SurveyQuestionForPrompt[])
 
 [작성 가이드라인]
 1. 로컬 진료 현장의 실제 임상 경험과 환자 처방 관점을 반영하여 답변합니다.
-2. 문항당 공백 포함 100~200자 내외로 작성합니다.
+2. 문항당 공백 포함 100~150자 내외로 작성합니다.
 3. 기계적인 느낌을 피하기 위해 괄호()는 사용하지 않습니다.
 4. 실제 키보드로 빠르게 타이핑한 것처럼 자연스러운 문체로 작성하며, 자주 발생하는 가벼운 오타(예: '-스빈다', '-할 떄', '하ㅗㄴ자' 등)를 전체 답변 중 1~2개 자연스럽게 포함합니다.
 5. 마크다운 기호 없이 질문 번호와 순수 텍스트 답변만 깔끔하게 출력합니다.
@@ -431,7 +443,7 @@ export function formatAdvancedSurveyPrompt(questions: SurveyQuestionForPrompt[])
 [설문 문항]
 ${questionLines.join('\n\n')}`;
 
-  return '```text\n' + promptText + '\n```';
+  return `<pre><code class="language-text">${escapeHtml(promptText)}</code></pre>`;
 }
 
 /**
@@ -883,9 +895,9 @@ async function processSeminarQuiz(
       try {
         await fs.mkdir(baseDir, { recursive: true });
         await page.screenshot({ path: advancedShotPath, fullPage: true }).catch(() => {});
-        await sendTelegram(telegramNoticeText, advancedShotPath).catch(() => {});
+        await sendTelegram(telegramNoticeText, advancedShotPath, { parse_mode: 'HTML' }).catch(() => {});
       } catch (_ssErr) {
-        await sendTelegram(telegramNoticeText).catch(() => {});
+        await sendTelegram(telegramNoticeText, null, { parse_mode: 'HTML' }).catch(() => {});
       } finally {
         await fs.unlink(advancedShotPath).catch(() => {});
       }
