@@ -39,13 +39,12 @@ dotenv.config();
 const HEADLESS = (process.env.HEADLESS || 'true').toLowerCase() === 'true';
 const TIMEZONE = process.env.SCHEDULE_TZ || 'Asia/Seoul';
 const DAILY_ROUTINE_CRON = process.env.DAILY_CRON || '1 0 * * *';
-const INTERMD_QUIZ_CRON = process.env.INTERMD_QUIZ_CRON || '1 8 * * *';
 const DOCPLE_DAILY_CRON = process.env.DOCPLE_DAILY_CRON || '4 7 * * *';
 const ETC_DAILY_QUESTS_CRON =
   process.env.ETC_DAILY_QUESTS_CRON ||
   process.env.OTHER_DAILY_QUESTS_CRON ||
   process.env.KEYMEDI_ATTENDANCE_CRON ||
-  '5 7 * * *';
+  '1 8 * * *';
 const BROADCAST_TODAY_LINKS_CRON = '0 0 9 * * *';
 const HOURLY_TODAY_LINKS_EARLY_CRON = '0 2 0 * * *';
 const HOURLY_TODAY_LINKS_CRON = '5 0 1-12 * * *';
@@ -462,17 +461,6 @@ const hourlyTodayLinksTask: Task = {
 scheduler.scheduleTaskCron(hourlyTodayLinksTask);
 taskRegistry.registerTask(hourlyTodayLinksTask);
 
-const intermdQuizTask: Task = {
-  name: 'intermd_quiz',
-  schedule: INTERMD_QUIZ_CRON,
-  timezone: TIMEZONE,
-  run: async (ctx, options) => {
-    return await intermdQuizTaskModule.run(ctx, options);
-  },
-};
-taskRegistry.registerTask(intermdQuizTask);
-scheduler.scheduleTaskCron(intermdQuizTask);
-
 const docpleDailyTask: Task = {
   name: 'docple_daily',
   schedule: DOCPLE_DAILY_CRON,
@@ -484,7 +472,7 @@ const docpleDailyTask: Task = {
 taskRegistry.registerTask(docpleDailyTask);
 scheduler.scheduleTaskCron(docpleDailyTask);
 
-// 기타일일퀘스트 통합 태스크 (키메디 -> HMP -> 메디게이트 순차 실행)
+// 기타일일퀘스트 통합 태스크 (인터엠디 -> 키메디 -> HMP -> 메디게이트 순차 실행)
 const etcDailyQuestsTask: Task = {
   name: '기타일일퀘스트',
   schedule: ETC_DAILY_QUESTS_CRON,
@@ -501,6 +489,14 @@ taskRegistry.registerTask({
 scheduler.scheduleTaskCron(etcDailyQuestsTask);
 
 // 개별 실행을 위한 태스크 등록 (스케줄 크론은 기타일일퀘스트로 통합)
+const intermdQuizTask: Task = {
+  name: 'intermd_quiz',
+  run: async (ctx, options) => {
+    return await intermdQuizTaskModule.run(ctx, options);
+  },
+};
+taskRegistry.registerTask(intermdQuizTask);
+
 const keymediAttendanceTask: Task = {
   name: 'keymedi_attendance',
   run: async (ctx) => {
