@@ -394,6 +394,46 @@ export function formatQuizResults(
   return message;
 }
 
+export interface SurveyQuestionForPrompt {
+  questionNumber: number;
+  questionText: string;
+  typeName?: string;
+  typeKey?: string;
+  options?: Array<{ index: number; text: string }>;
+}
+
+/**
+ * 심화설문 문항을 바탕으로 AI(ChatGPT, Claude 등)에 전달하여
+ * 로컬의원 의사 입장의 자연스러운 답변을 생성할 수 있는 프롬프트 코드블럭을 포맷합니다.
+ */
+export function formatAdvancedSurveyPrompt(questions: SurveyQuestionForPrompt[]): string {
+  if (!questions || questions.length === 0) return '';
+
+  const questionLines = questions.map((q, idx) => {
+    const qNum = q.questionNumber || idx + 1;
+    let text = `${qNum}. Q${qNum}: ${q.questionText.trim()}`;
+    if (q.options && q.options.length > 0) {
+      const optStr = q.options.map((o) => `   ${o.index}) ${o.text}`).join('\n');
+      text += `\n${optStr}`;
+    }
+    return text;
+  });
+
+  const promptText = `다음은 세미나 심화설문 문항입니다. 10년 차 로컬의원(개원의) 의사의 입장에서 현실적이고 자연스러운 피드백을 작성해 주세요.
+
+[작성 가이드라인]
+1. 로컬 진료 현장의 실제 임상 경험과 환자 처방 관점을 반영하여 답변합니다.
+2. 문항당 공백 포함 100~200자 내외로 작성합니다.
+3. 기계적인 느낌을 피하기 위해 괄호()는 사용하지 않습니다.
+4. 실제 키보드로 빠르게 타이핑한 것처럼 자연스러운 문체로 작성하며, 자주 발생하는 가벼운 오타(예: '-스빈다', '-할 떄', '하ㅗㄴ자' 등)를 전체 답변 중 1~2개 자연스럽게 포함합니다.
+5. 마크다운 기호 없이 질문 번호와 순수 텍스트 답변만 깔끔하게 출력합니다.
+
+[설문 문항]
+${questionLines.join('\n\n')}`;
+
+  return '```text\n' + promptText + '\n```';
+}
+
 /**
  * 미등록 문제를 텔레그램 메시지 형식으로 포맷
  */
@@ -521,6 +561,7 @@ async function processSeminarQuiz(
     const maxLoopPages = 10;
     let currentPageNum = 1;
     let lastPageQuestionCount = 0;
+    let lastPageQuestions: SurveyQuestion[] = [];
 
     // ── 다중 페이지 탐색 및 응답 루프 ───────────────────────────────────────────────
     while (currentPageNum <= maxLoopPages) {
@@ -560,6 +601,7 @@ async function processSeminarQuiz(
       const pageQuestions = await parseAllSurveyQuestions(page, cheatsheet, httpQuizNums);
       console.log(`[seminar_quiz] 페이지 ${currentPageNum} 문항 파싱 수: ${pageQuestions.length}`);
       lastPageQuestionCount = pageQuestions.length;
+      lastPageQuestions = pageQuestions;
 
       for (let i = 0; i < pageQuestions.length; i++) {
         const q = pageQuestions[i];
@@ -814,17 +856,36 @@ async function processSeminarQuiz(
       const baseDir = path.join(process.cwd(), 'screenshot');
       const advancedShotPath = path.join(baseDir, `quiz_advanced_${seminarName ?? 'unknown'}_${Date.now()}.png`);
 
+      // 심화설문 문항 추출 및 AI 답변 생성용 프롬프트 포맷
+      const depthQuestionsForPrompt: SurveyQuestionForPrompt[] =
+        lastPageQuestions.length > 0
+          ? lastPageQuestions.map((q) => ({
+              questionNumber: q.questionNumber,
+              questionText: q.questionText,
+              options: q.options,
+            }))
+          : (
+              httpQuizResult?.depthSurveyQuestions ||
+              httpQuizResult?.allQuestions.filter((q) => q.pageNumber === (httpQuizResult?.totalPageCnt ?? 1)) ||
+              []
+            ).map((q) => ({
+              questionNumber: q.questionNumber,
+              questionText: q.questionText,
+              typeName: q.typeName,
+              typeKey: q.typeKey,
+              options: q.options,
+            }));
+
+      const promptBlock = formatAdvancedSurveyPrompt(depthQuestionsForPrompt);
+      const promptSection = promptBlock ? `\n\n${promptBlock}` : '';
+      const telegramNoticeText = `📋 ℹ️ [심화설문] 퀴즈 정답 추출 완료 (자동 제출 제외)\n${resultMessage}\n\n🔗 세미나 URL: ${seminarPageUrl}${promptSection}`;
+
       try {
         await fs.mkdir(baseDir, { recursive: true });
         await page.screenshot({ path: advancedShotPath, fullPage: true }).catch(() => {});
-        await sendTelegram(
-          `📋 ℹ️ [심화설문] 퀴즈 정답 추출 완료 (자동 제출 제외)\n${resultMessage}\n\n🔗 세미나 URL: ${seminarPageUrl}`,
-          advancedShotPath,
-        ).catch(() => {});
+        await sendTelegram(telegramNoticeText, advancedShotPath).catch(() => {});
       } catch (_ssErr) {
-        await sendTelegram(
-          `📋 ℹ️ [심화설문] 퀴즈 정답 추출 완료 (자동 제출 제외)\n${resultMessage}\n\n🔗 세미나 URL: ${seminarPageUrl}`,
-        ).catch(() => {});
+        await sendTelegram(telegramNoticeText).catch(() => {});
       } finally {
         await fs.unlink(advancedShotPath).catch(() => {});
       }
@@ -837,7 +898,7 @@ async function processSeminarQuiz(
       return {
         success: true,
         hasQuizResult: channelResults.length > 0,
-        message: `${resultMessage}\n(※ 심화설문으로 자동 제출이 제외되었습니다)`,
+        message: `${resultMessage}\n(※ 심화설문으로 자동 제출이 제외되었습니다)${promptSection}`,
       };
     }
 
