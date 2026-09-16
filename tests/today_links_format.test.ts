@@ -664,6 +664,46 @@ async function testCollectTodaySeminarMessageExcludesSmallCapacitySeminars() {
   assert.deepStrictEqual(res.dinnerSeminarIds, ['9104', '9105']);
 }
 
+async function testCollectTodaySeminarMessageIncludesMorningSeminars() {
+  vi.spyOn(seminarRepo, 'getAllSeminars').mockReturnValue([
+    {
+      seminarId: '9201',
+      name: '아침 모닝 세미나',
+      url: 'https://m.doctorville.co.kr/cme/seminar/9201',
+      date: '2026-09-08',
+      time: '07:30~08:30',
+      processState: 2,
+    },
+    {
+      seminarId: '9202',
+      name: '점심 런치 세미나',
+      url: 'https://m.doctorville.co.kr/cme/seminar/9202',
+      date: '2026-09-08',
+      time: '12:30~13:30',
+      processState: 2,
+    },
+    {
+      seminarId: '9203',
+      name: '저녁 디너 세미나',
+      url: 'https://m.doctorville.co.kr/cme/seminar/9203',
+      date: '2026-09-08',
+      time: '18:00~19:00',
+      processState: 2,
+    },
+  ]);
+
+  const res = await collectTodaySeminarMessage(undefined, '2026-09-08');
+  assert.ok(res.message.includes('[아침 세미나]'), '아침 세미나 헤더가 포함되어야 함');
+  assert.ok(res.message.includes('아침 모닝 세미나'), '아침 세미나가 메시지에 포함되어야 함');
+  assert.ok(res.message.includes('[점심 세미나]'), '점심 세미나 헤더가 포함되어야 함');
+  assert.ok(res.message.includes('점심 런치 세미나'), '점심 세미나가 메시지에 포함되어야 함');
+  assert.ok(res.message.includes('[저녁 세미나]'), '저녁 세미나 헤더가 포함되어야 함');
+  assert.ok(res.message.includes('저녁 디너 세미나'), '저녁 세미나가 메시지에 포함되어야 함');
+  assert.deepStrictEqual(res.morningSeminarIds, ['9201']);
+  assert.deepStrictEqual(res.lunchSeminarIds, ['9202']);
+  assert.deepStrictEqual(res.dinnerSeminarIds, ['9203']);
+}
+
 describe('today_links_format 단위 테스트', () => {
   it('testTodayLinksFormatWithUserExample', () => {
     testTodayLinksFormatWithUserExample();
@@ -695,5 +735,9 @@ describe('today_links_format 단위 테스트', () => {
 
   it('testCollectTodaySeminarMessageExcludesSmallCapacitySeminars', async () => {
     await testCollectTodaySeminarMessageExcludesSmallCapacitySeminars();
+  });
+
+  it('testCollectTodaySeminarMessageIncludesMorningSeminars', async () => {
+    await testCollectTodaySeminarMessageIncludesMorningSeminars();
   });
 });

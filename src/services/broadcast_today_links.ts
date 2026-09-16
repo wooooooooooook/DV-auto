@@ -25,12 +25,14 @@ const seoulDateString = (): string => new Date().toLocaleDateString('en-CA', { t
 function saveSeminarIds(seminarData: SeminarTaskData | undefined): void {
   const data = seminarData || {
     date: seoulDateString(),
+    morningSeminarIds: [],
     lunchSeminarIds: [],
     dinnerSeminarIds: [],
     allSeminarIds: [],
   };
   const normalized = {
     date: data.date || seoulDateString(),
+    morningSeminarIds: Array.from(new Set((data.morningSeminarIds || []).filter(Boolean))),
     lunchSeminarIds: Array.from(new Set((data.lunchSeminarIds || []).filter(Boolean))),
     dinnerSeminarIds: Array.from(new Set((data.dinnerSeminarIds || []).filter(Boolean))),
   };

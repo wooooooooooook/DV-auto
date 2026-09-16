@@ -4,6 +4,7 @@ import * as storage from '../services/storage';
 import * as seminarRepo from '../services/seminar_repository';
 import { TODAY_QUIZ_INFO_KEY, type CachedTodayQuizInfo } from './today_quiz';
 import { isLowCapacitySeminar } from '../modules/seminar_api';
+import { getSeminarPeriod } from '../services/seminar_monitor_trigger';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
@@ -39,6 +40,7 @@ type PointConversionInfo = {
 type QuizInfo = { link: string; productTitle?: string; answers?: Array<string | number> };
 type SeminarData = {
   date: string;
+  morningSeminarIds?: string[];
   lunchSeminarIds: string[];
   dinnerSeminarIds: string[];
 };
@@ -265,6 +267,7 @@ async function collectTodaySeminarMessage(
   customDateInput?: string,
 ): Promise<SeminarMessageResult> {
   const { todayString, isoDate, isCustomDate, targetMonth, targetDay } = getTodayDateStrings(customDateInput);
+  const morningSeminarIds: string[] = [];
   const lunchSeminarIds: string[] = [];
   const dinnerSeminarIds: string[] = [];
   const seminarTitlePrefix = isCustomDate ? `[${todayString}]` : '오늘의';
@@ -274,7 +277,7 @@ async function collectTodaySeminarMessage(
     const storedSeminars = seminarRepo.getAllSeminars();
     const seenIds = new Set<string>();
     const seenUrls = new Set<string>();
-    const parsedSeminars: ParsedSeminarItem[] = [];
+    const parsedSeminars: (ParsedSeminarItem & { period: '아침' | '점심' | '저녁' })[] = [];
 
     for (const stored of storedSeminars) {
       if (!stored.date || !isDateMatching(stored.date, dateTarget)) continue;
@@ -288,14 +291,8 @@ async function collectTodaySeminarMessage(
       const fullUrl = stored.url || (sid ? `${SEMINAR_DETAIL_PAGE}${sid}` : '');
       if ((sid && seenIds.has(sid)) || (fullUrl && seenUrls.has(fullUrl))) continue;
 
-      let nightTime = stored.nightTime ?? false;
-      if (stored.time) {
-        const hourMatch = stored.time.match(/(\d{1,2})\s*:/);
-        if (hourMatch) {
-          const hour = Number(hourMatch[1]);
-          if (Number.isFinite(hour) && hour >= 16) nightTime = true;
-        }
-      }
+      const period = getSeminarPeriod(stored);
+      const nightTime = period === '저녁';
 
       parsedSeminars.push({
         title: stored.name || '세미나',
@@ -308,6 +305,7 @@ async function collectTodaySeminarMessage(
         isPointExcluded: stored.isPointExcluded,
         hiddenYn: stored.hiddenYn,
         diseaseCategoryNm: stored.diseaseCategoryNm,
+        period,
       });
       if (sid) seenIds.add(sid);
       if (fullUrl) seenUrls.add(fullUrl);
@@ -325,29 +323,24 @@ async function collectTodaySeminarMessage(
       return {
         message: `<b>${seminarTitlePrefix} 세미나:</b> 세미나가 없습니다. ☕`,
         date: isoDate,
+        morningSeminarIds: [],
         lunchSeminarIds: [],
         dinnerSeminarIds: [],
       };
     }
 
+    const morningSeminars: string[] = [];
     const lunchSeminars: string[] = [];
     const dinnerSeminars: string[] = [];
-
-    const isDinnerSeminar = (classAttr: string, time: string): boolean => {
-      if (classAttr.includes('night_time')) return true;
-
-      const hourMatch = time.match(/(\d{1,2})\s*:/);
-      if (!hourMatch) return false;
-
-      const hour = Number(hourMatch[1]);
-      return Number.isFinite(hour) && hour >= 16;
-    };
 
     for (const item of parsedSeminars) {
       const seminarTitle = formatSeminarDisplayName(item, { maxLen: false });
       const seminarInfo = ` ${item.time}. ${seminarTitle} ${item.seminarLink}`;
 
-      if (isDinnerSeminar(item.classAttr, item.time)) {
+      if (item.period === '아침') {
+        morningSeminars.push(seminarInfo);
+        if (item.seminarId) morningSeminarIds.push(item.seminarId);
+      } else if (item.period === '저녁') {
         dinnerSeminars.push(seminarInfo);
         if (item.seminarId) dinnerSeminarIds.push(item.seminarId);
       } else {
@@ -356,21 +349,23 @@ async function collectTodaySeminarMessage(
       }
     }
 
-    if (lunchSeminars.length > 0 || dinnerSeminars.length > 0) {
-      let message = `<b>${seminarTitlePrefix} 세미나 리스트:</b>\n`;
+    const sections: string[] = [];
+    if (morningSeminars.length > 0) {
+      sections.push(`🍴 <b>[아침 세미나]</b>\n- ${morningSeminars.join('\n- ')}`);
+    }
+    if (lunchSeminars.length > 0) {
+      sections.push(`🍴 <b>[점심 세미나]</b>\n- ${lunchSeminars.join('\n- ')}`);
+    }
+    if (dinnerSeminars.length > 0) {
+      sections.push(`🍴 <b>[저녁 세미나]</b>\n- ${dinnerSeminars.join('\n- ')}`);
+    }
 
-      if (lunchSeminars.length > 0) {
-        message += `🍴 <b>[점심 세미나]</b>\n- `;
-        message += lunchSeminars.join('\n- ');
-      }
-      message += '\n';
-      if (dinnerSeminars.length > 0) {
-        message += `\n🍴 <b>[저녁 세미나]</b>\n- `;
-        message += dinnerSeminars.join('\n- ');
-      }
+    if (sections.length > 0) {
+      const message = `<b>${seminarTitlePrefix} 세미나 리스트:</b>\n` + sections.join('\n\n');
       return {
         message,
         date: isoDate,
+        morningSeminarIds: [...new Set(morningSeminarIds)],
         lunchSeminarIds: [...new Set(lunchSeminarIds)],
         dinnerSeminarIds: [...new Set(dinnerSeminarIds)],
       };
@@ -378,6 +373,7 @@ async function collectTodaySeminarMessage(
     return {
       message: `<b>${seminarTitlePrefix} 세미나 리스트:</b> 세미나가 없습니다. ☕`,
       date: isoDate,
+      morningSeminarIds: [],
       lunchSeminarIds: [],
       dinnerSeminarIds: [],
     };
@@ -390,6 +386,7 @@ async function collectTodaySeminarMessage(
     return {
       message: `<b>${seminarTitlePrefix} 세미나 확인 실패:</b> ${escapeHtml(message)}`,
       date: isoDate,
+      morningSeminarIds: [],
       lunchSeminarIds: [],
       dinnerSeminarIds: [],
     };
@@ -615,6 +612,7 @@ async function run({ page, args }: Partial<PlaywrightRunArgs> = {}, taskOptions?
     const allSeminarIds = seminarMessage
       ? Array.from(
           new Set([
+            ...(seminarMessage.morningSeminarIds || []),
             ...(seminarMessage.lunchSeminarIds || []),
             ...(seminarMessage.dinnerSeminarIds || []),
             ...newSeminarIds,
@@ -626,6 +624,7 @@ async function run({ page, args }: Partial<PlaywrightRunArgs> = {}, taskOptions?
     if (!isCustomDate) {
       storage.set(TODAY_SEMINAR_KEY, {
         date: seminarMessage.date,
+        morningSeminarIds: seminarMessage.morningSeminarIds,
         lunchSeminarIds: seminarMessage.lunchSeminarIds,
         dinnerSeminarIds: seminarMessage.dinnerSeminarIds,
       });
@@ -643,6 +642,7 @@ async function run({ page, args }: Partial<PlaywrightRunArgs> = {}, taskOptions?
       options,
       seminarData: {
         date: seminarMessage.date,
+        morningSeminarIds: seminarMessage.morningSeminarIds,
         lunchSeminarIds: seminarMessage.lunchSeminarIds,
         dinnerSeminarIds: seminarMessage.dinnerSeminarIds,
         allSeminarIds,
