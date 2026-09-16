@@ -175,7 +175,7 @@ describe('seminar_quiz 다중 페이지 탐색 및 제출하기 감지 테스트
 
     expect(result.success).toBe(true);
     expect(result.hasQuizResult).toBe(true);
-    expect(result.message).toContain('(※ 심화설문으로 자동 제출이 제외되었습니다)');
+    expect(result.message).not.toContain('심화설문으로 자동 제출이 제외되었습니다');
 
     // 1페이지에서 [다음]을 눌러 2페이지에 도달했는지 확인
     expect(clickedButtons).toContain('next');

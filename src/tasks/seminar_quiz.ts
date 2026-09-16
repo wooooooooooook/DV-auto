@@ -910,7 +910,7 @@ async function processSeminarQuiz(
       return {
         success: true,
         hasQuizResult: channelResults.length > 0,
-        message: `${resultMessage}\n(※ 심화설문으로 자동 제출이 제외되었습니다)${promptSection}`,
+        message: resultMessage,
       };
     }
 
