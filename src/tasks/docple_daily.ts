@@ -331,6 +331,12 @@ export async function run(ctx?: TaskContext): Promise<TaskResult> {
     return {
       success: result.success && result.attendance.status !== 'FAILED',
       message: reportText,
+      options: {
+        result,
+        endCash: result.endCash,
+        startCash: result.startCash,
+        cashDiff: result.cashDiff,
+      },
     };
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);

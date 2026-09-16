@@ -17,7 +17,7 @@ export const adminCommands = [
     description: '즉시 메디게이트 심포지움 시청(medigate_watch) 실행 [webinarIdx] [duration]',
   },
   { command: 'run_medigate_apply_now', description: '즉시 메디게이트 심포지움 자동 신청(medigate_apply) 실행' },
-  { command: 'run_etc_daily_quests_now', description: '즉시 기타일일퀘스트(인터엠디/키메디/HMP/메디게이트) 실행' },
+  { command: 'run_etc_daily_quests_now', description: '즉시 기타일일퀘스트(인터엠디/키메디/HMP/메디게이트/닥플) 실행' },
   { command: 'monitor_morning_seminar_now', description: '즉시 아침 세미나 모니터링 시작' },
   { command: 'monitor_lunch_seminar_now', description: '즉시 점심 세미나 모니터링 시작' },
   { command: 'monitor_dinner_seminar_now', description: '즉시 저녁 세미나 모니터링 시작' },

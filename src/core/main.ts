@@ -40,11 +40,11 @@ dotenv.config();
 const HEADLESS = (process.env.HEADLESS || 'true').toLowerCase() === 'true';
 const TIMEZONE = process.env.SCHEDULE_TZ || 'Asia/Seoul';
 const DAILY_ROUTINE_CRON = process.env.DAILY_CRON || '1 0 * * *';
-const DOCPLE_DAILY_CRON = process.env.DOCPLE_DAILY_CRON || '4 7 * * *';
 const ETC_DAILY_QUESTS_CRON =
   process.env.ETC_DAILY_QUESTS_CRON ||
   process.env.OTHER_DAILY_QUESTS_CRON ||
   process.env.KEYMEDI_ATTENDANCE_CRON ||
+  process.env.DOCPLE_DAILY_CRON ||
   '1 8 * * *';
 const BROADCAST_TODAY_LINKS_CRON = '0 0 9 * * *';
 const HOURLY_TODAY_LINKS_EARLY_CRON = '0 2 0 * * *';
@@ -463,18 +463,7 @@ const hourlyTodayLinksTask: Task = {
 scheduler.scheduleTaskCron(hourlyTodayLinksTask);
 taskRegistry.registerTask(hourlyTodayLinksTask);
 
-const docpleDailyTask: Task = {
-  name: 'docple_daily',
-  schedule: DOCPLE_DAILY_CRON,
-  timezone: TIMEZONE,
-  run: async (ctx) => {
-    return await docpleDailyTaskModule.run(ctx);
-  },
-};
-taskRegistry.registerTask(docpleDailyTask);
-scheduler.scheduleTaskCron(docpleDailyTask);
-
-// 기타일일퀘스트 통합 태스크 (인터엠디 -> 키메디 -> HMP -> 메디게이트 순차 실행)
+// 기타일일퀘스트 통합 태스크 (인터엠디 -> 키메디 -> HMP -> 메디게이트 -> 닥플 순차 실행)
 const etcDailyQuestsTask: Task = {
   name: '기타일일퀘스트',
   schedule: ETC_DAILY_QUESTS_CRON,
@@ -489,6 +478,15 @@ taskRegistry.registerTask({
   run: async (ctx) => etcDailyQuestsTask.run(ctx),
 });
 scheduler.scheduleTaskCron(etcDailyQuestsTask);
+
+// 개별 실행을 위한 태스크 등록 (스케줄 크론은 기타일일퀘스트로 통합)
+const docpleDailyTask: Task = {
+  name: 'docple_daily',
+  run: async (ctx) => {
+    return await docpleDailyTaskModule.run(ctx);
+  },
+};
+taskRegistry.registerTask(docpleDailyTask);
 
 // 개별 실행을 위한 태스크 등록 (스케줄 크론은 기타일일퀘스트로 통합)
 const intermdQuizTask: Task = {
