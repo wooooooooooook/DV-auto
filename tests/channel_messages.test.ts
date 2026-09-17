@@ -1,5 +1,4 @@
 import assert from 'assert';
-import path from 'path';
 import fs from 'fs';
 import { Telegraf } from 'telegraf';
 import * as storage from '../src/services/storage';
