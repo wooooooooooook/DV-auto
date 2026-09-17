@@ -25,7 +25,7 @@ import { sendNotificationToChannel } from '../src/modules/utils';
 import { describe, it } from 'vitest';
 
 // 테스트 DB 설정
-const testDbPath = path.join(__dirname, '..', 'data', 'test_channel_messages.db');
+const testDbPath = ':memory:';
 process.env.SQLITE_DB_PATH = testDbPath;
 process.env.NOTICE_CHANNEL_ID = '-1001234567890';
 storage.setDatabasePath(testDbPath);

@@ -4,6 +4,7 @@ import * as logger from './logger';
 import { isTaskRunning } from './seminar_monitor_trigger';
 import * as taskRegistry from '../core/taskRegistry';
 import { runTask } from '../core/runner';
+import { sendMedigateSymposiumStartNotice } from './subscription_service';
 
 export interface MedigateWatchedRecord {
   webinarIdx: number;
@@ -44,6 +45,26 @@ export function markSymposiumWatchedToday(
   storage.set(key, {
     webinarIdx,
     ...record,
+  });
+}
+
+export function getStartNotifiedKey(webinarIdx: number, dateStr?: string): string {
+  const date = dateStr || getTodayKstDateString();
+  return `medigate_start_notified:${webinarIdx}:${date}`;
+}
+
+export function isSymposiumStartNotifiedToday(webinarIdx: number, dateStr?: string): boolean {
+  const key = getStartNotifiedKey(webinarIdx, dateStr);
+  const record = storage.get<{ notifiedAt: string; success: boolean }>(key);
+  return record?.success === true;
+}
+
+export function markSymposiumStartNotifiedToday(webinarIdx: number, dateStr?: string): void {
+  const key = getStartNotifiedKey(webinarIdx, dateStr);
+  storage.set(key, {
+    webinarIdx,
+    notifiedAt: new Date().toISOString(),
+    success: true,
   });
 }
 
@@ -126,6 +147,21 @@ export async function checkAndWatchMedigateSymposiums(
     `[Medigate Monitor] On-Air 심포지움 ${onAirItems.length}건 발견:`,
     onAirItems.map((i) => `[${i.webinarIdx}] ${i.subject}`),
   );
+
+  // On-Air 심포지움 시작 알림 발송 (오늘 아직 알림이 발송되지 않은 건)
+  for (const item of onAirItems) {
+    if (!isSymposiumStartNotifiedToday(item.webinarIdx, dateStr)) {
+      try {
+        await sendMedigateSymposiumStartNotice(item);
+        markSymposiumStartNotifiedToday(item.webinarIdx, dateStr);
+        logger.info(
+          `[Medigate Monitor] [${item.webinarIdx}] ${item.subject} - 메디게이트 심포지움 시작 알림 발송 완료`,
+        );
+      } catch (err) {
+        logger.error(`[Medigate Monitor] [${item.webinarIdx}] 시작 알림 발송 중 오류:`, err);
+      }
+    }
+  }
 
   const unwatchedTargets: MedigateSymposiumItem[] = [];
   let skippedCount = 0;

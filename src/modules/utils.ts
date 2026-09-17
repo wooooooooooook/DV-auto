@@ -139,6 +139,57 @@ async function sendTelegram(
       return false;
     }
     console.error('Failed to send Telegram message:', error);
+
+    // HTML 파싱 에러(400 Bad Request: can't parse entities 등) 발생 시 HTML 태그를 제거한 Plain Text로 재전송 시도
+    const parseMode = (options as { parse_mode?: string }).parse_mode;
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const isParseError =
+      Boolean(parseMode) &&
+      (errorMessage.includes("can't parse entities") ||
+        errorMessage.includes('Unsupported start tag') ||
+        errorMessage.includes('Bad Request: 400') ||
+        errorMessage.includes('400'));
+
+    if (isParseError) {
+      try {
+        console.warn('[Telegram] HTML parsing failed. Retrying in Plain Text fallback mode...');
+        const plainOptions = { ...(options as Record<string, unknown>) };
+        delete plainOptions.parse_mode;
+
+        // HTML 태그 제거 및 기본 엔티티 디코딩
+        const plainText = text
+          .replace(/<[^>]+>/g, '')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&amp;/g, '&');
+
+        const validImagePath = imagePath && fs.existsSync(imagePath) ? imagePath : null;
+        if (validImagePath) {
+          if (plainText.length <= TELEGRAM_SAFE_CAPTION_LENGTH) {
+            await bot.telegram.sendPhoto(
+              CHAT_ID,
+              { source: validImagePath },
+              {
+                caption: plainText,
+                ...(plainOptions as SendPhotoOptions),
+              },
+            );
+            return true;
+          }
+        }
+        const errorChunks = splitPlainText(plainText, TELEGRAM_SAFE_MESSAGE_LENGTH);
+        for (let i = 0; i < errorChunks.length; i++) {
+          const isLast = i === errorChunks.length - 1;
+          const chunkOptions = isLast ? plainOptions : { ...plainOptions, reply_markup: undefined };
+          await bot.telegram.sendMessage(CHAT_ID, errorChunks[i], chunkOptions as SendMessageOptions);
+          if (!isLast) await sleep(100);
+        }
+        return true;
+      } catch (fallbackError) {
+        console.error('[Telegram] Fallback Plain Text transmission also failed:', fallbackError);
+      }
+    }
+
     try {
       const message = error instanceof Error ? error.message : String(error);
       const errorText = `Failed to send a complex Telegram message. Error: ${message}`;
@@ -865,7 +916,9 @@ function formatPrivateSeminarTag(seminar: { hiddenYn?: string; diseaseCategoryNm
   const isPrivate = seminar.hiddenYn === 'Y' || seminar.hiddenYn === 'y';
   if (!isPrivate) return '';
   const categoryTag =
-    seminar.diseaseCategoryNm && seminar.diseaseCategoryNm.trim() ? `[${seminar.diseaseCategoryNm.trim()}]` : '';
+    seminar.diseaseCategoryNm && seminar.diseaseCategoryNm.trim()
+      ? `[${escapeHtml(seminar.diseaseCategoryNm.trim())}]`
+      : '';
   return `[비공개]${categoryTag}`;
 }
 
@@ -919,11 +972,11 @@ function formatSeminarDisplayName(item: SeminarDisplayItem, options: FormatSemin
   const timePart = includeTime && item.time ? String(item.time).trim() : '';
   let dateTimePrefix = '';
   if (datePart && timePart) {
-    dateTimePrefix = `[${datePart} ${timePart}]`;
+    dateTimePrefix = `[${escapeHtml(datePart)} ${escapeHtml(timePart)}]`;
   } else if (datePart) {
-    dateTimePrefix = `[${datePart}]`;
+    dateTimePrefix = `[${escapeHtml(datePart)}]`;
   } else if (timePart) {
-    dateTimePrefix = `[${timePart}]`;
+    dateTimePrefix = `[${escapeHtml(timePart)}]`;
   }
 
   // 2. 플래그들 (제목 앞으로)
@@ -957,7 +1010,7 @@ function formatSeminarDisplayName(item: SeminarDisplayItem, options: FormatSemin
     item.currentCount !== undefined && item.currentCount !== null ? String(item.currentCount).trim() : '';
   const totalCountStr = item.totalCount !== undefined && item.totalCount !== null ? String(item.totalCount).trim() : '';
   if (includeCapacity && currentCountStr !== '' && totalCountStr !== '') {
-    capacitySuffix = ` (${currentCountStr}/${totalCountStr})`;
+    capacitySuffix = ` (${escapeHtml(currentCountStr)}/${escapeHtml(totalCountStr)})`;
   }
 
   // 조합: [일시] [플래그들...] [제목] [정원]

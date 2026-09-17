@@ -170,21 +170,52 @@ describe('formatSeminarDisplayName 공통 함수 테스트', () => {
     expect(section).not.toContain('<user_1>');
   });
 
-  it('12. buildSeminarStatusMessage 및 개별알림: 퀴즈 결과 메시지의 HTML 특수문자 이스케이프 검증', async () => {
-    const { buildSeminarStatusMessage, buildSeminarLiveEndMessage } =
-      await import('../src/tasks/monitor_seminars_notice');
-    const seminar = {
-      seminarId: '999',
-      name: '테스트 세미나',
-      url: 'https://m.doctorville.co.kr/cme/seminar/999',
-      status: '종료' as const,
-      quizResultMessage: '📋 퀴즈: HbA1c < 6.5% & LDL < 100',
+  it('13. 세미나 제목 및 일시, 정원에 <7%) 등 HTML 태그 유사 문자열 포함 시 안전하게 이스케이프되는지 검증', () => {
+    const item: SeminarDisplayItem = {
+      name: '당뇨병 치료의 최신 지견 (HbA1c <7%)',
+      date: '<2026-09-17>',
+      time: '<13:00>',
+      currentCount: '<10',
+      totalCount: '100>',
+      hiddenYn: 'Y',
+      diseaseCategoryNm: '<내분비>',
     };
+    const result = formatSeminarDisplayName(item, {
+      includeDate: true,
+      includeTime: true,
+      includeCapacity: true,
+      maxLen: false,
+    });
+    expect(result).toBe(
+      '[&lt;2026-09-17&gt; &lt;13:00&gt;] 🔒<b>[비공개][&lt;내분비&gt;]</b> 당뇨병 치료의 최신 지견 (HbA1c &lt;7%) (&lt;10/100&gt;)',
+    );
+  });
 
-    const statusResult = buildSeminarStatusMessage('점심', [seminar]);
-    expect(statusResult.text).toContain('HbA1c &lt; 6.5% &amp; LDL &lt; 100');
+  it('14. subscription_service의 마감 임박/설문/심포지움 메시지 빌더 HTML 이스케이프 검증', async () => {
+    const { buildSingleDoctorVilleSurveyMessage, buildMedigateSymposiumStartMessage } =
+      await import('../src/services/subscription_service');
 
-    const liveEndResult = buildSeminarLiveEndMessage(seminar);
-    expect(liveEndResult.text).toContain('HbA1c &lt; 6.5% &amp; LDL &lt; 100');
+    const surveyMsg = buildSingleDoctorVilleSurveyMessage({
+      category: '<설문분류>',
+      title: '설문 제목: HbA1c <7% 환자 대상',
+      date: '<2026-09-17>',
+      pointText: '<1,000P>',
+    });
+    expect(surveyMsg.text).toContain('[&lt;설문분류&gt;]');
+    expect(surveyMsg.text).toContain('HbA1c &lt;7% 환자 대상');
+    expect(surveyMsg.text).toContain('&lt;1,000P&gt;');
+    expect(surveyMsg.text).not.toContain('<설문분류>');
+
+    const symposiumMsg = buildMedigateSymposiumStartMessage({
+      webinarIdx: 1234,
+      subject: '심포지움 (LDL-C <70mg/dL)',
+      dateDesc: '<2026-09-17 19:00>',
+      instructorSummary: '<홍길동> 교수',
+      clientName: '<제약회사>',
+    });
+    expect(symposiumMsg.text).toContain('LDL-C &lt;70mg/dL');
+    expect(symposiumMsg.text).toContain('&lt;홍길동&gt; 교수');
+    expect(symposiumMsg.text).toContain('&lt;제약회사&gt;');
+    expect(symposiumMsg.text).not.toContain('<홍길동>');
   });
 });

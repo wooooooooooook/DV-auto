@@ -121,6 +121,7 @@ function initDatabase(db: Database.Database): void {
       survey_closing_10 INTEGER DEFAULT 0,
       point_conversion INTEGER DEFAULT 0,
       doctorville_survey INTEGER DEFAULT 0,
+      medigate_symposium INTEGER DEFAULT 0,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -128,6 +129,12 @@ function initDatabase(db: Database.Database): void {
 
   try {
     db.exec('ALTER TABLE subscriptions ADD COLUMN doctorville_survey INTEGER DEFAULT 0');
+  } catch (_e) {
+    // 이미 존재하는 경우 무시
+  }
+
+  try {
+    db.exec('ALTER TABLE subscriptions ADD COLUMN medigate_symposium INTEGER DEFAULT 0');
   } catch (_e) {
     // 이미 존재하는 경우 무시
   }

@@ -36,7 +36,7 @@ function setBot(name: BotName, instance: Telegraf | null): void {
     bots[name] = instance;
 
     // Register these commands before any legacy Telegram handler in telegram.ts.
-    if (instance) {
+    if (instance && typeof instance.command === 'function') {
       instance.command('check_advanced_seminars', async (ctx: Context) => {
         try {
           if (name === 'notice' && ctx.from?.id && !checkNoticeCooldown(ctx.from.id)) {
@@ -212,6 +212,12 @@ function setBot(name: BotName, instance: Telegraf | null): void {
                     alertMessage = '📋 닥터빌 참여 가능 설문(시장조사 등) 발견 알림이 켜졌습니다.';
                   } else {
                     alertMessage = '📋 닥터빌 참여 가능 설문 알림이 꺼졌습니다.';
+                  }
+                } else if (topic === 'medigate_symposium') {
+                  if (updatedSub.medigateSymposium) {
+                    alertMessage = '🩺 메디게이트 심포지움 시작 알림이 켜졌습니다.';
+                  } else {
+                    alertMessage = '🩺 메디게이트 심포지움 시작 알림이 꺼졌습니다.';
                   }
                 } else if (topic === 'new_seminar_point_excluded' || topic === 'new_seminar_include_point_excluded') {
                   if (updatedSub.newSeminarIncludePointExcluded) {

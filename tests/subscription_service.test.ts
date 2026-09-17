@@ -16,6 +16,8 @@ import {
   buildMainMenu,
   buildTodayLinksTimeMenu,
   buildNewSeminarMenu,
+  buildMedigateSymposiumStartMessage,
+  sendMedigateSymposiumStartNotice,
 } from '../src/services/subscription_service';
 import {
   addInterMDQuizSubscriber,
@@ -51,6 +53,8 @@ describe('subscription_service', () => {
     expect(defaultSub.surveyClosing20).toBe(false);
     expect(defaultSub.surveyClosing10).toBe(false);
     expect(defaultSub.pointConversion).toBe(false);
+    expect(defaultSub.doctorvilleSurvey).toBe(false);
+    expect(defaultSub.medigateSymposium).toBe(false);
 
     const updated = updateSubscription(12345, {
       todayLinks: true,
@@ -60,6 +64,8 @@ describe('subscription_service', () => {
       surveyClosing20: true,
       surveyClosing10: true,
       pointConversion: true,
+      doctorvilleSurvey: true,
+      medigateSymposium: true,
     });
 
     expect(updated.todayLinks).toBe(true);
@@ -69,6 +75,8 @@ describe('subscription_service', () => {
     expect(updated.surveyClosing20).toBe(true);
     expect(updated.surveyClosing10).toBe(true);
     expect(updated.pointConversion).toBe(true);
+    expect(updated.doctorvilleSurvey).toBe(true);
+    expect(updated.medigateSymposium).toBe(true);
 
     const fetched = getSubscription(12345);
     expect(fetched.todayLinks).toBe(true);
@@ -78,6 +86,8 @@ describe('subscription_service', () => {
     expect(fetched.surveyClosing20).toBe(true);
     expect(fetched.surveyClosing10).toBe(true);
     expect(fetched.pointConversion).toBe(true);
+    expect(fetched.doctorvilleSurvey).toBe(true);
+    expect(fetched.medigateSymposium).toBe(true);
   });
 
   it('토픽별 ON/OFF 토글이 올바르게 동작해야 한다', () => {
@@ -112,6 +122,15 @@ describe('subscription_service', () => {
 
     toggleTopic(100, 'point_conversion');
     expect(getSubscription(100).pointConversion).toBe(true);
+
+    toggleTopic(100, 'doctorville_survey');
+    expect(getSubscription(100).doctorvilleSurvey).toBe(true);
+
+    toggleTopic(100, 'medigate_symposium');
+    expect(getSubscription(100).medigateSymposium).toBe(true);
+
+    toggleTopic(100, 'medigate_symposium');
+    expect(getSubscription(100).medigateSymposium).toBe(false);
   });
 
   it('오늘의 링크 시간 설정 시 자동으로 todayLinks가 ON되어야 한다', () => {
@@ -551,5 +570,66 @@ describe('subscription_service', () => {
     // 1002번 유저는 일반 세미나 1개만 수신
     expect(user1002Messages.length).toBe(1);
     expect(user1002Messages[0].text).toContain('일반 세미나');
+  });
+
+  it('buildMedigateSymposiumStartMessage가 올바른 포맷의 메시지를 생성해야 한다', () => {
+    const item = {
+      webinarIdx: 9876,
+      subject: '2026 심혈관 질환 최신 지견 심포지움',
+      dateDesc: '2026-09-17(목) 19:30 ~ 21:00',
+      instructorSummary: '홍길동 교수 (한국병원)',
+      clientName: '한국제약',
+      status: 'ING',
+      applyFlag: 'Y',
+    };
+
+    const msg = buildMedigateSymposiumStartMessage(item);
+    expect(msg.text).toContain('🩺 <b>[메디게이트 심포지움 시작]</b>');
+    expect(msg.text).toContain('2026 심혈관 질환 최신 지견 심포지움');
+    expect(msg.text).toContain('2026-09-17(목) 19:30 ~ 21:00');
+    expect(msg.text).toContain('홍길동 교수 (한국병원)');
+    expect(msg.text).toContain('한국제약');
+    expect(msg.text).toContain('https://new.medigate.net/symposium/9876');
+    expect(msg.options.parse_mode).toBe('HTML');
+  });
+
+  it('sendMedigateSymposiumStartNotice가 medigate_symposium 구독자에게만 메시지를 발송해야 한다', async () => {
+    const { setBot } = await import('../src/services/bot_instance');
+    const sentMessages: Array<{ chatId: number; text: string }> = [];
+    const mockBot = {
+      command: () => {},
+      action: () => {},
+      telegram: {
+        sendMessage: async (chatId: number, text: string) => {
+          sentMessages.push({ chatId, text });
+          return { message_id: 888 };
+        },
+      },
+    };
+    setBot('notice', mockBot as unknown as Parameters<typeof setBot>[1]);
+
+    // 2001번: medigate_symposium 구독 ON
+    updateSubscription(2001, { medigateSymposium: true });
+    // 2002번: medigate_symposium 구독 OFF
+    updateSubscription(2002, { medigateSymposium: false });
+
+    const item = {
+      webinarIdx: 5555,
+      subject: '당뇨병 치료의 최신 가이드라인',
+      dateDesc: '2026-09-17 20:00',
+      status: 'ING',
+      applyFlag: 'Y',
+    };
+
+    const res = await sendMedigateSymposiumStartNotice(item);
+    expect(res.successCount).toBe(1);
+    expect(res.failCount).toBe(0);
+
+    const user2001 = sentMessages.filter((m) => m.chatId === 2001);
+    const user2002 = sentMessages.filter((m) => m.chatId === 2002);
+
+    expect(user2001.length).toBe(1);
+    expect(user2001[0].text).toContain('당뇨병 치료의 최신 가이드라인');
+    expect(user2002.length).toBe(0);
   });
 });

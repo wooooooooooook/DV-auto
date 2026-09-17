@@ -1,10 +1,11 @@
 import { getDatabase } from './storage';
 import { getBot } from './bot_instance';
 import { splitTelegramMessage, TELEGRAM_SAFE_MESSAGE_LENGTH } from '../modules/telegram_splitter';
-import { sleep, formatSeminarDisplayName } from '../modules/utils';
+import { sleep, formatSeminarDisplayName, escapeHtml } from '../modules/utils';
 import * as logger from './logger';
 import type { SeminarListItem } from './seminar_repository';
 import { isLowCapacitySeminar } from '../modules/seminar_api';
+import type { MedigateSymposiumItem } from '../modules/medigate_api';
 
 export type SubscriptionTopic =
   | 'today_links'
@@ -17,7 +18,8 @@ export type SubscriptionTopic =
   | 'survey_closing_20'
   | 'survey_closing_10'
   | 'point_conversion'
-  | 'doctorville_survey';
+  | 'doctorville_survey'
+  | 'medigate_symposium';
 
 export type NewSeminarFilter = 'all' | 'limit_5000' | 'limit_3000' | 'urgent_1000' | 'off';
 
@@ -53,6 +55,7 @@ export interface SubscriptionRecord {
   surveyClosing10: boolean;
   pointConversion: boolean;
   doctorvilleSurvey: boolean;
+  medigateSymposium: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -75,6 +78,7 @@ interface SubscriptionRow {
   survey_closing_10?: number;
   point_conversion?: number;
   doctorville_survey?: number;
+  medigate_symposium?: number;
   created_at?: number;
   updated_at?: number;
 }
@@ -139,6 +143,7 @@ export function getSubscription(chatId: number): SubscriptionRecord {
       surveyClosing10: false,
       pointConversion: false,
       doctorvilleSurvey: false,
+      medigateSymposium: false,
       createdAt: 0,
       updatedAt: 0,
     };
@@ -158,6 +163,7 @@ export function getSubscription(chatId: number): SubscriptionRecord {
     surveyClosing10: row.survey_closing_10 === 1,
     pointConversion: row.point_conversion === 1,
     doctorvilleSurvey: row.doctorville_survey === 1,
+    medigateSymposium: row.medigate_symposium === 1,
     createdAt: row.created_at || 0,
     updatedAt: row.updated_at || 0,
   };
@@ -185,12 +191,12 @@ export function updateSubscription(
     INSERT INTO subscriptions (
       chat_id, today_links, today_links_time, today_links_sent_date,
       new_seminar, new_seminar_include_point_excluded, intermd_quiz, seminar_changes, seminar_live,
-      survey_closing_20, survey_closing_10, point_conversion, doctorville_survey,
+      survey_closing_20, survey_closing_10, point_conversion, doctorville_survey, medigate_symposium,
       created_at, updated_at
     ) VALUES (
       @chatId, @todayLinks, @todayLinksTime, @todayLinksSentDate,
       @newSeminar, @newSeminarIncludePointExcluded, @intermdQuiz, @seminarChanges, @seminarLive,
-      @surveyClosing20, @surveyClosing10, @pointConversion, @doctorvilleSurvey,
+      @surveyClosing20, @surveyClosing10, @pointConversion, @doctorvilleSurvey, @medigateSymposium,
       @createdAt, @updatedAt
     )
     ON CONFLICT(chat_id) DO UPDATE SET
@@ -206,6 +212,7 @@ export function updateSubscription(
       survey_closing_10 = excluded.survey_closing_10,
       point_conversion = excluded.point_conversion,
       doctorville_survey = excluded.doctorville_survey,
+      medigate_symposium = excluded.medigate_symposium,
       updated_at = excluded.updated_at
   `,
   ).run({
@@ -222,6 +229,7 @@ export function updateSubscription(
     surveyClosing10: next.surveyClosing10 ? 1 : 0,
     pointConversion: next.pointConversion ? 1 : 0,
     doctorvilleSurvey: next.doctorvilleSurvey ? 1 : 0,
+    medigateSymposium: next.medigateSymposium ? 1 : 0,
     createdAt: next.createdAt,
     updatedAt: next.updatedAt,
   });
@@ -241,7 +249,8 @@ export function toggleTopic(
     | 'survey_closing_20'
     | 'survey_closing_10'
     | 'point_conversion'
-    | 'doctorville_survey',
+    | 'doctorville_survey'
+    | 'medigate_symposium',
 ): SubscriptionRecord {
   const current = getSubscription(chatId);
   switch (topic) {
@@ -264,6 +273,8 @@ export function toggleTopic(
       return updateSubscription(chatId, { pointConversion: !current.pointConversion });
     case 'doctorville_survey':
       return updateSubscription(chatId, { doctorvilleSurvey: !current.doctorvilleSurvey });
+    case 'medigate_symposium':
+      return updateSubscription(chatId, { medigateSymposium: !current.medigateSymposium });
   }
 }
 
@@ -291,6 +302,7 @@ export function setAllTopics(chatId: number, enable: boolean): SubscriptionRecor
     surveyClosing10: enable,
     pointConversion: enable,
     doctorvilleSurvey: enable,
+    medigateSymposium: enable,
   });
 }
 
@@ -329,6 +341,9 @@ export function getSubscribersForTopic(topic: SubscriptionTopic): number[] {
       break;
     case 'doctorville_survey':
       query = 'SELECT chat_id FROM subscriptions WHERE doctorville_survey = 1';
+      break;
+    case 'medigate_symposium':
+      query = 'SELECT chat_id FROM subscriptions WHERE medigate_symposium = 1';
       break;
   }
   const rows = db.prepare(query).all() as Array<{ chat_id: number }>;
@@ -582,7 +597,7 @@ export async function sendUrgentSeminarsToSubscribers(
     const { current, total, remaining } = parseCapacityNumbers(s);
     const dateStr = s.date || s.time ? `[${s.date || ''}${s.date && s.time ? ' ' : ''}${s.time || ''}] ` : '';
     const capInfo = total > 0 ? ` (${current}/${total}) ⚡ 잔여 ${remaining}명` : '';
-    formattedItems.push(`${i + 1}. ${dateStr}<b>${s.name}</b>${capInfo}\n${s.url}`);
+    formattedItems.push(`${i + 1}. ${escapeHtml(dateStr)}<b>${escapeHtml(s.name)}</b>${escapeHtml(capInfo)}\n${s.url}`);
   }
 
   const messageText = [
@@ -767,6 +782,7 @@ export interface SubscriptionStats {
   surveyClosing10: number;
   pointConversion: number;
   doctorvilleSurvey: number;
+  medigateSymposium: number;
 }
 
 export function getSubscriptionStats(): SubscriptionStats {
@@ -790,7 +806,8 @@ export function getSubscriptionStats(): SubscriptionStats {
       SUM(CASE WHEN survey_closing_20 = 1 THEN 1 ELSE 0 END) as surveyClosing20,
       SUM(CASE WHEN survey_closing_10 = 1 THEN 1 ELSE 0 END) as surveyClosing10,
       SUM(CASE WHEN point_conversion = 1 THEN 1 ELSE 0 END) as pointConversion,
-      SUM(CASE WHEN doctorville_survey = 1 THEN 1 ELSE 0 END) as doctorvilleSurvey
+      SUM(CASE WHEN doctorville_survey = 1 THEN 1 ELSE 0 END) as doctorvilleSurvey,
+      SUM(CASE WHEN medigate_symposium = 1 THEN 1 ELSE 0 END) as medigateSymposium
     FROM subscriptions
   `,
     )
@@ -836,6 +853,7 @@ export function getSubscriptionStats(): SubscriptionStats {
     surveyClosing10: safeNum(baseRow?.surveyClosing10),
     pointConversion: safeNum(baseRow?.pointConversion),
     doctorvilleSurvey: safeNum(baseRow?.doctorvilleSurvey),
+    medigateSymposium: safeNum(baseRow?.medigateSymposium),
   };
 }
 
@@ -882,6 +900,7 @@ export function buildMainMenu(chatId: number): { text: string; replyMarkup: Inli
     `• ⏳ <b>설문 마감 10분전</b>: ${sub.surveyClosing10 ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.surveyClosing10}명 구독)</i>`,
     `• 💰 <b>네페 포인트 전환</b>: ${sub.pointConversion ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.pointConversion}명 구독)</i>`,
     `• 📋 <b>닥터빌 설문 (시장조사 등)</b>: ${sub.doctorvilleSurvey ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.doctorvilleSurvey}명 구독)</i>`,
+    `• 🩺 <b>메디게이트 심포지움 시작</b>: ${sub.medigateSymposium ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.medigateSymposium}명 구독)</i>`,
   ].join('\n');
 
   const inlineKeyboard = [
@@ -946,6 +965,12 @@ export function buildMainMenu(chatId: number): { text: string; replyMarkup: Inli
       },
     ],
     [
+      {
+        text: `🩺 메디게이트 심포지움 (👥 ${stats.medigateSymposium}명): ${sub.medigateSymposium ? 'ON 🟢' : 'OFF 🔴'}`,
+        callback_data: 'sub:toggle:medigate_symposium',
+      },
+    ],
+    [
       { text: '🔄 전체 켜기', callback_data: 'sub:all_on' },
       { text: '⏹ 전체 끄기', callback_data: 'sub:all_off' },
     ],
@@ -977,10 +1002,10 @@ export function buildSingleDoctorVilleSurveyMessage(item: DoctorVilleSurveyNotic
   text: string;
   options: Record<string, unknown>;
 } {
-  const categoryTag = item.category ? `[${item.category}] ` : '';
+  const categoryTag = item.category ? `[${escapeHtml(item.category)}] ` : '';
   const pointInfo = item.pointText || (item.point ? `${item.point.toLocaleString()}P` : '');
-  const pointLine = pointInfo ? `💰 <b>포인트</b>: ${pointInfo}\n` : '';
-  const dateLine = item.date ? `📅 <b>기간</b>: ${item.date}\n` : '';
+  const pointLine = pointInfo ? `💰 <b>포인트</b>: ${escapeHtml(pointInfo)}\n` : '';
+  const dateLine = item.date ? `📅 <b>기간</b>: ${escapeHtml(item.date)}\n` : '';
   const linkUrl =
     item.url ||
     (item.itemId
@@ -990,7 +1015,7 @@ export function buildSingleDoctorVilleSurveyMessage(item: DoctorVilleSurveyNotic
   const text = [
     `📋 <b>[닥터빌 참여 가능 설문 발견]</b>`,
     '',
-    `<b>${categoryTag}${item.title}</b>`,
+    `<b>${categoryTag}${escapeHtml(item.title)}</b>`,
     dateLine + pointLine,
     `🔗 <b>참여 링크</b>: ${linkUrl}`,
   ]
@@ -1169,4 +1194,113 @@ export function buildNewSeminarMenu(chatId: number): { text: string; replyMarkup
       inline_keyboard: keyboardRows,
     },
   };
+}
+
+/**
+ * 메디게이트 심포지움 시작 알림 메시지 빌더
+ */
+export function buildMedigateSymposiumStartMessage(item: MedigateSymposiumItem): {
+  text: string;
+  options: Record<string, unknown>;
+} {
+  const dateStr =
+    item.dateDesc || (item.startDate ? `${item.startDate}${item.endDate ? ` ~ ${item.endDate}` : ''}` : '');
+  const dateLine = dateStr ? `📅 <b>일시</b>: ${escapeHtml(dateStr)}\n` : '';
+  const instructorLine = item.instructorSummary ? `👨‍⚕️ <b>연자</b>: ${escapeHtml(item.instructorSummary)}\n` : '';
+  const clientLine = item.clientName ? `🏢 <b>주최</b>: ${escapeHtml(item.clientName)}\n` : '';
+  const targetUrl = `https://new.medigate.net/symposium/${item.webinarIdx}`;
+
+  const text = [
+    `🩺 <b>[메디게이트 심포지움 시작]</b>`,
+    '',
+    `<b>${escapeHtml(item.subject)}</b>`,
+    dateLine + instructorLine + clientLine,
+    `🔗 <b>참여 링크</b>: ${targetUrl}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  return {
+    text,
+    options: {
+      parse_mode: 'HTML',
+      link_preview_options: { is_disabled: true },
+    },
+  };
+}
+
+/**
+ * 메디게이트 심포지움 시작 시 medigate_symposium 토픽 구독자에게 알림을 발송합니다.
+ */
+export async function sendMedigateSymposiumStartNotice(
+  symposium: MedigateSymposiumItem | MedigateSymposiumItem[],
+): Promise<{ successCount: number; failCount: number }> {
+  const items = Array.isArray(symposium) ? symposium : [symposium];
+  if (items.length === 0) {
+    return { successCount: 0, failCount: 0 };
+  }
+
+  const subscribers = getSubscribersForTopic('medigate_symposium');
+  if (subscribers.length === 0) {
+    return { successCount: 0, failCount: 0 };
+  }
+
+  const bot = getBot('notice');
+  if (!bot) {
+    logger.warn(
+      '[subscription_service] 공지봇(noticeBot)이 초기화되지 않아 메디게이트 심포지움 알림을 발송할 수 없습니다.',
+    );
+    return { successCount: 0, failCount: subscribers.length };
+  }
+
+  let successCount = 0;
+  let failCount = 0;
+  const invalidChatIds: number[] = [];
+
+  for (let idx = 0; idx < subscribers.length; idx++) {
+    const chatId = subscribers[idx];
+    try {
+      for (const item of items) {
+        const messageContent = buildMedigateSymposiumStartMessage(item);
+        const chunks = splitTelegramMessage(messageContent.text, { maxLength: TELEGRAM_SAFE_MESSAGE_LENGTH });
+        for (let i = 0; i < chunks.length; i++) {
+          await bot.telegram.sendMessage(chatId, chunks[i], messageContent.options);
+          if (i < chunks.length - 1) {
+            await sleep(100);
+          }
+        }
+        await sleep(100);
+      }
+      successCount++;
+    } catch (error) {
+      failCount++;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error(`[subscription_service] [medigate_symposium] chatId(${chatId}) 발송 실패:`, errorMessage);
+
+      const lower = errorMessage.toLowerCase();
+      if (
+        lower.includes('forbidden') ||
+        lower.includes('blocked') ||
+        lower.includes('chat not found') ||
+        lower.includes('deactivated')
+      ) {
+        invalidChatIds.push(chatId);
+      }
+    }
+    if (idx < subscribers.length - 1) {
+      await sleep(50);
+    }
+  }
+
+  if (invalidChatIds.length > 0) {
+    for (const invalidId of invalidChatIds) {
+      removeSubscriberCompletely(invalidId);
+    }
+    logger.info(
+      `[subscription_service] 유효하지 않은 구독자 ${invalidChatIds.length}명 자동 구독 해제 완료:`,
+      invalidChatIds,
+    );
+  }
+
+  return { successCount, failCount };
 }

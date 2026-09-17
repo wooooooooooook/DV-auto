@@ -4,8 +4,12 @@ import {
   getWatchedKey,
   isSymposiumWatchedToday,
   markSymposiumWatchedToday,
+  getStartNotifiedKey,
+  isSymposiumStartNotifiedToday,
+  markSymposiumStartNotifiedToday,
   checkAndWatchMedigateSymposiums,
 } from '../src/services/medigate_monitor_service';
+import * as subscriptionService from '../src/services/subscription_service';
 import * as storage from '../src/services/storage';
 import * as runner from '../src/core/runner';
 import * as taskRegistry from '../src/core/taskRegistry';
@@ -118,5 +122,48 @@ describe('Medigate Monitor Service Tests', () => {
     expect(res.skippedCount).toBe(1);
     expect(res.targets).toHaveLength(0);
     expect(runTaskSpy).not.toHaveBeenCalled();
+  });
+
+  it('markSymposiumStartNotifiedToday 및 isSymposiumStartNotifiedToday 테스트', () => {
+    expect(isSymposiumStartNotifiedToday(6001, '2026-09-15')).toBe(false);
+    expect(getStartNotifiedKey(6001, '2026-09-15')).toBe('medigate_start_notified:6001:2026-09-15');
+
+    markSymposiumStartNotifiedToday(6001, '2026-09-15');
+    expect(isSymposiumStartNotifiedToday(6001, '2026-09-15')).toBe(true);
+    expect(isSymposiumStartNotifiedToday(6001, '2026-09-16')).toBe(false);
+  });
+
+  it('checkAndWatchMedigateSymposiums - On-Air 감지 시 시작 알림 발송 및 중복 발송 방지', async () => {
+    const mockClient = new MedigateClient();
+    vi.spyOn(mockClient, 'login').mockResolvedValue({ success: true, message: '로그인 성공' });
+    vi.spyOn(mockClient, 'getSymposiumList').mockResolvedValue([
+      {
+        webinarIdx: 7001,
+        subject: '실시간 라이브 심포지움',
+        status: 'ING',
+        applyFlag: 'Y',
+      } as MedigateSymposiumItem,
+    ]);
+
+    const sendNoticeSpy = vi
+      .spyOn(subscriptionService, 'sendMedigateSymposiumStartNotice')
+      .mockResolvedValue({ successCount: 1, failCount: 0 });
+
+    // 1차 실행: 시작 알림 전송 및 마킹
+    await checkAndWatchMedigateSymposiums({
+      client: mockClient,
+      now: new Date('2026-09-15T10:00:00Z'),
+    });
+
+    expect(sendNoticeSpy).toHaveBeenCalledTimes(1);
+    expect(isSymposiumStartNotifiedToday(7001, '2026-09-15')).toBe(true);
+
+    // 2차 실행: 이미 오늘 알림이 발송되었으므로 sendMedigateSymposiumStartNotice가 다시 호출되지 않아야 함
+    await checkAndWatchMedigateSymposiums({
+      client: mockClient,
+      now: new Date('2026-09-15T10:10:00Z'),
+    });
+
+    expect(sendNoticeSpy).toHaveBeenCalledTimes(1);
   });
 });
