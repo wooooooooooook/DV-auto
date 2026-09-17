@@ -885,47 +885,40 @@ export function buildMainMenu(chatId: number): { text: string; replyMarkup: Inli
     '🔔 <b>공지봇 맞춤 알림 구독 설정</b>',
     '',
     '현재 설정된 맞춤 알림 구독 현황입니다.',
-    '버튼을 눌러 각 항목의 <b>ON/OFF</b> 및 <b>상세 조건</b>을 설정하세요.',
+    '버튼을 눌러 각 항목의 <b>ON/OFF</b> 및 <b>세부 조건</b>을 설정하세요.',
     '',
     '💡 <i>일부 알림(세미나 라이브/퀴즈/링크 등)은 전체 공지채널과 중복될 수 있습니다. 중복 알림이 불편하신 경우 <b>공지채널을 음소거</b>하거나 <b>채널 나가기</b> 후 공지봇 알림만 받아보시는 것을 권장합니다.</i>',
-    '⚠️ <i>설문 마감 알림(20분전/10분전)은 개인의 설문 진행 여부와 관계없이 알림이 전송됩니다. 이미 설문을 완료하셨더라도 알림이 발송될 수 있으니 참고해 주세요.</i>',
     '',
-    '📋 <b>[구독 현황]</b> <i>(👥 항목별 현재 구독자 수)</i>',
-    `• 🔗 <b>오늘의 링크</b>: ${sub.todayLinks ? `🟢 ON (수신 시간: ${sub.todayLinksTime})` : '🔴 OFF'} <i>(👥 ${stats.todayLinks}명 구독)</i>`,
-    `• 🆕 <b>신규 세미나</b>: ${newSeminarStatusText} <i>(👥 ${stats.newSeminar}명 구독)</i>`,
-    `• ❓ <b>인터엠디 퀴즈</b>: ${sub.intermdQuiz ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.intermdQuiz}명 구독)</i>`,
-    `• 🔄 <b>세미나 정보 변경/심화</b>: ${sub.seminarChanges ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.seminarChanges}명 구독)</i>`,
-    `• 🔴 <b>세미나 라이브/퀴즈</b>: ${sub.seminarLive ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.seminarLive}명 구독)</i>`,
-    `• ⏳ <b>설문 마감 20분전</b>: ${sub.surveyClosing20 ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.surveyClosing20}명 구독)</i>`,
-    `• ⏳ <b>설문 마감 10분전</b>: ${sub.surveyClosing10 ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.surveyClosing10}명 구독)</i>`,
-    `• 💰 <b>네페 포인트 전환</b>: ${sub.pointConversion ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.pointConversion}명 구독)</i>`,
-    `• 📋 <b>닥터빌 설문 (시장조사 등)</b>: ${sub.doctorvilleSurvey ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.doctorvilleSurvey}명 구독)</i>`,
-    `• 🩺 <b>메디게이트 심포지움 시작</b>: ${sub.medigateSymposium ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.medigateSymposium}명 구독)</i>`,
+    '📋 <b>[닥터빌 알림 구독 현황]</b> <i>(👥 항목별 현재 구독자 수)</i>',
+    `• 🔗 <b>오늘의 링크</b>: ${sub.todayLinks ? `🟢 ON (수신 시간: ${sub.todayLinksTime})` : '🔴 OFF'} <i>(👥 ${stats.todayLinks}명)</i>`,
+    `• 🆕 <b>신규 세미나</b>: ${newSeminarStatusText} <i>(👥 ${stats.newSeminar}명)</i>`,
+    `• 🔄 <b>세미나 정보 변경/심화</b>: ${sub.seminarChanges ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.seminarChanges}명)</i>`,
+    `• 🔴 <b>세미나 라이브/퀴즈</b>: ${sub.seminarLive ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.seminarLive}명)</i>`,
+    `• ⏳ <b>세미나 설문 마감</b>: 20분전 ${sub.surveyClosing20 ? '🟢' : '🔴'} | 10분전 ${sub.surveyClosing10 ? '🟢' : '🔴'} <i>(👥 20분 ${stats.surveyClosing20}명 / 10분 ${stats.surveyClosing10}명)</i>`,
+    `• 💰 <b>네페 포인트 전환</b>: ${sub.pointConversion ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.pointConversion}명)</i>`,
+    `• 📋 <b>닥터빌 설문 (시장조사 등)</b>: ${sub.doctorvilleSurvey ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.doctorvilleSurvey}명)</i>`,
+    '',
+    '🌐 <b>[닥터빌 외 서비스 알림 구독 현황]</b>',
+    `• ❓ <b>인터엠디 퀴즈</b>: ${sub.intermdQuiz ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.intermdQuiz}명)</i>`,
+    `• 🩺 <b>메디게이트 심포지움</b>: ${sub.medigateSymposium ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.medigateSymposium}명)</i>`,
   ].join('\n');
+
+  const surveySummary =
+    sub.surveyClosing20 || sub.surveyClosing10
+      ? `${sub.surveyClosing20 ? '20분전🟢' : ''}${sub.surveyClosing20 && sub.surveyClosing10 ? ' ' : ''}${sub.surveyClosing10 ? '10분전🟢' : ''}`
+      : 'OFF 🔴';
 
   const inlineKeyboard = [
     [
       {
-        text: `🔗 오늘의 링크 (👥 ${stats.todayLinks}명): ${sub.todayLinks ? 'ON 🟢' : 'OFF 🔴'}`,
-        callback_data: 'sub:toggle:today_links',
-      },
-    ],
-    [
-      {
-        text: `⏰ 오늘의 링크 시간 (${sub.todayLinksTime}) ⚙️`,
-        callback_data: 'sub:menu:today_links_time',
+        text: `🔗 오늘의 링크 (👥 ${stats.todayLinks}명): ${sub.todayLinks ? `ON 🟢 (${sub.todayLinksTime})` : 'OFF 🔴'} ⚙️`,
+        callback_data: 'sub:menu:today_links',
       },
     ],
     [
       {
         text: `🆕 신규 세미나 (👥 ${stats.newSeminar}명): ${sub.newSeminar === 'off' ? 'OFF 🔴' : getNewSeminarFilterLabel(sub.newSeminar)} ⚙️`,
         callback_data: 'sub:menu:new_seminar',
-      },
-    ],
-    [
-      {
-        text: `❓ 인터엠디 퀴즈 (👥 ${stats.intermdQuiz}명): ${sub.intermdQuiz ? 'ON 🟢' : 'OFF 🔴'}`,
-        callback_data: 'sub:toggle:intermd_quiz',
       },
     ],
     [
@@ -942,14 +935,8 @@ export function buildMainMenu(chatId: number): { text: string; replyMarkup: Inli
     ],
     [
       {
-        text: `⏳ 설문 마감 20분전 (👥 ${stats.surveyClosing20}명): ${sub.surveyClosing20 ? 'ON 🟢' : 'OFF 🔴'}`,
-        callback_data: 'sub:toggle:survey_closing_20',
-      },
-    ],
-    [
-      {
-        text: `⏳ 설문 마감 10분전 (👥 ${stats.surveyClosing10}명): ${sub.surveyClosing10 ? 'ON 🟢' : 'OFF 🔴'}`,
-        callback_data: 'sub:toggle:survey_closing_10',
+        text: `⏳ 세미나 설문 마감: ${surveySummary} ⚙️`,
+        callback_data: 'sub:menu:survey_closing',
       },
     ],
     [
@@ -966,8 +953,8 @@ export function buildMainMenu(chatId: number): { text: string; replyMarkup: Inli
     ],
     [
       {
-        text: `🩺 메디게이트 심포지움 (👥 ${stats.medigateSymposium}명): ${sub.medigateSymposium ? 'ON 🟢' : 'OFF 🔴'}`,
-        callback_data: 'sub:toggle:medigate_symposium',
+        text: `🌐 닥터빌 외 서비스 알림 설정 ⚙️`,
+        callback_data: 'sub:menu:external_services',
       },
     ],
     [
@@ -1104,23 +1091,34 @@ export async function sendDoctorVilleSurveysToSubscribers(
   return { successCount, failCount };
 }
 
-export function buildTodayLinksTimeMenu(chatId: number): { text: string; replyMarkup: InlineKeyboardMarkup } {
+export function buildTodayLinksMenu(chatId: number): { text: string; replyMarkup: InlineKeyboardMarkup } {
   const sub = getSubscription(chatId);
   const stats = getSubscriptionStats();
 
   const text = [
-    '⏰ <b>오늘의 링크 알림 수신 시간 설정</b>',
+    '🔗 <b>오늘의 링크 맞춤 알림 설정</b>',
     '',
     '매일 희망하시는 시간에 오늘의 세미나/퀴즈 링크 모음을 전송해 드립니다.',
-    `• 현재 설정된 시간: <b>${sub.todayLinksTime}</b> (${sub.todayLinks ? '🟢 구독 중' : '🔴 구독 OFF'})`,
-    '💡 <i>각 시간 버튼의 (👥 N명)은 해당 시간대를 선택한 구독자 수입니다.</i>',
+    `• 현재 알림 상태: <b>${sub.todayLinks ? '🟢 알림 켜짐 (ON)' : '🔴 알림 꺼짐 (OFF)'}</b> <i>(👥 ${stats.todayLinks}명 구독)</i>`,
+    `• 현재 수신 시간: <b>${sub.todayLinksTime}</b>`,
     '',
+    '💡 <i>원하시는 수신 시간을 선택하시면 자동으로 알림이 켜집니다.</i>',
     '희망하시는 수신 시간을 아래에서 선택해주세요:',
   ].join('\n');
 
+  const keyboardRows: Array<Array<{ text: string; callback_data: string }>> = [];
+
+  // 알림 ON/OFF 토글
+  keyboardRows.push([
+    {
+      text: `🔗 알림 상태: ${sub.todayLinks ? 'ON 🟢 (알림 끄기)' : 'OFF 🔴 (알림 켜기)'}`,
+      callback_data: 'sub:toggle:today_links',
+    },
+  ]);
+
   const buttons: Array<{ text: string; callback_data: string }> = [];
   for (const time of TODAY_LINKS_AVAILABLE_TIMES) {
-    const isSelected = sub.todayLinksTime === time;
+    const isSelected = sub.todayLinks && sub.todayLinksTime === time;
     const count = stats.todayLinksByTime[time] || 0;
     buttons.push({
       text: `${time} (👥 ${count}명)${isSelected ? ' ✅' : ''}`.trim(),
@@ -1129,7 +1127,6 @@ export function buildTodayLinksTimeMenu(chatId: number): { text: string; replyMa
   }
 
   // 3개씩 행 분할
-  const keyboardRows: Array<Array<{ text: string; callback_data: string }>> = [];
   for (let i = 0; i < buttons.length; i += 3) {
     keyboardRows.push(buttons.slice(i, i + 3));
   }
@@ -1143,6 +1140,8 @@ export function buildTodayLinksTimeMenu(chatId: number): { text: string; replyMa
     },
   };
 }
+
+export const buildTodayLinksTimeMenu = buildTodayLinksMenu;
 
 export function buildNewSeminarMenu(chatId: number): { text: string; replyMarkup: InlineKeyboardMarkup } {
   const sub = getSubscription(chatId);
@@ -1192,6 +1191,82 @@ export function buildNewSeminarMenu(chatId: number): { text: string; replyMarkup
     text,
     replyMarkup: {
       inline_keyboard: keyboardRows,
+    },
+  };
+}
+
+export function buildSurveyClosingMenu(chatId: number): { text: string; replyMarkup: InlineKeyboardMarkup } {
+  const sub = getSubscription(chatId);
+  const stats = getSubscriptionStats();
+
+  const text = [
+    '⏳ <b>세미나 설문 마감 알림 설정</b>',
+    '',
+    '라이브 세미나 종료 후 진행되는 설문의 마감 전 리마인드 알림을 설정합니다.',
+    '',
+    '⚠️ <i>설문 마감 알림은 개인의 설문 진행 여부와 관계없이 알림이 전송됩니다. 이미 설문을 완료하셨더라도 알림이 발송될 수 있으니 참고해 주세요.</i>',
+    '',
+    `• <b>설문 마감 20분전 알림</b>: ${sub.surveyClosing20 ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.surveyClosing20}명 구독)</i>`,
+    `• <b>설문 마감 10분전 알림</b>: ${sub.surveyClosing10 ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.surveyClosing10}명 구독)</i>`,
+  ].join('\n');
+
+  const inlineKeyboard = [
+    [
+      {
+        text: `⏳ 설문 마감 20분전 (👥 ${stats.surveyClosing20}명): ${sub.surveyClosing20 ? 'ON 🟢' : 'OFF 🔴'}`,
+        callback_data: 'sub:toggle:survey_closing_20',
+      },
+    ],
+    [
+      {
+        text: `⏳ 설문 마감 10분전 (👥 ${stats.surveyClosing10}명): ${sub.surveyClosing10 ? 'ON 🟢' : 'OFF 🔴'}`,
+        callback_data: 'sub:toggle:survey_closing_10',
+      },
+    ],
+    [{ text: '◀ 메인 설정으로 돌아가기', callback_data: 'sub:menu:main' }],
+  ];
+
+  return {
+    text,
+    replyMarkup: {
+      inline_keyboard: inlineKeyboard,
+    },
+  };
+}
+
+export function buildExternalServicesMenu(chatId: number): { text: string; replyMarkup: InlineKeyboardMarkup } {
+  const sub = getSubscription(chatId);
+  const stats = getSubscriptionStats();
+
+  const text = [
+    '🌐 <b>닥터빌 외 서비스 알림 설정</b>',
+    '',
+    '닥터빌 외 타 의료/의사 플랫폼의 퀴즈 및 심포지움 알림을 설정합니다.',
+    '',
+    `• ❓ <b>인터엠디 오늘의 퀴즈</b>: ${sub.intermdQuiz ? '🟢 ON (매일 08:01 정답 발송)' : '🔴 OFF'} <i>(👥 ${stats.intermdQuiz}명 구독)</i>`,
+    `• 🩺 <b>메디게이트 심포지움 시작</b>: ${sub.medigateSymposium ? '🟢 ON (시작 시 실시간 발송)' : '🔴 OFF'} <i>(👥 ${stats.medigateSymposium}명 구독)</i>`,
+  ].join('\n');
+
+  const inlineKeyboard = [
+    [
+      {
+        text: `❓ 인터엠디 퀴즈 (👥 ${stats.intermdQuiz}명): ${sub.intermdQuiz ? 'ON 🟢' : 'OFF 🔴'}`,
+        callback_data: 'sub:toggle:intermd_quiz',
+      },
+    ],
+    [
+      {
+        text: `🩺 메디게이트 심포지움 (👥 ${stats.medigateSymposium}명): ${sub.medigateSymposium ? 'ON 🟢' : 'OFF 🔴'}`,
+        callback_data: 'sub:toggle:medigate_symposium',
+      },
+    ],
+    [{ text: '◀ 메인 설정으로 돌아가기', callback_data: 'sub:menu:main' }],
+  ];
+
+  return {
+    text,
+    replyMarkup: {
+      inline_keyboard: inlineKeyboard,
     },
   };
 }

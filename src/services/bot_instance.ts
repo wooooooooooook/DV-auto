@@ -191,7 +191,20 @@ function setBot(name: BotName, instance: Telegraf | null): void {
                 let alertMessage = '설정이 변경되었습니다.';
                 let showAlert = false;
 
-                if (topic === 'survey_closing_20') {
+                if (topic === 'today_links') {
+                  alertMessage = updatedSub.todayLinks
+                    ? '🔗 오늘의 링크 알림이 켜졌습니다.'
+                    : '🔗 오늘의 링크 알림이 꺼졌습니다.';
+                  await ctx.answerCbQuery(alertMessage).catch(() => {});
+                  const { text, replyMarkup } = subService.buildTodayLinksMenu(chatId);
+                  await ctx
+                    .editMessageText(text, {
+                      parse_mode: 'HTML',
+                      reply_markup: replyMarkup,
+                    })
+                    .catch(() => {});
+                  return;
+                } else if (topic === 'survey_closing_20') {
                   if (updatedSub.surveyClosing20) {
                     alertMessage =
                       '⏳ 설문 마감 20분전 알림이 켜졌습니다.\n\n※ 이미 설문을 진행/완료하셨더라도 해당 시간에 알림이 전송됩니다.';
@@ -199,6 +212,15 @@ function setBot(name: BotName, instance: Telegraf | null): void {
                   } else {
                     alertMessage = '설문 마감 20분전 알림이 꺼졌습니다.';
                   }
+                  await ctx.answerCbQuery(alertMessage, { show_alert: showAlert }).catch(() => {});
+                  const { text, replyMarkup } = subService.buildSurveyClosingMenu(chatId);
+                  await ctx
+                    .editMessageText(text, {
+                      parse_mode: 'HTML',
+                      reply_markup: replyMarkup,
+                    })
+                    .catch(() => {});
+                  return;
                 } else if (topic === 'survey_closing_10') {
                   if (updatedSub.surveyClosing10) {
                     alertMessage =
@@ -207,18 +229,59 @@ function setBot(name: BotName, instance: Telegraf | null): void {
                   } else {
                     alertMessage = '설문 마감 10분전 알림이 꺼졌습니다.';
                   }
+                  await ctx.answerCbQuery(alertMessage, { show_alert: showAlert }).catch(() => {});
+                  const { text, replyMarkup } = subService.buildSurveyClosingMenu(chatId);
+                  await ctx
+                    .editMessageText(text, {
+                      parse_mode: 'HTML',
+                      reply_markup: replyMarkup,
+                    })
+                    .catch(() => {});
+                  return;
+                } else if (topic === 'intermd_quiz') {
+                  alertMessage = updatedSub.intermdQuiz
+                    ? '❓ 인터엠디 오늘의 퀴즈 알림이 켜졌습니다.'
+                    : '❓ 인터엠디 오늘의 퀴즈 알림이 꺼졌습니다.';
+                  await ctx.answerCbQuery(alertMessage).catch(() => {});
+                  const { text, replyMarkup } = subService.buildExternalServicesMenu(chatId);
+                  await ctx
+                    .editMessageText(text, {
+                      parse_mode: 'HTML',
+                      reply_markup: replyMarkup,
+                    })
+                    .catch(() => {});
+                  return;
+                } else if (topic === 'medigate_symposium') {
+                  alertMessage = updatedSub.medigateSymposium
+                    ? '🩺 메디게이트 심포지움 시작 알림이 켜졌습니다.'
+                    : '🩺 메디게이트 심포지움 시작 알림이 꺼졌습니다.';
+                  await ctx.answerCbQuery(alertMessage).catch(() => {});
+                  const { text, replyMarkup } = subService.buildExternalServicesMenu(chatId);
+                  await ctx
+                    .editMessageText(text, {
+                      parse_mode: 'HTML',
+                      reply_markup: replyMarkup,
+                    })
+                    .catch(() => {});
+                  return;
                 } else if (topic === 'doctorville_survey') {
                   if (updatedSub.doctorvilleSurvey) {
                     alertMessage = '📋 닥터빌 참여 가능 설문(시장조사 등) 발견 알림이 켜졌습니다.';
                   } else {
                     alertMessage = '📋 닥터빌 참여 가능 설문 알림이 꺼졌습니다.';
                   }
-                } else if (topic === 'medigate_symposium') {
-                  if (updatedSub.medigateSymposium) {
-                    alertMessage = '🩺 메디게이트 심포지움 시작 알림이 켜졌습니다.';
-                  } else {
-                    alertMessage = '🩺 메디게이트 심포지움 시작 알림이 꺼졌습니다.';
-                  }
+                } else if (topic === 'seminar_changes') {
+                  alertMessage = updatedSub.seminarChanges
+                    ? '🔄 세미나 정보 변경 알림이 켜졌습니다.'
+                    : '🔄 세미나 정보 변경 알림이 꺼졌습니다.';
+                } else if (topic === 'seminar_live') {
+                  alertMessage = updatedSub.seminarLive
+                    ? '🔴 세미나 라이브/퀴즈 알림이 켜졌습니다.'
+                    : '🔴 세미나 라이브/퀴즈 알림이 꺼졌습니다.';
+                } else if (topic === 'point_conversion') {
+                  alertMessage = updatedSub.pointConversion
+                    ? '💰 네페 포인트 전환 알림이 켜졌습니다.'
+                    : '💰 네페 포인트 전환 알림이 꺼졌습니다.';
                 } else if (topic === 'new_seminar_point_excluded' || topic === 'new_seminar_include_point_excluded') {
                   if (updatedSub.newSeminarIncludePointExcluded) {
                     alertMessage = '🎁 포인트가 미지급되는 세미나도 신규 알림에 포함하여 수신합니다.';
@@ -247,9 +310,9 @@ function setBot(name: BotName, instance: Telegraf | null): void {
                 return;
               }
 
-              if (actionData === 'menu:today_links_time') {
+              if (actionData === 'menu:today_links' || actionData === 'menu:today_links_time') {
                 await ctx.answerCbQuery().catch(() => {});
-                const { text, replyMarkup } = subService.buildTodayLinksTimeMenu(chatId);
+                const { text, replyMarkup } = subService.buildTodayLinksMenu(chatId);
                 await ctx
                   .editMessageText(text, {
                     parse_mode: 'HTML',
@@ -263,7 +326,7 @@ function setBot(name: BotName, instance: Telegraf | null): void {
                 const time = actionData.replace('set_time:', '');
                 subService.setTodayLinksTime(chatId, time);
                 await ctx.answerCbQuery(`오늘의 링크 시간이 ${time}으로 설정되었습니다.`).catch(() => {});
-                const { text, replyMarkup } = subService.buildMainMenu(chatId);
+                const { text, replyMarkup } = subService.buildTodayLinksMenu(chatId);
                 await ctx
                   .editMessageText(text, {
                     parse_mode: 'HTML',
@@ -292,7 +355,31 @@ function setBot(name: BotName, instance: Telegraf | null): void {
                 subService.setNewSeminarFilter(chatId, filter);
                 const label = subService.getNewSeminarFilterLabel(filter);
                 await ctx.answerCbQuery(`신규 세미나 알림이 [${label}] (으)로 설정되었습니다.`).catch(() => {});
-                const { text, replyMarkup } = subService.buildMainMenu(chatId);
+                const { text, replyMarkup } = subService.buildNewSeminarMenu(chatId);
+                await ctx
+                  .editMessageText(text, {
+                    parse_mode: 'HTML',
+                    reply_markup: replyMarkup,
+                  })
+                  .catch(() => {});
+                return;
+              }
+
+              if (actionData === 'menu:survey_closing') {
+                await ctx.answerCbQuery().catch(() => {});
+                const { text, replyMarkup } = subService.buildSurveyClosingMenu(chatId);
+                await ctx
+                  .editMessageText(text, {
+                    parse_mode: 'HTML',
+                    reply_markup: replyMarkup,
+                  })
+                  .catch(() => {});
+                return;
+              }
+
+              if (actionData === 'menu:external_services') {
+                await ctx.answerCbQuery().catch(() => {});
+                const { text, replyMarkup } = subService.buildExternalServicesMenu(chatId);
                 await ctx
                   .editMessageText(text, {
                     parse_mode: 'HTML',
