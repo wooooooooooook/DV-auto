@@ -704,9 +704,69 @@ async function testCollectTodaySeminarMessageIncludesMorningSeminars() {
   assert.deepStrictEqual(res.dinnerSeminarIds, ['9203']);
 }
 
+function testActiveSurveysSectionFormat() {
+  const mockInput: TodayLinksFormatInput = {
+    quizInfo: null,
+    seminarMessage: null,
+    storedNewSeminars: [],
+    pointConversionInfo: null,
+    activeSurveys: [
+      {
+        title: '펙수프라잔 20mg 시장조사',
+        category: '시장조사',
+        pointText: '3,000P',
+        point: 3000,
+        date: '2026-09-17 ~ 2026-09-20',
+        progress: '진행중',
+        isAvailable: true,
+        url: 'https://www.doctorville.co.kr/survey/main',
+      },
+      {
+        title: '신약 임상 세미나 설문',
+        category: '라이브세미나',
+        itemId: '5599',
+        pointText: '1,000P',
+        point: 1000,
+        date: '2026-09-17 ~ 2026-09-17',
+        progress: '바로지급',
+        isAvailable: true,
+        url: 'https://m.doctorville.co.kr/cme/seminar/5599',
+      },
+    ],
+  };
+
+  const { message, options } = formatTodayLinksBroadcast(mockInput);
+
+  assert.ok(message.includes('📋 <b>참여 가능한 설문 (진행 중)</b>'), '참여 가능한 설문 섹션 헤더가 포함되어야 함');
+  assert.ok(
+    message.includes('※ 계정별 참여 여부 및 선착순에 따라 이미 종료되었을 수 있습니다.'),
+    '종료 가능 안내 문구가 포함되어야 함',
+  );
+  assert.ok(
+    message.includes('1. <b>[시장조사] 펙수프라잔 20mg 시장조사</b> [2026-09-17 ~ 2026-09-20] 💰(3,000P)'),
+    '시장조사 설문 및 기간이 포함되어야 함',
+  );
+  assert.ok(message.includes('https://www.doctorville.co.kr/survey/main'), '설문 메인 링크가 포함되어야 함');
+  assert.ok(
+    message.includes('2. <b>[라이브세미나] 신약 임상 세미나 설문</b> [2026-09-17 ~ 2026-09-17] 💰(1,000P)'),
+    '라이브세미나 설문 및 기간이 포함되어야 함',
+  );
+  assert.ok(message.includes('https://m.doctorville.co.kr/cme/seminar/5599'), '세미나 상세 링크가 포함되어야 함');
+
+  // 인라인 키보드에 설문 바로가기 버튼 확인
+  const flatButtons = options.reply_markup.inline_keyboard.flat();
+  const surveyButton = flatButtons.find((btn) => btn.text === '📋 설문 목록 바로가기');
+  assert.ok(surveyButton, '설문 목록 바로가기 버튼이 포함되어야 함');
+  assert.strictEqual(surveyButton?.url, 'https://www.doctorville.co.kr/survey/main');
+}
+
 describe('today_links_format 단위 테스트', () => {
   it('testTodayLinksFormatWithUserExample', () => {
     testTodayLinksFormatWithUserExample();
+  });
+
+  it('testActiveSurveysSectionFormat', () => {
+    testActiveSurveysSectionFormat();
   });
 
   it('testDateParsingAndCustomDateFormat', () => {

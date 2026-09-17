@@ -300,6 +300,7 @@
 | `https://m.doctorville.co.kr/mypage/info` | `GET` (HTTP / Playwright) | 로그인 세션 검증 (회원정보수정 버튼 유무 확인) | `utils.ts` |
 | `https://www.doctorville.co.kr/my/point/pointUseHistoryList` | `POST` (Form `x-www-form-urlencoded`) | 포인트 적립내역 조회 (JSON API 장애 시 폴백) | `check_seminar_point.ts` |
 | `https://www.doctorville.co.kr/seminar/main` | `GET` (HTML 파싱) | PC 웹 세미나 메인 목록 파싱 (기존 방식 호환) | `apply_seminar.ts`, `today_links.ts` |
+| `https://www.doctorville.co.kr/survey/main` | `GET` (HTML 파싱) | 참여 가능 설문(시장조사/세미나 설문) 탐지 및 구독자 알림 | `survey_monitor_service.ts`, `html_parser.ts`, `apply_seminar.ts` |
 | `https://www.doctorville.co.kr/product/medicineList` | `GET` (Playwright / Cheerio) | 오늘의 퀴즈 대상 의약품 목록 조회 | `today_quiz.ts`, `today_links.ts` |
 | `https://www.doctorville.co.kr/product/instrumentList` | `GET` (Playwright / Cheerio) | 오늘의 퀴즈 대상 의료기기 목록 조회 | `today_quiz.ts`, `today_links.ts` |
 | `https://m.doctorville.co.kr/cme/seminar/{seminarId}` | `GET` (Playwright) | 세미나 라이브 방송 입장, 실시간 퀴즈 및 설문 응답 | `seminar_quiz.ts`, `run_seminar_quiz.ts` |

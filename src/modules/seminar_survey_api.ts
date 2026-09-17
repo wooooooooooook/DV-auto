@@ -1,5 +1,6 @@
 import { sendDoctorVilleRequest } from './http_client';
 import { checkIsAdvancedSurvey } from './seminar_api';
+import { parseSurveyMainListHtml, type ActiveSurveyItem } from './html_parser';
 import {
   loadCheatsheet,
   findMatchingKeywords,
@@ -394,6 +395,69 @@ export async function fetchSeminarSurveyQuizHttp(
       allQuestions: [],
       quizSummaryMessage: '',
       errorMessage: `fetchSeminarSurveyQuizHttp 오류: ${errorMsg}`,
+    };
+  }
+}
+
+export interface FetchSurveyMainResult {
+  success: boolean;
+  items: ActiveSurveyItem[];
+  availableItems: ActiveSurveyItem[];
+  ongoingItems: ActiveSurveyItem[];
+  isAuthExpired: boolean;
+  errorMessage?: string;
+}
+
+/**
+ * 닥터빌 설문 메인 페이지(https://www.doctorville.co.kr/survey/main)를 조회하여
+ * 전체 설문, 참여 가능한 설문 및 기간 진행 중인 설문 목록을 파싱하여 반환합니다.
+ */
+export async function fetchSurveyMainList(page = 1, referenceDate?: string): Promise<FetchSurveyMainResult> {
+  const url =
+    page > 1 ? `https://www.doctorville.co.kr/survey/main?page=${page}` : 'https://www.doctorville.co.kr/survey/main';
+  try {
+    const res = await sendDoctorVilleRequest(url);
+    if (res.resultType === 'AUTH_EXPIRED') {
+      return {
+        success: false,
+        items: [],
+        availableItems: [],
+        ongoingItems: [],
+        isAuthExpired: true,
+        errorMessage: '세션이 만료되었습니다. 로그인이 필요합니다.',
+      };
+    }
+    if (res.status !== 200) {
+      return {
+        success: false,
+        items: [],
+        availableItems: [],
+        ongoingItems: [],
+        isAuthExpired: false,
+        errorMessage: `HTTP 요청 실패 (상태 코드: ${res.status})`,
+      };
+    }
+
+    const items = parseSurveyMainListHtml(res.body, url, referenceDate);
+    const availableItems = items.filter((item) => item.isAvailable);
+    const ongoingItems = items.filter((item) => item.isOngoing || item.isAvailable);
+
+    return {
+      success: true,
+      items,
+      availableItems,
+      ongoingItems,
+      isAuthExpired: false,
+    };
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    return {
+      success: false,
+      items: [],
+      availableItems: [],
+      ongoingItems: [],
+      isAuthExpired: false,
+      errorMessage: `fetchSurveyMainList 오류: ${errorMsg}`,
     };
   }
 }

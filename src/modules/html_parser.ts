@@ -191,3 +191,134 @@ export function parseCurrentPointHtml(html: string): string {
   }
   return '조회 실패';
 }
+
+export interface ActiveSurveyItem {
+  surveyId?: string;
+  surveyType?: number;
+  itemId?: string;
+  category: string;
+  title: string;
+  date: string;
+  startDate?: string;
+  endDate?: string;
+  isOngoing: boolean;
+  progress: string;
+  pointText: string;
+  point?: number;
+  surveyUrl?: string;
+  isAvailable: boolean;
+  minutesLeft?: number;
+  url: string;
+}
+
+/**
+ * 설문 기간 문자열(예: '2026-09-16 ~ 2026-09-18' 또는 '2026-09-17') 파싱 및
+ * 기준일(오늘 KST) 기준 진행 중인 기간인지 판별합니다.
+ */
+export function parseSurveyDateRange(
+  dateStr: string,
+  referenceDate: string = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' }),
+): { startDate?: string; endDate?: string; isOngoing: boolean } {
+  if (!dateStr) return { isOngoing: false };
+
+  const matches = dateStr.match(/(\d{4}[-/.]\d{1,2}[-/.]\d{1,2})/g);
+  if (matches && matches.length >= 2) {
+    const start = matches[0].replace(/[/.]/g, '-');
+    const end = matches[1].replace(/[/.]/g, '-');
+    return {
+      startDate: start,
+      endDate: end,
+      isOngoing: end >= referenceDate,
+    };
+  }
+  if (matches && matches.length === 1) {
+    const single = matches[0].replace(/[/.]/g, '-');
+    return {
+      startDate: single,
+      endDate: single,
+      isOngoing: single >= referenceDate,
+    };
+  }
+  return { isOngoing: false };
+}
+
+/**
+ * 닥터빌 설문 메인(https://www.doctorville.co.kr/survey/main) HTML 파싱
+ * 참여 가능한 설문(시장조사 및 세미나 설문 등)을 식별합니다.
+ */
+export function parseSurveyMainListHtml(
+  html: string,
+  baseUrl = 'https://www.doctorville.co.kr/survey/main',
+  referenceDate: string = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' }),
+): ActiveSurveyItem[] {
+  const $ = cheerio.load(html);
+  const results: ActiveSurveyItem[] = [];
+
+  $('.survey_list table tbody tr').each((_, tr) => {
+    const $tr = $(tr);
+    const category = $tr.find('.tit_info .category').text().trim() || '';
+    const title = $tr.find('.tit_info .tit').text().trim() || '';
+    const date = $tr.find('.tit_info .date').text().trim() || '';
+    const progressNode = $tr.find('td:nth-child(1) .progress');
+    const progress = progressNode.text().trim() || '';
+    const pointText = $tr.find('td:nth-child(1) .point').text().trim() || '';
+
+    const pointMatch = pointText.match(/([\d,]+)\s*P/i);
+    const point = pointMatch ? parseInt(pointMatch[1].replace(/,/g, ''), 10) : undefined;
+
+    const actionTd = $tr.find('td:nth-child(3)');
+    const surveyId = actionTd.find('.surveyIdCls').val()?.toString().trim() || undefined;
+    const surveyTypeStr = actionTd.find('.surveyTypeCls').val()?.toString().trim();
+    const surveyType = surveyTypeStr ? parseInt(surveyTypeStr, 10) : undefined;
+    const itemId = actionTd.find('.itemIdCls').val()?.toString().trim() || undefined;
+    const surveyUrl = actionTd.find('.surveyUrl').val()?.toString().trim() || undefined;
+
+    const timerEl = $tr.find('.survey-timer');
+    const minutesLeftAttr = timerEl.attr('data-minutes-left');
+    const minutesLeft = minutesLeftAttr !== undefined ? parseInt(minutesLeftAttr, 10) : undefined;
+
+    const hasButton = actionTd.find('.btn_survey, .btn_apply, button, a').length > 0;
+    const isFinishClass = progressNode.hasClass('finish');
+    const isClosedText =
+      progress.includes('달성') ||
+      progress.includes('마감') ||
+      progress.includes('종료') ||
+      progress.includes('바로지급') ||
+      progress.includes('일괄지급');
+
+    let isAvailable = false;
+    if (hasButton) {
+      isAvailable = true;
+    } else if (minutesLeft !== undefined && minutesLeft > 0) {
+      isAvailable = true;
+    } else if (surveyId && !isFinishClass && !isClosedText) {
+      isAvailable = true;
+    }
+
+    const { startDate, endDate, isOngoing } = parseSurveyDateRange(date, referenceDate);
+    const url = itemId ? `https://m.doctorville.co.kr/cme/seminar/${itemId}` : baseUrl;
+
+    if (title) {
+      results.push({
+        surveyId,
+        surveyType,
+        itemId,
+        category,
+        title,
+        date,
+        startDate,
+        endDate,
+        isOngoing,
+        progress,
+        pointText,
+        point,
+        surveyUrl,
+        isAvailable,
+        minutesLeft,
+        url,
+      });
+    }
+  });
+
+  return results;
+}

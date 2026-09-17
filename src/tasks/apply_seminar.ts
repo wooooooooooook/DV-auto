@@ -33,6 +33,7 @@ import { refreshSeminarPointStatus } from '../services/seminar_point_sync';
 import type { SeminarListItem } from '../services/seminar_repository';
 import { enrichSeminarsWithDetail, isPastSeminar, isUncompletedSeminar } from '../services/seminar_sync_service';
 import { clearCache as clearAdvancedSeminarsCache } from './check_advanced_seminars';
+import { checkAndNotifyActiveSurveys } from '../services/survey_monitor_service';
 
 export const mergeSeminar = seminarRepo.mergeSeminarRecord;
 
@@ -680,6 +681,11 @@ export async function syncSeminars(options: ApplySeminarOptions = {}): Promise<S
 
     await checkAndTriggerSeminarMonitors(finalSeminars, { targetDate: referenceDate }).catch((err) => {
       logger.error('checkAndTriggerSeminarMonitors error in syncSeminars:', err);
+    });
+
+    // 닥터빌 참여 가능 설문(/survey/main) 감지 및 doctorville_survey 구독자 알림
+    await checkAndNotifyActiveSurveys().catch((err) => {
+      logger.error('checkAndNotifyActiveSurveys error in syncSeminars:', err);
     });
 
     syncResult.message = message;

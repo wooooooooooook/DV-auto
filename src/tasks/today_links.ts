@@ -5,9 +5,12 @@ import * as seminarRepo from '../services/seminar_repository';
 import { TODAY_QUIZ_INFO_KEY, type CachedTodayQuizInfo } from './today_quiz';
 import { isLowCapacitySeminar } from '../modules/seminar_api';
 import { getSeminarPeriod } from '../services/seminar_monitor_trigger';
+import { fetchSurveyMainList } from '../modules/seminar_survey_api';
+import type { ActiveSurveyItem } from '../modules/html_parser';
 
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
+const SURVEY_MAIN_PAGE = 'https://www.doctorville.co.kr/survey/main';
 const POINT_CONVERSION_URL = 'https://www.doctorville.co.kr/my/point/pointUseHistoryList';
 const TODAY_QUIZ_TEMP_KEY = 'today_quiz:temp_answers';
 export const TODAY_LINKS_CACHE_KEY = 'today_links_cache';
@@ -462,11 +465,25 @@ function formatPointConversionMessage(info: PointConversionInfo | null, todayIso
   return '💳 <b>다음 네이버페이포인트 전환가능일:</b> 미정';
 }
 
+async function collectActiveSurveys(targetDate?: string): Promise<ActiveSurveyItem[]> {
+  try {
+    const res = await fetchSurveyMainList(1, targetDate);
+    if (res.success && res.ongoingItems) {
+      return res.ongoingItems;
+    }
+    return [];
+  } catch (err) {
+    console.error('collectActiveSurveys error', err);
+    return [];
+  }
+}
+
 export type TodayLinksFormatInput = {
   quizInfo: QuizInfo | null;
   seminarMessage: SeminarMessageResult | null;
   storedNewSeminars: StoredNewSeminars['seminars'];
   pointConversionInfo: PointConversionInfo | null;
+  activeSurveys?: ActiveSurveyItem[] | null;
   targetDate?: string;
   isCustomDate?: boolean;
 };
@@ -485,7 +502,8 @@ export type TodayLinksFormattedResult = {
 };
 
 function formatTodayLinksBroadcast(input: TodayLinksFormatInput): TodayLinksFormattedResult {
-  const { quizInfo, seminarMessage, storedNewSeminars, pointConversionInfo, targetDate, isCustomDate } = input;
+  const { quizInfo, seminarMessage, storedNewSeminars, pointConversionInfo, activeSurveys, targetDate, isCustomDate } =
+    input;
 
   let message = '';
   if (isCustomDate && targetDate) {
@@ -508,6 +526,21 @@ function formatTodayLinksBroadcast(input: TodayLinksFormatInput): TodayLinksForm
   message += `✏️ <b>오늘의 퀴즈:</b> ${quizMessage}\n`;
   if (seminarMessage?.message) {
     message += `\n📖 ${seminarMessage.message}\n`;
+  }
+
+  if (activeSurveys && activeSurveys.length > 0) {
+    const surveyList = activeSurveys
+      .map((item, index) => {
+        const categoryTag = item.category ? `[${escapeHtml(item.category)}] ` : '';
+        const pointInfo = item.pointText || (item.point ? `${item.point.toLocaleString()}P` : '');
+        const pointPart = pointInfo ? ` 💰(${escapeHtml(pointInfo)})` : '';
+        const datePart = item.date ? ` [${escapeHtml(item.date)}]` : '';
+        const link = item.url || (item.itemId ? `${SEMINAR_DETAIL_PAGE}${item.itemId}` : SURVEY_MAIN_PAGE);
+        return `${index + 1}. <b>${categoryTag}${escapeHtml(item.title)}</b>${datePart}${pointPart}\n${link}`;
+      })
+      .join('\n');
+
+    message += `\n📋 <b>참여 가능한 설문 (진행 중)</b>\n<i>※ 계정별 참여 여부 및 선착순에 따라 이미 종료되었을 수 있습니다.</i>\n${surveyList}\n`;
   }
 
   const visibleNewSeminars = storedNewSeminars || [];
@@ -556,6 +589,11 @@ https://t.me/+J1UGmvLA9jU4NjQ1</blockquote>\n<blockquote>✨ <b>공지봇(@DV_no
   }
   inlineKeyboard.push(actionRow);
 
+  // 참여 가능한 설문이 있는 경우 바로가기 버튼 추가
+  if (activeSurveys && activeSurveys.length > 0) {
+    inlineKeyboard.push([{ text: '📋 설문 목록 바로가기', url: SURVEY_MAIN_PAGE }]);
+  }
+
   // 포인트 전환 가능일(당일 전환 가능)인 경우 포인트 전환 바로가기 버튼 추가
   const pointConversionDay = pointConversionInfo?.available
     ? true
@@ -596,6 +634,7 @@ async function run({ page, args }: Partial<PlaywrightRunArgs> = {}, taskOptions?
     const quizInfo = await collectQuizInfo(page);
     const seminarMessage = await collectTodaySeminarMessage(page, inputDate);
     const pointConversionInfo = await collectPointConversionInfo(page);
+    const activeSurveys = await collectActiveSurveys(isCustomDate ? isoDate : undefined);
 
     const storedNewSeminars = getYesterdayAddedSeminars(yesterdayIso);
 
@@ -604,6 +643,7 @@ async function run({ page, args }: Partial<PlaywrightRunArgs> = {}, taskOptions?
       seminarMessage,
       storedNewSeminars,
       pointConversionInfo,
+      activeSurveys,
       targetDate: isCustomDate ? `${isoDate} (${todayString})` : undefined,
       isCustomDate,
     });

@@ -16,7 +16,8 @@ export type SubscriptionTopic =
   | 'seminar_live'
   | 'survey_closing_20'
   | 'survey_closing_10'
-  | 'point_conversion';
+  | 'point_conversion'
+  | 'doctorville_survey';
 
 export type NewSeminarFilter = 'all' | 'limit_5000' | 'limit_3000' | 'urgent_1000' | 'off';
 
@@ -51,6 +52,7 @@ export interface SubscriptionRecord {
   surveyClosing20: boolean;
   surveyClosing10: boolean;
   pointConversion: boolean;
+  doctorvilleSurvey: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -72,6 +74,7 @@ interface SubscriptionRow {
   survey_closing_20?: number;
   survey_closing_10?: number;
   point_conversion?: number;
+  doctorville_survey?: number;
   created_at?: number;
   updated_at?: number;
 }
@@ -135,6 +138,7 @@ export function getSubscription(chatId: number): SubscriptionRecord {
       surveyClosing20: false,
       surveyClosing10: false,
       pointConversion: false,
+      doctorvilleSurvey: false,
       createdAt: 0,
       updatedAt: 0,
     };
@@ -153,6 +157,7 @@ export function getSubscription(chatId: number): SubscriptionRecord {
     surveyClosing20: row.survey_closing_20 === 1,
     surveyClosing10: row.survey_closing_10 === 1,
     pointConversion: row.point_conversion === 1,
+    doctorvilleSurvey: row.doctorville_survey === 1,
     createdAt: row.created_at || 0,
     updatedAt: row.updated_at || 0,
   };
@@ -180,12 +185,12 @@ export function updateSubscription(
     INSERT INTO subscriptions (
       chat_id, today_links, today_links_time, today_links_sent_date,
       new_seminar, new_seminar_include_point_excluded, intermd_quiz, seminar_changes, seminar_live,
-      survey_closing_20, survey_closing_10, point_conversion,
+      survey_closing_20, survey_closing_10, point_conversion, doctorville_survey,
       created_at, updated_at
     ) VALUES (
       @chatId, @todayLinks, @todayLinksTime, @todayLinksSentDate,
       @newSeminar, @newSeminarIncludePointExcluded, @intermdQuiz, @seminarChanges, @seminarLive,
-      @surveyClosing20, @surveyClosing10, @pointConversion,
+      @surveyClosing20, @surveyClosing10, @pointConversion, @doctorvilleSurvey,
       @createdAt, @updatedAt
     )
     ON CONFLICT(chat_id) DO UPDATE SET
@@ -200,6 +205,7 @@ export function updateSubscription(
       survey_closing_20 = excluded.survey_closing_20,
       survey_closing_10 = excluded.survey_closing_10,
       point_conversion = excluded.point_conversion,
+      doctorville_survey = excluded.doctorville_survey,
       updated_at = excluded.updated_at
   `,
   ).run({
@@ -215,6 +221,7 @@ export function updateSubscription(
     surveyClosing20: next.surveyClosing20 ? 1 : 0,
     surveyClosing10: next.surveyClosing10 ? 1 : 0,
     pointConversion: next.pointConversion ? 1 : 0,
+    doctorvilleSurvey: next.doctorvilleSurvey ? 1 : 0,
     createdAt: next.createdAt,
     updatedAt: next.updatedAt,
   });
@@ -233,7 +240,8 @@ export function toggleTopic(
     | 'seminar_live'
     | 'survey_closing_20'
     | 'survey_closing_10'
-    | 'point_conversion',
+    | 'point_conversion'
+    | 'doctorville_survey',
 ): SubscriptionRecord {
   const current = getSubscription(chatId);
   switch (topic) {
@@ -254,6 +262,8 @@ export function toggleTopic(
       return updateSubscription(chatId, { surveyClosing10: !current.surveyClosing10 });
     case 'point_conversion':
       return updateSubscription(chatId, { pointConversion: !current.pointConversion });
+    case 'doctorville_survey':
+      return updateSubscription(chatId, { doctorvilleSurvey: !current.doctorvilleSurvey });
   }
 }
 
@@ -280,6 +290,7 @@ export function setAllTopics(chatId: number, enable: boolean): SubscriptionRecor
     surveyClosing20: enable,
     surveyClosing10: enable,
     pointConversion: enable,
+    doctorvilleSurvey: enable,
   });
 }
 
@@ -315,6 +326,9 @@ export function getSubscribersForTopic(topic: SubscriptionTopic): number[] {
       break;
     case 'point_conversion':
       query = 'SELECT chat_id FROM subscriptions WHERE point_conversion = 1';
+      break;
+    case 'doctorville_survey':
+      query = 'SELECT chat_id FROM subscriptions WHERE doctorville_survey = 1';
       break;
   }
   const rows = db.prepare(query).all() as Array<{ chat_id: number }>;
@@ -752,6 +766,7 @@ export interface SubscriptionStats {
   surveyClosing20: number;
   surveyClosing10: number;
   pointConversion: number;
+  doctorvilleSurvey: number;
 }
 
 export function getSubscriptionStats(): SubscriptionStats {
@@ -774,7 +789,8 @@ export function getSubscriptionStats(): SubscriptionStats {
       SUM(CASE WHEN seminar_live = 1 THEN 1 ELSE 0 END) as seminarLive,
       SUM(CASE WHEN survey_closing_20 = 1 THEN 1 ELSE 0 END) as surveyClosing20,
       SUM(CASE WHEN survey_closing_10 = 1 THEN 1 ELSE 0 END) as surveyClosing10,
-      SUM(CASE WHEN point_conversion = 1 THEN 1 ELSE 0 END) as pointConversion
+      SUM(CASE WHEN point_conversion = 1 THEN 1 ELSE 0 END) as pointConversion,
+      SUM(CASE WHEN doctorville_survey = 1 THEN 1 ELSE 0 END) as doctorvilleSurvey
     FROM subscriptions
   `,
     )
@@ -819,6 +835,7 @@ export function getSubscriptionStats(): SubscriptionStats {
     surveyClosing20: safeNum(baseRow?.surveyClosing20),
     surveyClosing10: safeNum(baseRow?.surveyClosing10),
     pointConversion: safeNum(baseRow?.pointConversion),
+    doctorvilleSurvey: safeNum(baseRow?.doctorvilleSurvey),
   };
 }
 
@@ -864,6 +881,7 @@ export function buildMainMenu(chatId: number): { text: string; replyMarkup: Inli
     `• ⏳ <b>설문 마감 20분전</b>: ${sub.surveyClosing20 ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.surveyClosing20}명 구독)</i>`,
     `• ⏳ <b>설문 마감 10분전</b>: ${sub.surveyClosing10 ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.surveyClosing10}명 구독)</i>`,
     `• 💰 <b>네페 포인트 전환</b>: ${sub.pointConversion ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.pointConversion}명 구독)</i>`,
+    `• 📋 <b>닥터빌 설문 (시장조사 등)</b>: ${sub.doctorvilleSurvey ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.doctorvilleSurvey}명 구독)</i>`,
   ].join('\n');
 
   const inlineKeyboard = [
@@ -922,6 +940,12 @@ export function buildMainMenu(chatId: number): { text: string; replyMarkup: Inli
       },
     ],
     [
+      {
+        text: `📋 닥터빌 설문 (👥 ${stats.doctorvilleSurvey}명): ${sub.doctorvilleSurvey ? 'ON 🟢' : 'OFF 🔴'}`,
+        callback_data: 'sub:toggle:doctorville_survey',
+      },
+    ],
+    [
       { text: '🔄 전체 켜기', callback_data: 'sub:all_on' },
       { text: '⏹ 전체 끄기', callback_data: 'sub:all_off' },
     ],
@@ -934,6 +958,125 @@ export function buildMainMenu(chatId: number): { text: string; replyMarkup: Inli
       inline_keyboard: inlineKeyboard,
     },
   };
+}
+
+export interface DoctorVilleSurveyNoticeItem {
+  surveyId?: string;
+  surveyType?: number;
+  itemId?: string;
+  category?: string;
+  title: string;
+  date?: string;
+  pointText?: string;
+  point?: number;
+  surveyUrl?: string;
+  url?: string;
+}
+
+export function buildSingleDoctorVilleSurveyMessage(item: DoctorVilleSurveyNoticeItem): {
+  text: string;
+  options: Record<string, unknown>;
+} {
+  const categoryTag = item.category ? `[${item.category}] ` : '';
+  const pointInfo = item.pointText || (item.point ? `${item.point.toLocaleString()}P` : '');
+  const pointLine = pointInfo ? `💰 <b>포인트</b>: ${pointInfo}\n` : '';
+  const dateLine = item.date ? `📅 <b>기간</b>: ${item.date}\n` : '';
+  const linkUrl =
+    item.url ||
+    (item.itemId
+      ? `https://m.doctorville.co.kr/cme/seminar/${item.itemId}`
+      : 'https://www.doctorville.co.kr/survey/main');
+
+  const text = [
+    `📋 <b>[닥터빌 참여 가능 설문 발견]</b>`,
+    '',
+    `<b>${categoryTag}${item.title}</b>`,
+    dateLine + pointLine,
+    `🔗 <b>참여 링크</b>: ${linkUrl}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  return {
+    text,
+    options: {
+      parse_mode: 'HTML',
+      link_preview_options: { is_disabled: true },
+    },
+  };
+}
+
+/**
+ * 닥터빌 신규 참여 가능 설문이 발견되었을 때 doctorville_survey 구독자들에게 알림을 발송합니다.
+ */
+export async function sendDoctorVilleSurveysToSubscribers(
+  surveys: DoctorVilleSurveyNoticeItem[],
+): Promise<{ successCount: number; failCount: number }> {
+  if (surveys.length === 0) {
+    return { successCount: 0, failCount: 0 };
+  }
+
+  const subscribers = getSubscribersForTopic('doctorville_survey');
+  if (subscribers.length === 0) {
+    return { successCount: 0, failCount: 0 };
+  }
+
+  const bot = getBot('notice');
+  if (!bot) {
+    logger.warn('[subscription_service] 공지봇(noticeBot)이 초기화되지 않아 닥터빌 설문 알림을 발송할 수 없습니다.');
+    return { successCount: 0, failCount: subscribers.length };
+  }
+
+  let successCount = 0;
+  let failCount = 0;
+  const invalidChatIds: number[] = [];
+
+  for (let idx = 0; idx < subscribers.length; idx++) {
+    const chatId = subscribers[idx];
+    try {
+      for (const survey of surveys) {
+        const messageContent = buildSingleDoctorVilleSurveyMessage(survey);
+        const chunks = splitTelegramMessage(messageContent.text, { maxLength: TELEGRAM_SAFE_MESSAGE_LENGTH });
+        for (let i = 0; i < chunks.length; i++) {
+          await bot.telegram.sendMessage(chatId, chunks[i], messageContent.options);
+          if (i < chunks.length - 1) {
+            await sleep(100);
+          }
+        }
+        await sleep(100);
+      }
+      successCount++;
+    } catch (error) {
+      failCount++;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error(`[subscription_service] [doctorville_survey] chatId(${chatId}) 발송 실패:`, errorMessage);
+
+      const lower = errorMessage.toLowerCase();
+      if (
+        lower.includes('forbidden') ||
+        lower.includes('blocked') ||
+        lower.includes('chat not found') ||
+        lower.includes('deactivated')
+      ) {
+        invalidChatIds.push(chatId);
+      }
+    }
+    if (idx < subscribers.length - 1) {
+      await sleep(50);
+    }
+  }
+
+  if (invalidChatIds.length > 0) {
+    for (const invalidId of invalidChatIds) {
+      removeSubscriberCompletely(invalidId);
+    }
+    logger.info(
+      `[subscription_service] 유효하지 않은 구독자 ${invalidChatIds.length}명 자동 구독 해제 완료:`,
+      invalidChatIds,
+    );
+  }
+
+  return { successCount, failCount };
 }
 
 export function buildTodayLinksTimeMenu(chatId: number): { text: string; replyMarkup: InlineKeyboardMarkup } {

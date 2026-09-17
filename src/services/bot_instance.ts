@@ -207,6 +207,12 @@ function setBot(name: BotName, instance: Telegraf | null): void {
                   } else {
                     alertMessage = '설문 마감 10분전 알림이 꺼졌습니다.';
                   }
+                } else if (topic === 'doctorville_survey') {
+                  if (updatedSub.doctorvilleSurvey) {
+                    alertMessage = '📋 닥터빌 참여 가능 설문(시장조사 등) 발견 알림이 켜졌습니다.';
+                  } else {
+                    alertMessage = '📋 닥터빌 참여 가능 설문 알림이 꺼졌습니다.';
+                  }
                 } else if (topic === 'new_seminar_point_excluded' || topic === 'new_seminar_include_point_excluded') {
                   if (updatedSub.newSeminarIncludePointExcluded) {
                     alertMessage = '🎁 포인트가 미지급되는 세미나도 신규 알림에 포함하여 수신합니다.';
