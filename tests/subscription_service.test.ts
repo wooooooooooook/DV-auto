@@ -17,6 +17,7 @@ import {
   buildTodayLinksMenu,
   buildTodayLinksTimeMenu,
   buildNewSeminarMenu,
+  buildSeminarLiveMenu,
   buildSurveyClosingMenu,
   buildExternalServicesMenu,
   buildMedigateSymposiumStartMessage,
@@ -336,7 +337,7 @@ describe('subscription_service', () => {
     ).toBe(true);
     expect(
       mainUI.replyMarkup.inline_keyboard.some((row) =>
-        row.some((btn) => btn.text.includes('⏳ 세미나 설문 마감: OFF 🔴 ⚙️')),
+        row.some((btn) => btn.text.includes('🔴 세미나 라이브/퀴즈 및 설문 마감: OFF 🔴 (OFF 🔴) ⚙️')),
       ),
     ).toBe(true);
     expect(
@@ -359,14 +360,25 @@ describe('subscription_service', () => {
     ).toBe(true);
     expect(buildTodayLinksTimeMenu).toBe(buildTodayLinksMenu);
 
-    const surveyClosingUI = buildSurveyClosingMenu(700);
-    expect(surveyClosingUI.text).toContain('세미나 설문 마감 알림 설정');
-    expect(surveyClosingUI.text).toContain('설문 진행 여부와 관계없이 알림이 전송됩니다');
+    const seminarLiveUI = buildSeminarLiveMenu(700);
+    expect(seminarLiveUI.text).toContain('세미나 라이브/퀴즈 및 설문 마감 알림 설정');
+    expect(seminarLiveUI.text).toContain('설문 진행 여부와 관계없이 알림이 전송됩니다');
     expect(
-      surveyClosingUI.replyMarkup.inline_keyboard.some((row) =>
+      seminarLiveUI.replyMarkup.inline_keyboard.some((row) =>
+        row.some((btn) => btn.text.includes('🔴 세미나 라이브/퀴즈 (👥 0명): OFF 🔴')),
+      ),
+    ).toBe(true);
+    expect(
+      seminarLiveUI.replyMarkup.inline_keyboard.some((row) =>
         row.some((btn) => btn.text.includes('⏳ 설문 마감 20분전 (👥 0명): OFF 🔴')),
       ),
     ).toBe(true);
+    expect(
+      seminarLiveUI.replyMarkup.inline_keyboard.some((row) =>
+        row.some((btn) => btn.text.includes('⏳ 설문 마감 10분전 (👥 0명): OFF 🔴')),
+      ),
+    ).toBe(true);
+    expect(buildSurveyClosingMenu).toBe(buildSeminarLiveMenu);
 
     const externalUI = buildExternalServicesMenu(700);
     expect(externalUI.text).toContain('닥터빌 외 서비스 알림 설정');

@@ -278,6 +278,15 @@ function setBot(name: BotName, instance: Telegraf | null): void {
                   alertMessage = updatedSub.seminarLive
                     ? '🔴 세미나 라이브/퀴즈 알림이 켜졌습니다.'
                     : '🔴 세미나 라이브/퀴즈 알림이 꺼졌습니다.';
+                  await ctx.answerCbQuery(alertMessage).catch(() => {});
+                  const { text, replyMarkup } = subService.buildSeminarLiveMenu(chatId);
+                  await ctx
+                    .editMessageText(text, {
+                      parse_mode: 'HTML',
+                      reply_markup: replyMarkup,
+                    })
+                    .catch(() => {});
+                  return;
                 } else if (topic === 'point_conversion') {
                   alertMessage = updatedSub.pointConversion
                     ? '💰 네페 포인트 전환 알림이 켜졌습니다.'
@@ -365,9 +374,9 @@ function setBot(name: BotName, instance: Telegraf | null): void {
                 return;
               }
 
-              if (actionData === 'menu:survey_closing') {
+              if (actionData === 'menu:seminar_live' || actionData === 'menu:survey_closing') {
                 await ctx.answerCbQuery().catch(() => {});
-                const { text, replyMarkup } = subService.buildSurveyClosingMenu(chatId);
+                const { text, replyMarkup } = subService.buildSeminarLiveMenu(chatId);
                 await ctx
                   .editMessageText(text, {
                     parse_mode: 'HTML',
