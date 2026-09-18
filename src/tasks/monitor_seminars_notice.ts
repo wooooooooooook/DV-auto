@@ -10,7 +10,13 @@ import {
   formatRecentCommentsSection,
 } from '../services/channel_message_repository';
 import { sendToTopicSubscribers, type SubscriptionTopic } from '../services/subscription_service';
-import { formatPrivateSeminarTag, truncateSeminarName, formatSeminarDisplayName, escapeHtml } from '../modules/utils';
+import {
+  formatPrivateSeminarTag,
+  truncateSeminarName,
+  formatSeminarDisplayName,
+  escapeHtml,
+  getSeoulKoreanDate,
+} from '../modules/utils';
 
 export { formatPrivateSeminarTag, truncateSeminarName, formatSeminarDisplayName };
 
@@ -509,17 +515,18 @@ export function buildSeminarStatusMessage(
   nowMs = Date.now(),
   timeExpiredMessage?: string | null,
 ): { text: string; options: Record<string, unknown> } {
+  const dateHeader = getSeoulKoreanDate(nowMs);
   const visibleList = seminars.filter((s) => !isLowCapacitySeminar(s));
   if (visibleList.length === 0) {
     return {
-      text: `🔔 ${periodName}세미나\n\n예정된 세미나가 없습니다.`,
+      text: `🔔 [${dateHeader}] ${periodName}세미나\n\n예정된 세미나가 없습니다.`,
       options: { link_preview_options: { is_disabled: true } },
     };
   }
 
   const sortedList = sortSeminarsByStartTime(visibleList);
 
-  let text = `🔔 ${periodName}세미나\n\n`;
+  let text = `🔔 [${dateHeader}] ${periodName}세미나\n\n`;
 
   for (let i = 0; i < sortedList.length; i++) {
     const s = sortedList[i];

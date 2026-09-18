@@ -379,7 +379,9 @@ describe('monitor_seminars API 기반 모니터링 기능 단위/통합 테스�
     assert(autoEnterCalls.length > 0, 'Playwright 브라우저 페이지 생성이 호출되어야 함');
     // 통합 메시지 포맷 검증
     assert(
-      channelMessages.some((m) => m.includes('🔔 테스트점심세미나') && m.includes('API 테스트 세미나')),
+      channelMessages.some(
+        (m) => m.includes('🔔') && m.includes('테스트점심세미나') && m.includes('API 테스트 세미나'),
+      ),
       '채널에 🔔 테스트점심세미나 통합 공지가 전송되어야 함',
     );
     assert(

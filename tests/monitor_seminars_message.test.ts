@@ -41,7 +41,7 @@ describe('buildSeminarMonitorStatusMessage 세미나 모니터 현황 메시지 
     const message = buildSeminarMonitorStatusMessage('저녁', seminars);
 
     // 1. 헤더 검증
-    assert(message.startsWith('🔔 저녁세미나\n\n'), '헤더가 🔔 저녁세미나로 시작해야 함');
+    assert(/🔔 \[\d{2}월 \d{2}일\] 저녁세미나\n\n/.test(message), '헤더가 🔔 [MM월 DD일] 저녁세미나로 시작해야 함');
 
     // 2. ** 볼드 마크다운이 포함되지 않았는지 검증
     assert(!message.includes('**'), '메시지에 ** 볼드 마크다운이 포함되지 않아야 함');
@@ -122,7 +122,7 @@ describe('buildSeminarMonitorStatusMessage 세미나 모니터 현황 메시지 
 
   it('세미나가 없는 경우 기본 메시지 반환', () => {
     const message = buildSeminarMonitorStatusMessage('저녁', []);
-    assert.strictEqual(message, '🔔 저녁세미나\n\n예정된 세미나가 없습니다.');
+    assert.ok(/🔔 \[\d{2}월 \d{2}일\] 저녁세미나\n\n예정된 세미나가 없습니다\./.test(message));
   });
 
   it('buildSeminarLiveStartMessage 및 buildSeminarLiveEndMessage 개별 알림 포맷 검증', async () => {

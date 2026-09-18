@@ -1,5 +1,5 @@
 import type { PlaywrightRunArgs } from '../types';
-import { getPointConversionAvailabilityHttp, formatSeminarDisplayName } from '../modules/utils';
+import { getPointConversionAvailabilityHttp, formatSeminarDisplayName, getSeoulKoreanDate } from '../modules/utils';
 import * as storage from '../services/storage';
 import * as seminarRepo from '../services/seminar_repository';
 import { TODAY_QUIZ_INFO_KEY, type CachedTodayQuizInfo } from './today_quiz';
@@ -505,9 +505,12 @@ function formatTodayLinksBroadcast(input: TodayLinksFormatInput): TodayLinksForm
   const { quizInfo, seminarMessage, storedNewSeminars, pointConversionInfo, activeSurveys, targetDate, isCustomDate } =
     input;
 
+  const dateHeader = getSeoulKoreanDate(targetDate);
   let message = '';
   if (isCustomDate && targetDate) {
     message += `📅 <b>[${escapeHtml(targetDate)} 링크 및 세미나]</b>\n\n`;
+  } else {
+    message += `📅 <b>[${dateHeader} 오늘의 링크]</b>\n\n`;
   }
 
   message += '✨ <b>출석체크:</b> https://m.doctorville.co.kr/mypage/attendance\n\n';

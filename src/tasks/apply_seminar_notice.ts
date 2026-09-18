@@ -7,6 +7,7 @@ import {
   truncateSeminarName,
   formatPrivateSeminarTag,
   formatSeminarDisplayName,
+  getSeoulKoreanDate,
 } from '../modules/utils';
 import { DEFAULT_NOTICE_OPTIONS, formatRecentCommentsSection } from '../services/channel_notice_service';
 import { isLowCapacitySeminar } from '../modules/seminar_api';
@@ -179,7 +180,9 @@ export function buildNewSeminarsNoticeMessage(
   seminars: SeminarListItem[],
   newlyAddedIds?: string[] | Set<string>,
   comments: Array<{ userName: string; text: string }> = [],
+  referenceDate?: string,
 ): { text: string; options: Record<string, unknown> } {
+  const dateHeader = getSeoulKoreanDate(referenceDate);
   // 정원 100명 미만인 세미나는 공지 목록에서 제외하고, 발견 순서(detectedAt 오름차순)대로 정렬
   const visibleSeminars = seminars
     .filter((item) => !isLowCapacitySeminar(item))
@@ -190,7 +193,7 @@ export function buildNewSeminarsNoticeMessage(
       return 0;
     });
 
-  let text = `🆕 오늘 추가된 세미나 모음 (누적 ${visibleSeminars.length}건)\n\n`;
+  let text = `🆕 [${dateHeader}] 오늘 추가된 세미나 모음 (누적 ${visibleSeminars.length}건)\n\n`;
 
   const newIdSet =
     newlyAddedIds instanceof Set
@@ -248,7 +251,7 @@ export async function publishNewSeminarsNotice(
     channelId,
     prevMessageId,
     buildMessageFn: (commentsToAttach) =>
-      buildNewSeminarsNoticeMessage(visibleSeminars, newlyAddedIds, commentsToAttach),
+      buildNewSeminarsNoticeMessage(visibleSeminars, newlyAddedIds, commentsToAttach, _date),
     customComments: comments,
     logPrefix: 'apply_seminar',
   });
@@ -314,7 +317,7 @@ export async function syncNewSeminarsNotice(
     const commentRecords = channelRepo.getChannelCommentsByParentMessageId(prevMsg.messageId, targetChannelId);
     const comments = commentRecords.map((r) => ({ userName: r.userName, text: r.text }));
 
-    const { text: newText } = buildNewSeminarsNoticeMessage(todayNewSeminars, highlightedIds, comments);
+    const { text: newText } = buildNewSeminarsNoticeMessage(todayNewSeminars, highlightedIds, comments, referenceDate);
 
     if (newText.trim() !== prevText.trim()) {
       logger.info(`[apply_seminar] 오늘 발견된 세미나 누적 공지 정원/정보 수정 (Message ID: ${prevMsg.messageId})`);

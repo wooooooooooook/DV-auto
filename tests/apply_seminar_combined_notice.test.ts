@@ -66,7 +66,8 @@ describe('신규 세미나 모음 통합 공지 (삭제/재발송) 단위 테스
     const { text, options } = buildNewSeminarsNoticeMessage(seminars, ['102'], comments);
 
     // 1. 헤더 검증
-    assert.ok(text.startsWith('🆕 오늘 추가된 세미나 모음 (누적 2건)\n\n'), '헤더가 정확해야 함');
+    assert.ok(text.includes('오늘 추가된 세미나 모음 (누적 2건)'), '헤더가 정확해야 함');
+    assert.ok(/🆕 \[\d{2}월 \d{2}일\] 오늘 추가된 세미나 모음/.test(text));
 
     // 2. 101번 세미나 포맷 (일반, 구분자 없음, 1. 순번)
     assert.ok(text.includes('1. [2026-08-27 13:00] 기존에 감지되었던 일반 세미나 (15/100)'));
@@ -214,7 +215,8 @@ describe('신규 세미나 모음 통합 공지 (삭제/재발송) 단위 테스
     const { text } = buildNewSeminarsNoticeMessage(list);
 
     // 1. 헤더 카운트: 5명, 50명, 99명 제외되어 총 2건 (100명, 미정)
-    assert.ok(text.startsWith('🆕 오늘 추가된 세미나 모음 (누적 2건)\n\n'));
+    assert.ok(text.includes('오늘 추가된 세미나 모음 (누적 2건)'));
+    assert.ok(/🆕 \[\d{2}월 \d{2}일\] 오늘 추가된 세미나 모음/.test(text));
 
     // 2. 5명, 50명, 99명 세미나는 미포함
     assert.ok(!text.includes('정원 5명 소규모 세미나'));
@@ -270,7 +272,8 @@ describe('신규 세미나 모음 통합 공지 (삭제/재발송) 단위 테스
     const { text } = buildNewSeminarsNoticeMessage(seminars, ['5650']);
 
     // 1. 헤더
-    assert.ok(text.startsWith('🆕 오늘 추가된 세미나 모음 (누적 3건)\n\n'));
+    assert.ok(text.includes('오늘 추가된 세미나 모음 (누적 3건)'));
+    assert.ok(/🆕 \[\d{2}월 \d{2}일\] 오늘 추가된 세미나 모음/.test(text));
 
     // 2. 발견 순서대로 1., 2., 3. 순번이 매겨졌는지 검증 (최근 발견 5650이 3번으로 맨 아래)
     const idx1 = text.indexOf('1. [2026-09-20 13:00~14:00] 가장 늦은 세미나 날짜지만 먼저');
@@ -445,7 +448,8 @@ describe('신규 세미나 모음 통합 공지 (삭제/재발송) 단위 테스
     );
     assert.strictEqual(firstMsgId, 1001);
     assert.strictEqual(sentHistory.length, 1);
-    assert.ok(sentHistory[0].text.includes('🆕 오늘 추가된 세미나 모음 (누적 2건)'));
+    assert.ok(sentHistory[0].text.includes('오늘 추가된 세미나 모음 (누적 2건)'));
+    assert.ok(/🆕 \[\d{2}월 \d{2}일\] 오늘 추가된 세미나 모음/.test(sentHistory[0].text));
     assert.strictEqual(deletedIds.length, 0);
 
     // [2차 실행] 세미나 103 추가 감지
@@ -473,7 +477,8 @@ describe('신규 세미나 모음 통합 공지 (삭제/재발송) 단위 테스
 
     assert.strictEqual(secondMsgId, 1002);
     assert.strictEqual(sentHistory.length, 2);
-    assert.ok(sentHistory[1].text.includes('🆕 오늘 추가된 세미나 모음 (누적 3건)'));
+    assert.ok(sentHistory[1].text.includes('오늘 추가된 세미나 모음 (누적 3건)'));
+    assert.ok(/🆕 \[\d{2}월 \d{2}일\] 오늘 추가된 세미나 모음/.test(sentHistory[1].text));
     // 103번에만 구분자가 적용되었는지 검증
     assert.ok(
       sentHistory[1].text.includes(
@@ -557,7 +562,7 @@ https://m.doctorville.co.kr/cme/seminar/103
     seminarRepo.upsertSeminars(initialSeminars);
 
     // 2. 1차 발행 시뮬레이션: 102번이 신규 강조되어 발행됨
-    const initialNoticeText = buildNewSeminarsNoticeMessage(initialSeminars, ['102']).text;
+    const initialNoticeText = buildNewSeminarsNoticeMessage(initialSeminars, ['102'], [], targetDate).text;
     channelRepoModule.recordChannelMessage({
       channelId,
       messageId: 5001,
@@ -614,7 +619,7 @@ https://m.doctorville.co.kr/cme/seminar/103
     channelRepoModule.updateChannelMessageStatus(
       5001,
       'edited',
-      buildNewSeminarsNoticeMessage(updatedSeminars, ['102']).text,
+      buildNewSeminarsNoticeMessage(updatedSeminars, ['102'], [], targetDate).text,
       channelId,
     );
 

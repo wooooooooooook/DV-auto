@@ -64,6 +64,52 @@ export function getTelegramRetryAfter(error: unknown): number | null {
   return null;
 }
 
+/**
+ * Asia/Seoul 시간대 기준 MM월 DD일 형식의 날짜 문자열을 반환합니다.
+ * 예: 09월 18일, 01월 05일
+ */
+export function getSeoulKoreanDate(input?: Date | number | string): string {
+  let dateObj: Date;
+  if (!input) {
+    dateObj = new Date();
+  } else if (typeof input === 'number') {
+    dateObj = new Date(input);
+  } else if (input instanceof Date) {
+    dateObj = input;
+  } else if (typeof input === 'string') {
+    const ymdMatch = input.trim().match(/^(\d{4})[-/.]?(\d{1,2})[-/.]?(\d{1,2})/);
+    if (ymdMatch) {
+      const month = String(parseInt(ymdMatch[2], 10)).padStart(2, '0');
+      const day = String(parseInt(ymdMatch[3], 10)).padStart(2, '0');
+      return `${month}월 ${day}일`;
+    }
+    const mdMatch = input.trim().match(/^(\d{1,2})[-/.](\d{1,2})/);
+    if (mdMatch) {
+      const month = String(parseInt(mdMatch[1], 10)).padStart(2, '0');
+      const day = String(parseInt(mdMatch[2], 10)).padStart(2, '0');
+      return `${month}월 ${day}일`;
+    }
+    const parsed = new Date(input);
+    if (!isNaN(parsed.getTime())) {
+      dateObj = parsed;
+    } else {
+      dateObj = new Date();
+    }
+  } else {
+    dateObj = new Date();
+  }
+
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Seoul',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(dateObj);
+
+  const month = parts.find((p) => p.type === 'month')?.value || '';
+  const day = parts.find((p) => p.type === 'day')?.value || '';
+  return `${month}월 ${day}일`;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

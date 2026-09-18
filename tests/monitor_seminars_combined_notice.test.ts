@@ -36,7 +36,7 @@ describe('세미나 모니터링 통합 메시지 (삭제/재발송) 단위 테�
     const { text, options } = buildSeminarStatusMessage('점심', seminars, false);
 
     // 1. 헤더 검증
-    assert.ok(text.startsWith('🔔 점심세미나\n\n'));
+    assert.ok(/🔔 \[\d{2}월 \d{2}일\] 점심세미나\n\n/.test(text));
 
     // 2. 세미나별 상태 이모티콘 및 태그 검증
     assert.ok(text.includes('🟢 입장가능 | ✨<b>[심화설문]</b> 1번 점심 세미나'));
