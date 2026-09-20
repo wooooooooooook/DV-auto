@@ -40,8 +40,23 @@ export function formatHmpAttendanceMessage(result: HmpAttendanceWorkflowResult):
     `👤 사용자: ${memberName}${gradeText}`,
     `📅 일시: ${kstDateStr}`,
     `📌 출석 상태: ${attendStatusText}${accumulateDays}`,
-    `💰 보유 캡슐: ${currentCapsules} 캡슐`,
   ];
+
+  if (result.roulette && result.roulette.spins.length > 0) {
+    const rouletteLines: string[] = [];
+    for (const spin of result.roulette.spins) {
+      if (spin.success) {
+        const giftText =
+          spin.prizeType === 'PRODUCT' ? (spin.giftiShowSent ? ' (기프티쇼 발송 완료)' : ' (기프티쇼 발송 대기)') : '';
+        rouletteLines.push(`  • 연속 ${spin.stepDays}일 룰렛 당첨: ${spin.prizeName}${giftText}`);
+      } else {
+        rouletteLines.push(`  • 연속 ${spin.stepDays}일 룰렛 실패: ${spin.message}`);
+      }
+    }
+    lines.push(`🎰 룰렛 결과:\n${rouletteLines.join('\n')}`);
+  }
+
+  lines.push(`💰 보유 캡슐: ${currentCapsules} 캡슐`);
 
   return lines.join('\n');
 }
@@ -61,6 +76,7 @@ export async function run(_ctx?: TaskContext): Promise<TaskResult> {
       message,
       options: {
         capsules: result.userInfo?.capsules,
+        roulette: result.roulette,
       },
     };
   } catch (error: unknown) {

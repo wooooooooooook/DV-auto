@@ -394,13 +394,22 @@
   - `POST https://www.hmp.co.kr/ajax/main/userInfo.hm`
   - 헤더: `X-Requested-With: XMLHttpRequest`
   - 응답: `knowCommUserInfo` (닉네임, 등급 등), `myBnftValList` (`bnftGbn === "POINT"`의 `remanPnt`가 보유 캡슐 수량)
-- **출석체크 파라미터 조회 (`/event/attendanceRouletteMain.hm`)**:
-  - `GET https://www.hmp.co.kr/event/attendanceRouletteMain.hm?attendMain=Y`
-  - HTML 파싱: `cntntCd`, `cntntSeq`, `pointTitle`, `capsule10`, `loginCount`, 당일 수령 여부
+- **출석체크 및 룰렛 파라미터 조회 (`/event/attendanceRouletteMain.hm`)**:
+  - `GET https://www.hmp.co.kr/event/attendanceRouletteMain.hm?seq=6712`
+  - HTML 파싱: `cntntCd`, `cntntSeq`, `pointTitle`, `capsule10`, `loginCount`, `maxLoginCount`, `rouelette10/20/30`, `win10/20/30`, 당일 수령 여부
 - **출석체크 캡슐 받기 실행 (`/ajax/event/capsuleHist.hm`)**:
   - `POST https://www.hmp.co.kr/ajax/event/capsuleHist.hm` (Form `x-www-form-urlencoded`)
   - 파라미터: `cntntCd`, `cntntSeq`, `pointTitle`, `bizGbn`, `seq`
   - 응답: 성공 시 `{ "code": "800" }` (+10 캡슐 적립), 이미 완료 시 `{ "message": "1." }`
+- **출석 룰렛 참여 실행 (`/ajax/event/rouelettePercentage.hm`)**:
+  - `POST https://www.hmp.co.kr/ajax/event/rouelettePercentage.hm` (Form `x-www-form-urlencoded`)
+  - 파라미터: `memId`, `step` (1: 10일, 2: 20일, 3: 30/28일), `seq: "6712"`
+  - 응답: 성공 시 `{ "code": "800", "winNum": "8" }` (1~8번 경품 번호)
+- **룰렛 당첨 상품 기프티쇼 발송 (`/ajax/event/arSendGiftiShow.hm`)**:
+  - `POST https://www.hmp.co.kr/ajax/event/arSendGiftiShow.hm` (Form `x-www-form-urlencoded`)
+  - 파라미터: `phoneNo` (숫자 11자리), `step` (1: 10일, 2: 20일, 3: 30/28일)
+  - 응답: 성공 시 `{ "rtn_code": "0000" }`
+
 
 ---
 
