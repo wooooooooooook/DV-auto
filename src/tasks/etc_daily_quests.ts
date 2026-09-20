@@ -8,7 +8,7 @@ import * as logger from '../services/logger';
 import * as utils from '../modules/utils';
 
 export interface EtcDailyQuestsResults {
-  intermd: { ok: boolean; error: string | null };
+  intermd: { ok: boolean; error: string | null; point?: number };
   keymedi: { ok: boolean; error: string | null; point?: number };
   hmp: { ok: boolean; error: string | null; capsules?: number };
   medigate: { ok: boolean; error: string | null; point?: number };
@@ -30,11 +30,15 @@ export async function run(ctx?: TaskContext): Promise<TaskResult> {
     docple: { ok: false, error: null },
   };
 
-  // 1. 인터엠디 오늘의 퀴즈
+  // 1. 인터엠디 오늘의 퀴즈 & 포인트 현황
   try {
     logger.info('[기타일일퀘스트] 1/5 인터엠디 오늘의 퀴즈 시작');
     const intermdRes = await intermdQuizTaskModule.run(ctx);
     results.intermd.ok = intermdRes.success !== false;
+    const intermdPoint = intermdRes.options?.memberPoint ?? intermdRes.options?.point;
+    if (typeof intermdPoint === 'number') {
+      results.intermd.point = intermdPoint;
+    }
     if (intermdRes?.message && !intermdRes.silent) {
       await utils
         .sendTelegram(intermdRes.message)
@@ -143,7 +147,9 @@ export async function run(ctx?: TaskContext): Promise<TaskResult> {
   const allSuccess =
     results.intermd.ok && results.keymedi.ok && results.hmp.ok && results.medigate.ok && results.docple.ok;
 
-  const intermdStatus = results.intermd.ok ? '인터엠디: ✅ 성공' : '인터엠디: ❌ 실패';
+  const intermdStatus = results.intermd.ok
+    ? `인터엠디: ✅ 성공${results.intermd.point !== undefined ? ` (${results.intermd.point.toLocaleString()}P)` : ''}`
+    : '인터엠디: ❌ 실패';
   const keymediStatus = results.keymedi.ok
     ? `키메디: ✅ 성공${results.keymedi.point !== undefined ? ` (${results.keymedi.point.toLocaleString()}P)` : ''}`
     : '키메디: ❌ 실패';

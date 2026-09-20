@@ -86,7 +86,11 @@ export function stripHtmlTags(html: string): string {
     .trim();
 }
 
-export function formatInterMDQuizMessage(quiz: InterMDTodayQuiz, submitResult?: InterMDSubmitResult | null): string {
+export function formatInterMDQuizMessage(
+  quiz: InterMDTodayQuiz,
+  submitResult?: InterMDSubmitResult | null,
+  pointInfo?: { memberPoint?: number; memberPointExpire?: number } | null,
+): string {
   const parts: string[] = [];
 
   parts.push(`📋 [인터엠디 오늘의 퀴즈]`);
@@ -132,6 +136,15 @@ export function formatInterMDQuizMessage(quiz: InterMDTodayQuiz, submitResult?: 
     }
   }
 
+  if (pointInfo && typeof pointInfo.memberPoint === 'number') {
+    parts.push('');
+    let pointText = `💰 보유 포인트: ${pointInfo.memberPoint.toLocaleString()} P`;
+    if (pointInfo.memberPointExpire !== undefined && pointInfo.memberPointExpire > 0) {
+      pointText += ` (소멸예정: ${pointInfo.memberPointExpire.toLocaleString()}P)`;
+    }
+    parts.push(pointText);
+  }
+
   if (quiz.guide && quiz.guide.trim()) {
     const cleanGuide = stripHtmlTags(quiz.guide);
     if (cleanGuide) {
@@ -162,10 +175,33 @@ export async function run(
 
     const quiz = await client.getTodayQuiz();
     if (!quiz) {
+      let memberPoint: number | undefined = undefined;
+      try {
+        if (typeof client.getPointInfo === 'function') {
+          const ptData = await client.getPointInfo();
+          if (ptData && typeof ptData.memberPoint === 'number') {
+            memberPoint = ptData.memberPoint;
+          }
+        }
+        if (memberPoint === undefined && typeof client.memberInfo?.memberPoint === 'number') {
+          memberPoint = client.memberInfo.memberPoint;
+        }
+      } catch (_e) {
+        /* ignore */
+      }
+
       const noQuizMsg = 'ℹ️ [인터엠디 오늘의 퀴즈] 오늘 출제된 퀴즈가 없습니다.';
       logger.info('intermd_quiz no quiz found today');
       // 퀴즈가 없는 날은 스케줄 실행 결과 silent: true (관리자봇 및 공지봇 모두 silent)
-      return { success: true, silent: true, message: noQuizMsg };
+      return {
+        success: true,
+        silent: true,
+        message: noQuizMsg,
+        options: {
+          memberPoint,
+          point: memberPoint,
+        },
+      };
     }
 
     let submitResult: InterMDSubmitResult;
@@ -181,11 +217,35 @@ export async function run(
       submitResult = await client.submitTodayQuiz(quiz);
     }
 
-    // 순수 퀴즈 정보 메시지 (공지봇 및 캐시용: 상태정보 제외)
+    // 포인트 정보 조회 (퀴즈 제출 후 최신 보유 포인트 반영)
+    let memberPoint: number | undefined = undefined;
+    let memberPointExpire: number | undefined = undefined;
+    try {
+      if (typeof client.getPointInfo === 'function') {
+        const ptData = await client.getPointInfo();
+        if (ptData && typeof ptData.memberPoint === 'number') {
+          memberPoint = ptData.memberPoint;
+          memberPointExpire = ptData.memberPointExpire;
+        }
+      }
+      if (memberPoint === undefined && typeof client.memberInfo?.memberPoint === 'number') {
+        memberPoint = client.memberInfo.memberPoint;
+        if (typeof client.memberInfo?.memberPointExpire === 'number') {
+          memberPointExpire = client.memberInfo.memberPointExpire;
+        }
+      }
+    } catch (e) {
+      logger.warn('intermd_quiz: failed to fetch point info', e);
+    }
+
+    // 순수 퀴즈 정보 메시지 (공지봇 및 캐시용: 상태정보 및 개인 포인트 제외)
     const quizInfoMessage = formatInterMDQuizMessage(quiz);
 
-    // 관리자용 메시지 (상태정보 포함)
-    const adminMessage = formatInterMDQuizMessage(quiz, submitResult);
+    // 관리자용 메시지 (상태정보 및 포인트 포함)
+    const adminMessage = formatInterMDQuizMessage(quiz, submitResult, {
+      memberPoint,
+      memberPointExpire,
+    });
 
     // 정답 항목 탐색
     let answerItem: { order: number; title: string } | undefined = undefined;
@@ -222,6 +282,10 @@ export async function run(
     return {
       success: submitResult.success,
       message: adminMessage,
+      options: {
+        memberPoint,
+        point: memberPoint,
+      },
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

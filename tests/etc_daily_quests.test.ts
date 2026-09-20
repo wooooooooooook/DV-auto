@@ -201,6 +201,7 @@ describe('기타일일퀘스트 (etc_daily_quests) 통합 태스크 테스트', 
     vi.spyOn(intermdQuizTaskModule, 'run').mockResolvedValue({
       success: true,
       message: '📋 [인터엠디 퀴즈]',
+      options: { memberPoint: 14370 },
     });
 
     vi.spyOn(keymediAttendanceTaskModule, 'run').mockResolvedValue({
@@ -232,7 +233,7 @@ describe('기타일일퀘스트 (etc_daily_quests) 통합 태스크 테스트', 
     const result = await etcDailyQuestsTask.run();
 
     expect(result.success).toBe(true);
-    expect(result.message).toContain('인터엠디: ✅ 성공');
+    expect(result.message).toContain('인터엠디: ✅ 성공 (14,370P)');
     expect(result.message).toContain('키메디: ✅ 성공 (5,200P)');
     expect(result.message).toContain('HMP: ✅ 성공 (350 캡슐)');
     expect(result.message).toContain('메디게이트: ✅ 성공 (1,000P)');
@@ -240,6 +241,7 @@ describe('기타일일퀘스트 (etc_daily_quests) 통합 태스크 테스트', 
 
     const opts = result.options as { results: etcDailyQuestsTask.EtcDailyQuestsResults };
     expect(opts.results.intermd.ok).toBe(true);
+    expect(opts.results.intermd.point).toBe(14370);
     expect(opts.results.keymedi.point).toBe(5200);
     expect(opts.results.hmp.capsules).toBe(350);
     expect(opts.results.medigate.point).toBe(1000);

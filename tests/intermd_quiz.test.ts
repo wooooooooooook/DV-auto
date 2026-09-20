@@ -89,6 +89,16 @@ describe('InterMD Quiz Tests', () => {
       );
       assert(adminFormatted.includes('📖 [해설]\n레치타티보 해설 내용입니다.'), 'Must include stripped guide');
 
+      // 관리자용 포맷팅 (포인트 정보 포함)
+      const adminFormattedWithPoints = formatInterMDQuizMessage(mockQuiz, mockSubmitResult, {
+        memberPoint: 14370,
+        memberPointExpire: 500,
+      });
+      assert(
+        adminFormattedWithPoints.includes('💰 보유 포인트: 14,370 P (소멸예정: 500P)'),
+        'Must include point info when provided',
+      );
+
       // 공지봇용 포맷팅 (상태 정보 제외된 순수 퀴즈 정보)
       const noticeFormatted = formatInterMDQuizMessage(mockQuiz);
       assert(noticeFormatted.includes('📋 [인터엠디 오늘의 퀴즈]'), 'Notice must include header');
@@ -96,6 +106,7 @@ describe('InterMD Quiz Tests', () => {
       assert(noticeFormatted.includes('2. 레치타티보(Recitativo) (★ 정답)'), 'Notice must include quiz questions');
       assert(!noticeFormatted.includes('제출 결과'), 'Notice must NOT include submit result');
       assert(!noticeFormatted.includes('상태:'), 'Notice must NOT include status');
+      assert(!noticeFormatted.includes('보유 포인트:'), 'Notice must NOT include point info');
       console.log('  ✓ formatInterMDQuizMessage correctly separates notice quiz info and admin status');
     }
 
@@ -217,12 +228,19 @@ describe('InterMD Quiz Tests', () => {
             is_correct: true,
           };
         }
+
+        override async getPointInfo() {
+          return { memberPoint: 14370, memberPointExpire: 0 };
+        }
       }
 
       const mockClient = new MockInterMDClient();
       const result = await runInterMDQuiz({}, { client: mockClient, notify: false });
       assert.strictEqual(result.success, true);
       assert(result.message && result.message.includes('정답 제출 완료'), 'Result message should indicate success');
+      assert.strictEqual(result.options?.point, 14370);
+      assert.strictEqual(result.options?.memberPoint, 14370);
+      assert(result.message && result.message.includes('14,370 P'), 'Result message should contain point info');
 
       // Verify cache was populated with pure quiz info (no submit result)
       const cache = getInterMDQuizCache();

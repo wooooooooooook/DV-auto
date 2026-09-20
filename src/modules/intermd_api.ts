@@ -9,9 +9,15 @@ export interface InterMDMemberInfo {
   memberName?: string;
   memberAuth?: number;
   memberPoint?: number;
+  memberPointExpire?: number;
   memberMajorsNm?: string;
   memberHospitalType?: string;
   [key: string]: unknown;
+}
+
+export interface InterMDPointInfo {
+  memberPoint: number;
+  memberPointExpire?: number;
 }
 
 export interface InterMDQuizItem {
@@ -335,6 +341,37 @@ export class InterMDClient {
       code: String(res.data?.code || ''),
       memberInfo: res.data?.memberInfo || null,
     };
+  }
+
+  public async getPointInfo(): Promise<InterMDPointInfo | null> {
+    try {
+      const session = await this.getSession();
+      if (session && session.memberInfo) {
+        this.memberInfo = session.memberInfo;
+        const point =
+          typeof session.memberInfo.memberPoint === 'number'
+            ? session.memberInfo.memberPoint
+            : Number(session.memberInfo.memberPoint || 0);
+        const expire =
+          typeof session.memberInfo.memberPointExpire === 'number'
+            ? session.memberInfo.memberPointExpire
+            : Number(session.memberInfo.memberPointExpire || 0);
+        return {
+          memberPoint: isNaN(point) ? 0 : point,
+          memberPointExpire: isNaN(expire) ? 0 : expire,
+        };
+      }
+      if (this.memberInfo && typeof this.memberInfo.memberPoint === 'number') {
+        return {
+          memberPoint: this.memberInfo.memberPoint,
+          memberPointExpire:
+            typeof this.memberInfo.memberPointExpire === 'number' ? this.memberInfo.memberPointExpire : undefined,
+        };
+      }
+      return null;
+    } catch (_e) {
+      return null;
+    }
   }
 
   public async checkAuth(): Promise<boolean> {
