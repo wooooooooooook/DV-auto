@@ -1267,6 +1267,7 @@ export const DOCPLE_REWARD_BANNER_KEYS = [
 export async function findAndClickDocpleRewardBanner(
   accessToken: string,
   bannerKeys: string[] = DOCPLE_REWARD_BANNER_KEYS,
+  options: { forceAttempt?: boolean } = {},
 ): Promise<DocpleBannerClickResult> {
   let alreadyReported = false;
 
@@ -1282,17 +1283,19 @@ export async function findAndClickDocpleRewardBanner(
       continue;
     }
 
-    // 이미 오늘 수령한 배너인지 확인 (canReceiveReward가 명시적으로 false이거나 userTodayClickCount가 maxClicksPerDay 이상인 경우)
-    if (
-      rewardBanner.canReceiveReward === false ||
-      (rewardBanner.userTodayClickCount !== undefined &&
-        rewardBanner.userTodayClickCount !== null &&
-        rewardBanner.maxClicksPerDay !== undefined &&
-        rewardBanner.maxClicksPerDay !== null &&
-        rewardBanner.userTodayClickCount >= rewardBanner.maxClicksPerDay)
-    ) {
-      alreadyReported = true;
-      continue;
+    // forceAttempt가 아닐 때만 클라이언트 단에서 canReceiveReward 검사
+    if (!options.forceAttempt) {
+      if (
+        rewardBanner.canReceiveReward === false ||
+        (rewardBanner.userTodayClickCount !== undefined &&
+          rewardBanner.userTodayClickCount !== null &&
+          rewardBanner.maxClicksPerDay !== undefined &&
+          rewardBanner.maxClicksPerDay !== null &&
+          rewardBanner.userTodayClickCount >= rewardBanner.maxClicksPerDay)
+      ) {
+        alreadyReported = true;
+        continue;
+      }
     }
 
     // 클릭 시도
@@ -1306,7 +1309,10 @@ export async function findAndClickDocpleRewardBanner(
 
     if (clickRes.status === 'ALREADY') {
       alreadyReported = true;
-      // 다음 배너를 더 볼 필요 없이 오늘 이미 참여 완료로 판정
+      // forceAttempt가 아닐 때만 즉시 리턴
+      if (!options.forceAttempt) {
+        return clickRes;
+      }
       return clickRes;
     }
   }

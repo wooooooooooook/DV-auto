@@ -638,10 +638,24 @@ Q2: 복용 방법은?
           rewardCash: 10,
           message: '출석체크 성공 (+10 캐시)',
         },
+        bannerClicks: [
+          {
+            status: 'SUCCESS',
+            rewardCash: 10,
+            message: '배너 클릭 캐시 적립 성공 (+10 캐시)',
+            accountName: 'MC_M_닥플몰 혜택모음',
+          },
+          {
+            status: 'ALREADY',
+            rewardCash: 0,
+            message: '이미 오늘 배너 클릭 캐시를 적립했습니다.',
+            accountName: 'MC_M_닥플몰 혜택모음',
+          },
+        ],
         bannerClick: {
           status: 'SUCCESS',
           rewardCash: 10,
-          message: '배너 클릭 캐시 적립 성공',
+          message: '배너 클릭 캐시 적립 성공 (+10 캐시)',
           accountName: 'MC_M_닥플몰 혜택모음',
         },
         quizList: [
@@ -659,7 +673,9 @@ Q2: 복용 방법은?
       expect(report).toContain('📋 [닥플 플러스 일일 자동화 리포트]');
       expect(report).toContain('1,000원 → 1,110원 (+110원)');
       expect(report).toContain('✅ 출석체크: 완료 (+10원)');
-      expect(report).toContain('🎯 배너 클릭: 완료 (+10원) [MC_M_닥플몰 혜택모음]');
+      expect(report).toContain('🎯 배너 클릭 (2건, 성공 1건 (+10원)):');
+      expect(report).toContain('1. ✅ [MC_M_닥플몰 혜택모음] 배너 클릭 캐시 적립 성공');
+      expect(report).toContain('2. ℹ️ [MC_M_닥플몰 혜택모음] 이미 오늘 배너 클릭 캐시를 적립했습니다.');
       expect(report).toContain('e-디테일링 Quiz (2건)');
       expect(report).toContain('https://docple-plus.com/e-detailing/1');
       expect(report).toContain('커뮤니티 추천 (2건)');
@@ -837,9 +853,105 @@ Q2: 복용 방법은?
       expect(taskRes.success).toBe(true);
       expect(taskRes.message).toContain('📋 [닥플 플러스 일일 자동화 리포트]');
       expect(taskRes.message).toContain('5,000원 → 5,070원 (+70원)');
-      expect(taskRes.message).toContain('🎯 배너 클릭: 완료 (+10원) [MC_M_닥플몰 혜택모음]');
+      expect(taskRes.message).toContain('🎯 배너 클릭 (1건, 성공 1건 (+10원)):');
+      expect(taskRes.message).toContain('[MC_M_닥플몰 혜택모음] 배너 클릭 캐시 적립 성공');
       expect(taskRes.message).toContain('https://docple-plus.com/e-detailing/99');
       expect(taskRes.message).toContain('[1234] 좋은 하루 되세요');
+    });
+
+    it('executeDocpleDaily: 추천 대상 게시글마다 각각 배너 클릭을 시도해야 함', async () => {
+      // 1. 로그인
+      mockRequest.mockResolvedValueOnce(
+        createMockTextResponse({
+          success: true,
+          data: { accessToken: 'token-multi' },
+        }),
+      );
+
+      // 2. 시작 캐시
+      mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: { myCash: 1000 } }));
+      mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: [] }));
+
+      // 3. 출석 캘린더 & 출석체크 (이미 완료)
+      mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: { attendedDates: [] } }));
+      mockRequest.mockResolvedValueOnce(
+        createMockTextResponse({ success: false, code: 'ALREADY_ATTENDED', message: '오늘 이미 출석 완료' }),
+      );
+
+      // 4. 퀴즈 (없음)
+      mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: { quizzes: [] } }));
+      mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: { content: [] } }));
+
+      // 5. 커뮤니티 인증
+      mockRequest.mockResolvedValueOnce(
+        createMockTextResponse({ resultCode: '0', result: { communityToken: 'token' } }),
+      );
+
+      // 6. 커뮤니티 글 목록 (2개 일반글)
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          resultCode: '0',
+          result: {
+            communityList: [
+              { bid: 1001, no: 1, title: '첫 번째 글', noticeYN: 'N', useYN: 'Y', reCom: 'N' },
+              { bid: 1002, no: 2, title: '두 번째 글', noticeYN: 'N', useYN: 'Y', reCom: 'N' },
+            ],
+          },
+        }),
+      );
+
+      // --- 첫 번째 글 처리 ---
+      // 글 상세 조회
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({ resultCode: '0', result: { bid: 1001, no: 1, title: '첫 번째 글' } }),
+      );
+      // 배너 조회
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: [{ accountNo: 101, adId: 'ad-1', accountName: '광고 1', rewardPoints: 10, canReceiveReward: true }],
+        }),
+      );
+      // ad-click (성공)
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({ success: true, code: 'SUCCESS', data: { rewardCash: 10 } }),
+      );
+      // 글 추천
+      mockRequest.mockResolvedValueOnce(
+        createMockTextResponse({ resultCode: '0', result: { cashGrantInfo: { rewarded: true, cashAmount: 10 } } }),
+      );
+
+      // --- 두 번째 글 처리 ---
+      // 글 상세 조회
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({ resultCode: '0', result: { bid: 1002, no: 2, title: '두 번째 글' } }),
+      );
+      // 배너 조회
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: [{ accountNo: 101, adId: 'ad-1', accountName: '광고 1', rewardPoints: 10, canReceiveReward: false }],
+        }),
+      );
+      // ad-click (이미 클릭)
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({ success: false, code: 'ALREADY_CLICKED', message: '이미 오늘 참여 완료' }),
+      );
+      // 글 추천
+      mockRequest.mockResolvedValueOnce(
+        createMockTextResponse({ resultCode: '0', result: { cashGrantInfo: { rewarded: true, cashAmount: 10 } } }),
+      );
+
+      // 7. 종료 캐시
+      mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: { myCash: 1030 } }));
+      mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: [] }));
+
+      const result = await executeDocpleDaily('user', 'pass', 'comm');
+      expect(result.recommendedPosts.length).toBe(2);
+      expect(result.bannerClicks.length).toBe(2);
+      expect(result.bannerClicks[0].status).toBe('SUCCESS');
+      expect(result.bannerClicks[0].rewardCash).toBe(10);
+      expect(result.bannerClicks[1].status).toBe('ALREADY');
     });
   });
 

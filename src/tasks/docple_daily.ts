@@ -43,6 +43,7 @@ export interface DocpleDailyWorkflowResult {
   endCash: number;
   cashDiff: number;
   attendance: DocpleAttendanceResult;
+  bannerClicks: DocpleBannerClickResult[];
   bannerClick?: DocpleBannerClickResult;
   quizList: Array<{ id: number | string; name: string; url: string; status?: string }>;
   recommendedPosts: Array<{
@@ -84,7 +85,18 @@ export function formatDocpleDailyReport(res: DocpleDailyWorkflowResult): string 
   }
 
   // 2. 배너 클릭
-  if (res.bannerClick) {
+  if (res.bannerClicks && res.bannerClicks.length > 0) {
+    const successClicks = res.bannerClicks.filter((b) => b.status === 'SUCCESS');
+    const totalBannerCash = successClicks.reduce((sum, b) => sum + (b.rewardCash || 0), 0);
+    const cashStr = totalBannerCash > 0 ? ` (+${totalBannerCash.toLocaleString()}원)` : '';
+
+    lines.push(`\n🎯 배너 클릭 (${res.bannerClicks.length}건, 성공 ${successClicks.length}건${cashStr}):`);
+    res.bannerClicks.forEach((b, idx) => {
+      const statusIcon = b.status === 'SUCCESS' ? '✅' : b.status === 'ALREADY' ? 'ℹ️' : '⚠️';
+      const nameText = b.accountName ? ` [${b.accountName}]` : '';
+      lines.push(`  ${idx + 1}. ${statusIcon}${nameText} ${b.message}`);
+    });
+  } else if (res.bannerClick) {
     if (res.bannerClick.status === 'SUCCESS') {
       const nameText = res.bannerClick.accountName ? ` [${res.bannerClick.accountName}]` : '';
       lines.push(`🎯 배너 클릭: 완료 (+${res.bannerClick.rewardCash}원)${nameText}`);
@@ -258,8 +270,8 @@ export async function executeDocpleDaily(
     errors.push(msg);
   }
 
-  // 커뮤니티 인증 및 최신 일반글 5건 추천 + 게시글 본문 배너 클릭
-  logger.info('Docple daily: Step 5. Community auth, recommending posts, and banner click...');
+  // 커뮤니티 인증 및 최신 일반글 5건 추천 + 각 게시글 본문 배너 클릭
+  logger.info('Docple daily: Step 5. Community auth, recommending posts, and banner click for each post...');
   const recommendedPosts: Array<{
     tid: number;
     title: string;
@@ -267,12 +279,13 @@ export async function executeDocpleDaily(
     success: boolean;
     message: string;
   }> = [];
-  let bannerClickResult: DocpleBannerClickResult | undefined;
+  const bannerClicks: DocpleBannerClickResult[] = [];
 
   if (!commPass) {
     errors.push('커뮤니티 비밀번호가 설정되지 않아 커뮤니티 추천을 건너뜁니다.');
     try {
-      bannerClickResult = await findAndClickDocpleRewardBanner(accessToken);
+      const fallbackRes = await findAndClickDocpleRewardBanner(accessToken, undefined, { forceAttempt: true });
+      bannerClicks.push(fallbackRes);
     } catch (bannerErr) {
       logger.error('Docple banner click fallback error', bannerErr);
     }
@@ -282,7 +295,8 @@ export async function executeDocpleDaily(
       if (!commAuthRes.success) {
         errors.push(`커뮤니티 비밀번호 인증 실패: ${commAuthRes.message}`);
         try {
-          bannerClickResult = await findAndClickDocpleRewardBanner(accessToken);
+          const fallbackRes = await findAndClickDocpleRewardBanner(accessToken, undefined, { forceAttempt: true });
+          bannerClicks.push(fallbackRes);
         } catch (bannerErr) {
           logger.error('Docple banner click fallback error', bannerErr);
         }
@@ -302,25 +316,27 @@ export async function executeDocpleDaily(
         );
 
         const targetPosts = eligiblePosts.slice(0, 5);
-        let postDetailChecked = false;
 
         for (const post of targetPosts) {
-          // 첫 번째 추천 게시글(또는 아직 배너 클릭 전) 상세 조회 및 본문 배너 클릭 수행
-          if (!postDetailChecked) {
-            try {
-              logger.info(`Docple daily: Viewing post ${post.bid || post.tid} for detail & banner click...`);
-              await getDocpleCommunityPostDetail(accessToken, {
-                bid: post.bid || post.tid,
-                grpCode: post.grpCode || 'NI',
-                subCode: post.subCode || '',
-                communityToken: commToken,
-              });
+          // 추천 게시글마다 상세 조회 및 본문 배너 클릭 수행
+          try {
+            logger.info(`Docple daily: Viewing post ${post.bid || post.tid} for detail & banner click...`);
+            await getDocpleCommunityPostDetail(accessToken, {
+              bid: post.bid || post.tid,
+              grpCode: post.grpCode || 'NI',
+              subCode: post.subCode || '',
+              communityToken: commToken,
+            });
 
-              bannerClickResult = await findAndClickDocpleRewardBanner(accessToken);
-              postDetailChecked = true;
-            } catch (bannerErr) {
-              logger.error('Docple banner click error during post detail view', bannerErr);
-            }
+            const bannerRes = await findAndClickDocpleRewardBanner(accessToken, undefined, { forceAttempt: true });
+            bannerClicks.push(bannerRes);
+          } catch (bannerErr) {
+            logger.error(`Docple banner click error for post ${post.bid || post.tid}`, bannerErr);
+            bannerClicks.push({
+              status: 'FAILED',
+              rewardCash: 0,
+              message: `배너 클릭 처리 오류: ${bannerErr instanceof Error ? bannerErr.message : String(bannerErr)}`,
+            });
           }
 
           const recRes = await recommendDocpleCommunityPost(accessToken, {
@@ -340,11 +356,12 @@ export async function executeDocpleDaily(
           });
         }
 
-        // 추천 대상 글이 없거나 상세 조회가 실행되지 않은 경우 라운지 배너로 폴백 탐색
-        if (!postDetailChecked) {
+        // 추천 대상 글이 없어서 루프를 돌지 못한 경우 라운지 배너로 폴백 탐색
+        if (targetPosts.length === 0) {
           try {
-            logger.info('Docple daily: No eligible posts or detail view not executed, searching lounge banners...');
-            bannerClickResult = await findAndClickDocpleRewardBanner(accessToken);
+            logger.info('Docple daily: No eligible posts, searching lounge banners...');
+            const fallbackRes = await findAndClickDocpleRewardBanner(accessToken, undefined, { forceAttempt: true });
+            bannerClicks.push(fallbackRes);
           } catch (bannerErr) {
             logger.error('Docple banner click fallback error', bannerErr);
           }
@@ -370,7 +387,8 @@ export async function executeDocpleDaily(
     endCash,
     cashDiff,
     attendance: attendanceRes,
-    bannerClick: bannerClickResult,
+    bannerClicks,
+    bannerClick: bannerClicks[0],
     quizList,
     recommendedPosts,
     errors,
