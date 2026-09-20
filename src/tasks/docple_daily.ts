@@ -16,8 +16,11 @@ import {
   matchDocpleQuizAnswersWithCheatsheet,
   authDocpleCommunityPassword,
   getDocpleCommunityPosts,
+  getDocpleCommunityPostDetail,
   recommendDocpleCommunityPost,
+  findAndClickDocpleRewardBanner,
   type DocpleAttendanceResult,
+  type DocpleBannerClickResult,
 } from '../modules/docple_api';
 import { sendTelegram } from '../modules/utils';
 import * as logger from '../services/logger';
@@ -40,6 +43,7 @@ export interface DocpleDailyWorkflowResult {
   endCash: number;
   cashDiff: number;
   attendance: DocpleAttendanceResult;
+  bannerClick?: DocpleBannerClickResult;
   quizList: Array<{ id: number | string; name: string; url: string; status?: string }>;
   recommendedPosts: Array<{
     tid: number;
@@ -79,7 +83,21 @@ export function formatDocpleDailyReport(res: DocpleDailyWorkflowResult): string 
     lines.push(`⚠️ 출석체크 실패: ${res.attendance.message}`);
   }
 
-  // 2. 퀴즈 URL
+  // 2. 배너 클릭
+  if (res.bannerClick) {
+    if (res.bannerClick.status === 'SUCCESS') {
+      const nameText = res.bannerClick.accountName ? ` [${res.bannerClick.accountName}]` : '';
+      lines.push(`🎯 배너 클릭: 완료 (+${res.bannerClick.rewardCash}원)${nameText}`);
+    } else if (res.bannerClick.status === 'ALREADY') {
+      lines.push('ℹ️ 배너 클릭: 이미 오늘 클릭 완료');
+    } else if (res.bannerClick.status === 'SKIPPED') {
+      lines.push('ℹ️ 배너 클릭: 참여 가능한 리워드 배너 없음');
+    } else {
+      lines.push(`⚠️ 배너 클릭 실패: ${res.bannerClick.message}`);
+    }
+  }
+
+  // 3. 퀴즈 URL
   lines.push(`\n💊 e-디테일링 Quiz (${res.quizList.length}건):`);
   if (res.quizList.length > 0) {
     res.quizList.forEach((q, idx) => {
@@ -90,7 +108,7 @@ export function formatDocpleDailyReport(res: DocpleDailyWorkflowResult): string 
     lines.push('  • 진행 중인 퀴즈 대상 의약품이 없습니다.');
   }
 
-  // 3. 커뮤니티 추천
+  // 4. 커뮤니티 추천
   lines.push(`\n👍 커뮤니티 추천 (${res.recommendedPosts.length}건):`);
   if (res.recommendedPosts.length > 0) {
     res.recommendedPosts.forEach((p, idx) => {
@@ -101,7 +119,7 @@ export function formatDocpleDailyReport(res: DocpleDailyWorkflowResult): string 
     lines.push('  • 추천 가능한 최신 일반 게시글이 없습니다.');
   }
 
-  // 4. 오류 내역
+  // 5. 오류 내역
   if (res.errors.length > 0) {
     lines.push(`\n⚠️ 기타 오류/경고 (${res.errors.length}건):`);
     res.errors.forEach((err) => lines.push(`  • ${err}`));
@@ -240,8 +258,8 @@ export async function executeDocpleDaily(
     errors.push(msg);
   }
 
-  // 커뮤니티 인증 및 최신 일반글 5건 추천
-  logger.info('Docple daily: Step 5. Community auth and recommending posts...');
+  // 커뮤니티 인증 및 최신 일반글 5건 추천 + 게시글 본문 배너 클릭
+  logger.info('Docple daily: Step 5. Community auth, recommending posts, and banner click...');
   const recommendedPosts: Array<{
     tid: number;
     title: string;
@@ -249,14 +267,25 @@ export async function executeDocpleDaily(
     success: boolean;
     message: string;
   }> = [];
+  let bannerClickResult: DocpleBannerClickResult | undefined;
 
   if (!commPass) {
     errors.push('커뮤니티 비밀번호가 설정되지 않아 커뮤니티 추천을 건너뜁니다.');
+    try {
+      bannerClickResult = await findAndClickDocpleRewardBanner(accessToken);
+    } catch (bannerErr) {
+      logger.error('Docple banner click fallback error', bannerErr);
+    }
   } else {
     try {
       const commAuthRes = await authDocpleCommunityPassword(accessToken, commPass);
       if (!commAuthRes.success) {
         errors.push(`커뮤니티 비밀번호 인증 실패: ${commAuthRes.message}`);
+        try {
+          bannerClickResult = await findAndClickDocpleRewardBanner(accessToken);
+        } catch (bannerErr) {
+          logger.error('Docple banner click fallback error', bannerErr);
+        }
       } else {
         const commToken = commAuthRes.communityToken;
         const posts = await getDocpleCommunityPosts(accessToken, {
@@ -273,7 +302,27 @@ export async function executeDocpleDaily(
         );
 
         const targetPosts = eligiblePosts.slice(0, 5);
+        let postDetailChecked = false;
+
         for (const post of targetPosts) {
+          // 첫 번째 추천 게시글(또는 아직 배너 클릭 전) 상세 조회 및 본문 배너 클릭 수행
+          if (!postDetailChecked) {
+            try {
+              logger.info(`Docple daily: Viewing post ${post.bid || post.tid} for detail & banner click...`);
+              await getDocpleCommunityPostDetail(accessToken, {
+                bid: post.bid || post.tid,
+                grpCode: post.grpCode || 'NI',
+                subCode: post.subCode || '',
+                communityToken: commToken,
+              });
+
+              bannerClickResult = await findAndClickDocpleRewardBanner(accessToken);
+              postDetailChecked = true;
+            } catch (bannerErr) {
+              logger.error('Docple banner click error during post detail view', bannerErr);
+            }
+          }
+
           const recRes = await recommendDocpleCommunityPost(accessToken, {
             bid: post.bid || post.tid,
             no: post.no,
@@ -289,6 +338,16 @@ export async function executeDocpleDaily(
             success: recRes.success,
             message: recRes.message,
           });
+        }
+
+        // 추천 대상 글이 없거나 상세 조회가 실행되지 않은 경우 라운지 배너로 폴백 탐색
+        if (!postDetailChecked) {
+          try {
+            logger.info('Docple daily: No eligible posts or detail view not executed, searching lounge banners...');
+            bannerClickResult = await findAndClickDocpleRewardBanner(accessToken);
+          } catch (bannerErr) {
+            logger.error('Docple banner click fallback error', bannerErr);
+          }
         }
       }
     } catch (err) {
@@ -311,6 +370,7 @@ export async function executeDocpleDaily(
     endCash,
     cashDiff,
     attendance: attendanceRes,
+    bannerClick: bannerClickResult,
     quizList,
     recommendedPosts,
     errors,

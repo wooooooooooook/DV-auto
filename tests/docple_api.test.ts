@@ -8,6 +8,10 @@ import {
   extractDocpleQuizUrls,
   authDocpleCommunityPassword,
   getDocpleCommunityPosts,
+  getDocpleCommunityPostDetail,
+  getDocpleBanners,
+  clickDocpleAdBanner,
+  findAndClickDocpleRewardBanner,
   recommendDocpleCommunityPost,
 } from '../src/modules/docple_api';
 import {
@@ -447,6 +451,178 @@ Q2: 복용 방법은?
       expect(recRes.success).toBe(true);
       expect(recRes.rewardCash).toBe(10);
     });
+
+    it('getDocpleCommunityPostDetail: 게시글 상세 정보 조회', async () => {
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          resultCode: '0',
+          result: {
+            bid: 504,
+            no: 104,
+            title: '일반글 1',
+            content: '게시글 상세 본문 내용',
+            grpCode: 'NI',
+          },
+        }),
+      );
+
+      const detail = await getDocpleCommunityPostDetail('mock-token', {
+        bid: 504,
+        grpCode: 'NI',
+        communityToken: 'comm-token',
+      });
+      expect(detail).not.toBeNull();
+      expect(detail?.bid).toBe(504);
+      expect(detail?.title).toBe('일반글 1');
+    });
+
+    it('getDocpleBanners: 배너 목록 조회', async () => {
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: [
+            {
+              accountNo: 100000824,
+              adId: '100000019-100000089-100000824',
+              accountName: 'MC_M_닥플몰 혜택모음',
+              rewardPoints: 10,
+              maxClicksPerDay: 1,
+              canReceiveReward: true,
+            },
+          ],
+        }),
+      );
+
+      const banners = await getDocpleBanners('mock-token', 'M_D_COM_M');
+      expect(banners.length).toBe(1);
+      expect(banners[0].accountNo).toBe(100000824);
+      expect(banners[0].rewardPoints).toBe(10);
+      expect(banners[0].canReceiveReward).toBe(true);
+    });
+
+    it('clickDocpleAdBanner: 배너 클릭 성공 및 이미 클릭 케이스', async () => {
+      // 1. 성공 케이스
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          code: 'SUCCESS',
+          message: '성공',
+          data: {
+            canClickMore: false,
+            rewardCash: 10,
+          },
+        }),
+      );
+
+      const successRes = await clickDocpleAdBanner('mock-token', 100000824, 'ad-123');
+      expect(successRes.status).toBe('SUCCESS');
+      expect(successRes.rewardCash).toBe(10);
+      expect(successRes.canClickMore).toBe(false);
+
+      // 2. 이미 클릭한 케이스
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse(
+          {
+            success: false,
+            code: 'ALREADY_CLICKED',
+            message: '이미 오늘 배너를 클릭하셨습니다.',
+          },
+          200,
+        ),
+      );
+
+      const alreadyRes = await clickDocpleAdBanner('mock-token', 100000824, 'ad-123');
+      expect(alreadyRes.status).toBe('ALREADY');
+      expect(alreadyRes.rewardCash).toBe(0);
+      expect(alreadyRes.message).toContain('이미 오늘');
+    });
+
+    it('findAndClickDocpleRewardBanner: 1순위 본문 배너 성공 및 폴백 동작 검증', async () => {
+      // 1. M_D_COM_M 배너에 리워드 광고가 있는 경우 즉시 클릭 성공
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: [
+            {
+              accountNo: 100000824,
+              adId: 'ad-m-1',
+              accountName: 'MC_M_닥플몰 혜택모음',
+              rewardPoints: 10,
+              canReceiveReward: true,
+            },
+          ],
+        }),
+      );
+      // ad-click
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          code: 'SUCCESS',
+          data: { canClickMore: false, rewardCash: 10 },
+        }),
+      );
+
+      const res1 = await findAndClickDocpleRewardBanner('mock-token', ['M_D_COM_M', 'D_COM3']);
+      expect(res1.status).toBe('SUCCESS');
+      expect(res1.rewardCash).toBe(10);
+      expect(res1.accountName).toBe('MC_M_닥플몰 혜택모음');
+      expect(res1.bannerKey).toBe('M_D_COM_M');
+
+      // 2. M_D_COM_M이 비어있어서 D_COM_R1으로 폴백 성공
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: [], // M_D_COM_M empty
+        }),
+      );
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: [
+            {
+              accountNo: 100000873,
+              adId: 'ad-r1-1',
+              accountName: 'D_CR1_닥플몰_라이넥주',
+              rewardPoints: 10,
+              canReceiveReward: true,
+            },
+          ],
+        }),
+      );
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          code: 'SUCCESS',
+          data: { canClickMore: false, rewardCash: 10 },
+        }),
+      );
+
+      const res2 = await findAndClickDocpleRewardBanner('mock-token', ['M_D_COM_M', 'D_COM_R1']);
+      expect(res2.status).toBe('SUCCESS');
+      expect(res2.rewardCash).toBe(10);
+      expect(res2.accountName).toBe('D_CR1_닥플몰_라이넥주');
+      expect(res2.bannerKey).toBe('D_COM_R1');
+
+      // 3. 배너가 canReceiveReward: false로 이미 오늘 참여 완료된 경우
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: [
+            {
+              accountNo: 100000824,
+              adId: 'ad-m-1',
+              accountName: 'MC_M_닥플몰 혜택모음',
+              rewardPoints: 10,
+              canReceiveReward: false,
+            },
+          ],
+        }),
+      );
+
+      const res3 = await findAndClickDocpleRewardBanner('mock-token', ['M_D_COM_M']);
+      expect(res3.status).toBe('ALREADY');
+      expect(res3.rewardCash).toBe(0);
+    });
   });
 
   describe('Daily Task Workflow & Report Formatting', () => {
@@ -461,6 +637,12 @@ Q2: 복용 방법은?
           status: 'SUCCESS',
           rewardCash: 10,
           message: '출석체크 성공 (+10 캐시)',
+        },
+        bannerClick: {
+          status: 'SUCCESS',
+          rewardCash: 10,
+          message: '배너 클릭 캐시 적립 성공',
+          accountName: 'MC_M_닥플몰 혜택모음',
         },
         quizList: [
           { id: 1, name: '의약품 A', url: 'https://docple-plus.com/e-detailing/1' },
@@ -477,6 +659,7 @@ Q2: 복용 방법은?
       expect(report).toContain('📋 [닥플 플러스 일일 자동화 리포트]');
       expect(report).toContain('1,000원 → 1,110원 (+110원)');
       expect(report).toContain('✅ 출석체크: 완료 (+10원)');
+      expect(report).toContain('🎯 배너 클릭: 완료 (+10원) [MC_M_닥플몰 혜택모음]');
       expect(report).toContain('e-디테일링 Quiz (2건)');
       expect(report).toContain('https://docple-plus.com/e-detailing/1');
       expect(report).toContain('커뮤니티 추천 (2건)');
@@ -587,7 +770,40 @@ Q2: 복용 방법은?
         }),
       );
 
-      // 8. 게시글 추천
+      // 8. 게시글 상세 조회 (조회수 및 상세 데이터)
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          resultCode: '0',
+          result: { bid: 1234, no: 888, title: '좋은 하루 되세요', grpCode: 'NI' },
+        }),
+      );
+
+      // 9. 배너 목록 조회 (M_D_COM_M)
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: [
+            {
+              accountNo: 100000824,
+              adId: 'ad-m-1',
+              accountName: 'MC_M_닥플몰 혜택모음',
+              rewardPoints: 10,
+              canReceiveReward: true,
+            },
+          ],
+        }),
+      );
+
+      // 10. 배너 클릭 캐시 적립 (ad-click)
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          code: 'SUCCESS',
+          data: { canClickMore: false, rewardCash: 10 },
+        }),
+      );
+
+      // 11. 게시글 추천
       mockRequest.mockResolvedValueOnce(
         createMockTextResponse({
           resultCode: '0',
@@ -595,11 +811,11 @@ Q2: 복용 방법은?
         }),
       );
 
-      // 9. 종료 캐시: users/info
+      // 12. 종료 캐시: users/info
       mockRequest.mockResolvedValueOnce(
         createMockJsonResponse({
           success: true,
-          data: { myCash: 5060 },
+          data: { myCash: 5070 },
         }),
       );
       // 종료 캐시: cash/recent
@@ -620,7 +836,8 @@ Q2: 복용 방법은?
 
       expect(taskRes.success).toBe(true);
       expect(taskRes.message).toContain('📋 [닥플 플러스 일일 자동화 리포트]');
-      expect(taskRes.message).toContain('5,000원 → 5,060원 (+60원)');
+      expect(taskRes.message).toContain('5,000원 → 5,070원 (+70원)');
+      expect(taskRes.message).toContain('🎯 배너 클릭: 완료 (+10원) [MC_M_닥플몰 혜택모음]');
       expect(taskRes.message).toContain('https://docple-plus.com/e-detailing/99');
       expect(taskRes.message).toContain('[1234] 좋은 하루 되세요');
     });

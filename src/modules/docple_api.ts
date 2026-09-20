@@ -1035,3 +1035,293 @@ export function formatDocpleQuizTelegramMessage(params: {
 
   return lines.join('\n');
 }
+
+export interface DocpleBannerItem {
+  accountNo: number;
+  adId: string;
+  accountName: string;
+  imageUrl?: string;
+  linkUrl?: string;
+  linkTarget?: string;
+  bannerType?: string;
+  bannerWidth?: number;
+  bannerHeight?: number;
+  maxClicksPerDay?: number;
+  rewardPoints?: number;
+  userTodayClickCount?: number | null;
+  canReceiveReward?: boolean | null;
+  remainingRewardCount?: number | null;
+  [key: string]: unknown;
+}
+
+export interface DocpleBannerClickResult {
+  status: 'SUCCESS' | 'ALREADY' | 'SKIPPED' | 'FAILED';
+  rewardCash: number;
+  message: string;
+  accountNo?: number;
+  adId?: string;
+  accountName?: string;
+  bannerKey?: string;
+  canClickMore?: boolean;
+  raw?: unknown;
+}
+
+export interface DocpleCommunityPostDetail {
+  bid?: number;
+  no?: number;
+  title?: string;
+  content?: string;
+  grpCode?: string;
+  subCode?: string;
+  postTagCode?: string;
+  [key: string]: unknown;
+}
+
+/**
+ * 커뮤니티 게시글 상세 정보 조회 (조회수 증가 및 상세 데이터 확인)
+ */
+export async function getDocpleCommunityPostDetail(
+  accessToken: string,
+  params: {
+    bid: number | string;
+    grpCode?: string;
+    subCode?: string;
+    postTagCode?: string;
+    communityToken?: string;
+  },
+): Promise<DocpleCommunityPostDetail | null> {
+  try {
+    const { bid, grpCode = 'NI', subCode = '', postTagCode = '', communityToken } = params;
+    const res = await request(`${DOCPLE_BASE_URL}/api/community/view`, {
+      method: 'POST',
+      headers: getCommonHeaders(accessToken, communityToken),
+      body: JSON.stringify({
+        bid: Number(bid),
+        grpCode: grpCode || 'NI',
+        divPage: 1,
+        ispc: 'P',
+        subCode: subCode || '',
+        postTagCode: postTagCode || '',
+      }),
+    });
+
+    if (res.statusCode !== 200) {
+      return null;
+    }
+
+    const json = (await res.body.json()) as DocpleApiResponse<DocpleCommunityPostDetail>;
+    return (json?.result || json?.data || null) as DocpleCommunityPostDetail | null;
+  } catch (error) {
+    logger.error('Docple getDocpleCommunityPostDetail error', error);
+    return null;
+  }
+}
+
+/**
+ * 배너 목록 조회 (key: D_COM3, M_D_COM_M, D_COM_R1 등)
+ */
+export async function getDocpleBanners(accessToken: string, bannerKey: string): Promise<DocpleBannerItem[]> {
+  try {
+    const res = await request(`${DOCPLE_BASE_URL}/api/season2/banner/${encodeURIComponent(bannerKey)}`, {
+      method: 'GET',
+      headers: getCommonHeaders(accessToken),
+    });
+
+    if (res.statusCode !== 200) {
+      return [];
+    }
+
+    const json = (await res.body.json()) as DocpleApiResponse<DocpleBannerItem[]>;
+    return Array.isArray(json?.data) ? json.data : [];
+  } catch (error) {
+    logger.error(`Docple getDocpleBanners (${bannerKey}) error`, error);
+    return [];
+  }
+}
+
+/**
+ * 배너 노출/클릭 이벤트 로그 기록 (실패해도 무방)
+ */
+export async function logDocpleBannerEvent(adId: string, eventType: 'VIEW' | 'CLICK'): Promise<void> {
+  try {
+    await request(`${DOCPLE_BASE_URL}/api/v2/dadp/banners/logs`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: DOCPLE_BASE_URL,
+        Referer: `${DOCPLE_BASE_URL}/`,
+      },
+      body: JSON.stringify({ eventType, adId }),
+    });
+  } catch {
+    // 로그 기록 실패는 무시
+  }
+}
+
+/**
+ * 광고 배너 클릭 및 캐시 보상 적립 요청
+ */
+export async function clickDocpleAdBanner(
+  accessToken: string,
+  accountNo: number | string,
+  adId?: string,
+): Promise<DocpleBannerClickResult> {
+  try {
+    const res = await request(`${DOCPLE_BASE_URL}/api/season2/ad-click`, {
+      method: 'POST',
+      headers: getCommonHeaders(accessToken),
+      body: JSON.stringify({ accountNo: Number(accountNo) }),
+    });
+
+    const bodyText = await res.body.text();
+    let json: DocpleApiResponse<{
+      canClickMore?: boolean;
+      rewardCash?: number;
+      cash?: number;
+      [key: string]: unknown;
+    }>;
+    try {
+      json = JSON.parse(bodyText) as DocpleApiResponse<{
+        canClickMore?: boolean;
+        rewardCash?: number;
+        cash?: number;
+        [key: string]: unknown;
+      }>;
+    } catch {
+      return {
+        status: 'FAILED',
+        rewardCash: 0,
+        accountNo: Number(accountNo),
+        adId,
+        message: `배너 클릭 응답 파싱 실패 (HTTP ${res.statusCode})`,
+      };
+    }
+
+    if (res.statusCode === 200 && (json?.success || String(json?.code) === 'SUCCESS')) {
+      const rewardCash = json?.data?.rewardCash ?? json?.data?.cash ?? 10;
+      const canClickMore = json?.data?.canClickMore;
+      return {
+        status: 'SUCCESS',
+        rewardCash,
+        accountNo: Number(accountNo),
+        adId,
+        canClickMore,
+        message: `배너 클릭 캐시 적립 성공 (+${rewardCash} 캐시)`,
+        raw: json.data,
+      };
+    }
+
+    const msg = json?.message || '';
+    if (
+      msg.includes('이미') ||
+      msg.includes('완료') ||
+      msg.includes('초과') ||
+      String(json?.code) === 'ALREADY_CLICKED' ||
+      String(json?.code) === 'MAX_CLICK_EXCEEDED'
+    ) {
+      return {
+        status: 'ALREADY',
+        rewardCash: 0,
+        accountNo: Number(accountNo),
+        adId,
+        message: msg || '이미 오늘 배너 클릭 캐시를 적립했습니다.',
+        raw: json,
+      };
+    }
+
+    return {
+      status: 'FAILED',
+      rewardCash: 0,
+      accountNo: Number(accountNo),
+      adId,
+      message: msg || `배너 클릭 실패 (HTTP ${res.statusCode})`,
+      raw: json,
+    };
+  } catch (error) {
+    logger.error('Docple clickDocpleAdBanner error', error);
+    return {
+      status: 'FAILED',
+      rewardCash: 0,
+      accountNo: Number(accountNo),
+      adId,
+      message: `배너 클릭 오류: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+export const DOCPLE_REWARD_BANNER_KEYS = [
+  'M_D_COM_M', // 모바일 본문 중간 배너 (1순위)
+  'D_COM3', // PC 본문 중간 배너 (2순위)
+  'D_COM_R1', // PC 우측 배너 1 (폴백)
+  'D_COM1', // PC 상단 배너 (폴백)
+  'D_COM_L', // PC 좌측 배너 (폴백)
+  'D_COM_R2', // PC 우측 배너 2 (폴백)
+  'M_D_COM_T', // 모바일 상단 배너 (폴백)
+];
+
+/**
+ * 리워드 배너를 탐색하고 10포인트 적립 클릭 수행
+ * 1. 본문 배너(M_D_COM_M, D_COM3) 우선 조회
+ * 2. 없거나 클릭 불가 시 라운지 기타 배너로 폴백
+ */
+export async function findAndClickDocpleRewardBanner(
+  accessToken: string,
+  bannerKeys: string[] = DOCPLE_REWARD_BANNER_KEYS,
+): Promise<DocpleBannerClickResult> {
+  let alreadyReported = false;
+
+  for (const key of bannerKeys) {
+    const banners = await getDocpleBanners(accessToken, key);
+    if (!banners || banners.length === 0) {
+      continue;
+    }
+
+    // 리워드 포인트가 있는 배너 찾기
+    const rewardBanner = banners.find((b) => (b.rewardPoints ?? 0) > 0);
+    if (!rewardBanner) {
+      continue;
+    }
+
+    // 이미 오늘 수령한 배너인지 확인 (canReceiveReward가 명시적으로 false이거나 userTodayClickCount가 maxClicksPerDay 이상인 경우)
+    if (
+      rewardBanner.canReceiveReward === false ||
+      (rewardBanner.userTodayClickCount !== undefined &&
+        rewardBanner.userTodayClickCount !== null &&
+        rewardBanner.maxClicksPerDay !== undefined &&
+        rewardBanner.maxClicksPerDay !== null &&
+        rewardBanner.userTodayClickCount >= rewardBanner.maxClicksPerDay)
+    ) {
+      alreadyReported = true;
+      continue;
+    }
+
+    // 클릭 시도
+    const clickRes = await clickDocpleAdBanner(accessToken, rewardBanner.accountNo, rewardBanner.adId);
+    clickRes.accountName = rewardBanner.accountName;
+    clickRes.bannerKey = key;
+
+    if (clickRes.status === 'SUCCESS') {
+      return clickRes;
+    }
+
+    if (clickRes.status === 'ALREADY') {
+      alreadyReported = true;
+      // 다음 배너를 더 볼 필요 없이 오늘 이미 참여 완료로 판정
+      return clickRes;
+    }
+  }
+
+  if (alreadyReported) {
+    return {
+      status: 'ALREADY',
+      rewardCash: 0,
+      message: '이미 오늘 배너 클릭 캐시를 적립했습니다.',
+    };
+  }
+
+  return {
+    status: 'SKIPPED',
+    rewardCash: 0,
+    message: '클릭 가능한 닥플 리워드 배너가 없습니다.',
+  };
+}

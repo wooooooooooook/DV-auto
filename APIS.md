@@ -487,6 +487,24 @@
   - Header: `communityToken: <communityToken>`, `Cookie: communityToken=<communityToken>; accessToken=<accessToken>`
   - Body: `{"kind": "W", "bid": "<bid>", "yesNo": "Y", "grpCode": "NI", "ispc": "P", "no": <no>}`
   - 응답: `resultCode === "0"`, `result: { "cashGrantInfo": { "rewarded": true, "cashAmount": 10 } }`
+- **커뮤니티 게시글 상세 조회 (`/api/community/view`)**:
+  - `POST https://docple-plus.com/api/community/view`
+  - Header: `communityToken: <communityToken>`, `Cookie: communityToken=<communityToken>; accessToken=<accessToken>`
+  - Body: `{"bid": <bid>, "grpCode": "NI", "divPage": 1, "ispc": "P", "subCode": "", "postTagCode": ""}`
+  - 응답: `result: { "bid": 2032652, "no": 100136914, "title": "...", "content": "...", ... }`
+- **배너 목록 조회 (`/api/season2/banner/{bannerKey}`)**:
+  - `GET https://docple-plus.com/api/season2/banner/{bannerKey}`
+  - Header: `Authorization: Bearer <accessToken>`
+  - 주요 키: `M_D_COM_M` (모바일 본문 중간), `D_COM3` (PC 본문 중간), `D_COM_R1` (PC 우측 1), `D_COM1` (PC 상단), `D_COM_L` (PC 좌측)
+  - 응답: `data: [ { "accountNo": 100000824, "adId": "...", "accountName": "...", "rewardPoints": 10, "maxClicksPerDay": 1, "canReceiveReward": true, ... } ]`
+- **광고 배너 클릭 캐시 적립 (`/api/season2/ad-click`)**:
+  - `POST https://docple-plus.com/api/season2/ad-click`
+  - Header: `Authorization: Bearer <accessToken>`
+  - Body: `{"accountNo": <accountNo>}`
+  - 응답: `data: { "canClickMore": false, "rewardCash": 10 }`
+- **배너 노출/클릭 이벤트 로그 (`/api/v2/dadp/banners/logs`)**:
+  - `POST https://docple-plus.com/api/v2/dadp/banners/logs`
+  - Body: `{"eventType": "VIEW" | "CLICK", "adId": "<adId>"}`
 
 ---
 
