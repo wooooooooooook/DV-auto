@@ -496,12 +496,13 @@
   - `GET https://docple-plus.com/api/season2/banner/{bannerKey}`
   - Header: `Authorization: Bearer <accessToken>`
   - 주요 키: `M_D_COM_M` (모바일 본문 중간), `D_COM3` (PC 본문 중간), `D_COM_R1` (PC 우측 1), `D_COM1` (PC 상단), `D_COM_L` (PC 좌측)
-  - 응답: `data: [ { "accountNo": 100000824, "adId": "...", "accountName": "...", "rewardPoints": 10, "maxClicksPerDay": 1, "canReceiveReward": true, ... } ]`
+  - 응답: `data: [ { "accountNo": 100000824, "adId": "...", "accountName": "...", "rewardPoints": 10, "maxClicksPerDay": 1, "canReceiveReward": true, "remainingRewardCount": 1, ... } ]`
+  - **리워드 플래그 조건**: `rewardPoints > 0` && `canReceiveReward !== false` && `remainingRewardCount > 0` && `userTodayClickCount < maxClicksPerDay`일 때 웹 프론트엔드에서 `클릭하고 {rewardPoints}캐시 받기!` 플래그 뱃지가 렌더링되며, 이 조건에 해당하는 배너만 적립 대상입니다.
 - **광고 배너 클릭 캐시 적립 (`/api/season2/ad-click`)**:
   - `POST https://docple-plus.com/api/season2/ad-click`
   - Header: `Authorization: Bearer <accessToken>`
   - Body: `{"accountNo": <accountNo>}`
-  - 응답: `data: { "canClickMore": false, "rewardCash": 10 }`
+  - 응답: `data: { "canClickMore": false, "rewardCash": 10 }` (포인트는 고정 10원이 아닌 배너별 가변 캐시이며, `canClickMore: false` 수신 시 당일 한도 소진으로 후속 클릭 시도 중단)
 - **배너 노출/클릭 이벤트 로그 (`/api/v2/dadp/banners/logs`)**:
   - `POST https://docple-plus.com/api/v2/dadp/banners/logs`
   - Body: `{"eventType": "VIEW" | "CLICK", "adId": "<adId>"}`

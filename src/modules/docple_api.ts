@@ -1062,6 +1062,8 @@ export interface DocpleBannerClickResult {
   adId?: string;
   accountName?: string;
   bannerKey?: string;
+  rewardPoints?: number;
+  rewardFlagText?: string;
   canClickMore?: boolean;
   raw?: unknown;
 }
@@ -1159,12 +1161,58 @@ export async function logDocpleBannerEvent(adId: string, eventType: 'VIEW' | 'CL
 }
 
 /**
+ * 배너에 "클릭하고 N캐시 받기" 리워드 플래그가 활성화되어 있는지 검사
+ * - rewardPoints > 0
+ * - canReceiveReward !== false
+ * - remainingRewardCount > 0 (설정된 경우)
+ * - userTodayClickCount < maxClicksPerDay (설정된 경우)
+ */
+export function hasDocpleRewardFlag(banner: DocpleBannerItem): boolean {
+  const points = banner.rewardPoints ?? 0;
+  if (points <= 0) {
+    return false;
+  }
+  if (banner.canReceiveReward === false) {
+    return false;
+  }
+  if (
+    banner.remainingRewardCount !== undefined &&
+    banner.remainingRewardCount !== null &&
+    banner.remainingRewardCount <= 0
+  ) {
+    return false;
+  }
+  if (
+    banner.userTodayClickCount !== undefined &&
+    banner.userTodayClickCount !== null &&
+    banner.maxClicksPerDay !== undefined &&
+    banner.maxClicksPerDay !== null &&
+    banner.userTodayClickCount >= banner.maxClicksPerDay
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * 배너의 리워드 플래그 텍스트 반환 (예: "클릭하고 10캐시 받기!")
+ */
+export function getDocpleRewardFlagText(banner: DocpleBannerItem): string | undefined {
+  if (!hasDocpleRewardFlag(banner)) {
+    return undefined;
+  }
+  const points = banner.rewardPoints ?? 0;
+  return `클릭하고 ${points}캐시 받기!`;
+}
+
+/**
  * 광고 배너 클릭 및 캐시 보상 적립 요청
  */
 export async function clickDocpleAdBanner(
   accessToken: string,
   accountNo: number | string,
   adId?: string,
+  expectedReward?: number,
 ): Promise<DocpleBannerClickResult> {
   try {
     const res = await request(`${DOCPLE_BASE_URL}/api/season2/ad-click`, {
@@ -1191,6 +1239,7 @@ export async function clickDocpleAdBanner(
       return {
         status: 'FAILED',
         rewardCash: 0,
+        rewardPoints: expectedReward,
         accountNo: Number(accountNo),
         adId,
         message: `배너 클릭 응답 파싱 실패 (HTTP ${res.statusCode})`,
@@ -1198,11 +1247,12 @@ export async function clickDocpleAdBanner(
     }
 
     if (res.statusCode === 200 && (json?.success || String(json?.code) === 'SUCCESS')) {
-      const rewardCash = json?.data?.rewardCash ?? json?.data?.cash ?? 10;
+      const rewardCash = json?.data?.rewardCash ?? json?.data?.cash ?? expectedReward ?? 10;
       const canClickMore = json?.data?.canClickMore;
       return {
         status: 'SUCCESS',
         rewardCash,
+        rewardPoints: expectedReward ?? rewardCash,
         accountNo: Number(accountNo),
         adId,
         canClickMore,
@@ -1222,6 +1272,7 @@ export async function clickDocpleAdBanner(
       return {
         status: 'ALREADY',
         rewardCash: 0,
+        rewardPoints: expectedReward,
         accountNo: Number(accountNo),
         adId,
         message: msg || '이미 오늘 배너 클릭 캐시를 적립했습니다.',
@@ -1232,6 +1283,7 @@ export async function clickDocpleAdBanner(
     return {
       status: 'FAILED',
       rewardCash: 0,
+      rewardPoints: expectedReward,
       accountNo: Number(accountNo),
       adId,
       message: msg || `배너 클릭 실패 (HTTP ${res.statusCode})`,
@@ -1242,6 +1294,7 @@ export async function clickDocpleAdBanner(
     return {
       status: 'FAILED',
       rewardCash: 0,
+      rewardPoints: expectedReward,
       accountNo: Number(accountNo),
       adId,
       message: `배너 클릭 오류: ${error instanceof Error ? error.message : String(error)}`,
@@ -1260,16 +1313,16 @@ export const DOCPLE_REWARD_BANNER_KEYS = [
 ];
 
 /**
- * 리워드 배너를 탐색하고 10포인트 적립 클릭 수행
- * 1. 본문 배너(M_D_COM_M, D_COM3) 우선 조회
- * 2. 없거나 클릭 불가 시 라운지 기타 배너로 폴백
+ * 리워드 배너를 탐색하고 포인트 지급 플래그가 붙은 배너 클릭 수행
+ * 1. "클릭하고 N캐시 받기!" 플래그가 활성화된 배너 우선 탐색
+ * 2. 한도 도달 등으로 플래그가 꺼진 배너만 있는 경우 ALREADY 반환
  */
 export async function findAndClickDocpleRewardBanner(
   accessToken: string,
   bannerKeys: string[] = DOCPLE_REWARD_BANNER_KEYS,
   options: { forceAttempt?: boolean } = {},
 ): Promise<DocpleBannerClickResult> {
-  let alreadyReported = false;
+  let hasRewardBannerWithLimitReached = false;
 
   for (const key of bannerKeys) {
     const banners = await getDocpleBanners(accessToken, key);
@@ -1277,57 +1330,62 @@ export async function findAndClickDocpleRewardBanner(
       continue;
     }
 
-    // 리워드 포인트가 있는 배너 찾기
-    const rewardBanner = banners.find((b) => (b.rewardPoints ?? 0) > 0);
-    if (!rewardBanner) {
+    // 1. 포인트가 설정된 리워드 배너 필터링
+    const rewardBanners = banners.filter((b) => (b.rewardPoints ?? 0) > 0);
+    if (rewardBanners.length === 0) {
       continue;
     }
 
-    // forceAttempt가 아닐 때만 클라이언트 단에서 canReceiveReward 검사
-    if (!options.forceAttempt) {
-      if (
-        rewardBanner.canReceiveReward === false ||
-        (rewardBanner.userTodayClickCount !== undefined &&
-          rewardBanner.userTodayClickCount !== null &&
-          rewardBanner.maxClicksPerDay !== undefined &&
-          rewardBanner.maxClicksPerDay !== null &&
-          rewardBanner.userTodayClickCount >= rewardBanner.maxClicksPerDay)
-      ) {
-        alreadyReported = true;
-        continue;
+    // 2. "클릭하고 N캐시 받기" 플래그가 붙어있는 배너 찾기
+    const flaggedBanner = rewardBanners.find((b) => hasDocpleRewardFlag(b));
+
+    if (!flaggedBanner) {
+      // 포인트 배너는 있으나 한도 초과 또는 이미 수령하여 플래그가 비활성화됨
+      hasRewardBannerWithLimitReached = true;
+      if (!options.forceAttempt) {
+        break; // 이미 당일 한도 소진 상태이므로 불필요한 후속 배너 조회 중단
       }
     }
 
-    // 클릭 시도
-    const clickRes = await clickDocpleAdBanner(accessToken, rewardBanner.accountNo, rewardBanner.adId);
-    clickRes.accountName = rewardBanner.accountName;
+    const targetBanner = flaggedBanner || (options.forceAttempt ? rewardBanners[0] : null);
+    if (!targetBanner) {
+      continue;
+    }
+
+    const flagText = getDocpleRewardFlagText(targetBanner);
+    const clickRes = await clickDocpleAdBanner(
+      accessToken,
+      targetBanner.accountNo,
+      targetBanner.adId,
+      targetBanner.rewardPoints,
+    );
+    clickRes.accountName = targetBanner.accountName;
     clickRes.bannerKey = key;
+    clickRes.rewardPoints = targetBanner.rewardPoints;
+    clickRes.rewardFlagText =
+      flagText || (targetBanner.rewardPoints ? `클릭하고 ${targetBanner.rewardPoints}캐시 받기!` : undefined);
 
     if (clickRes.status === 'SUCCESS') {
       return clickRes;
     }
 
     if (clickRes.status === 'ALREADY') {
-      alreadyReported = true;
-      // forceAttempt가 아닐 때만 즉시 리턴
-      if (!options.forceAttempt) {
-        return clickRes;
-      }
+      hasRewardBannerWithLimitReached = true;
       return clickRes;
     }
   }
 
-  if (alreadyReported) {
+  if (hasRewardBannerWithLimitReached) {
     return {
       status: 'ALREADY',
       rewardCash: 0,
-      message: '이미 오늘 배너 클릭 캐시를 적립했습니다.',
+      message: '일일 배너 클릭 캐시 적립 한도에 도달했습니다. ("클릭하고 N캐시 받기" 플래그 비활성)',
     };
   }
 
   return {
     status: 'SKIPPED',
     rewardCash: 0,
-    message: '클릭 가능한 닥플 리워드 배너가 없습니다.',
+    message: '클릭 가능한 닥플 리워드 배너("클릭하고 N캐시 받기")가 없습니다.',
   };
 }

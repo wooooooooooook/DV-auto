@@ -94,7 +94,8 @@ export function formatDocpleDailyReport(res: DocpleDailyWorkflowResult): string 
     res.bannerClicks.forEach((b, idx) => {
       const statusIcon = b.status === 'SUCCESS' ? '✅' : b.status === 'ALREADY' ? 'ℹ️' : '⚠️';
       const nameText = b.accountName ? ` [${b.accountName}]` : '';
-      lines.push(`  ${idx + 1}. ${statusIcon}${nameText} ${b.message}`);
+      const flagText = b.rewardFlagText ? ` (${b.rewardFlagText})` : '';
+      lines.push(`  ${idx + 1}. ${statusIcon}${nameText}${flagText} ${b.message}`);
     });
   } else if (res.bannerClick) {
     if (res.bannerClick.status === 'SUCCESS') {
@@ -280,11 +281,12 @@ export async function executeDocpleDaily(
     message: string;
   }> = [];
   const bannerClicks: DocpleBannerClickResult[] = [];
+  let canAttemptBannerClick = true;
 
   if (!commPass) {
     errors.push('커뮤니티 비밀번호가 설정되지 않아 커뮤니티 추천을 건너뜁니다.');
     try {
-      const fallbackRes = await findAndClickDocpleRewardBanner(accessToken, undefined, { forceAttempt: true });
+      const fallbackRes = await findAndClickDocpleRewardBanner(accessToken);
       bannerClicks.push(fallbackRes);
     } catch (bannerErr) {
       logger.error('Docple banner click fallback error', bannerErr);
@@ -295,7 +297,7 @@ export async function executeDocpleDaily(
       if (!commAuthRes.success) {
         errors.push(`커뮤니티 비밀번호 인증 실패: ${commAuthRes.message}`);
         try {
-          const fallbackRes = await findAndClickDocpleRewardBanner(accessToken, undefined, { forceAttempt: true });
+          const fallbackRes = await findAndClickDocpleRewardBanner(accessToken);
           bannerClicks.push(fallbackRes);
         } catch (bannerErr) {
           logger.error('Docple banner click fallback error', bannerErr);
@@ -318,7 +320,7 @@ export async function executeDocpleDaily(
         const targetPosts = eligiblePosts.slice(0, 5);
 
         for (const post of targetPosts) {
-          // 추천 게시글마다 상세 조회 및 본문 배너 클릭 수행
+          // 추천 게시글마다 상세 조회
           try {
             logger.info(`Docple daily: Viewing post ${post.bid || post.tid} for detail & banner click...`);
             await getDocpleCommunityPostDetail(accessToken, {
@@ -327,16 +329,30 @@ export async function executeDocpleDaily(
               subCode: post.subCode || '',
               communityToken: commToken,
             });
+          } catch (viewErr) {
+            logger.error(`Docple post detail error for ${post.bid || post.tid}`, viewErr);
+          }
 
-            const bannerRes = await findAndClickDocpleRewardBanner(accessToken, undefined, { forceAttempt: true });
-            bannerClicks.push(bannerRes);
-          } catch (bannerErr) {
-            logger.error(`Docple banner click error for post ${post.bid || post.tid}`, bannerErr);
-            bannerClicks.push({
-              status: 'FAILED',
-              rewardCash: 0,
-              message: `배너 클릭 처리 오류: ${bannerErr instanceof Error ? bannerErr.message : String(bannerErr)}`,
-            });
+          // 리워드 배너 클릭 시도 ("클릭하고 N캐시 받기" 플래그 활성 배너 탐색 및 한도 내에서만 클릭)
+          if (canAttemptBannerClick) {
+            try {
+              const bannerRes = await findAndClickDocpleRewardBanner(accessToken);
+              bannerClicks.push(bannerRes);
+
+              if (bannerRes.status === 'ALREADY' || bannerRes.canClickMore === false) {
+                logger.info(
+                  `Docple daily: Banner limit reached (${bannerRes.status}, canClickMore: ${bannerRes.canClickMore}). Skipping subsequent banner clicks.`,
+                );
+                canAttemptBannerClick = false;
+              }
+            } catch (bannerErr) {
+              logger.error(`Docple banner click error for post ${post.bid || post.tid}`, bannerErr);
+              bannerClicks.push({
+                status: 'FAILED',
+                rewardCash: 0,
+                message: `배너 클릭 처리 오류: ${bannerErr instanceof Error ? bannerErr.message : String(bannerErr)}`,
+              });
+            }
           }
 
           const recRes = await recommendDocpleCommunityPost(accessToken, {
@@ -360,7 +376,7 @@ export async function executeDocpleDaily(
         if (targetPosts.length === 0) {
           try {
             logger.info('Docple daily: No eligible posts, searching lounge banners...');
-            const fallbackRes = await findAndClickDocpleRewardBanner(accessToken, undefined, { forceAttempt: true });
+            const fallbackRes = await findAndClickDocpleRewardBanner(accessToken);
             bannerClicks.push(fallbackRes);
           } catch (bannerErr) {
             logger.error('Docple banner click fallback error', bannerErr);
