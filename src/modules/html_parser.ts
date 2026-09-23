@@ -253,11 +253,94 @@ export function parseSurveyMainListHtml(
 ): ActiveSurveyItem[] {
   const $ = cheerio.load(html);
   const results: ActiveSurveyItem[] = [];
+  const seenKeys = new Set<string>();
 
+  // 1. 상단 활성 설문 배너 카드 영역 (.survey_box li.link_info 또는 .survey_box .link_info)
+  const $boxItems = $('.survey_box li.link_info, .survey_box .link_info');
+  const boxElements = $boxItems.length > 0 ? $boxItems : $('.survey_box li');
+
+  boxElements.each((_, el) => {
+    const $item = $(el);
+    const title = $item.find('.tit_info .tit, .tit').text().trim() || '';
+    if (!title) return;
+
+    const category = $item.find('.tit_info .category, .category').text().trim() || '';
+    const timerEl = $item.find('.survey-timer');
+    const timerText = timerEl.text().trim() || '';
+    const date = timerText || $item.find('.tit_info .date, .date').text().trim() || '';
+
+    const progressNode = $item.find('.progress');
+    const progressSpan = progressNode.find('span').text().trim();
+    const progress = progressSpan || progressNode.clone().children().remove().end().text().trim() || '';
+
+    const pointNode = $item.find('.tit_info .point, .point');
+    const pointText = pointNode.text().trim().replace(/\s+/g, ' ') || '';
+    const pointMatch = pointText.match(/([\d,]+)\s*P/i);
+    const point = pointMatch ? parseInt(pointMatch[1].replace(/,/g, ''), 10) : undefined;
+
+    const surveyId = $item.find('.surveyIdCls').val()?.toString().trim() || undefined;
+    const surveyTypeStr = $item.find('.surveyTypeCls').val()?.toString().trim();
+    const surveyType = surveyTypeStr ? parseInt(surveyTypeStr, 10) : undefined;
+    const itemId = $item.find('.itemIdCls').val()?.toString().trim() || undefined;
+    const surveyUrl = $item.find('.surveyUrl').val()?.toString().trim() || undefined;
+
+    const minutesLeftAttr = timerEl.attr('data-minutes-left');
+    const minutesLeft = minutesLeftAttr !== undefined ? parseInt(minutesLeftAttr, 10) : undefined;
+
+    const hasButton = $item.find('.btn_survey, .btn_apply, button, a').length > 0;
+    const isFinishClass = progressNode.hasClass('finish');
+    const isClosedText =
+      progress.includes('달성') ||
+      progress.includes('마감') ||
+      progress.includes('종료') ||
+      progress.includes('바로지급') ||
+      progress.includes('일괄지급');
+
+    let isAvailable = false;
+    if (progress.includes('진행중')) {
+      isAvailable = true;
+    } else if (hasButton) {
+      isAvailable = true;
+    } else if (minutesLeft !== undefined && minutesLeft > 0) {
+      isAvailable = true;
+    } else if (surveyId && !isFinishClass && !isClosedText) {
+      isAvailable = true;
+    }
+
+    const { startDate, endDate, isOngoing } = parseSurveyDateRange(date, referenceDate);
+    const url = itemId && itemId !== '0' ? `https://m.doctorville.co.kr/cme/seminar/${itemId}` : baseUrl;
+
+    const dedupeKey = surveyId ? `id_${surveyId}` : `title_${title}_${date}`;
+    if (!seenKeys.has(dedupeKey)) {
+      seenKeys.add(dedupeKey);
+      results.push({
+        surveyId,
+        surveyType,
+        itemId,
+        category,
+        title,
+        date,
+        startDate,
+        endDate,
+        isOngoing,
+        progress,
+        pointText,
+        point,
+        surveyUrl,
+        isAvailable,
+        minutesLeft,
+        url,
+      });
+    }
+  });
+
+  // 2. 하단 설문 목록 테이블 영역 (.survey_list table tbody tr)
   $('.survey_list table tbody tr').each((_, tr) => {
     const $tr = $(tr);
     const category = $tr.find('.tit_info .category').text().trim() || '';
     const title = $tr.find('.tit_info .tit').text().trim() || '';
+    if (!title) return;
+
     const date = $tr.find('.tit_info .date').text().trim() || '';
     const progressNode = $tr.find('td:nth-child(1) .progress');
     const progress = progressNode.text().trim() || '';
@@ -287,7 +370,9 @@ export function parseSurveyMainListHtml(
       progress.includes('일괄지급');
 
     let isAvailable = false;
-    if (hasButton) {
+    if (progress.includes('진행중')) {
+      isAvailable = true;
+    } else if (hasButton) {
       isAvailable = true;
     } else if (minutesLeft !== undefined && minutesLeft > 0) {
       isAvailable = true;
@@ -296,9 +381,11 @@ export function parseSurveyMainListHtml(
     }
 
     const { startDate, endDate, isOngoing } = parseSurveyDateRange(date, referenceDate);
-    const url = itemId ? `https://m.doctorville.co.kr/cme/seminar/${itemId}` : baseUrl;
+    const url = itemId && itemId !== '0' ? `https://m.doctorville.co.kr/cme/seminar/${itemId}` : baseUrl;
 
-    if (title) {
+    const dedupeKey = surveyId ? `id_${surveyId}` : `title_${title}_${date}`;
+    if (!seenKeys.has(dedupeKey)) {
+      seenKeys.add(dedupeKey);
       results.push({
         surveyId,
         surveyType,

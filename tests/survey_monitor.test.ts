@@ -97,6 +97,38 @@ describe('닥터빌 참여 가능 설문 감지 및 구독 알림 테스트', ()
       expect(results[2].url).toBe('https://m.doctorville.co.kr/cme/seminar/5678');
       expect(results[2].isAvailable).toBe(true);
     });
+
+    it('상단 .survey_box 배너 카드 영역의 진행 중 설문도 정확히 파싱해야 한다', () => {
+      const boxHtml = `
+        <div class="survey_box">
+          <ul class="list">
+            <li class="link_info">
+              <input type="hidden" class="surveyIdCls" value="3576">
+              <input type="hidden" class="surveyTypeCls" value="10">
+              <input type="hidden" class="itemIdCls" value="0">
+              <a href="#none" class="btn_survey">
+                <p class="progress"><span>진행중</span>
+                  <em class="survey-timer" data-minutes-left="9500">2026-09-23 ~ 2026-09-30</em>
+                </p>
+                <div class="tit_info">
+                  <span class="category">기타</span>
+                  <p class="tit">포인트샵 신규 상품 의향 조사</p>
+                  <span class="point hide">0P</span>
+                </div>
+              </a>
+            </li>
+          </ul>
+        </div>
+      `;
+
+      const results = parseSurveyMainListHtml(boxHtml);
+      expect(results.length).toBe(1);
+      expect(results[0].surveyId).toBe('3576');
+      expect(results[0].title).toBe('포인트샵 신규 상품 의향 조사');
+      expect(results[0].category).toBe('기타');
+      expect(results[0].isAvailable).toBe(true);
+      expect(results[0].date).toBe('2026-09-23 ~ 2026-09-30');
+    });
   });
 
   describe('subscription_service: doctorville_survey', () => {
@@ -149,6 +181,7 @@ describe('닥터빌 참여 가능 설문 감지 및 구독 알림 테스트', ()
           pointText: '2,000P',
           point: 2000,
           isAvailable: true,
+          isOngoing: true,
           url: 'https://www.doctorville.co.kr/survey/main',
         },
       ];
@@ -157,6 +190,7 @@ describe('닥터빌 참여 가능 설문 감지 및 구독 알림 테스트', ()
         success: true,
         items: mockAvailableItems,
         availableItems: mockAvailableItems,
+        ongoingItems: mockAvailableItems,
         isAuthExpired: false,
       });
 
