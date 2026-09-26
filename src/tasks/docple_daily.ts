@@ -319,6 +319,8 @@ export async function executeDocpleDaily(
 
         const targetPosts = eligiblePosts.slice(0, 5);
 
+        const clickedAccountNos = new Set<number>();
+
         for (const post of targetPosts) {
           // 추천 게시글마다 상세 조회
           try {
@@ -333,17 +335,35 @@ export async function executeDocpleDaily(
             logger.error(`Docple post detail error for ${post.bid || post.tid}`, viewErr);
           }
 
-          // 리워드 배너 클릭 시도 ("클릭하고 N캐시 받기" 플래그 활성 배너 탐색 및 한도 내에서만 클릭)
+          // 리워드 배너 클릭 시도 ("클릭하고 N캐시 받기" 플래그 활성 배너 탐색 및 이미 클릭한 배너 제외)
           if (canAttemptBannerClick) {
             try {
-              const bannerRes = await findAndClickDocpleRewardBanner(accessToken);
-              bannerClicks.push(bannerRes);
+              const bannerRes = await findAndClickDocpleRewardBanner(accessToken, undefined, {
+                excludeAccountNos: Array.from(clickedAccountNos),
+              });
 
-              if (bannerRes.status === 'ALREADY' || bannerRes.canClickMore === false) {
-                logger.info(
-                  `Docple daily: Banner limit reached (${bannerRes.status}, canClickMore: ${bannerRes.canClickMore}). Skipping subsequent banner clicks.`,
-                );
-                canAttemptBannerClick = false;
+              if (bannerRes.status === 'SUCCESS') {
+                if (bannerRes.accountNo) {
+                  clickedAccountNos.add(bannerRes.accountNo);
+                }
+                bannerClicks.push(bannerRes);
+
+                // 서버에서 일일 전체 한도 소진(canClickMore === false)을 명시적으로 알려준 경우에만 후속 클릭 시도 중단
+                if (bannerRes.canClickMore === false) {
+                  logger.info(
+                    `Docple daily: Banner global limit reached (canClickMore: false). Skipping subsequent banner clicks.`,
+                  );
+                  canAttemptBannerClick = false;
+                }
+              } else if (bannerRes.status === 'ALREADY' || bannerRes.status === 'SKIPPED') {
+                // 특정 글에서 클릭 가능한 배너가 없더라도 다음 글에서 새 배너가 노출될 수 있으므로 canAttemptBannerClick은 유지하되,
+                // 리포트 배열에는 중복 상태가 과도하게 쌓이지 않도록 동일 상태는 1회만 기록
+                const hasExistingStatus = bannerClicks.some((b) => b.status === bannerRes.status);
+                if (!hasExistingStatus) {
+                  bannerClicks.push(bannerRes);
+                }
+              } else {
+                bannerClicks.push(bannerRes);
               }
             } catch (bannerErr) {
               logger.error(`Docple banner click error for post ${post.bid || post.tid}`, bannerErr);

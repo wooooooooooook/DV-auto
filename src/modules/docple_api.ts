@@ -1315,12 +1315,14 @@ export const DOCPLE_REWARD_BANNER_KEYS = [
 /**
  * 리워드 배너를 탐색하고 포인트 지급 플래그가 붙은 배너 클릭 수행
  * 1. "클릭하고 N캐시 받기!" 플래그가 활성화된 배너 우선 탐색
- * 2. 한도 도달 등으로 플래그가 꺼진 배너만 있는 경우 ALREADY 반환
+ * 2. 이미 클릭한 배너(excludeAccountNos)는 제외하고 새로운 배너 우선 탐색
+ * 3. 한 슬롯에 유효 배너가 없더라도 다른 슬롯(bannerKeys)까지 계속 탐색
+ * 4. 한도 도달 등으로 플래그가 꺼진 배너만 있는 경우 ALREADY 반환
  */
 export async function findAndClickDocpleRewardBanner(
   accessToken: string,
   bannerKeys: string[] = DOCPLE_REWARD_BANNER_KEYS,
-  options: { forceAttempt?: boolean } = {},
+  options: { forceAttempt?: boolean; excludeAccountNos?: number[] } = {},
 ): Promise<DocpleBannerClickResult> {
   let hasRewardBannerWithLimitReached = false;
 
@@ -1336,18 +1338,29 @@ export async function findAndClickDocpleRewardBanner(
       continue;
     }
 
-    // 2. "클릭하고 N캐시 받기" 플래그가 붙어있는 배너 찾기
-    const flaggedBanner = rewardBanners.find((b) => hasDocpleRewardFlag(b));
+    // 2. 이미 클릭한 계정(accountNo) 제외
+    const candidateBanners = options.excludeAccountNos?.length
+      ? rewardBanners.filter((b) => !options.excludeAccountNos!.includes(Number(b.accountNo)))
+      : rewardBanners;
+
+    // 3. "클릭하고 N캐시 받기" 플래그가 붙어있는 배너 찾기
+    const flaggedBanner = candidateBanners.find((b) => hasDocpleRewardFlag(b));
 
     if (!flaggedBanner) {
-      // 포인트 배너는 있으나 한도 초과 또는 이미 수령하여 플래그가 비활성화됨
-      hasRewardBannerWithLimitReached = true;
+      // 포인트 배너는 있으나 한도 초과 또는 이미 수령하여 플래그가 비활성화된 경우 기록
+      if (
+        rewardBanners.some((b) => !hasDocpleRewardFlag(b)) ||
+        (options.excludeAccountNos?.length && candidateBanners.length === 0)
+      ) {
+        hasRewardBannerWithLimitReached = true;
+      }
       if (!options.forceAttempt) {
-        break; // 이미 당일 한도 소진 상태이므로 불필요한 후속 배너 조회 중단
+        // 이 슬롯에 유효한 배너가 없더라도 다음 배너 슬롯(D_COM3, D_COM_R1 등)으로 계속 탐색
+        continue;
       }
     }
 
-    const targetBanner = flaggedBanner || (options.forceAttempt ? rewardBanners[0] : null);
+    const targetBanner = flaggedBanner || (options.forceAttempt ? candidateBanners[0] || rewardBanners[0] : null);
     if (!targetBanner) {
       continue;
     }
@@ -1371,7 +1384,8 @@ export async function findAndClickDocpleRewardBanner(
 
     if (clickRes.status === 'ALREADY') {
       hasRewardBannerWithLimitReached = true;
-      return clickRes;
+      // 해당 배너는 이미 클릭되었으므로, 다음 슬롯에 다른 배너가 있는지 계속 확인
+      continue;
     }
   }
 
