@@ -1403,3 +1403,43 @@ export async function findAndClickDocpleRewardBanner(
     message: '클릭 가능한 닥플 리워드 배너("클릭하고 N캐시 받기")가 없습니다.',
   };
 }
+
+/**
+ * 닥플의 모든 리워드 배너 슬롯을 탐색하여, 클릭 가능한 모든 배너를 한도 도달 시까지 순차적으로 클릭 적립
+ * @param accessToken 인증 토큰
+ * @param bannerKeys 탐색할 배너 키 목록 (기본값: DOCPLE_REWARD_BANNER_KEYS)
+ * @param options maxClicks: 최대 클릭 수(기본 20), intervalMs: 클릭 간격(기본 300ms), excludeAccountNos: 사전 제외할 accountNo 목록
+ */
+export async function findAndClickAllDocpleRewardBanners(
+  accessToken: string,
+  bannerKeys: string[] = DOCPLE_REWARD_BANNER_KEYS,
+  options: { maxClicks?: number; intervalMs?: number; excludeAccountNos?: number[] } = {},
+): Promise<DocpleBannerClickResult[]> {
+  const maxClicks = options.maxClicks ?? 20;
+  const intervalMs = options.intervalMs ?? 300;
+  const clickedAccountNos = new Set<number>(options.excludeAccountNos || []);
+  const results: DocpleBannerClickResult[] = [];
+
+  while (results.filter((r) => r.status === 'SUCCESS').length < maxClicks) {
+    const bannerRes = await findAndClickDocpleRewardBanner(accessToken, bannerKeys, {
+      excludeAccountNos: Array.from(clickedAccountNos),
+    });
+
+    if (bannerRes.status === 'SUCCESS') {
+      if (bannerRes.accountNo) {
+        clickedAccountNos.add(bannerRes.accountNo);
+      }
+      results.push(bannerRes);
+
+      if (intervalMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      }
+    } else {
+      // 더 이상 클릭 가능한 리워드 배너가 없거나(ALREADY / SKIPPED) 에러 발생 시 상태 기록 후 종료
+      results.push(bannerRes);
+      break;
+    }
+  }
+
+  return results;
+}

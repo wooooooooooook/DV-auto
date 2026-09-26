@@ -12,6 +12,7 @@ import {
   getDocpleBanners,
   clickDocpleAdBanner,
   findAndClickDocpleRewardBanner,
+  findAndClickAllDocpleRewardBanners,
   recommendDocpleCommunityPost,
 } from '../src/modules/docple_api';
 import {
@@ -730,6 +731,61 @@ Q2: 복용 방법은?
       expect(res4.accountNo).toBe(100000999);
       expect(res4.rewardCash).toBe(20);
     });
+
+    it('findAndClickAllDocpleRewardBanners: 여러 슬롯에 걸쳐 있는 리워드 배너를 한도까지 모두 클릭', async () => {
+      // 1회차: M_D_COM_M에서 배너 1 (101) 발견 및 클릭
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: [{ accountNo: 101, adId: 'ad-1', accountName: '광고 1', rewardPoints: 10, canReceiveReward: true }],
+        }),
+      );
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({ success: true, code: 'SUCCESS', data: { rewardCash: 10 } }),
+      );
+
+      // 2회차: 101은 제외 -> D_COM3에서 배너 2 (102) 발견 및 클릭
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: [{ accountNo: 101, adId: 'ad-1', accountName: '광고 1', rewardPoints: 10, canReceiveReward: true }],
+        }),
+      );
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: [{ accountNo: 102, adId: 'ad-2', accountName: '광고 2', rewardPoints: 20, canReceiveReward: true }],
+        }),
+      );
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({ success: true, code: 'SUCCESS', data: { rewardCash: 20 } }),
+      );
+
+      // 3회차: 101, 102 모두 제외 -> 더 이상 유효 배너 없음 -> ALREADY
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: [{ accountNo: 101, adId: 'ad-1', accountName: '광고 1', rewardPoints: 10, canReceiveReward: true }],
+        }),
+      );
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: [{ accountNo: 102, adId: 'ad-2', accountName: '광고 2', rewardPoints: 20, canReceiveReward: true }],
+        }),
+      );
+      for (let i = 0; i < 5; i++) {
+        mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: [] }));
+      }
+
+      const results = await findAndClickAllDocpleRewardBanners('mock-token', undefined, { intervalMs: 0 });
+      expect(results.length).toBe(3);
+      expect(results[0].status).toBe('SUCCESS');
+      expect(results[0].accountNo).toBe(101);
+      expect(results[1].status).toBe('SUCCESS');
+      expect(results[1].accountNo).toBe(102);
+      expect(results[2].status).toBe('ALREADY');
+    });
   });
 
   describe('Daily Task Workflow & Report Formatting', () => {
@@ -901,7 +957,15 @@ Q2: 복용 방법은?
         }),
       );
 
-      // 9. 배너 목록 조회 (M_D_COM_M)
+      // 9. 게시글 추천
+      mockRequest.mockResolvedValueOnce(
+        createMockTextResponse({
+          resultCode: '0',
+          result: { cashGrantInfo: { rewarded: true, cashAmount: 10 } },
+        }),
+      );
+
+      // 10. 리워드 배너 전체 클릭: 1회차 M_D_COM_M 배너 발견 및 클릭
       mockRequest.mockResolvedValueOnce(
         createMockJsonResponse({
           success: true,
@@ -916,25 +980,34 @@ Q2: 복용 방법은?
           ],
         }),
       );
-
-      // 10. 배너 클릭 캐시 적립 (ad-click)
       mockRequest.mockResolvedValueOnce(
         createMockJsonResponse({
           success: true,
           code: 'SUCCESS',
-          data: { canClickMore: false, rewardCash: 10 },
+          data: { rewardCash: 10 },
         }),
       );
 
-      // 11. 게시글 추천
+      // 10-2. 2회차: 100000824 제외 -> 나머지 슬롯 빈 목록 -> ALREADY
       mockRequest.mockResolvedValueOnce(
-        createMockTextResponse({
-          resultCode: '0',
-          result: { cashGrantInfo: { rewarded: true, cashAmount: 10 } },
+        createMockJsonResponse({
+          success: true,
+          data: [
+            {
+              accountNo: 100000824,
+              adId: 'ad-m-1',
+              accountName: 'MC_M_닥플몰 혜택모음',
+              rewardPoints: 10,
+              canReceiveReward: true,
+            },
+          ],
         }),
       );
+      for (let i = 0; i < 6; i++) {
+        mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: [] }));
+      }
 
-      // 12. 종료 캐시: users/info
+      // 11. 종료 캐시: users/info
       mockRequest.mockResolvedValueOnce(
         createMockJsonResponse({
           success: true,
@@ -960,13 +1033,13 @@ Q2: 복용 방법은?
       expect(taskRes.success).toBe(true);
       expect(taskRes.message).toContain('📋 [닥플 플러스 일일 자동화 리포트]');
       expect(taskRes.message).toContain('5,000원 → 5,070원 (+70원)');
-      expect(taskRes.message).toContain('🎯 배너 클릭 (1건, 성공 1건 (+10원)):');
+      expect(taskRes.message).toContain('🎯 배너 클릭 (2건, 성공 1건 (+10원)):');
       expect(taskRes.message).toContain('[MC_M_닥플몰 혜택모음] (클릭하고 10캐시 받기!) 배너 클릭 캐시 적립 성공');
       expect(taskRes.message).toContain('https://docple-plus.com/e-detailing/99');
       expect(taskRes.message).toContain('[1234] 좋은 하루 되세요');
     });
 
-    it('executeDocpleDaily: 추가 배너가 없을 때 후속 글에서 ALREADY 처리 검증', async () => {
+    it('executeDocpleDaily: 추가 배너가 없을 때 ALREADY 상태 정상 수집 검증', async () => {
       // 1. 로그인
       mockRequest.mockResolvedValueOnce(
         createMockTextResponse({
@@ -1007,41 +1080,43 @@ Q2: 복용 방법은?
         }),
       );
 
-      // --- 첫 번째 글 처리 (배너 클릭 성공) ---
+      // 글 1 조회 및 추천
       mockRequest.mockResolvedValueOnce(
         createMockJsonResponse({ resultCode: '0', result: { bid: 1001, no: 1, title: '첫 번째 글' } }),
-      );
-      mockRequest.mockResolvedValueOnce(
-        createMockJsonResponse({
-          success: true,
-          data: [{ accountNo: 101, adId: 'ad-1', accountName: '광고 1', rewardPoints: 20, canReceiveReward: true }],
-        }),
-      );
-      mockRequest.mockResolvedValueOnce(
-        createMockJsonResponse({ success: true, code: 'SUCCESS', data: { rewardCash: 20, canClickMore: false } }),
       );
       mockRequest.mockResolvedValueOnce(
         createMockTextResponse({ resultCode: '0', result: { cashGrantInfo: { rewarded: true, cashAmount: 10 } } }),
       );
 
-      // --- 두 번째 글 처리 (배너 조회 시 이미 클릭한 accountNo 101만 존재 -> ALREADY) ---
+      // 글 2 조회 및 추천
       mockRequest.mockResolvedValueOnce(
         createMockJsonResponse({ resultCode: '0', result: { bid: 1002, no: 2, title: '두 번째 글' } }),
       );
-      // M_D_COM_M 조회 시 이미 클릭한 101만 존재
+      mockRequest.mockResolvedValueOnce(
+        createMockTextResponse({ resultCode: '0', result: { cashGrantInfo: { rewarded: true, cashAmount: 10 } } }),
+      );
+
+      // 리워드 배너 전체 클릭: 1회차 배너 1 (101) 클릭 성공
       mockRequest.mockResolvedValueOnce(
         createMockJsonResponse({
           success: true,
           data: [{ accountNo: 101, adId: 'ad-1', accountName: '광고 1', rewardPoints: 20, canReceiveReward: true }],
         }),
       );
-      // 나머지 6개 배너 키는 빈 목록
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({ success: true, code: 'SUCCESS', data: { rewardCash: 20 } }),
+      );
+
+      // 2회차: 101 제외 -> 나머지 슬롯 빈 목록 -> ALREADY
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: [{ accountNo: 101, adId: 'ad-1', accountName: '광고 1', rewardPoints: 20, canReceiveReward: true }],
+        }),
+      );
       for (let i = 0; i < 6; i++) {
         mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: [] }));
       }
-      mockRequest.mockResolvedValueOnce(
-        createMockTextResponse({ resultCode: '0', result: { cashGrantInfo: { rewarded: true, cashAmount: 10 } } }),
-      );
 
       // 7. 종료 캐시
       mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: { myCash: 1030 } }));
@@ -1055,7 +1130,7 @@ Q2: 복용 방법은?
       expect(result.bannerClicks[1].status).toBe('ALREADY');
     });
 
-    it('executeDocpleDaily: 게시글마다 다른 배너가 노출될 때 추가 클릭 적립 수행', async () => {
+    it('executeDocpleDaily: 여러 슬롯에 있는 배너들을 한 번에 모두 탐색하여 한도까지 클릭 적립', async () => {
       // 1. 로그인
       mockRequest.mockResolvedValueOnce(
         createMockTextResponse({
@@ -1096,52 +1171,66 @@ Q2: 복용 방법은?
         }),
       );
 
-      // --- 첫 번째 글 처리: 배너 1 (accountNo: 101) 클릭 성공 (canClickMore: true) ---
+      // 글 1 조회 및 추천
       mockRequest.mockResolvedValueOnce(
         createMockJsonResponse({ resultCode: '0', result: { bid: 2001, no: 1, title: '첫 번째 글' } }),
       );
-      // 배너 1 조회 (M_D_COM_M)
-      mockRequest.mockResolvedValueOnce(
-        createMockJsonResponse({
-          success: true,
-          data: [{ accountNo: 101, adId: 'ad-1', accountName: '광고 1', rewardPoints: 20, canReceiveReward: true }],
-        }),
-      );
-      // 배너 1 클릭
-      mockRequest.mockResolvedValueOnce(
-        createMockJsonResponse({ success: true, code: 'SUCCESS', data: { rewardCash: 20, canClickMore: true } }),
-      );
-      // 글 1 추천
       mockRequest.mockResolvedValueOnce(
         createMockTextResponse({ resultCode: '0', result: { cashGrantInfo: { rewarded: true, cashAmount: 10 } } }),
       );
 
-      // --- 두 번째 글 처리: 배너 1은 이미 클릭했으므로(excludeAccountNos) 다음 슬롯(D_COM3)에서 배너 2(accountNo: 102) 클릭 성공 ---
+      // 글 2 조회 및 추천
       mockRequest.mockResolvedValueOnce(
         createMockJsonResponse({ resultCode: '0', result: { bid: 2002, no: 2, title: '두 번째 글' } }),
       );
-      // M_D_COM_M 조회: 배너 1(accountNo: 101)만 존재하므로 제외 대상
+      mockRequest.mockResolvedValueOnce(
+        createMockTextResponse({ resultCode: '0', result: { cashGrantInfo: { rewarded: true, cashAmount: 10 } } }),
+      );
+
+      // --- 리워드 배너 전체 클릭: 1회차 배너 1 (accountNo: 101) 클릭 성공 ---
       mockRequest.mockResolvedValueOnce(
         createMockJsonResponse({
           success: true,
           data: [{ accountNo: 101, adId: 'ad-1', accountName: '광고 1', rewardPoints: 20, canReceiveReward: true }],
         }),
       );
-      // D_COM3 조회: 새로운 배너 2(accountNo: 102) 존재 -> 타겟팅
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({ success: true, code: 'SUCCESS', data: { rewardCash: 20 } }),
+      );
+
+      // --- 2회차: 배너 1(101) 제외 후 D_COM3에서 배너 2 (accountNo: 102) 클릭 성공 ---
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: [{ accountNo: 101, adId: 'ad-1', accountName: '광고 1', rewardPoints: 20, canReceiveReward: true }],
+        }),
+      );
       mockRequest.mockResolvedValueOnce(
         createMockJsonResponse({
           success: true,
           data: [{ accountNo: 102, adId: 'ad-2', accountName: '광고 2', rewardPoints: 10, canReceiveReward: true }],
         }),
       );
-      // 배너 2 클릭
       mockRequest.mockResolvedValueOnce(
-        createMockJsonResponse({ success: true, code: 'SUCCESS', data: { rewardCash: 10, canClickMore: true } }),
+        createMockJsonResponse({ success: true, code: 'SUCCESS', data: { rewardCash: 10 } }),
       );
-      // 글 2 추천
+
+      // --- 3회차: 101, 102 제외 -> 더 이상 새 배너 없음 -> ALREADY ---
       mockRequest.mockResolvedValueOnce(
-        createMockTextResponse({ resultCode: '0', result: { cashGrantInfo: { rewarded: true, cashAmount: 10 } } }),
+        createMockJsonResponse({
+          success: true,
+          data: [{ accountNo: 101, adId: 'ad-1', accountName: '광고 1', rewardPoints: 20, canReceiveReward: true }],
+        }),
       );
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: [{ accountNo: 102, adId: 'ad-2', accountName: '광고 2', rewardPoints: 10, canReceiveReward: true }],
+        }),
+      );
+      for (let i = 0; i < 5; i++) {
+        mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: [] }));
+      }
 
       // 7. 종료 캐시
       mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: { myCash: 1050 } }));
@@ -1149,13 +1238,14 @@ Q2: 복용 방법은?
 
       const result = await executeDocpleDaily('user', 'pass', 'comm');
       expect(result.recommendedPosts.length).toBe(2);
-      expect(result.bannerClicks.length).toBe(2);
+      expect(result.bannerClicks.length).toBe(3);
       expect(result.bannerClicks[0].status).toBe('SUCCESS');
       expect(result.bannerClicks[0].rewardCash).toBe(20);
       expect(result.bannerClicks[0].accountName).toBe('광고 1');
       expect(result.bannerClicks[1].status).toBe('SUCCESS');
       expect(result.bannerClicks[1].rewardCash).toBe(10);
       expect(result.bannerClicks[1].accountName).toBe('광고 2');
+      expect(result.bannerClicks[2].status).toBe('ALREADY');
     });
   });
 
