@@ -966,7 +966,7 @@ Q2: 복용 방법은?
       expect(taskRes.message).toContain('[1234] 좋은 하루 되세요');
     });
 
-    it('executeDocpleDaily: canClickMore가 false이면 전체 한도 소진으로 후속 글 배너 조회 스킵', async () => {
+    it('executeDocpleDaily: 추가 배너가 없을 때 후속 글에서 ALREADY 처리 검증', async () => {
       // 1. 로그인
       mockRequest.mockResolvedValueOnce(
         createMockTextResponse({
@@ -1007,7 +1007,7 @@ Q2: 복용 방법은?
         }),
       );
 
-      // --- 첫 번째 글 처리 (canClickMore: false로 응답) ---
+      // --- 첫 번째 글 처리 (배너 클릭 성공) ---
       mockRequest.mockResolvedValueOnce(
         createMockJsonResponse({ resultCode: '0', result: { bid: 1001, no: 1, title: '첫 번째 글' } }),
       );
@@ -1024,10 +1024,21 @@ Q2: 복용 방법은?
         createMockTextResponse({ resultCode: '0', result: { cashGrantInfo: { rewarded: true, cashAmount: 10 } } }),
       );
 
-      // --- 두 번째 글 처리 (canClickMore: false로 한도 도달했으므로 배너 조회 자체를 스킵) ---
+      // --- 두 번째 글 처리 (배너 조회 시 이미 클릭한 accountNo 101만 존재 -> ALREADY) ---
       mockRequest.mockResolvedValueOnce(
         createMockJsonResponse({ resultCode: '0', result: { bid: 1002, no: 2, title: '두 번째 글' } }),
       );
+      // M_D_COM_M 조회 시 이미 클릭한 101만 존재
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: [{ accountNo: 101, adId: 'ad-1', accountName: '광고 1', rewardPoints: 20, canReceiveReward: true }],
+        }),
+      );
+      // 나머지 6개 배너 키는 빈 목록
+      for (let i = 0; i < 6; i++) {
+        mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: [] }));
+      }
       mockRequest.mockResolvedValueOnce(
         createMockTextResponse({ resultCode: '0', result: { cashGrantInfo: { rewarded: true, cashAmount: 10 } } }),
       );
@@ -1038,10 +1049,10 @@ Q2: 복용 방법은?
 
       const result = await executeDocpleDaily('user', 'pass', 'comm');
       expect(result.recommendedPosts.length).toBe(2);
-      expect(result.bannerClicks.length).toBe(1);
+      expect(result.bannerClicks.length).toBe(2);
       expect(result.bannerClicks[0].status).toBe('SUCCESS');
       expect(result.bannerClicks[0].rewardCash).toBe(20);
-      expect(result.bannerClicks[0].canClickMore).toBe(false);
+      expect(result.bannerClicks[1].status).toBe('ALREADY');
     });
 
     it('executeDocpleDaily: 게시글마다 다른 배너가 노출될 때 추가 클릭 적립 수행', async () => {
