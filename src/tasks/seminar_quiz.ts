@@ -475,7 +475,7 @@ export async function requestHermesAiSurveyAnswer(promptText: string): Promise<s
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 60000);
+  const timeout = setTimeout(() => controller.abort(), 200000);
 
   try {
     const res = await fetch(url, {
@@ -514,7 +514,8 @@ export async function requestHermesAiSurveyAnswer(promptText: string): Promise<s
     return null;
   } catch (err: unknown) {
     if (err instanceof Error && err.name === 'AbortError') {
-      console.warn('[seminar_quiz] Hermes AI 요청 타임아웃 (60초 초과)');
+      console.warn('[seminar_quiz] Hermes AI 요청 타임아웃 (200초 초과)');
+      throw new Error('Hermes AI 요청 타임아웃 (200초 초과)');
     } else {
       console.warn('[seminar_quiz] Hermes AI 요청 중 오류 발생:', err);
     }

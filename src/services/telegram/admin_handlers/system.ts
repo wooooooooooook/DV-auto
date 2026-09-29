@@ -241,6 +241,11 @@ export function setupSystemCommands(adminBot: Telegraf): void {
   });
 
   adminBot.command(['test_llm', 'llm'], async (ctx) => {
+    const startTime = Date.now();
+    let url = process.env.HERMES_AI_URL || `${HERMES_API_BASE_URL}/chat/completions`;
+    let model = process.env.HERMES_MODEL || HERMES_DEFAULT_MODEL;
+    let hasApiKey = Boolean(process.env.HERMES_API_KEY?.trim());
+
     try {
       const messageText = ctx.message?.text || '';
       // /test_llm 또는 /llm 뒤의 인자 파싱 (여러 줄 줄바꿈 포함 전체)
@@ -266,9 +271,9 @@ export function setupSystemCommands(adminBot: Telegraf): void {
         prompt = '안녕하세요! 연결 및 응답 테스트입니다. 1줄 이내로 간단하게 자기소개와 현재 상태를 응답해주세요.';
       }
 
-      const url = process.env.HERMES_AI_URL || `${HERMES_API_BASE_URL}/chat/completions`;
-      const model = process.env.HERMES_MODEL || HERMES_DEFAULT_MODEL;
-      const hasApiKey = Boolean(process.env.HERMES_API_KEY?.trim());
+      url = process.env.HERMES_AI_URL || `${HERMES_API_BASE_URL}/chat/completions`;
+      model = process.env.HERMES_MODEL || HERMES_DEFAULT_MODEL;
+      hasApiKey = Boolean(process.env.HERMES_API_KEY?.trim());
 
       logger.info('User requested LLM test', { from: ctx.from?.username, prompt: prompt.slice(0, 50) });
 
@@ -277,7 +282,6 @@ export function setupSystemCommands(adminBot: Telegraf): void {
         `⏳ [Hermes AI 질의 중...]\n- Endpoint: ${url}\n- Model: ${model}\n- API Key: ${hasApiKey ? '설정됨 (Bearer ***)' : '미설정'}\n- Prompt: ${prompt.length > 100 ? `${prompt.slice(0, 100)}...` : prompt}`,
       );
 
-      const startTime = Date.now();
       const aiAnswer = await requestHermesAiSurveyAnswer(prompt);
       const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(2);
 
@@ -294,9 +298,18 @@ export function setupSystemCommands(adminBot: Telegraf): void {
         `🤖 [Hermes AI 테스트 성공] (${elapsedSec}s)\n- Model: ${model}\n- Endpoint: ${url}\n\n📝 [질의 내용]\n${prompt}\n\n💡 [AI 응답]\n${aiAnswer}`,
       );
     } catch (err) {
+      const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(2);
       const message = err instanceof Error ? err.message : String(err);
       logger.error('LLM test command failed', err);
-      await replyWithSplit(ctx, `❌ [Hermes AI 테스트 에러]: ${message}`);
+
+      if (message.includes('타임아웃')) {
+        await replyWithSplit(
+          ctx,
+          `⏰ [Hermes AI 테스트 실패 (타임아웃)] (${elapsedSec}s)\n\n요청 시간이 초과되었습니다 (200초).\n- Endpoint: ${url}\n- Model: ${model}\n- API Key: ${hasApiKey ? '설정됨' : '미설정'}\n\nHermes 서버 상태 및 응답 속도를 확인해주세요.`,
+        );
+      } else {
+        await replyWithSplit(ctx, `❌ [Hermes AI 테스트 에러]: ${message}`);
+      }
     }
   });
 

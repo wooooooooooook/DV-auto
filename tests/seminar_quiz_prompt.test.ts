@@ -165,6 +165,12 @@ describe('requestHermesAiSurveyAnswer 단위 테스트', () => {
     const result = await requestHermesAiSurveyAnswer('프롬프트');
     expect(result).toBeNull();
   });
+
+  it('Hermes AI 서버 요청이 타임아웃(AbortError)되면 타임아웃 예외를 던진다', async () => {
+    globalThis.fetch = vi.fn().mockRejectedValue(new DOMException('The operation was aborted.', 'AbortError'));
+
+    await expect(requestHermesAiSurveyAnswer('프롬프트')).rejects.toThrow('Hermes AI 요청 타임아웃 (200초 초과)');
+  });
 });
 
 describe('generateUnknownQuizPromptText & handleUnknownQuestions 단위 테스트', () => {
