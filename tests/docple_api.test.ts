@@ -14,6 +14,16 @@ import {
   findAndClickDocpleRewardBanner,
   findAndClickAllDocpleRewardBanners,
   recommendDocpleCommunityPost,
+  getDocpleSeminars,
+  getDocplePopularSeminars,
+  getDocpleSeminarDetail,
+  agreeDocpleSeminarTerms,
+  startDocpleSeminarWatch,
+  reportDocpleSeminarWatchProgress,
+  endDocpleSeminarWatch,
+  claimDocpleSeminarReward,
+  processDocpleCastReward,
+  processAllDocpleCastRewards,
 } from '../src/modules/docple_api';
 import {
   executeDocpleDaily,
@@ -786,6 +796,247 @@ Q2: 복용 방법은?
       expect(results[1].accountNo).toBe(102);
       expect(results[2].status).toBe('ALREADY');
     });
+
+    it('getDocpleSeminars & getDocplePopularSeminars: 닥플캐스트 목록 및 인기 목록 정상 조회', async () => {
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: {
+            content: [
+              {
+                id: 26,
+                title: '최신 당뇨병 치료 전략',
+                rewardCash: 100,
+                rewardType: 'DAILY',
+                availablePeriod: '2026.01.01 ~ 2026.12.31',
+              },
+            ],
+            totalElements: 1,
+            totalPages: 1,
+          },
+        }),
+      );
+
+      const listRes = await getDocpleSeminars('mock-token', { page: 1, size: 20 });
+      expect(listRes.items.length).toBe(1);
+      expect(listRes.items[0].id).toBe(26);
+      expect(listRes.items[0].rewardCash).toBe(100);
+      expect(listRes.totalElements).toBe(1);
+
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: [
+            {
+              id: 26,
+              title: '인기 당뇨 세미나',
+              rewardCash: 100,
+            },
+          ],
+        }),
+      );
+
+      const popRes = await getDocplePopularSeminars('mock-token');
+      expect(popRes.length).toBe(1);
+      expect(popRes[0].id).toBe(26);
+    });
+
+    it('getDocpleSeminarDetail & agreeDocpleSeminarTerms: 세미나 상세 정보 및 약관 동의', async () => {
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: {
+            id: 26,
+            title: '상세 테스트 세미나',
+            rewardCash: 100,
+            rewardType: 'DAILY',
+            isTermsAgreed: false,
+            terms: {
+              title: '사전등록 약관',
+              clauses: [{ id: 1, title: '개인정보 수집 이용 동의', isRequired: true }],
+            },
+          },
+        }),
+      );
+
+      const detail = await getDocpleSeminarDetail('mock-token', 26);
+      expect(detail).toBeDefined();
+      expect(detail?.title).toBe('상세 테스트 세미나');
+      expect(detail?.terms).toBeDefined();
+
+      mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true }));
+      const agreeSuccess = await agreeDocpleSeminarTerms('mock-token', 26);
+      expect(agreeSuccess).toBe(true);
+    });
+
+    it('startDocpleSeminarWatch, reportDocpleSeminarWatchProgress, endDocpleSeminarWatch, claimDocpleSeminarReward: 시청 생명주기 메서드 정상 호출', async () => {
+      // 1. watch start
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: { sessionId: 'sess-abc', signedVideoUrl: 'https://cdn.example.com/v.mp4' },
+        }),
+      );
+      const startRes = await startDocpleSeminarWatch('mock-token', 26);
+      expect(startRes?.sessionId).toBe('sess-abc');
+
+      // 2. watch progress
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: { success: true, canClaimReward: true, rewardCash: 100 },
+        }),
+      );
+      const progressRes = await reportDocpleSeminarWatchProgress('mock-token', 26, {
+        sessionId: 'sess-abc',
+        watchedStart: 0,
+        watchedEnd: 300,
+      });
+      expect(progressRes.success).toBe(true);
+      expect(progressRes.canClaimReward).toBe(true);
+
+      // 3. watch end
+      mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true }));
+      const endRes = await endDocpleSeminarWatch('mock-token', 26, {
+        sessionId: 'sess-abc',
+        watchedStart: 0,
+        watchedEnd: 300,
+      });
+      expect(endRes).toBe(true);
+
+      // 4. claim reward
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: { rewardGranted: true, rewardCash: 100, rewardType: 'DAILY' },
+        }),
+      );
+      const claimRes = await claimDocpleSeminarReward('mock-token', 26);
+      expect(claimRes.rewardGranted).toBe(true);
+      expect(claimRes.rewardCash).toBe(100);
+    });
+
+    it('processDocpleCastReward: 이미 리워드 수령한 경우 ALREADY 반환', async () => {
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: {
+            id: 26,
+            title: '완료된 세미나',
+            rewardCash: 100,
+            rewardType: 'DAILY',
+            watchProgress: {
+              isRewardGranted: true,
+            },
+          },
+        }),
+      );
+
+      const res = await processDocpleCastReward('mock-token', 26);
+      expect(res.status).toBe('ALREADY');
+      expect(res.seminarId).toBe(26);
+      expect(res.rewardCash).toBe(0);
+      expect(res.message).toContain('이미');
+    });
+
+    it('processDocpleCastReward: 약관 동의 -> 시청 세션 시작 -> 진행률 보고 -> 리워드 100캐시 수령 성공', async () => {
+      // 1. 상세 조회 (약관 미동의, 시청 필요)
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: {
+            id: 26,
+            title: '당뇨병 최신 지견',
+            rewardCash: 100,
+            rewardType: 'DAILY',
+            isTermsAgreed: false,
+            terms: { title: '약관' },
+            watchProgress: { isRewardGranted: false },
+          },
+        }),
+      );
+      // 2. 약관 동의
+      mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true }));
+      // 3. 시청 세션 시작
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: {
+            sessionId: 'session-1234',
+            signedVideoUrl: 'https://cdn.example.com/video.mp4',
+            canClaimReward: false,
+          },
+        }),
+      );
+      // 4. 진행률 보고
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: { success: true, canClaimReward: true, rewardCash: 100 },
+        }),
+      );
+      // 5. 시청 종료 보고
+      mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true }));
+      // 6. 리워드 수령
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: {
+            rewardGranted: true,
+            rewardCash: 100,
+            rewardType: 'DAILY',
+            message: '오늘 리워드 수령 완료! 내일 다시 받을 수 있습니다',
+          },
+        }),
+      );
+
+      const res = await processDocpleCastReward('mock-token', 26);
+      expect(res.status).toBe('SUCCESS');
+      expect(res.seminarId).toBe(26);
+      expect(res.rewardCash).toBe(100);
+      expect(res.message).toContain('수령 완료');
+    });
+
+    it('processAllDocpleCastRewards: 인기 및 일반 목록 중 리워드 대상 세미나들을 찾아 순차 수령', async () => {
+      // 1. 인기 목록
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: [{ id: 26, title: '세미나 26', rewardCash: 100 }],
+        }),
+      );
+      // 2. 일반 목록
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: {
+            content: [
+              { id: 26, title: '세미나 26', rewardCash: 100 },
+              { id: 27, title: '세미나 27', rewardCash: 0 },
+            ],
+            totalElements: 2,
+          },
+        }),
+      );
+
+      // 세미나 26 상세 조회 (이미 완료)
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: {
+            id: 26,
+            title: '세미나 26',
+            rewardCash: 100,
+            watchProgress: { isRewardGranted: true },
+          },
+        }),
+      );
+
+      const allRes = await processAllDocpleCastRewards('mock-token');
+      expect(allRes.length).toBe(1);
+      expect(allRes[0].seminarId).toBe(26);
+      expect(allRes[0].status).toBe('ALREADY');
+    });
   });
 
   describe('Daily Task Workflow & Report Formatting', () => {
@@ -829,6 +1080,24 @@ Q2: 복용 방법은?
           { tid: 101, title: '게시글 1', success: true, message: '추천 성공' },
           { tid: 102, title: '게시글 2', success: true, message: '추천 성공' },
         ],
+        castRewards: [
+          {
+            seminarId: 26,
+            title: '최신 당뇨병 치료 전략',
+            status: 'SUCCESS',
+            rewardCash: 100,
+            message: '시청 리워드 수령 완료 (+100 캐시)',
+            rewardType: 'DAILY',
+          },
+          {
+            seminarId: 27,
+            title: '고혈압 관리 지침',
+            status: 'ALREADY',
+            rewardCash: 0,
+            message: '오늘 이미 시청 리워드를 수령했습니다.',
+            rewardType: 'DAILY',
+          },
+        ],
         errors: [],
       };
 
@@ -842,6 +1111,9 @@ Q2: 복용 방법은?
       expect(report).toContain('e-디테일링 Quiz (2건)');
       expect(report).toContain('https://docple-plus.com/e-detailing/1');
       expect(report).toContain('커뮤니티 추천 (2건)');
+      expect(report).toContain('🎬 닥플캐스트 VOD (2건, 성공 1건 (+100원)):');
+      expect(report).toContain('1. ✅ [26] 최신 당뇨병 치료 전략 [DAILY] (시청 리워드 수령 완료 (+100 캐시))');
+      expect(report).toContain('2. ℹ️ [27] 고혈압 관리 지침 [DAILY] (오늘 이미 시청 리워드를 수령했습니다.)');
     });
 
     it('executeDocpleDaily: 로그인 실패 시 에러 throw', async () => {
@@ -1007,6 +1279,10 @@ Q2: 복용 방법은?
         mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: [] }));
       }
 
+      // 닥플캐스트 목록 (리워드 없음)
+      mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: [] }));
+      mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: { content: [] } }));
+
       // 11. 종료 캐시: users/info
       mockRequest.mockResolvedValueOnce(
         createMockJsonResponse({
@@ -1117,6 +1393,10 @@ Q2: 복용 방법은?
       for (let i = 0; i < 6; i++) {
         mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: [] }));
       }
+
+      // 닥플캐스트 목록 (리워드 없음)
+      mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: [] }));
+      mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: { content: [] } }));
 
       // 7. 종료 캐시
       mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: { myCash: 1030 } }));
@@ -1232,6 +1512,10 @@ Q2: 복용 방법은?
         mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: [] }));
       }
 
+      // 닥플캐스트 목록 (리워드 없음)
+      mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: [] }));
+      mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: { content: [] } }));
+
       // 7. 종료 캐시
       mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: { myCash: 1050 } }));
       mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: [] }));
@@ -1246,6 +1530,122 @@ Q2: 복용 방법은?
       expect(result.bannerClicks[1].rewardCash).toBe(10);
       expect(result.bannerClicks[1].accountName).toBe('광고 2');
       expect(result.bannerClicks[2].status).toBe('ALREADY');
+    });
+
+    it('executeDocpleDaily: 닥플캐스트 VOD 리워드 세미나 발견 시 시청 및 100캐시 수령 통합 검증', async () => {
+      // 1. 로그인
+      mockRequest.mockResolvedValueOnce(
+        createMockTextResponse({
+          success: true,
+          data: { accessToken: 'token-cast-integration' },
+        }),
+      );
+
+      // 2. 시작 캐시
+      mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: { myCash: 1000 } }));
+      mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: [] }));
+
+      // 3. 출석 (이미 완료)
+      mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: { attendedDates: [] } }));
+      mockRequest.mockResolvedValueOnce(
+        createMockTextResponse({ success: false, code: 'ALREADY_ATTENDED', message: '오늘 이미 출석 완료' }),
+      );
+
+      // 4. 퀴즈 (없음)
+      mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: { quizzes: [] } }));
+      mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: { content: [] } }));
+
+      // 5. 커뮤니티 인증 (생략 또는 빈 목록)
+      mockRequest.mockResolvedValueOnce(
+        createMockTextResponse({ resultCode: '0', result: { communityToken: 'token' } }),
+      );
+      mockRequest.mockResolvedValueOnce(createMockJsonResponse({ resultCode: '0', result: { communityList: [] } }));
+
+      // 6. 배너 (리워드 배너 없음: 7개 슬롯)
+      for (let i = 0; i < 7; i++) {
+        mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: [] }));
+      }
+
+      // 7. 닥플캐스트
+      // 7-1. 인기 세미나 (빈 목록)
+      mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: [] }));
+      // 7-2. 세미나 목록 (1개 100캐시 리워드 세미나 발견)
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: {
+            content: [
+              {
+                id: 26,
+                title: '최신 당뇨병 치료 전략',
+                rewardCash: 100,
+                rewardType: 'DAILY',
+              },
+            ],
+            totalElements: 1,
+            totalPages: 1,
+          },
+        }),
+      );
+      // 7-3. 세미나 26 상세 조회
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: {
+            id: 26,
+            title: '최신 당뇨병 치료 전략',
+            rewardCash: 100,
+            rewardType: 'DAILY',
+            isTermsAgreed: true,
+            watchProgress: { isRewardGranted: false },
+          },
+        }),
+      );
+      // 7-4. 시청 세션 시작
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: {
+            sessionId: 'session-26-cast',
+            signedVideoUrl: 'https://cdn.example.com/cast26.mp4',
+            canClaimReward: false,
+          },
+        }),
+      );
+      // 7-5. 시청 진행률 보고
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: { success: true, canClaimReward: true, rewardCash: 100 },
+        }),
+      );
+      // 7-6. 시청 세션 종료
+      mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true }));
+      // 7-7. 리워드 수령
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: {
+            rewardGranted: true,
+            rewardCash: 100,
+            rewardType: 'DAILY',
+            message: '시청 리워드가 지급되었습니다!',
+          },
+        }),
+      );
+
+      // 8. 종료 캐시
+      mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: { myCash: 1100 } }));
+      mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true, data: [] }));
+
+      const result = await executeDocpleDaily('user', 'pass', 'comm');
+      expect(result.castRewards).toBeDefined();
+      expect(result.castRewards?.length).toBe(1);
+      expect(result.castRewards?.[0].status).toBe('SUCCESS');
+      expect(result.castRewards?.[0].rewardCash).toBe(100);
+      expect(result.castRewards?.[0].seminarId).toBe(26);
+      expect(result.castRewards?.[0].title).toBe('최신 당뇨병 치료 전략');
+      expect(result.cashDiff).toBe(100);
     });
   });
 

@@ -142,6 +142,70 @@ export interface DocpleMedicineDetail {
   [key: string]: unknown;
 }
 
+export interface DocpleSeminarItem {
+  id: number;
+  title: string;
+  thumbnail?: string;
+  rewardCash?: number;
+  rewardType?: string; // 'DAILY' | 'ONCE' 등
+  availablePeriod?: string;
+  speakerName?: string;
+  speakerAffiliation?: string;
+  viewCount?: number;
+  likeCount?: number;
+  reviewCount?: number;
+  vodTypeName?: string;
+  subCategoryName?: string;
+  [key: string]: unknown;
+}
+
+export interface DocpleSeminarDetail {
+  id: number;
+  title: string;
+  thumbnailUrl?: string;
+  rewardCash?: number;
+  rewardType?: string;
+  rewardLinkUrl?: string;
+  rewardLinkTarget?: string;
+  rewardLinkButtonName?: string;
+  isTermsAgreed?: boolean;
+  terms?: {
+    id?: number;
+    title?: string;
+    description?: string;
+    clauses?: Array<{
+      id: number;
+      title: string;
+      content: string;
+      isRequired: boolean;
+      sortOrder: number;
+    }>;
+    refusalNotice?: string;
+  } | null;
+  viewingStartDate?: string;
+  viewingEndDate?: string;
+  watchProgress?: {
+    sessionId?: string;
+    lastPosition?: number;
+    viewingPercent?: number;
+    canClaimReward?: boolean;
+    isRewardGranted?: boolean;
+    isCompleted?: boolean;
+    rewardsExhausted?: boolean;
+    [key: string]: unknown;
+  } | null;
+  [key: string]: unknown;
+}
+
+export interface DocpleCastRewardResult {
+  seminarId: number;
+  title: string;
+  status: 'SUCCESS' | 'ALREADY' | 'SKIPPED' | 'EXHAUSTED' | 'FAILED';
+  rewardCash: number;
+  message: string;
+  rewardType?: string;
+}
+
 export interface DocpleCommunityAuthResult {
   success: boolean;
   communityToken?: string;
@@ -1439,6 +1503,590 @@ export async function findAndClickAllDocpleRewardBanners(
       results.push(bannerRes);
       break;
     }
+  }
+
+  return results;
+}
+
+/**
+ * 닥플캐스트 (세미나/VOD) 목록 조회
+ */
+export async function getDocpleSeminars(
+  accessToken: string,
+  options: {
+    page?: number;
+    size?: number;
+    sort?: string;
+    type?: string;
+    category?: string;
+    search?: string;
+  } = {},
+): Promise<{ items: DocpleSeminarItem[]; totalElements: number; totalPages: number }> {
+  try {
+    const params = new URLSearchParams();
+    if (options.page !== undefined) params.set('page', String(options.page));
+    if (options.size !== undefined) params.set('size', String(options.size));
+    if (options.sort) params.set('sort', options.sort);
+    if (options.type) params.set('type', options.type);
+    if (options.category) params.set('category', options.category);
+    if (options.search) params.set('search', options.search);
+
+    const query = params.toString() ? `?${params.toString()}` : '';
+    const res = await request(`${DOCPLE_BASE_URL}/api/season2/seminar/list${query}`, {
+      method: 'GET',
+      headers: getCommonHeaders(accessToken),
+    });
+
+    const bodyText = await res.body.text();
+    let json: DocpleApiResponse<{
+      content?: DocpleSeminarItem[];
+      totalElements?: number;
+      totalPages?: number;
+    }>;
+    try {
+      json = JSON.parse(bodyText);
+    } catch {
+      return { items: [], totalElements: 0, totalPages: 0 };
+    }
+
+    if (res.statusCode === 200 && json?.success && json.data) {
+      return {
+        items: json.data.content ?? [],
+        totalElements: json.data.totalElements ?? 0,
+        totalPages: json.data.totalPages ?? 0,
+      };
+    }
+
+    return { items: [], totalElements: 0, totalPages: 0 };
+  } catch (error) {
+    logger.error('Docple getDocpleSeminars error', error);
+    return { items: [], totalElements: 0, totalPages: 0 };
+  }
+}
+
+/**
+ * 닥플캐스트 인기 VOD 목록 조회
+ */
+export async function getDocplePopularSeminars(accessToken: string, limit?: number): Promise<DocpleSeminarItem[]> {
+  try {
+    const query = limit ? `?limit=${limit}` : '';
+    const res = await request(`${DOCPLE_BASE_URL}/api/season2/seminar/popular${query}`, {
+      method: 'GET',
+      headers: getCommonHeaders(accessToken),
+    });
+
+    const bodyText = await res.body.text();
+    let json: DocpleApiResponse<DocpleSeminarItem[]>;
+    try {
+      json = JSON.parse(bodyText);
+    } catch {
+      return [];
+    }
+
+    if (res.statusCode === 200 && json?.success && Array.isArray(json.data)) {
+      return json.data;
+    }
+
+    return [];
+  } catch (error) {
+    logger.error('Docple getDocplePopularSeminars error', error);
+    return [];
+  }
+}
+
+/**
+ * 닥플캐스트 세미나 상세 정보 조회
+ */
+export async function getDocpleSeminarDetail(
+  accessToken: string,
+  seminarId: number,
+): Promise<DocpleSeminarDetail | null> {
+  try {
+    const res = await request(`${DOCPLE_BASE_URL}/api/season2/seminar/${seminarId}`, {
+      method: 'GET',
+      headers: getCommonHeaders(accessToken),
+    });
+
+    const bodyText = await res.body.text();
+    let json: DocpleApiResponse<DocpleSeminarDetail>;
+    try {
+      json = JSON.parse(bodyText);
+    } catch {
+      return null;
+    }
+
+    if (res.statusCode === 200 && json?.success && json.data) {
+      return json.data;
+    }
+
+    return null;
+  } catch (error) {
+    logger.error(`Docple getDocpleSeminarDetail error for ${seminarId}`, error);
+    return null;
+  }
+}
+
+/**
+ * 닥플캐스트 사전등록/시청 약관 동의
+ */
+export async function agreeDocpleSeminarTerms(accessToken: string, seminarId: number): Promise<boolean> {
+  try {
+    const res = await request(`${DOCPLE_BASE_URL}/api/season2/seminar/${seminarId}/terms/agree`, {
+      method: 'POST',
+      headers: getCommonHeaders(accessToken),
+      body: JSON.stringify({}),
+    });
+
+    const bodyText = await res.body.text();
+    let json: DocpleApiResponse;
+    try {
+      json = JSON.parse(bodyText);
+    } catch {
+      return false;
+    }
+
+    return res.statusCode === 200 && !!json?.success;
+  } catch (error) {
+    logger.error(`Docple agreeDocpleSeminarTerms error for ${seminarId}`, error);
+    return false;
+  }
+}
+
+/**
+ * 닥플캐스트 VOD 시청 세션 시작
+ */
+export async function startDocpleSeminarWatch(
+  accessToken: string,
+  seminarId: number,
+): Promise<{
+  sessionId: string;
+  signedVideoUrl?: string;
+  canClaimReward?: boolean;
+  isRewardGranted?: boolean;
+  rewardsExhausted?: boolean;
+  rewardCash?: number;
+  lastPosition?: number;
+  viewingPercent?: number;
+} | null> {
+  try {
+    const res = await request(`${DOCPLE_BASE_URL}/api/season2/seminar/${seminarId}/watch/start`, {
+      method: 'POST',
+      headers: getCommonHeaders(accessToken),
+      body: JSON.stringify({}),
+    });
+
+    const bodyText = await res.body.text();
+    let json: DocpleApiResponse<{
+      sessionId: string;
+      signedVideoUrl?: string;
+      canClaimReward?: boolean;
+      isRewardGranted?: boolean;
+      rewardsExhausted?: boolean;
+      rewardCash?: number;
+      lastPosition?: number;
+      viewingPercent?: number;
+    }>;
+    try {
+      json = JSON.parse(bodyText);
+    } catch {
+      return null;
+    }
+
+    if (res.statusCode === 200 && json?.success && json.data?.sessionId) {
+      return json.data;
+    }
+
+    return null;
+  } catch (error) {
+    logger.error(`Docple startDocpleSeminarWatch error for ${seminarId}`, error);
+    return null;
+  }
+}
+
+/**
+ * 닥플캐스트 VOD 시청 진행률 보고 (heartbeat)
+ */
+export async function reportDocpleSeminarWatchProgress(
+  accessToken: string,
+  seminarId: number,
+  params: { sessionId: string; watchedStart: number; watchedEnd: number },
+): Promise<{
+  success: boolean;
+  canClaimReward?: boolean;
+  rewardsExhausted?: boolean;
+  rewardCash?: number;
+  failureReasons?: string[];
+}> {
+  try {
+    const res = await request(`${DOCPLE_BASE_URL}/api/season2/seminar/${seminarId}/watch/progress`, {
+      method: 'POST',
+      headers: getCommonHeaders(accessToken),
+      body: JSON.stringify(params),
+    });
+
+    const bodyText = await res.body.text();
+    let json: DocpleApiResponse<{
+      success?: boolean;
+      canClaimReward?: boolean;
+      rewardsExhausted?: boolean;
+      rewardCash?: number;
+      failureReasons?: string[];
+    }>;
+    try {
+      json = JSON.parse(bodyText);
+    } catch {
+      return { success: false };
+    }
+
+    if (res.statusCode === 200 && json?.success) {
+      return {
+        success: true,
+        canClaimReward: json.data?.canClaimReward,
+        rewardsExhausted: json.data?.rewardsExhausted,
+        rewardCash: json.data?.rewardCash,
+        failureReasons: json.data?.failureReasons,
+      };
+    }
+
+    return {
+      success: false,
+      failureReasons: json?.data?.failureReasons,
+    };
+  } catch (error) {
+    logger.error(`Docple reportDocpleSeminarWatchProgress error for ${seminarId}`, error);
+    return { success: false };
+  }
+}
+
+/**
+ * 닥플캐스트 VOD 시청 세션 종료
+ */
+export async function endDocpleSeminarWatch(
+  accessToken: string,
+  seminarId: number,
+  params: { sessionId: string; watchedStart: number; watchedEnd: number },
+): Promise<boolean> {
+  try {
+    const res = await request(`${DOCPLE_BASE_URL}/api/season2/seminar/${seminarId}/watch/end`, {
+      method: 'POST',
+      headers: getCommonHeaders(accessToken),
+      body: JSON.stringify(params),
+    });
+
+    const bodyText = await res.body.text();
+    let json: DocpleApiResponse;
+    try {
+      json = JSON.parse(bodyText);
+    } catch {
+      return false;
+    }
+
+    return res.statusCode === 200 && !!json?.success;
+  } catch (error) {
+    logger.error(`Docple endDocpleSeminarWatch error for ${seminarId}`, error);
+    return false;
+  }
+}
+
+/**
+ * 닥플캐스트 VOD 시청 리워드 수령
+ */
+export async function claimDocpleSeminarReward(
+  accessToken: string,
+  seminarId: number,
+): Promise<{
+  rewardGranted: boolean;
+  rewardCash?: number;
+  rewardType?: string;
+  message?: string;
+  rewardLinkUrl?: string;
+  rewardLinkTarget?: string;
+}> {
+  try {
+    const res = await request(`${DOCPLE_BASE_URL}/api/season2/seminar/${seminarId}/watch/claim-reward`, {
+      method: 'POST',
+      headers: getCommonHeaders(accessToken),
+      body: JSON.stringify({}),
+    });
+
+    const bodyText = await res.body.text();
+    let json: DocpleApiResponse<{
+      rewardGranted?: boolean;
+      rewardCash?: number;
+      rewardType?: string;
+      message?: string;
+      rewardLinkUrl?: string;
+      rewardLinkTarget?: string;
+    }>;
+    try {
+      json = JSON.parse(bodyText);
+    } catch {
+      return { rewardGranted: false, message: `응답 파싱 실패 (HTTP ${res.statusCode})` };
+    }
+
+    if (res.statusCode === 200 && json?.success && json.data) {
+      return {
+        rewardGranted: !!json.data.rewardGranted,
+        rewardCash: json.data.rewardCash,
+        rewardType: json.data.rewardType,
+        message: json.data.message,
+        rewardLinkUrl: json.data.rewardLinkUrl,
+        rewardLinkTarget: json.data.rewardLinkTarget,
+      };
+    }
+
+    return {
+      rewardGranted: false,
+      message: json?.message || json?.data?.message || `리워드 수령 실패 (HTTP ${res.statusCode})`,
+    };
+  } catch (error) {
+    logger.error(`Docple claimDocpleSeminarReward error for ${seminarId}`, error);
+    return { rewardGranted: false, message: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
+ * 단일 닥플캐스트 세미나의 리워드 수령 처리 (약관동의 -> 시청세션/진행률 -> 리워드수령)
+ */
+export async function processDocpleCastReward(
+  accessToken: string,
+  seminar: DocpleSeminarItem | number,
+): Promise<DocpleCastRewardResult> {
+  const seminarId = typeof seminar === 'number' ? seminar : seminar.id;
+  const initTitle = typeof seminar === 'number' ? `세미나 ${seminarId}` : seminar.title;
+
+  try {
+    // 1. 세미나 상세 조회
+    const detail = await getDocpleSeminarDetail(accessToken, seminarId);
+    if (!detail) {
+      return {
+        seminarId,
+        title: initTitle,
+        status: 'FAILED',
+        rewardCash: 0,
+        message: '세미나 상세 정보를 조회할 수 없습니다.',
+      };
+    }
+
+    const title = detail.title || initTitle;
+    const rewardCash = detail.rewardCash ?? (typeof seminar === 'object' ? seminar.rewardCash : 0) ?? 0;
+    const rewardType = detail.rewardType ?? (typeof seminar === 'object' ? seminar.rewardType : undefined);
+
+    // 리워드 대상 여부 확인
+    if (rewardCash <= 0) {
+      return {
+        seminarId,
+        title,
+        status: 'SKIPPED',
+        rewardCash: 0,
+        message: '리워드 대상이 아닙니다.',
+        rewardType,
+      };
+    }
+
+    // 이미 리워드를 수령한 상태인지 확인
+    if (detail.watchProgress?.isRewardGranted) {
+      const isDaily = rewardType === 'DAILY';
+      return {
+        seminarId,
+        title,
+        status: 'ALREADY',
+        rewardCash: 0,
+        message: isDaily ? '오늘 이미 시청 리워드를 수령했습니다.' : '이미 시청 리워드를 수령했습니다.',
+        rewardType,
+      };
+    }
+
+    // 시청 기간 확인
+    const now = new Date();
+    if (detail.viewingStartDate && new Date(detail.viewingStartDate) > now) {
+      return {
+        seminarId,
+        title,
+        status: 'SKIPPED',
+        rewardCash: 0,
+        message: '시청 시작 전입니다.',
+        rewardType,
+      };
+    }
+    if (detail.viewingEndDate && new Date(detail.viewingEndDate) < now) {
+      return {
+        seminarId,
+        title,
+        status: 'SKIPPED',
+        rewardCash: 0,
+        message: '시청 기간이 종료되었습니다.',
+        rewardType,
+      };
+    }
+
+    // 2. 약관 동의 필요 시 처리
+    if (detail.terms && !detail.isTermsAgreed) {
+      logger.info(`Docple Cast: Agreeing terms for seminar ${seminarId} (${title})...`);
+      await agreeDocpleSeminarTerms(accessToken, seminarId);
+    }
+
+    // 3. 바로 리워드 수령 가능한지 선제 시도 (canClaimReward 또는 isCompleted)
+    if (detail.watchProgress?.canClaimReward || detail.watchProgress?.isCompleted) {
+      logger.info(`Docple Cast: Claiming reward directly for seminar ${seminarId}...`);
+      const directClaim = await claimDocpleSeminarReward(accessToken, seminarId);
+      if (directClaim.rewardGranted) {
+        return {
+          seminarId,
+          title,
+          status: 'SUCCESS',
+          rewardCash: directClaim.rewardCash ?? rewardCash,
+          message: `시청 리워드 수령 완료 (+${directClaim.rewardCash ?? rewardCash} 캐시)`,
+          rewardType: directClaim.rewardType ?? rewardType,
+        };
+      }
+    }
+
+    // 4. 시청 세션 시작
+    logger.info(`Docple Cast: Starting watch session for seminar ${seminarId}...`);
+    const watchStart = await startDocpleSeminarWatch(accessToken, seminarId);
+    if (!watchStart || !watchStart.sessionId) {
+      return {
+        seminarId,
+        title,
+        status: 'FAILED',
+        rewardCash: 0,
+        message: '시청 세션 시작에 실패했습니다.',
+        rewardType,
+      };
+    }
+
+    if (watchStart.rewardsExhausted) {
+      return {
+        seminarId,
+        title,
+        status: 'EXHAUSTED',
+        rewardCash: 0,
+        message: '리워드가 마감되었습니다.',
+        rewardType,
+      };
+    }
+
+    if (watchStart.isRewardGranted) {
+      return {
+        seminarId,
+        title,
+        status: 'ALREADY',
+        rewardCash: 0,
+        message: '이미 시청 리워드를 수령했습니다.',
+        rewardType,
+      };
+    }
+
+    // 5. 시청 진행률 보고 및 세션 종료
+    const sessionId = watchStart.sessionId;
+    const watchedEnd = 600; // 충분한 시청 시간 보고
+    logger.info(`Docple Cast: Reporting watch progress for seminar ${seminarId}...`);
+    await reportDocpleSeminarWatchProgress(accessToken, seminarId, {
+      sessionId,
+      watchedStart: 0,
+      watchedEnd,
+    });
+
+    await endDocpleSeminarWatch(accessToken, seminarId, {
+      sessionId,
+      watchedStart: 0,
+      watchedEnd,
+    });
+
+    // 6. 리워드 수령 호출
+    logger.info(`Docple Cast: Claiming reward after watch for seminar ${seminarId}...`);
+    const claimRes = await claimDocpleSeminarReward(accessToken, seminarId);
+
+    if (claimRes.rewardGranted) {
+      const grantedCash = claimRes.rewardCash ?? rewardCash;
+      return {
+        seminarId,
+        title,
+        status: 'SUCCESS',
+        rewardCash: grantedCash,
+        message: `시청 리워드 수령 완료 (+${grantedCash} 캐시)`,
+        rewardType: claimRes.rewardType ?? rewardType,
+      };
+    }
+
+    const msg = claimRes.message || '';
+    if (msg.includes('마감') || msg.includes('소진')) {
+      return {
+        seminarId,
+        title,
+        status: 'EXHAUSTED',
+        rewardCash: 0,
+        message: msg || '리워드가 마감되었습니다.',
+        rewardType,
+      };
+    }
+    if (msg.includes('이미') || msg.includes('완료')) {
+      return {
+        seminarId,
+        title,
+        status: 'ALREADY',
+        rewardCash: 0,
+        message: msg || '이미 오늘 리워드를 수령했습니다.',
+        rewardType,
+      };
+    }
+
+    return {
+      seminarId,
+      title,
+      status: 'FAILED',
+      rewardCash: 0,
+      message: msg || '리워드 수령에 실패했습니다.',
+      rewardType,
+    };
+  } catch (error) {
+    logger.error(`Docple processDocpleCastReward error for ${seminarId}`, error);
+    return {
+      seminarId,
+      title: initTitle,
+      status: 'FAILED',
+      rewardCash: 0,
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * 닥플캐스트에서 리워드가 있는 모든 VOD를 탐색하여 순차적으로 리워드 수령 처리
+ */
+export async function processAllDocpleCastRewards(accessToken: string): Promise<DocpleCastRewardResult[]> {
+  const results: DocpleCastRewardResult[] = [];
+  const processedIds = new Set<number>();
+
+  try {
+    // 1. 인기 세미나 및 일반 세미나 목록 수집
+    const [popularList, normalList] = await Promise.all([
+      getDocplePopularSeminars(accessToken),
+      getDocpleSeminars(accessToken, { page: 1, size: 50, sort: 'latest' }),
+    ]);
+
+    const candidates: DocpleSeminarItem[] = [];
+
+    for (const item of [...popularList, ...normalList.items]) {
+      if (!processedIds.has(item.id)) {
+        processedIds.add(item.id);
+        if (item.rewardCash && item.rewardCash > 0) {
+          candidates.push(item);
+        }
+      }
+    }
+
+    logger.info(`Docple Cast: Found ${candidates.length} reward-eligible seminars.`);
+
+    for (const candidate of candidates) {
+      const res = await processDocpleCastReward(accessToken, candidate);
+      results.push(res);
+      // 요청 간 짧은 딜레이
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+  } catch (error) {
+    logger.error('Docple processAllDocpleCastRewards error', error);
   }
 
   return results;

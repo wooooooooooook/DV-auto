@@ -506,6 +506,41 @@
 - **배너 노출/클릭 이벤트 로그 (`/api/v2/dadp/banners/logs`)**:
   - `POST https://docple-plus.com/api/v2/dadp/banners/logs`
   - Body: `{"eventType": "VIEW" | "CLICK", "adId": "<adId>"}`
+- **닥플캐스트 (세미나 / VOD) 목록 조회 (`/api/season2/seminar/list`)**:
+  - `GET https://docple-plus.com/api/season2/seminar/list?page={page}&size={size}&sort={sort}`
+  - Header: `Authorization: Bearer <accessToken>`
+  - 응답: `data: { content: [ { id: 26, title: "...", rewardCash: 100, rewardType: "DAILY", ... } ], totalElements: 25, totalPages: 2 }`
+  - **리워드 뱃지 조건**: `rewardCash > 0`일 때 프론트엔드에서 `styles__RewardBadge-sc-1dxc1gu-34 ePIkSy gtm-cast-item-{id}` 클래스의 블루 캐시 아이콘 뱃지가 노출됩니다.
+- **인기 닥플캐스트 목록 조회 (`/api/season2/seminar/popular`)**:
+  - `GET https://docple-plus.com/api/season2/seminar/popular?limit={limit}`
+  - Header: `Authorization: Bearer <accessToken>`
+- **닥플캐스트 상세 조회 (`/api/season2/seminar/{id}`)**:
+  - `GET https://docple-plus.com/api/season2/seminar/{id}`
+  - Header: `Authorization: Bearer <accessToken>`
+  - 응답: `data: { id: 26, title: "...", rewardCash: 100, rewardType: "DAILY", rewardLinkButtonName: "참여하기", isTermsAgreed: true, terms: {...}, watchProgress: { isRewardGranted: false, canClaimReward: false, isCompleted: false } }`
+- **닥플캐스트 사전등록 약관 동의 (`/api/season2/seminar/{id}/terms/agree`)**:
+  - `POST https://docple-plus.com/api/season2/seminar/{id}/terms/agree`
+  - Header: `Authorization: Bearer <accessToken>`
+  - Body: `{}`
+- **닥플캐스트 VOD 시청 세션 시작 (`/api/season2/seminar/{id}/watch/start`)**:
+  - `POST https://docple-plus.com/api/season2/seminar/{id}/watch/start`
+  - Header: `Authorization: Bearer <accessToken>`
+  - Body: `{}`
+  - 응답: `data: { sessionId: "...", signedVideoUrl: "...", canClaimReward: boolean, isRewardGranted: boolean, rewardsExhausted: boolean }`
+- **닥플캐스트 시청 진행률 보고 (`/api/season2/seminar/{id}/watch/progress`)**:
+  - `POST https://docple-plus.com/api/season2/seminar/{id}/watch/progress`
+  - Header: `Authorization: Bearer <accessToken>`
+  - Body: `{"sessionId": "<sessionId>", "watchedStart": 0, "watchedEnd": 600}`
+  - 응답: `data: { success: true, canClaimReward: true, rewardCash: 100, rewardsExhausted: false }`
+- **닥플캐스트 시청 세션 종료 (`/api/season2/seminar/{id}/watch/end`)**:
+  - `POST https://docple-plus.com/api/season2/seminar/{id}/watch/end`
+  - Header: `Authorization: Bearer <accessToken>`
+  - Body: `{"sessionId": "<sessionId>", "watchedStart": 0, "watchedEnd": 600}`
+- **닥플캐스트 시청 리워드 수령 (`/api/season2/seminar/{id}/watch/claim-reward`)**:
+  - `POST https://docple-plus.com/api/season2/seminar/{id}/watch/claim-reward`
+  - Header: `Authorization: Bearer <accessToken>`
+  - Body: `{}`
+  - 응답: `data: { rewardGranted: true, rewardCash: 100, rewardType: "DAILY", message: "오늘 리워드 수령 완료! 내일 다시 받을 수 있습니다" }`
 
 ---
 

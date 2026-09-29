@@ -19,8 +19,10 @@ import {
   getDocpleCommunityPostDetail,
   recommendDocpleCommunityPost,
   findAndClickAllDocpleRewardBanners,
+  processAllDocpleCastRewards,
   type DocpleAttendanceResult,
   type DocpleBannerClickResult,
+  type DocpleCastRewardResult,
 } from '../modules/docple_api';
 import { sendTelegram } from '../modules/utils';
 import * as logger from '../services/logger';
@@ -53,6 +55,7 @@ export interface DocpleDailyWorkflowResult {
     success: boolean;
     message: string;
   }>;
+  castRewards?: DocpleCastRewardResult[];
   errors: string[];
 }
 
@@ -132,7 +135,24 @@ export function formatDocpleDailyReport(res: DocpleDailyWorkflowResult): string 
     lines.push('  • 추천 가능한 최신 일반 게시글이 없습니다.');
   }
 
-  // 5. 오류 내역
+  // 5. 닥플캐스트 VOD 리워드
+  if (res.castRewards && res.castRewards.length > 0) {
+    const successCasts = res.castRewards.filter((c) => c.status === 'SUCCESS');
+    const totalCastCash = successCasts.reduce((sum, c) => sum + (c.rewardCash || 0), 0);
+    const cashStr = totalCastCash > 0 ? ` (+${totalCastCash.toLocaleString()}원)` : '';
+
+    lines.push(`\n🎬 닥플캐스트 VOD (${res.castRewards.length}건, 성공 ${successCasts.length}건${cashStr}):`);
+    res.castRewards.forEach((c, idx) => {
+      const statusIcon =
+        c.status === 'SUCCESS' ? '✅' : c.status === 'ALREADY' ? 'ℹ️' : c.status === 'EXHAUSTED' ? '⏹️' : '⚠️';
+      const typeStr = c.rewardType ? ` [${c.rewardType}]` : '';
+      lines.push(`  ${idx + 1}. ${statusIcon} [${c.seminarId}] ${c.title}${typeStr} (${c.message})`);
+    });
+  } else if (res.castRewards && res.castRewards.length === 0) {
+    lines.push('\n🎬 닥플캐스트 VOD: 참여 가능한 리워드 세미나 없음');
+  }
+
+  // 6. 오류 내역
   if (res.errors.length > 0) {
     lines.push(`\n⚠️ 기타 오류/경고 (${res.errors.length}건):`);
     res.errors.forEach((err) => lines.push(`  • ${err}`));
@@ -358,6 +378,17 @@ export async function executeDocpleDaily(
     });
   }
 
+  // 5-3. 닥플캐스트 (세미나/VOD) 리워드 탐색 및 수령
+  const castRewards: DocpleCastRewardResult[] = [];
+  try {
+    logger.info('Docple daily: Step 5-3. Processing Docple Cast (세미나/VOD) rewards...');
+    const castResults = await processAllDocpleCastRewards(accessToken);
+    castRewards.push(...castResults);
+  } catch (castErr) {
+    logger.error('Docple cast reward error', castErr);
+    errors.push(`닥플캐스트 리워드 처리 오류: ${castErr instanceof Error ? castErr.message : String(castErr)}`);
+  }
+
   // 종료 캐시 확인
   logger.info('Docple daily: Step 6. Checking final cash balance...');
   const finalCashInfo = await getDocpleCash(accessToken);
@@ -375,6 +406,7 @@ export async function executeDocpleDaily(
     bannerClick: bannerClicks[0],
     quizList,
     recommendedPosts,
+    castRewards,
     errors,
   };
 
