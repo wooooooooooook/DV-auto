@@ -113,7 +113,7 @@ describe('requestHermesAiSurveyAnswer 단위 테스트', () => {
 
     expect(requestedUrl).toBe('http://hermes:20128/v1/chat/completions');
     expect(requestedBody).toBeDefined();
-    expect(requestedBody!.model).toBe('default');
+    expect(requestedBody!.model).toBe('my-combo');
     expect(requestedBody!.messages?.[0]?.content).toBe('테스트 프롬프트');
     expect(result).toBe(
       'Q1: 고령층 골다공증 환자군에서 효과적이며 골밀도 개선이 뚜렷하게 관찰되어 처방 만족도가 높스빈다.',

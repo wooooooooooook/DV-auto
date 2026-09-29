@@ -454,6 +454,7 @@ export function formatAdvancedSurveyPrompt(questions: SurveyQuestionForPrompt[])
 }
 
 export const HERMES_API_BASE_URL = 'http://hermes:20128/v1';
+export const HERMES_DEFAULT_MODEL = 'my-combo';
 
 /**
  * Hermes AI 서버에 심화설문 프롬프트를 전송하여 추천 답변을 받아옵니다.
@@ -463,7 +464,7 @@ export async function requestHermesAiSurveyAnswer(promptText: string): Promise<s
 
   const rawUrl = process.env.HERMES_AI_URL || `${HERMES_API_BASE_URL}/chat/completions`;
   const url = rawUrl.endsWith('/chat/completions') ? rawUrl : `${rawUrl.replace(/\/+$/, '')}/chat/completions`;
-  const model = process.env.HERMES_MODEL || 'default';
+  const model = process.env.HERMES_MODEL || HERMES_DEFAULT_MODEL;
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',

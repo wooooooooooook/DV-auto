@@ -7,7 +7,7 @@ import { inspect } from '../../../modules/inspect';
 import { replyWithSplit } from '../../../modules/utils';
 import { getChannelMessagesByDate, getSeoulDateString } from '../../channel_message_repository';
 import { runShellCommand, runShellCommandWithAllowedExitCodes } from '../quiz_cheatsheet';
-import { requestHermesAiSurveyAnswer, HERMES_API_BASE_URL } from '../../../tasks/seminar_quiz';
+import { requestHermesAiSurveyAnswer, HERMES_API_BASE_URL, HERMES_DEFAULT_MODEL } from '../../../tasks/seminar_quiz';
 
 export function setupSystemCommands(adminBot: Telegraf): void {
   adminBot.command('schedules', (ctx) => {
@@ -267,7 +267,7 @@ export function setupSystemCommands(adminBot: Telegraf): void {
       }
 
       const url = process.env.HERMES_AI_URL || `${HERMES_API_BASE_URL}/chat/completions`;
-      const model = process.env.HERMES_MODEL || 'default';
+      const model = process.env.HERMES_MODEL || HERMES_DEFAULT_MODEL;
       const hasApiKey = Boolean(process.env.HERMES_API_KEY?.trim());
 
       logger.info('User requested LLM test', { from: ctx.from?.username, prompt: prompt.slice(0, 50) });
