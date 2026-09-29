@@ -43,6 +43,7 @@ export const adminCommands = [
   { command: 'kakaopay5k_point_exchange', description: '카카오페이 5천원권 교환 실행' },
   { command: 'kakaopay3k_point_exchange', description: '카카오페이 3천원권 교환 실행' },
   // 4. 시스템 & 관리
+  { command: 'test_llm', description: 'Hermes LLM 질의 및 연결 테스트 [프롬프트]' },
   { command: 'schedules', description: '스케줄된 작업 목록 확인' },
   { command: 'log', description: '최근 로그 확인' },
   { command: 'update_app', description: '앱 업데이트 (pnpm update:app)' },

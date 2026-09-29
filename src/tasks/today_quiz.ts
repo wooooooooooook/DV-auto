@@ -1,5 +1,5 @@
 import quizMapping from '../../data/quiz.json';
-import { safeGoto, sendTelegram } from '../modules/utils';
+import { safeGoto, sendTelegram, escapeHtml } from '../modules/utils';
 import * as storage from '../services/storage';
 import type { PlaywrightRunArgs } from '../types';
 import {
@@ -7,6 +7,7 @@ import {
   loadCheatsheet,
   resolveBestKeywordMatch,
   findOptionByAnswer,
+  requestHermesAiSurveyAnswer,
   type QuizQuestion,
 } from './seminar_quiz';
 import { getTodayVerifiedQuizAnswers } from '../modules/quiz_api';
@@ -105,7 +106,30 @@ function formatTodayQuizUnknownQuestions(productTitle: string, questions: QuizQu
   return message;
 }
 
-async function notifyTodayQuizUnknownQuestions(
+/**
+ * 오늘의 퀴즈 미등록 문제에 대한 AI 추천 정답 요청 프롬프트를 생성합니다.
+ */
+export function generateTodayQuizUnknownPromptText(productTitle: string, questions: QuizQuestion[]): string {
+  if (!questions || questions.length === 0) return '';
+  const qLines = questions.map((q, idx) => {
+    let t = `Q${idx + 1}: ${q.questionText.trim()}`;
+    if (q.options && q.options.length > 0) {
+      t += '\n' + q.options.map((opt) => `  ${opt.index}. ${opt.text}`).join('\n');
+    }
+    return t;
+  });
+
+  return `다음은 제약 제품(${productTitle}) 관련 오늘의 퀴즈 문제입니다. 전문의 입장에서 각 문제의 가장 유력한 정답 번호와 간략한 이유를 작성해 주세요.
+
+[문제 목록]
+${qLines.join('\n\n')}
+
+[작성 가이드라인]
+1. 각 문항별로 추천 정답 번호(예: 1번, 2번 등)와 1줄 이내의 간결한 의학적 근거를 제시합니다.
+2. 마지막 줄에는 답장(Reply)으로 바로 복사/입력할 수 있도록 정답 번호만 나열(예: 123 또는 1)해 주세요.`;
+}
+
+export async function notifyTodayQuizUnknownQuestions(
   page: PlaywrightRunArgs['page'],
   productTitle: string,
   href: string,
@@ -118,6 +142,21 @@ async function notifyTodayQuizUnknownQuestions(
     await sendTelegram(message).catch((err) => {
       console.error('[today_quiz] 족보 미등록 알림 전송 실패:', err);
     });
+
+    const promptText = generateTodayQuizUnknownPromptText(productTitle, questions);
+    if (promptText) {
+      try {
+        const aiAnswer = await requestHermesAiSurveyAnswer(promptText);
+        if (aiAnswer && aiAnswer.trim()) {
+          const aiMessage = `🤖 <b>[오늘의 퀴즈 AI 추천 정답]</b>\n\n<pre><code class="language-text">${escapeHtml(aiAnswer.trim())}</code></pre>`;
+          await sendTelegram(aiMessage, null, { parse_mode: 'HTML' }).catch((err) => {
+            console.error('[today_quiz] 오늘의 퀴즈 AI 답변 텔레그램 발송 실패:', err);
+          });
+        }
+      } catch (aiErr) {
+        console.warn('[today_quiz] 오늘의 퀴즈 AI 답변 생성/발송 실패:', aiErr);
+      }
+    }
   } catch (err) {
     console.error('[today_quiz] 족보 미등록 질문 파싱/알림 중 오류:', err);
   }

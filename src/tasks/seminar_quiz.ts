@@ -407,10 +407,9 @@ export interface SurveyQuestionForPrompt {
 }
 
 /**
- * 심화설문 문항을 바탕으로 AI(ChatGPT, Claude 등)에 전달하여
- * 로컬의원 의사 입장의 자연스러운 답변을 생성할 수 있는 프롬프트 코드블럭을 포맷합니다.
+ * 심화설문 문항을 바탕으로 AI 프롬프트 순수 텍스트를 생성합니다.
  */
-export function formatAdvancedSurveyPrompt(questions: SurveyQuestionForPrompt[]): string {
+export function generateAdvancedSurveyPromptText(questions: SurveyQuestionForPrompt[]): string {
   if (!questions || questions.length === 0) return '';
 
   const questionLines = questions.map((q, idx) => {
@@ -431,7 +430,7 @@ export function formatAdvancedSurveyPrompt(questions: SurveyQuestionForPrompt[])
     return text;
   });
 
-  const promptText = `다음은 세미나 심화설문 문항입니다. 10년 차 로컬의원(개원의) 의사의 입장에서 현실적이고 자연스러운 피드백을 작성해 주세요.
+  return `다음은 세미나 심화설문 문항입니다. 10년 차 로컬의원(개원의) 의사의 입장에서 현실적이고 자연스러운 피드백을 작성해 주세요.
 
 [작성 가이드라인]
 1. 로컬 진료 현장의 실제 임상 경험과 환자 처방 관점을 반영하여 답변합니다.
@@ -442,14 +441,91 @@ export function formatAdvancedSurveyPrompt(questions: SurveyQuestionForPrompt[])
 
 [설문 문항]
 ${questionLines.join('\n\n')}`;
+}
 
+/**
+ * 심화설문 문항을 바탕으로 AI(ChatGPT, Claude 등)에 전달하여
+ * 로컬의원 의사 입장의 자연스러운 답변을 생성할 수 있는 프롬프트 코드블럭을 포맷합니다.
+ */
+export function formatAdvancedSurveyPrompt(questions: SurveyQuestionForPrompt[]): string {
+  const promptText = generateAdvancedSurveyPromptText(questions);
+  if (!promptText) return '';
   return `<pre><code class="language-text">${escapeHtml(promptText)}</code></pre>`;
+}
+
+export const HERMES_API_BASE_URL = 'http://hermes:20128/v1';
+
+/**
+ * Hermes AI 서버에 심화설문 프롬프트를 전송하여 추천 답변을 받아옵니다.
+ */
+export async function requestHermesAiSurveyAnswer(promptText: string): Promise<string | null> {
+  if (!promptText || !promptText.trim()) return null;
+
+  const rawUrl = process.env.HERMES_AI_URL || `${HERMES_API_BASE_URL}/chat/completions`;
+  const url = rawUrl.endsWith('/chat/completions') ? rawUrl : `${rawUrl.replace(/\/+$/, '')}/chat/completions`;
+  const model = process.env.HERMES_MODEL || 'default';
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  const apiKey = process.env.HERMES_API_KEY?.trim();
+  if (apiKey) {
+    headers['Authorization'] = `Bearer ${apiKey}`;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60000);
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: 'user',
+            content: promptText,
+          },
+        ],
+      }),
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      console.warn(`[seminar_quiz] Hermes AI 요청 실패 (status: ${res.status}): ${errText}`);
+      return null;
+    }
+
+    const data = (await res.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+
+    const content = data?.choices?.[0]?.message?.content;
+    if (typeof content === 'string' && content.trim()) {
+      console.log(`[seminar_quiz] Hermes AI 답변 수신 성공 (길이: ${content.trim().length}자)`);
+      return content.trim();
+    }
+
+    console.warn('[seminar_quiz] Hermes AI 응답 형식이 예상과 다릅니다:', data);
+    return null;
+  } catch (err: unknown) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      console.warn('[seminar_quiz] Hermes AI 요청 타임아웃 (60초 초과)');
+    } else {
+      console.warn('[seminar_quiz] Hermes AI 요청 중 오류 발생:', err);
+    }
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 /**
  * 미등록 문제를 텔레그램 메시지 형식으로 포맷
  */
-function formatUnknownQuestions(questions: SurveyQuestion[], results: QuizResult[]): string {
+export function formatUnknownQuestions(questions: SurveyQuestion[], results: QuizResult[]): string {
   let message = '❓ 족보에 없는 퀴즈:\n\n';
 
   for (let i = 0; i < results.length; i++) {
@@ -467,6 +543,70 @@ function formatUnknownQuestions(questions: SurveyQuestion[], results: QuizResult
 
   message += `💡 족보 등록 방법:\n• 이 메시지에 답장(Reply)으로 정답 번호(예: 123)만 전송\n• 또는 /add_seminar_answer_batch 사용`;
   return message;
+}
+
+/**
+ * 미등록 퀴즈에 대한 AI 추천 정답 요청 프롬프트를 생성합니다.
+ */
+export function generateUnknownQuizPromptText(questions: SurveyQuestion[], results: QuizResult[]): string {
+  const unknownList: Array<{ qNum: number; text: string; options: Array<{ index: number; text: string }> }> = [];
+
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i];
+    if (result.selectedIndex === null && result.kind === 'quiz') {
+      const q = questions.find((item) => item.questionNumber === result.questionIndex) || questions[i];
+      if (!q) continue;
+      unknownList.push({
+        qNum: result.questionIndex,
+        text: q.questionText,
+        options: q.options,
+      });
+    }
+  }
+
+  if (unknownList.length === 0) return '';
+
+  const qLines = unknownList.map((item) => {
+    let t = `Q${item.qNum}: ${item.text.trim()}`;
+    if (item.options && item.options.length > 0) {
+      t += '\n' + item.options.map((opt) => `  ${opt.index}. ${opt.text}`).join('\n');
+    }
+    return t;
+  });
+
+  return `다음은 의학/제약 관련 세미나 퀴즈 문제입니다. 전문의 입장에서 각 문제의 가장 유력한 정답 번호와 간략한 이유를 작성해 주세요.
+
+[문제 목록]
+${qLines.join('\n\n')}
+
+[작성 가이드라인]
+1. 각 문항별로 추천 정답 번호(예: 1번, 2번 등)와 1줄 이내의 간결한 의학적 근거를 제시합니다.
+2. 마지막 줄에는 답장(Reply)으로 바로 복사/입력할 수 있도록 정답 번호만 나열(예: 123 또는 1)해 주세요.`;
+}
+
+/**
+ * 족보 미등록 퀴즈 안내 메시지를 보내고, Hermes AI에게 추천 정답을 요청하여 추가로 전송합니다.
+ */
+export async function handleUnknownQuestions(questions: SurveyQuestion[], results: QuizResult[]): Promise<void> {
+  const unknownMessage = formatUnknownQuestions(questions, results);
+  await sendTelegram(unknownMessage).catch((err) => {
+    console.error('[seminar_quiz] 미등록 퀴즈 알림 전송 실패:', err);
+  });
+
+  const promptText = generateUnknownQuizPromptText(questions, results);
+  if (promptText) {
+    try {
+      const aiAnswer = await requestHermesAiSurveyAnswer(promptText);
+      if (aiAnswer && aiAnswer.trim()) {
+        const aiMessage = `🤖 <b>[미등록 퀴즈 AI 추천 정답]</b>\n\n<pre><code class="language-text">${escapeHtml(aiAnswer.trim())}</code></pre>`;
+        await sendTelegram(aiMessage, null, { parse_mode: 'HTML' }).catch((err) => {
+          console.error('[seminar_quiz] 미등록 퀴즈 AI 답변 텔레그램 발송 실패:', err);
+        });
+      }
+    } catch (aiErr) {
+      console.warn('[seminar_quiz] 미등록 퀴즈 AI 답변 생성/발송 실패:', aiErr);
+    }
+  }
 }
 
 type SeminarQuizResult = {
@@ -888,7 +1028,10 @@ async function processSeminarQuiz(
               options: q.options,
             }));
 
-      const promptBlock = formatAdvancedSurveyPrompt(depthQuestionsForPrompt);
+      const rawPromptText = generateAdvancedSurveyPromptText(depthQuestionsForPrompt);
+      const promptBlock = rawPromptText
+        ? `<pre><code class="language-text">${escapeHtml(rawPromptText)}</code></pre>`
+        : '';
       const promptSection = promptBlock ? `\n\n${promptBlock}` : '';
       const telegramNoticeText = `📋 ℹ️ [심화설문] 퀴즈 정답 추출 완료 (자동 제출 제외)\n${resultMessage}\n\n🔗 세미나 URL: ${seminarPageUrl}${promptSection}`;
 
@@ -902,9 +1045,23 @@ async function processSeminarQuiz(
         await fs.unlink(advancedShotPath).catch(() => {});
       }
 
+      // 심화설문 프롬프트 발송 후 Hermes AI 서버로 전송하여 응답값을 사용자에게 한번 더 전송
+      if (rawPromptText) {
+        try {
+          const aiAnswer = await requestHermesAiSurveyAnswer(rawPromptText);
+          if (aiAnswer && aiAnswer.trim()) {
+            const aiTelegramText = `🤖 <b>[심화설문 AI 추천 답변]</b>\n\n<pre><code class="language-text">${escapeHtml(aiAnswer.trim())}</code></pre>`;
+            await sendTelegram(aiTelegramText, null, { parse_mode: 'HTML' }).catch((err) => {
+              console.error('[seminar_quiz] Hermes AI 답변 텔레그램 발송 실패:', err);
+            });
+          }
+        } catch (aiErr) {
+          console.warn('[seminar_quiz] Hermes AI 답변 생성/발송 실패:', aiErr);
+        }
+      }
+
       if (_hasUnknown) {
-        const unknownMessage = formatUnknownQuestions(accumulatedQuestions, accumulatedResults);
-        await sendTelegram(unknownMessage).catch(() => {});
+        await handleUnknownQuestions(accumulatedQuestions, accumulatedResults);
       }
 
       return {
@@ -994,10 +1151,9 @@ async function processSeminarQuiz(
     }
     // ── 자동 클릭·제출 끝 ─────────────────────────────────────────────
 
-    // 미등록 [퀴즈] 문제가 있으면 관리자에게 상세 전송
+    // 미등록 [퀴즈] 문제가 있으면 관리자에게 상세 전송 및 AI 추천 정답 전송
     if (_hasUnknown) {
-      const unknownMessage = formatUnknownQuestions(accumulatedQuestions, accumulatedResults);
-      await sendTelegram(unknownMessage);
+      await handleUnknownQuestions(accumulatedQuestions, accumulatedResults);
     }
 
     return { success: true, hasQuizResult: channelResults.length > 0, message: resultMessage };

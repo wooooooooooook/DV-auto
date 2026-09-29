@@ -1100,6 +1100,191 @@ export function formatDocpleQuizTelegramMessage(params: {
   return lines.join('\n');
 }
 
+/**
+ * 닥플 퀴즈 미등록 문제에 대한 AI 추천 정답 요청 프롬프트(JSON 포맷 요청)를 생성합니다.
+ */
+export function generateDocpleQuizAiPrompt(params: {
+  quiz: DocpleQuizDetail;
+  medicine?: DocpleMedicineDetail | null;
+}): string {
+  const { quiz, medicine } = params;
+  const questions = quiz.questions || [];
+  if (questions.length === 0) return '';
+
+  const qLines = questions.map((q, idx) => {
+    let t = `Q${idx + 1}: ${q.questionText.trim()}`;
+    if (q.options && q.options.length > 0) {
+      t += '\n' + q.options.map((opt, oIdx) => `  ${oIdx + 1}. ${opt.optionText}`).join('\n');
+    }
+    return t;
+  });
+
+  const medInfoLines: string[] = [];
+  if (medicine) {
+    medInfoLines.push(`• 의약품명: ${medicine.medicineName}`);
+    if (medicine.mainIngredient) medInfoLines.push(`• 주요 성분: ${medicine.mainIngredient}`);
+    const categories = [medicine.therapeuticCategory, medicine.diseaseCategoryName].filter(Boolean).join(' / ');
+    if (categories) medInfoLines.push(`• 효능/분류: ${categories}`);
+    if (medicine.pharmaCompanyName) medInfoLines.push(`• 제약사: ${medicine.pharmaCompanyName}`);
+  }
+
+  const medSection = medInfoLines.length > 0 ? `\n[의약품 정보]\n${medInfoLines.join('\n')}\n` : '';
+
+  const sampleAnswers = questions.map((_, i) => i + 1);
+  const sampleJson = JSON.stringify(
+    {
+      answers: sampleAnswers,
+      reasons: questions.map((_, i) => `Q${i + 1} 정답 근거 요약`),
+    },
+    null,
+    2,
+  );
+
+  return `다음은 닥플 e-디테일링 퀴즈 문제입니다. 전문의 입장에서 의약품 정보와 임상 지식을 바탕으로 각 문제의 정답 번호(1-based)와 간략한 근거를 추론해 주세요.
+${medSection}
+[문제 목록]
+${qLines.join('\n\n')}
+
+[출력 형식 가이드]
+- 반드시 아래 JSON 포맷으로만 출력해 주세요. 마크다운 등의 추가 설명 텍스트 없이 유효한 JSON만 반환해야 합니다:
+${sampleJson}`;
+}
+
+/**
+ * AI 응답 텍스트에서 각 문제의 정답 번호(1-based) 목록을 파싱합니다.
+ * JSON 포맷(객체 및 배열)을 최우선으로 파싱하며, 실패 시 텍스트 패턴으로 fallback 처리합니다.
+ */
+export function parseDocpleAiAnswerIndices(aiResponse: string, questionCount: number): number[] | null {
+  if (!aiResponse || !aiResponse.trim() || questionCount <= 0) return null;
+
+  const trimmed = aiResponse.trim();
+
+  // 1. JSON 포맷 파싱 시도 (마크다운 코드블록 제거 포함)
+  try {
+    let jsonStr = trimmed;
+    const codeBlockMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    if (codeBlockMatch && codeBlockMatch[1]) {
+      jsonStr = codeBlockMatch[1].trim();
+    } else {
+      const firstBrace = jsonStr.indexOf('{');
+      const lastBrace = jsonStr.lastIndexOf('}');
+      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+        jsonStr = jsonStr.slice(firstBrace, lastBrace + 1);
+      } else {
+        const firstBracket = jsonStr.indexOf('[');
+        const lastBracket = jsonStr.lastIndexOf(']');
+        if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
+          jsonStr = jsonStr.slice(firstBracket, lastBracket + 1);
+        }
+      }
+    }
+
+    const parsed: unknown = JSON.parse(jsonStr);
+
+    if (Array.isArray(parsed)) {
+      const numbers = parsed.map((v) => Number(v)).filter((n) => !isNaN(n));
+      if (numbers.length === questionCount) {
+        return numbers;
+      }
+    } else if (parsed && typeof parsed === 'object') {
+      const obj = parsed as Record<string, unknown>;
+      // Case A: { answers: [1, 2] }
+      if (Array.isArray(obj.answers)) {
+        const numbers = obj.answers
+          .map((v) => {
+            if (typeof v === 'number') return v;
+            if (typeof v === 'string') return parseInt(v, 10);
+            if (v && typeof v === 'object' && 'answerIndex' in v) {
+              return Number((v as { answerIndex: unknown }).answerIndex);
+            }
+            if (v && typeof v === 'object' && 'answer' in v) {
+              return Number((v as { answer: unknown }).answer);
+            }
+            return NaN;
+          })
+          .filter((n) => !isNaN(n));
+
+        if (numbers.length === questionCount) {
+          return numbers;
+        }
+      }
+
+      // Case B: { "1": 1, "2": 2 } or { "q1": 1, "q2": 2 }
+      const numbers: number[] = [];
+      for (let i = 1; i <= questionCount; i++) {
+        const val = obj[String(i)] ?? obj[`q${i}`] ?? obj[`Q${i}`] ?? obj[`question${i}`];
+        if (val !== undefined) {
+          const num = Number(val);
+          if (!isNaN(num)) {
+            numbers.push(num);
+          }
+        }
+      }
+      if (numbers.length === questionCount) {
+        return numbers;
+      }
+    }
+  } catch {
+    // JSON 파싱 실패 시 fallback 텍스트 파싱 진행
+  }
+
+  // 2. 텍스트 라인 기반 Fallback 파싱
+  const lines = trimmed
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  // 2-1. "정답:" 또는 "정답 :" 패턴 탐색 (뒤에서부터 탐색)
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    const match = line.match(/(?:정답|답안|Answers?)\s*[:：\-\]]\s*([0-9\s,]+)/i);
+    if (match && match[1]) {
+      const numbers = match[1]
+        .split(/[\s,]+/)
+        .map((n) => parseInt(n, 10))
+        .filter((n) => !isNaN(n));
+      if (numbers.length === questionCount) {
+        return numbers;
+      }
+    }
+  }
+
+  // 2-2. Q1: 1, Q2: 2 등의 개별 문항 패턴 탐색
+  const qMap = new Map<number, number>();
+  for (const line of lines) {
+    const qMatch = line.match(/(?:Q|문제)\s*(\d+)\s*[:.)\s-]+.*?(\d+)\s*번?/i);
+    if (qMatch && qMatch[1] && qMatch[2]) {
+      const qIdx = parseInt(qMatch[1], 10);
+      const ansNum = parseInt(qMatch[2], 10);
+      if (qIdx >= 1 && qIdx <= questionCount) {
+        qMap.set(qIdx, ansNum);
+      }
+    }
+  }
+
+  if (qMap.size === questionCount) {
+    const numbers: number[] = [];
+    for (let i = 1; i <= questionCount; i++) {
+      const val = qMap.get(i);
+      if (val === undefined) return null;
+      numbers.push(val);
+    }
+    return numbers;
+  }
+
+  // 2-3. 마지막 줄이 순수 숫자들(예: "1 2" 또는 "1, 2")인 경우
+  const lastLine = lines[lines.length - 1];
+  const lastNumbers = lastLine
+    .split(/[\s,]+/)
+    .map((n) => parseInt(n, 10))
+    .filter((n) => !isNaN(n));
+  if (lastNumbers.length === questionCount) {
+    return lastNumbers;
+  }
+
+  return null;
+}
+
 export interface DocpleBannerItem {
   accountNo: number;
   adId: string;

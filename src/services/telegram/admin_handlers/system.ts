@@ -7,6 +7,7 @@ import { inspect } from '../../../modules/inspect';
 import { replyWithSplit } from '../../../modules/utils';
 import { getChannelMessagesByDate, getSeoulDateString } from '../../channel_message_repository';
 import { runShellCommand, runShellCommandWithAllowedExitCodes } from '../quiz_cheatsheet';
+import { requestHermesAiSurveyAnswer, HERMES_API_BASE_URL } from '../../../tasks/seminar_quiz';
 
 export function setupSystemCommands(adminBot: Telegraf): void {
   adminBot.command('schedules', (ctx) => {
@@ -239,6 +240,66 @@ export function setupSystemCommands(adminBot: Telegraf): void {
     }
   });
 
+  adminBot.command(['test_llm', 'llm'], async (ctx) => {
+    try {
+      const messageText = ctx.message?.text || '';
+      // /test_llm 또는 /llm 뒤의 인자 파싱 (여러 줄 줄바꿈 포함 전체)
+      const rawPrompt = messageText.replace(/^\/(?:test_llm|llm)(?:@\w+)?\s*/i, '').trim();
+
+      // 메시지 답장(Reply)으로 명령어를 보낸 경우, 답장 대상 메시지의 텍스트를 프롬프트로 활용
+      const replyTo = ctx.message && 'reply_to_message' in ctx.message ? ctx.message.reply_to_message : undefined;
+      const replyText =
+        replyTo && 'text' in replyTo && typeof replyTo.text === 'string'
+          ? replyTo.text
+          : replyTo && 'caption' in replyTo && typeof replyTo.caption === 'string'
+            ? replyTo.caption
+            : '';
+
+      let prompt = rawPrompt;
+      if (!prompt && replyText) {
+        prompt = replyText;
+      } else if (prompt && replyText) {
+        prompt = `${prompt}\n\n[참조 메시지]\n${replyText}`;
+      }
+
+      if (!prompt) {
+        prompt = '안녕하세요! 연결 및 응답 테스트입니다. 1줄 이내로 간단하게 자기소개와 현재 상태를 응답해주세요.';
+      }
+
+      const url = process.env.HERMES_AI_URL || `${HERMES_API_BASE_URL}/chat/completions`;
+      const model = process.env.HERMES_MODEL || 'default';
+      const hasApiKey = Boolean(process.env.HERMES_API_KEY?.trim());
+
+      logger.info('User requested LLM test', { from: ctx.from?.username, prompt: prompt.slice(0, 50) });
+
+      await replyWithSplit(
+        ctx,
+        `⏳ [Hermes AI 질의 중...]\n- Endpoint: ${url}\n- Model: ${model}\n- API Key: ${hasApiKey ? '설정됨 (Bearer ***)' : '미설정'}\n- Prompt: ${prompt.length > 100 ? `${prompt.slice(0, 100)}...` : prompt}`,
+      );
+
+      const startTime = Date.now();
+      const aiAnswer = await requestHermesAiSurveyAnswer(prompt);
+      const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(2);
+
+      if (!aiAnswer) {
+        await replyWithSplit(
+          ctx,
+          `❌ [Hermes AI 테스트 실패] (${elapsedSec}s)\n\n서버 응답이 없거나 에러가 발생했습니다.\n- Endpoint: ${url}\n- Model: ${model}\n- API Key: ${hasApiKey ? '설정됨' : '미설정'}\n\nHERMES_AI_URL, HERMES_API_KEY 설정 및 Hermes 서버 상태를 확인해주세요.`,
+        );
+        return;
+      }
+
+      await replyWithSplit(
+        ctx,
+        `🤖 [Hermes AI 테스트 성공] (${elapsedSec}s)\n- Model: ${model}\n- Endpoint: ${url}\n\n📝 [질의 내용]\n${prompt}\n\n💡 [AI 응답]\n${aiAnswer}`,
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('LLM test command failed', err);
+      await replyWithSplit(ctx, `❌ [Hermes AI 테스트 에러]: ${message}`);
+    }
+  });
+
   adminBot.command('help', (ctx) => {
     const message = `사용 가능한 명령어:
 
@@ -284,6 +345,7 @@ export function setupSystemCommands(adminBot: Telegraf): void {
 - /channel_messages [날짜]: 공지방 전송 메시지 ID 목록 조회 (기본: 오늘)
 
 ⚙️ 시스템 & 관리:
+- /test_llm [프롬프트]: Hermes LLM 연결 및 질의 테스트 (/llm 으로도 실행 가능)
 - /schedules: 스케줄된 작업 목록을 확인합니다.
 - /log [수량]: 최근 로그를 가져옵니다. (기본값: 20)
 - /update_app: pnpm update:app 명령어를 실행합니다. (서버 권한 필요, 재시작으로 응답 중단 가능)

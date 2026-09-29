@@ -12,6 +12,8 @@ import {
   getDocpleQuizDetail,
   getDocpleMedicineDetail,
   formatDocpleQuizTelegramMessage,
+  generateDocpleQuizAiPrompt,
+  parseDocpleAiAnswerIndices,
   submitDocpleQuiz,
   matchDocpleQuizAnswersWithCheatsheet,
   authDocpleCommunityPassword,
@@ -24,7 +26,8 @@ import {
   type DocpleBannerClickResult,
   type DocpleCastRewardResult,
 } from '../modules/docple_api';
-import { sendTelegram } from '../modules/utils';
+import { sendTelegram, escapeHtml } from '../modules/utils';
+import { requestHermesAiSurveyAnswer } from './seminar_quiz';
 import * as logger from '../services/logger';
 
 const SEMINAR_QUIZ_CHEATSHEET_PATH = path.join(process.cwd(), 'data/seminar_quiz_cheatsheet.json');
@@ -262,7 +265,79 @@ export async function executeDocpleDaily(
           }
         }
 
-        // 3. 족보가 없거나 미매칭인 경우 관리자 봇으로 문제/보기/상세정보 안내 메시지 발송
+        // 3. 족보가 없거나 미매칭인 경우: Hermes AI로 답변 추론 후 1회 제출 시도
+        let aiAnswerContent: string | null = null;
+        const aiPrompt = generateDocpleQuizAiPrompt({
+          quiz: quizDetail,
+          medicine: medDetail,
+        });
+
+        if (aiPrompt && quizDetail.canAttempt !== false) {
+          try {
+            logger.info(`Docple daily: Requesting AI answer for quiz ${q.quizId}...`);
+            aiAnswerContent = await requestHermesAiSurveyAnswer(aiPrompt);
+            if (aiAnswerContent) {
+              const parsedIndices = parseDocpleAiAnswerIndices(aiAnswerContent, quizDetail.questions.length);
+              if (parsedIndices) {
+                // 각 문항의 1-based index에 해당하는 optionId 매핑
+                const aiAnswers: Array<{ questionId: number; selectedOptionId: number; optionText: string }> = [];
+                let canSubmit = true;
+
+                for (let idx = 0; idx < quizDetail.questions.length; idx++) {
+                  const question = quizDetail.questions[idx];
+                  const optIdx = parsedIndices[idx] - 1; // 0-based
+                  const option = question.options[optIdx];
+                  if (!option) {
+                    canSubmit = false;
+                    break;
+                  }
+                  aiAnswers.push({
+                    questionId: question.questionId,
+                    selectedOptionId: option.optionId,
+                    optionText: option.optionText,
+                  });
+                }
+
+                if (canSubmit && aiAnswers.length === quizDetail.questions.length) {
+                  logger.info(
+                    `Docple daily: Attempting 1-time submission for quiz ${q.quizId} using AI answers (${parsedIndices.join(', ')})...`,
+                  );
+                  const submitRes = await submitDocpleQuiz(
+                    accessToken,
+                    q.quizId,
+                    aiAnswers.map((a) => ({
+                      questionId: a.questionId,
+                      selectedOptionId: a.selectedOptionId,
+                    })),
+                  );
+
+                  if (submitRes.isPassed) {
+                    const rewardMsg = submitRes.grantedCash ? ` (+${submitRes.grantedCash} 캐시)` : '';
+                    quizList.push({
+                      id: medId || q.quizId,
+                      name: medName,
+                      url: quizUrl,
+                      status: `AI 자동 제출 완료${rewardMsg}`,
+                    });
+
+                    await sendTelegram(
+                      `✅ [닥플 퀴즈 AI 정답 자동 제출 성공]\n\n• 의약품: ${medName}\n• 결과: 정답${rewardMsg}\n• 제출 정답:\n${aiAnswers.map((a, i) => `  Q${i + 1}: ${a.optionText}`).join('\n')}`,
+                    ).catch((sendErr) => {
+                      logger.warn('Failed to send quiz AI success message', sendErr);
+                    });
+                    continue;
+                  } else {
+                    logger.warn(`Docple daily: AI submission failed for quiz ${q.quizId}: ${submitRes.message}`);
+                  }
+                }
+              }
+            }
+          } catch (aiErr) {
+            logger.warn('Failed during Docple quiz AI answer inference/submission', aiErr);
+          }
+        }
+
+        // 4. 족보가 없고 AI 제출도 실패한 경우: 관리자 봇으로 문제/보기/상세정보 안내 메시지 및 AI 추천 답변 발송
         const quizMsg = formatDocpleQuizTelegramMessage({
           quiz: quizDetail,
           medicine: medDetail,
@@ -272,6 +347,13 @@ export async function executeDocpleDaily(
         await sendTelegram(quizMsg).catch((sendErr) => {
           logger.warn('Failed to send Docple quiz message to admin bot', sendErr);
         });
+
+        if (aiAnswerContent && aiAnswerContent.trim()) {
+          const aiTelegramText = `🤖 <b>[닥플 퀴즈 AI 추천 정답]</b>\n\n<pre><code class="language-text">${escapeHtml(aiAnswerContent.trim())}</code></pre>`;
+          await sendTelegram(aiTelegramText, null, { parse_mode: 'HTML' }).catch((sendErr) => {
+            logger.warn('Failed to send Docple quiz AI message to admin bot', sendErr);
+          });
+        }
 
         quizList.push({
           id: medId || q.quizId,
