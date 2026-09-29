@@ -104,6 +104,28 @@ describe('test_llm 텔레그램 명령어 단위 테스트', () => {
     expect(failMsg).toContain('❌ [Hermes AI 테스트 실패]');
   });
 
+  it('Hermes AI 요청에서 타임아웃 예외 발생 시 타임아웃 전용 에러 메시지를 회신한다', async () => {
+    const handler = commandHandlers.get('test_llm')!;
+    const replyMock = vi.spyOn(utilsModule, 'replyWithSplit').mockResolvedValue(undefined);
+    vi.spyOn(seminarQuizModule, 'requestHermesAiSurveyAnswer').mockRejectedValue(
+      new Error('Hermes AI 요청 타임아웃 (200초 초과)'),
+    );
+
+    const ctx = {
+      message: {
+        text: '/test_llm 타임아웃 테스트',
+      },
+      from: { username: 'testadmin' },
+    } as unknown as Context;
+
+    await handler(ctx);
+
+    expect(replyMock).toHaveBeenCalledTimes(2);
+    const timeoutMsg = replyMock.mock.calls[1][1] as string;
+    expect(timeoutMsg).toContain('⏰ [Hermes AI 테스트 실패 (타임아웃)]');
+    expect(timeoutMsg).toContain('요청 시간이 초과되었습니다 (200초)');
+  });
+
   it('답장(reply_to_message)으로 호출 시 답장 메시지 내용을 프롬프트로 활용한다', async () => {
     const handler = commandHandlers.get('test_llm')!;
     const replyMock = vi.spyOn(utilsModule, 'replyWithSplit').mockResolvedValue(undefined);
