@@ -483,6 +483,7 @@ export async function requestHermesAiSurveyAnswer(promptText: string): Promise<s
       headers,
       body: JSON.stringify({
         model,
+        stream: false,
         messages: [
           {
             role: 'user',

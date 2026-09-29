@@ -88,7 +88,9 @@ describe('requestHermesAiSurveyAnswer 단위 테스트', () => {
 
   it('Hermes AI 서버에 올바른 JSON body로 요청하고 응답텍스트를 반환한다', async () => {
     let requestedUrl = '';
-    let requestedBody: { model?: string; messages?: Array<{ role: string; content: string }> } | undefined;
+    let requestedBody:
+      | { model?: string; stream?: boolean; messages?: Array<{ role: string; content: string }> }
+      | undefined;
 
     globalThis.fetch = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
       requestedUrl = url;
@@ -114,6 +116,7 @@ describe('requestHermesAiSurveyAnswer 단위 테스트', () => {
     expect(requestedUrl).toBe('http://hermes:20128/v1/chat/completions');
     expect(requestedBody).toBeDefined();
     expect(requestedBody!.model).toBe('my-combo');
+    expect(requestedBody!.stream).toBe(false);
     expect(requestedBody!.messages?.[0]?.content).toBe('테스트 프롬프트');
     expect(result).toBe(
       'Q1: 고령층 골다공증 환자군에서 효과적이며 골밀도 개선이 뚜렷하게 관찰되어 처방 만족도가 높스빈다.',
