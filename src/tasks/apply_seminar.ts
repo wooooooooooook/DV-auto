@@ -466,18 +466,23 @@ export async function syncSeminars(options: ApplySeminarOptions = {}): Promise<S
     }
 
     // 예정된 비공개 세미나(DB 저장분)는 메인 API에 노출되지 않으므로 매 실행마다 detail API로 최신 상태 갱신
+    // PC 전용 세미나도 메인(모바일) API에 노출되지 않으므로 당일 시작 전/진행 중 세미나는 함께 detail API로 갱신하여
+    // 입장가능(processState 1/6) 전이 및 시작 알림 누락을 방지한다
     const currentIdSet = new Set(
       normalizedCurrentSeminars.map((s) => s.seminarId || getSeminarIdFromUrl(s.url)).filter(Boolean),
     );
     const pendingPrivateSeminars = storedSeminars.filter((s) => {
-      if (s.hiddenYn !== 'Y') return false;
       const sid = s.seminarId || getSeminarIdFromUrl(s.url);
       if (!sid || currentIdSet.has(sid)) return false;
       // 이미 종료된 세미나는 제외
       const ps = s.processState;
       if (ps === ProcessState.PROCESS_END || ps === ProcessState.PROCESS_COMPLETED) return false;
       if (s.seminarCompleted === 1) return false;
-      return true;
+      if (s.isClosed === true) return false;
+      // 비공개 세미나는 기존대로 항상 갱신 대상
+      if (s.hiddenYn === 'Y') return true;
+      // 그 외(예: PC 전용 세미나)는 당일 세미나만 갱신 (과거/미래 날짜는 제외)
+      return s.date === referenceDate;
     });
 
     let enrichedSeminars = normalizedCurrentSeminars;

@@ -1,6 +1,11 @@
 import assert from 'node:assert';
 import type { BrowserContext, Page } from 'playwright';
-import { getTodaysSeminarsFromApi, checkSeminarEndStatusFromApi, monitorSeminars } from '../src/tasks/monitor_seminars';
+import {
+  getTodaysSeminarsFromApi,
+  checkSeminarEndStatusFromApi,
+  monitorSeminars,
+  buildStartDtFromStored,
+} from '../src/tasks/monitor_seminars';
 import { isSeminarStartedByTime } from '../src/tasks/monitor_seminars_notice';
 import * as seminarApiModule from '../src/modules/seminar_api';
 import * as utilsModule from '../src/modules/utils';
@@ -588,5 +593,88 @@ describe('monitor_seminars API 기반 모니터링 기능 단위/통합 테스�
     assert.strictEqual(fallbackSem.status, '종료', 'DB의 processState에 따라 종료 상태여야 함');
     assert.strictEqual(fallbackSem.name, '로컬 DB에만 존재하는 종료된 세미나');
     console.log('  ✓ 로컬 DB fallback 복원 검증 완료!\n');
+  });
+
+  it('PC 전용 세미나: mainFuture API에 노출되지 않아도 DB fallback에서 시작시간 도래 시 입장가능으로 복원된다', async () => {
+    storage.setDatabasePath(':memory:');
+    storage.clear();
+
+    const fetchMainFutureSpy = vi.spyOn(seminarApiModule, 'fetchMainFutureSeminars');
+    const fetchSeminarDetailSpy = vi.spyOn(seminarApiModule, 'fetchSeminarDetail');
+
+    // 현재 KST 시각 기준으로 시작 시간이 지난 당일 세미나를 동적 구성 (자정 근처 날짜 역전 방지)
+    const nowKst = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
+    const todayIso = `${nowKst.getFullYear()}-${String(nowKst.getMonth() + 1).padStart(2, '0')}-${String(nowKst.getDate()).padStart(2, '0')}`;
+    const pastStartHour = Math.max(0, nowKst.getHours() - 1);
+    const startTime = `${String(pastStartHour).padStart(2, '0')}:00~${String(Math.min(23, pastStartHour + 1)).padStart(2, '0')}:00`;
+
+    const seminarRepo = await import('../src/services/seminar_repository');
+    // PC 전용 세미나(5699): 모바일 mainFuture API에 노출되지 않음, 신청완료 상태(processState=3)
+    seminarRepo.upsertSeminar({
+      seminarId: '5699',
+      name: 'PC 전용 점심 세미나',
+      url: 'https://m.doctorville.co.kr/cme/seminar/5699',
+      date: todayIso,
+      time: startTime,
+      currentCount: '10',
+      totalCount: '500',
+      nightTime: pastStartHour >= 16,
+      isAdvancedSurvey: false,
+      processState: 3, // PROCESS_CANCEL (신청 완료)
+      hiddenYn: 'N',
+    });
+
+    // mainFuture API 응답에는 5699가 없음 (PC 전용)
+    fetchMainFutureSpy.mockResolvedValue({
+      success: true,
+      items: [],
+      rawResponse: {},
+    });
+
+    const res = await getTodaysSeminarsFromApi(0, 24, todayIso);
+    assert.strictEqual(res.success, true);
+
+    const pcOnlySem = Object.values(res.seminars).find((s) => s.seminarId === '5699');
+    assert.ok(pcOnlySem, 'mainFuture에 없어도 DB의 PC 전용 세미나가 복원되어야 함');
+
+    // DB 저장분(date+time)으로 startDt가 구성되어야 함
+    assert.strictEqual(pcOnlySem.startDt, `${todayIso} ${String(pastStartHour).padStart(2, '0')}:00:00`);
+
+    // 시작 시간이 이미 지난 세미나이므로 입장가능으로 복원되어야 함 (PC 전용 세미나 시작 알림 누락 방지 핵심)
+    assert.strictEqual(
+      pcOnlySem.status,
+      '입장가능',
+      '시작 시간이 지난 PC 전용 세미나는 DB fallback에서도 입장가능으로 복원되어야 함',
+    );
+
+    // buildStartDtFromStored 단위 검증
+    assert.strictEqual(
+      buildStartDtFromStored({ date: '2026-08-24', time: '13:00~14:00' }, '2026-08-24'),
+      '2026-08-24 13:00:00',
+    );
+    assert.strictEqual(buildStartDtFromStored({ time: '13:00~14:00' }, '2026-08-24'), '2026-08-24 13:00:00');
+    assert.strictEqual(buildStartDtFromStored({ date: '2026-08-24', time: '' }, '2026-08-24'), undefined);
+
+    // checkSeminarEndStatusFromApi가 detail API의 processState/startDt를 반환하는지 검증
+    fetchSeminarDetailSpy.mockResolvedValue({
+      success: true,
+      seminarId: '5699',
+      surveyState: undefined,
+      isPointExcluded: false,
+      hasEntryHistory: false,
+      rawResponse: {
+        seminarDetail: {
+          seminarId: 5699,
+          seminarNm: 'PC 전용 점심 세미나',
+          processState: 1, // PROCESS_ENTER
+          startDt: `${todayIso} ${String(pastStartHour).padStart(2, '0')}:00:00`,
+        },
+      },
+    } as never);
+
+    const endCheck = await checkSeminarEndStatusFromApi('5699');
+    assert.strictEqual(endCheck.processState, 1, 'detail API의 processState가 반환되어야 함');
+    assert.ok(endCheck.startDt, 'detail API의 startDt가 반환되어야 함');
+    assert.strictEqual(endCheck.isEnded, false, '입장가능 상태는 종료가 아님');
   });
 });

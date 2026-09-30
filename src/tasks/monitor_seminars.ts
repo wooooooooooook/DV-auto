@@ -53,6 +53,22 @@ import { withBrowserContext, performAutoEnterForActiveSeminars, mapConcurrent } 
 export const API_POLL_INTERVAL_MS = 60 * 1000;
 
 /**
+ * DB 저장분 세미나(date + time)로 startDt 문자열("YYYY-MM-DD HH:MM:00")을 구성합니다.
+ * - mainFuture API에 노출되지 않는 PC 전용/비공개 세미나의 시작 시간 도래 판정용
+ */
+export function buildStartDtFromStored(
+  stored: { date?: string; time?: string; detectedDate?: string },
+  fallbackDate: string,
+): string | undefined {
+  const dateStr = stored.date || stored.detectedDate || fallbackDate;
+  const startHM = (stored.time || '').split('~')[0]?.trim();
+  if (!dateStr || !startHM || !startHM.includes(':')) return undefined;
+  const dateMatch = dateStr.match(/(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (!dateMatch) return undefined;
+  return `${dateMatch[1]}-${dateMatch[2].padStart(2, '0')}-${dateMatch[3].padStart(2, '0')} ${startHM}:00`;
+}
+
+/**
  * API 기반으로 당일 특정 시간대(startHour ~ endHour)의 세미나 목록을 조회하여 SeminarInfo 맵으로 반환
  */
 export async function getTodaysSeminarsFromApi(
@@ -189,6 +205,9 @@ export async function getTodaysSeminarsFromApi(
       const cancelProcessStateNum = stored.cancelProcessState;
       const seminarCompletedNum = stored.seminarCompleted;
 
+      // DB 저장분(date/time)으로 startDt를 구성하여 시작 시간 도래 판정에 활용
+      const storedStartDt = buildStartDtFromStored(stored, targetDate);
+
       let statusText: SeminarStatus = '대기';
       if (
         processStateNum === ProcessState.PROCESS_END ||
@@ -196,6 +215,14 @@ export async function getTodaysSeminarsFromApi(
         seminarCompletedNum === 1
       ) {
         statusText = '종료';
+      } else if (
+        processStateNum === ProcessState.PROCESS_ENTER ||
+        processStateNum === ProcessState.PROCESS_STARTED ||
+        isSeminarStartedByTime(storedStartDt)
+      ) {
+        // PC 전용 세미나 등 mainFuture API에 노출되지 않는 세미나는
+        // DB 저장분 기준으로 시작 시간이 지났으면 입장가능으로 판정
+        statusText = '입장가능';
       }
 
       seminars[trackingKey] = {
@@ -203,6 +230,7 @@ export async function getTodaysSeminarsFromApi(
         name: stored.name || '세미나',
         seminarId: sid,
         url: fullUrl,
+        startDt: storedStartDt,
         time: stored.time,
         hasSurvey: true,
         isSurveyPointExcluded: stored.isPointExcluded ?? false,
@@ -231,6 +259,9 @@ export async function checkSeminarEndStatusFromApi(seminarId: string): Promise<{
   isPointExcluded: boolean;
   hasEntryHistory: boolean;
   isPrivate?: boolean;
+  processState?: number;
+  startDt?: string;
+  endDt?: string;
   hiddenYn?: string;
   diseaseCategoryNm?: string;
   survey?: SeminarSurveyInfo | null;
@@ -318,6 +349,9 @@ export async function checkSeminarEndStatusFromApi(seminarId: string): Promise<{
     isEnded,
     isSurveyOpen,
     surveyState,
+    processState,
+    startDt: typeof detail?.startDt === 'string' ? detail.startDt : undefined,
+    endDt: typeof detail?.endDt === 'string' ? detail.endDt : undefined,
     isPointExcluded: detailRes.isPointExcluded,
     hasEntryHistory: detailRes.hasEntryHistory ?? false,
     isPrivate,
@@ -1145,17 +1179,28 @@ async function monitorSeminars(
         }
 
         // ── C. 입장 감시 및 자동 입장
+        // detail API 결과(endCheck)에서도 입장 가능 여부 판정:
+        // PC 전용 세미나 등 mainFuture API에 노출되지 않는 세미나(apiInfo 없음)는
+        // detail API의 processState(1=입장, 6=진행중) 및 startDt 기반으로 입장가능 전이 감지
+        const endCheckForEntry = seminarId && !isEnded ? detailCheckMap.get(seminarId) : undefined;
         const isReadyForEntry =
           currentSeminar.processState === ProcessState.PROCESS_ENTER ||
           currentSeminar.processState === ProcessState.PROCESS_STARTED ||
           apiInfo?.status === '입장가능' ||
-          isSeminarStartedByTime(currentSeminar.startDt);
+          endCheckForEntry?.processState === ProcessState.PROCESS_ENTER ||
+          endCheckForEntry?.processState === ProcessState.PROCESS_STARTED ||
+          isSeminarStartedByTime(currentSeminar.startDt) ||
+          isSeminarStartedByTime(endCheckForEntry?.startDt);
 
         if (isReadyForEntry) {
           if (currentSeminar.status === '대기') {
             console.log(`[${periodName}] Seminar newly ready for entry / started: ${name} (${seminarId})`);
             currentSeminar.status = '입장가능';
             currentSeminar.isEntryStarted = true;
+            // detail API에서 획득한 startDt로 시작시간 보강 (이후 종료 판정 등에 활용)
+            if (!currentSeminar.startDt && endCheckForEntry?.startDt) {
+              currentSeminar.startDt = endCheckForEntry.startDt;
+            }
             hasStateChanged = true;
           }
         }
