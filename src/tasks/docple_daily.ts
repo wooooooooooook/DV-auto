@@ -275,7 +275,8 @@ export async function executeDocpleDaily(
         if (aiPrompt && quizDetail.canAttempt !== false) {
           try {
             logger.info(`Docple daily: Requesting AI answer for quiz ${q.quizId}...`);
-            aiAnswerContent = await requestHermesAiSurveyAnswer(aiPrompt);
+            // AI 실패 시 아래 4단계에서 문제/보기 안내 메시지를 이미 발송하므로 중복 알림을 생략한다
+            aiAnswerContent = await requestHermesAiSurveyAnswer(aiPrompt, '닥플 퀴즈 AI 추천 정답', false);
             if (aiAnswerContent) {
               const parsedIndices = parseDocpleAiAnswerIndices(aiAnswerContent, quizDetail.questions.length);
               if (parsedIndices) {

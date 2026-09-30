@@ -3,6 +3,7 @@ import {
   formatAdvancedSurveyPrompt,
   generateAdvancedSurveyPromptText,
   requestHermesAiSurveyAnswer,
+  HERMES_TIMEOUT_MS,
   generateUnknownQuizPromptText,
   type SurveyQuestionForPrompt,
 } from '../src/tasks/seminar_quiz';
@@ -86,6 +87,10 @@ describe('requestHermesAiSurveyAnswer 단위 테스트', () => {
     expect(result).toBeNull();
   });
 
+  it('타임아웃은 200초(HERMES_TIMEOUT_MS = 200_000)로 설정되어 있다', () => {
+    expect(HERMES_TIMEOUT_MS).toBe(200_000);
+  });
+
   it('Hermes AI 서버에 올바른 JSON body로 요청하고 응답텍스트를 반환한다', async () => {
     let requestedUrl = '';
     let requestedBody:
@@ -155,7 +160,9 @@ describe('requestHermesAiSurveyAnswer 단위 테스트', () => {
     }
   });
 
-  it('Hermes AI 서버가 에러를 반환하면 null을 반환한다', async () => {
+  it('Hermes AI 서버가 에러를 반환하면 null을 반환하고 실패 알림을 전송한다', async () => {
+    vi.spyOn(await import('../src/modules/utils'), 'sendTelegram').mockResolvedValue(true);
+
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 500,
@@ -164,6 +171,58 @@ describe('requestHermesAiSurveyAnswer 단위 테스트', () => {
 
     const result = await requestHermesAiSurveyAnswer('프롬프트');
     expect(result).toBeNull();
+  });
+
+  it('요청 실패 시 조용히 실패하지 않고 텔레그램 실패 메시지를 전송한다', async () => {
+    const sendTelegramSpy = vi.fn().mockResolvedValue(true);
+    vi.spyOn(await import('../src/modules/utils'), 'sendTelegram').mockImplementation(sendTelegramSpy);
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      text: async () => 'Internal Server Error',
+    } as unknown as Response);
+
+    const result = await requestHermesAiSurveyAnswer('프롬프트', '심화설문 AI 추천 답변');
+    expect(result).toBeNull();
+    expect(sendTelegramSpy).toHaveBeenCalledTimes(1);
+
+    const failMsg = sendTelegramSpy.mock.calls[0][0] as string;
+    expect(failMsg).toContain('⚠️ [심화설문 AI 추천 답변 요청 실패]');
+    expect(failMsg).toContain('HTTP 500 오류 응답');
+  });
+
+  it('타임아웃 발생 시 텔레그램 타임아웃 실패 메시지를 전송한다', async () => {
+    const sendTelegramSpy = vi.fn().mockResolvedValue(true);
+    vi.spyOn(await import('../src/modules/utils'), 'sendTelegram').mockImplementation(sendTelegramSpy);
+
+    const abortError = new Error('The operation was aborted');
+    abortError.name = 'AbortError';
+    globalThis.fetch = vi.fn().mockRejectedValue(abortError);
+
+    const result = await requestHermesAiSurveyAnswer('프롬프트', '오늘의 퀴즈 AI 추천 정답');
+    expect(result).toBeNull();
+    expect(sendTelegramSpy).toHaveBeenCalledTimes(1);
+
+    const failMsg = sendTelegramSpy.mock.calls[0][0] as string;
+    expect(failMsg).toContain('⚠️ [오늘의 퀴즈 AI 추천 정답 요청 실패]');
+    expect(failMsg).toContain('타임아웃');
+    expect(failMsg).toContain('200초');
+  });
+
+  it('notifyFailure=false이면 텔레그램 실패 알림을 전송하지 않는다', async () => {
+    const sendTelegramSpy = vi.fn().mockResolvedValue(true);
+    vi.spyOn(await import('../src/modules/utils'), 'sendTelegram').mockImplementation(sendTelegramSpy);
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      text: async () => 'Service Unavailable',
+    } as unknown as Response);
+
+    const result = await requestHermesAiSurveyAnswer('프롬프트', 'Hermes LLM 테스트', false);
+    expect(result).toBeNull();
+    expect(sendTelegramSpy).not.toHaveBeenCalled();
   });
 });
 

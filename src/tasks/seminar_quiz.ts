@@ -455,11 +455,36 @@ export function formatAdvancedSurveyPrompt(questions: SurveyQuestionForPrompt[])
 
 export const HERMES_API_BASE_URL = 'http://hermes:20128/v1';
 export const HERMES_DEFAULT_MODEL = 'my-combo';
+/** Hermes AI 응답 대기 타임아웃 (ms) */
+export const HERMES_TIMEOUT_MS = 200_000;
 
 /**
- * Hermes AI 서버에 심화설문 프롬프트를 전송하여 추천 답변을 받아옵니다.
+ * Hermes AI 실패(타임아웃/HTTP 오류/응답 형식 이상 등)를 조용히 넘기지 않고
+ * 관리자 텔레그램으로 실패 메시지를 전송합니다.
  */
-export async function requestHermesAiSurveyAnswer(promptText: string): Promise<string | null> {
+async function notifyHermesFailure(
+  contextLabel: string,
+  reason: string,
+  startedAt: number,
+  url: string,
+  model: string,
+): Promise<void> {
+  const elapsedSec = ((Date.now() - startedAt) / 1000).toFixed(1);
+  const message = `⚠️ [${contextLabel} 요청 실패] (${elapsedSec}s)\n- 사유: ${reason}\n- Endpoint: ${url}\n- Model: ${model}\n\nHermes 서버 상태 및 HERMES_AI_URL / HERMES_API_KEY 설정을 확인해주세요.`;
+  await sendTelegram(message).catch((notifyErr) => {
+    console.warn('[seminar_quiz] Hermes AI 실패 알림 전송 실패:', notifyErr);
+  });
+}
+
+/**
+ * Hermes AI 서버에 프롬프트를 전송하여 답변을 받아옵니다.
+ * 타임아웃은 200초이며, 실패 시 null 반환과 함께 텔레그램 실패 메시지를 전송합니다.
+ */
+export async function requestHermesAiSurveyAnswer(
+  promptText: string,
+  contextLabel = 'Hermes AI',
+  notifyFailure = true,
+): Promise<string | null> {
   if (!promptText || !promptText.trim()) return null;
 
   const rawUrl = process.env.HERMES_AI_URL || `${HERMES_API_BASE_URL}/chat/completions`;
@@ -474,8 +499,9 @@ export async function requestHermesAiSurveyAnswer(promptText: string): Promise<s
     headers['Authorization'] = `Bearer ${apiKey}`;
   }
 
+  const startedAt = Date.now();
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 60000);
+  const timeout = setTimeout(() => controller.abort(), HERMES_TIMEOUT_MS);
 
   try {
     const res = await fetch(url, {
@@ -497,6 +523,9 @@ export async function requestHermesAiSurveyAnswer(promptText: string): Promise<s
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
       console.warn(`[seminar_quiz] Hermes AI 요청 실패 (status: ${res.status}): ${errText}`);
+      if (notifyFailure) {
+        await notifyHermesFailure(contextLabel, `HTTP ${res.status} 오류 응답`, startedAt, url, model);
+      }
       return null;
     }
 
@@ -511,12 +540,34 @@ export async function requestHermesAiSurveyAnswer(promptText: string): Promise<s
     }
 
     console.warn('[seminar_quiz] Hermes AI 응답 형식이 예상과 다릅니다:', data);
+    if (notifyFailure) {
+      await notifyHermesFailure(
+        contextLabel,
+        '응답 형식이 예상과 다름 (choices[0].message.content 누락)',
+        startedAt,
+        url,
+        model,
+      );
+    }
     return null;
   } catch (err: unknown) {
     if (err instanceof Error && err.name === 'AbortError') {
-      console.warn('[seminar_quiz] Hermes AI 요청 타임아웃 (60초 초과)');
+      console.warn(`[seminar_quiz] Hermes AI 요청 타임아웃 (${HERMES_TIMEOUT_MS / 1000}초 초과)`);
+      if (notifyFailure) {
+        await notifyHermesFailure(
+          contextLabel,
+          `응답 대기 중 타임아웃 (${HERMES_TIMEOUT_MS / 1000}초 초과)`,
+          startedAt,
+          url,
+          model,
+        );
+      }
     } else {
       console.warn('[seminar_quiz] Hermes AI 요청 중 오류 발생:', err);
+      if (notifyFailure) {
+        const reason = err instanceof Error ? err.message : String(err);
+        await notifyHermesFailure(contextLabel, `요청 중 오류 발생: ${reason}`, startedAt, url, model);
+      }
     }
     return null;
   } finally {
@@ -598,7 +649,7 @@ export async function handleUnknownQuestions(questions: SurveyQuestion[], result
   const promptText = generateUnknownQuizPromptText(questions, results);
   if (promptText) {
     try {
-      const aiAnswer = await requestHermesAiSurveyAnswer(promptText);
+      const aiAnswer = await requestHermesAiSurveyAnswer(promptText, '미등록 퀴즈 AI 추천 정답');
       if (aiAnswer && aiAnswer.trim()) {
         const aiMessage = `🤖 <b>[미등록 퀴즈 AI 추천 정답]</b>\n\n<pre><code class="language-text">${escapeHtml(aiAnswer.trim())}</code></pre>`;
         await sendTelegram(aiMessage, null, { parse_mode: 'HTML' }).catch((err) => {
@@ -1050,7 +1101,7 @@ async function processSeminarQuiz(
       // 심화설문 프롬프트 발송 후 Hermes AI 서버로 전송하여 응답값을 사용자에게 한번 더 전송
       if (rawPromptText) {
         try {
-          const aiAnswer = await requestHermesAiSurveyAnswer(rawPromptText);
+          const aiAnswer = await requestHermesAiSurveyAnswer(rawPromptText, '심화설문 AI 추천 답변');
           if (aiAnswer && aiAnswer.trim()) {
             const aiTelegramText = `🤖 <b>[심화설문 AI 추천 답변]</b>\n\n<pre><code class="language-text">${escapeHtml(aiAnswer.trim())}</code></pre>`;
             await sendTelegram(aiTelegramText, null, { parse_mode: 'HTML' }).catch((err) => {

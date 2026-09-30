@@ -49,6 +49,8 @@ describe('test_llm 텔레그램 명령어 단위 테스트', () => {
 
     expect(requestSpy).toHaveBeenCalledWith(
       '안녕하세요! 연결 및 응답 테스트입니다. 1줄 이내로 간단하게 자기소개와 현재 상태를 응답해주세요.',
+      'Hermes LLM 테스트',
+      false,
     );
     expect(replyMock).toHaveBeenCalledTimes(2);
 
@@ -77,7 +79,7 @@ describe('test_llm 텔레그램 명령어 단위 테스트', () => {
 
     await handler(ctx);
 
-    expect(requestSpy).toHaveBeenCalledWith('고혈압 치료제의 최신 가이드라인을 요약해줘');
+    expect(requestSpy).toHaveBeenCalledWith('고혈압 치료제의 최신 가이드라인을 요약해줘', 'Hermes LLM 테스트', false);
     expect(replyMock).toHaveBeenCalledTimes(2);
 
     const successMsg = replyMock.mock.calls[1][1] as string;
@@ -123,7 +125,11 @@ describe('test_llm 텔레그램 명령어 단위 테스트', () => {
 
     await handler(ctx);
 
-    expect(requestSpy).toHaveBeenCalledWith('Q1: 다음 중 올바른 약제 복용법은 무엇인가요?\n1) 식후 30분\n2) 취침 전');
+    expect(requestSpy).toHaveBeenCalledWith(
+      'Q1: 다음 중 올바른 약제 복용법은 무엇인가요?\n1) 식후 30분\n2) 취침 전',
+      'Hermes LLM 테스트',
+      false,
+    );
     expect(replyMock).toHaveBeenCalledTimes(2);
 
     const successMsg = replyMock.mock.calls[1][1] as string;

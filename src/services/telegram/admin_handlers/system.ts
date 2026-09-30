@@ -278,7 +278,8 @@ export function setupSystemCommands(adminBot: Telegraf): void {
       );
 
       const startTime = Date.now();
-      const aiAnswer = await requestHermesAiSurveyAnswer(prompt);
+      // 명령어 핸들러가 직접 실패 안내 메시지를 회신하므로 중복 알림을 생략한다
+      const aiAnswer = await requestHermesAiSurveyAnswer(prompt, 'Hermes LLM 테스트', false);
       const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(2);
 
       if (!aiAnswer) {

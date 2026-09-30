@@ -146,7 +146,7 @@ export async function notifyTodayQuizUnknownQuestions(
     const promptText = generateTodayQuizUnknownPromptText(productTitle, questions);
     if (promptText) {
       try {
-        const aiAnswer = await requestHermesAiSurveyAnswer(promptText);
+        const aiAnswer = await requestHermesAiSurveyAnswer(promptText, '오늘의 퀴즈 AI 추천 정답');
         if (aiAnswer && aiAnswer.trim()) {
           const aiMessage = `🤖 <b>[오늘의 퀴즈 AI 추천 정답]</b>\n\n<pre><code class="language-text">${escapeHtml(aiAnswer.trim())}</code></pre>`;
           await sendTelegram(aiMessage, null, { parse_mode: 'HTML' }).catch((err) => {
