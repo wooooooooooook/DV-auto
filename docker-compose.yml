@@ -10,7 +10,7 @@ services:
     init: true
 
     environment:
-      # í…”ë ˆê·¸ë¨ /logÂ·/update_app ëª…ë ¹ì˜ ë„ì»¤ ë¶„ê¸° ê°ì§€ í”Œë˜ê·¸
+      # ÅÚ·¹±×·¥ /log¡¤/update_app ¸í·ÉÀÇ µµÄ¿ ºĞ±â °¨Áö ÇÃ·¡±×
       DV_DOCKER: 1
 
       DV_USER: ${DV_USER}
@@ -41,6 +41,10 @@ services:
       HEADLESS: ${HEADLESS}
       
       HERMES_API_KEY: ${HERMES_API_KEY}
+
+      # ÄûÁî µî·Ï git µ¿±âÈ­ (µµÄ¿): µ¿±âÈ­ ÀúÀå¼Ò¸¦ º¼·ı¿¡ À¯ÁöÇÏ°í PAT ·Î push
+      DV_GIT_REPO_DIR: /app/runtime-data/repo
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
     volumes:
       - /opt/dv-auto/data:/app/runtime-data
 

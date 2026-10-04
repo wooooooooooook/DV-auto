@@ -2,6 +2,8 @@ import fs from 'fs/promises';
 import path from 'path';
 import { exec } from 'child_process';
 import * as logger from '../logger';
+import { isDockerEnv } from '../../core/runtime_env';
+import { commitAndPushInRepo } from '../git_sync';
 
 export const SEMINAR_QUIZ_CHEATSHEET_FILE = 'data/seminar_quiz_cheatsheet.json';
 export const SEMINAR_QUIZ_CHEATSHEET_PATH = path.join(process.cwd(), SEMINAR_QUIZ_CHEATSHEET_FILE);
@@ -57,6 +59,11 @@ export async function commitAndPushIfChanged(
   files: string[],
   message: string,
 ): Promise<{ performed: boolean; notice: string }> {
+  // 도커 컨테이너에는 .git 이 없어 동기화 저장소(DV_GIT_REPO_DIR) 기반으로 수행한다
+  if (isDockerEnv()) {
+    return commitAndPushInRepo(files, message);
+  }
+
   const fileArgs = buildShellArgs(files);
   const { stdout: statusOutput } = await runShellCommand(`git status --porcelain -- ${fileArgs}`);
   if (!statusOutput.trim()) {
