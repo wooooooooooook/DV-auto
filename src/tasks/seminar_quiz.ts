@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import type { Page } from 'playwright';
 import { sendTelegram } from '../modules/utils';
+import { enqueueLlmJob } from '../services/llm_queue';
 
 const CHEATSHEET_PATH = path.join(process.cwd(), 'data/seminar_quiz_cheatsheet.json');
 
@@ -648,17 +649,19 @@ export async function handleUnknownQuestions(questions: SurveyQuestion[], result
 
   const promptText = generateUnknownQuizPromptText(questions, results);
   if (promptText) {
-    try {
-      const aiAnswer = await requestHermesAiSurveyAnswer(promptText, '미등록 퀴즈 AI 추천 정답');
-      if (aiAnswer && aiAnswer.trim()) {
-        const aiMessage = `🤖 <b>[미등록 퀴즈 AI 추천 정답]</b>\n\n<pre><code class="language-text">${escapeHtml(aiAnswer.trim())}</code></pre>`;
-        await sendTelegram(aiMessage, null, { parse_mode: 'HTML' }).catch((err) => {
-          console.error('[seminar_quiz] 미등록 퀴즈 AI 답변 텔레그램 발송 실패:', err);
-        });
-      }
-    } catch (aiErr) {
-      console.warn('[seminar_quiz] 미등록 퀴즈 AI 답변 생성/발송 실패:', aiErr);
-    }
+    // AI 추천 정답 요청/발송은 백그라운드 큐에서 실행하여 퀴즈 작업이 응답 대기로 멈추지 않도록 한다
+    enqueueLlmJob({
+      label: '미등록 퀴즈 AI 추천 정답',
+      run: () => requestHermesAiSurveyAnswer(promptText, '미등록 퀴즈 AI 추천 정답'),
+      onResult: async (aiAnswer) => {
+        if (aiAnswer && aiAnswer.trim()) {
+          const aiMessage = `🤖 <b>[미등록 퀴즈 AI 추천 정답]</b>\n\n<pre><code class="language-text">${escapeHtml(aiAnswer.trim())}</code></pre>`;
+          await sendTelegram(aiMessage, null, { parse_mode: 'HTML' }).catch((err) => {
+            console.error('[seminar_quiz] 미등록 퀴즈 AI 답변 텔레그램 발송 실패:', err);
+          });
+        }
+      },
+    });
   }
 }
 
@@ -1099,18 +1102,20 @@ async function processSeminarQuiz(
       }
 
       // 심화설문 프롬프트 발송 후 Hermes AI 서버로 전송하여 응답값을 사용자에게 한번 더 전송
+      // (AI 요청/발송은 백그라운드 큐에서 실행하여 심화설문 처리가 응답 대기로 멈추지 않도록 한다)
       if (rawPromptText) {
-        try {
-          const aiAnswer = await requestHermesAiSurveyAnswer(rawPromptText, '심화설문 AI 추천 답변');
-          if (aiAnswer && aiAnswer.trim()) {
-            const aiTelegramText = `🤖 <b>[심화설문 AI 추천 답변]</b>\n\n<pre><code class="language-text">${escapeHtml(aiAnswer.trim())}</code></pre>`;
-            await sendTelegram(aiTelegramText, null, { parse_mode: 'HTML' }).catch((err) => {
-              console.error('[seminar_quiz] Hermes AI 답변 텔레그램 발송 실패:', err);
-            });
-          }
-        } catch (aiErr) {
-          console.warn('[seminar_quiz] Hermes AI 답변 생성/발송 실패:', aiErr);
-        }
+        enqueueLlmJob({
+          label: '심화설문 AI 추천 답변',
+          run: () => requestHermesAiSurveyAnswer(rawPromptText, '심화설문 AI 추천 답변'),
+          onResult: async (aiAnswer) => {
+            if (aiAnswer && aiAnswer.trim()) {
+              const aiTelegramText = `🤖 <b>[심화설문 AI 추천 답변]</b>\n\n<pre><code class="language-text">${escapeHtml(aiAnswer.trim())}</code></pre>`;
+              await sendTelegram(aiTelegramText, null, { parse_mode: 'HTML' }).catch((err) => {
+                console.error('[seminar_quiz] Hermes AI 답변 텔레그램 발송 실패:', err);
+              });
+            }
+          },
+        });
       }
 
       if (_hasUnknown) {

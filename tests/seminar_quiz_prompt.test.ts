@@ -5,8 +5,13 @@ import {
   requestHermesAiSurveyAnswer,
   HERMES_TIMEOUT_MS,
   generateUnknownQuizPromptText,
+  handleUnknownQuestions,
   type SurveyQuestionForPrompt,
+  type SurveyQuestion,
+  type QuizResult,
 } from '../src/tasks/seminar_quiz';
+import * as utilsModule from '../src/modules/utils';
+import { drainLlmQueue } from '../src/services/llm_queue';
 
 describe('formatAdvancedSurveyPrompt & generateAdvancedSurveyPromptText 단위 테스트', () => {
   it('질문 목록이 비어 있으면 빈 문자열을 반환한다', () => {
@@ -371,5 +376,75 @@ describe('Docple AI 프롬프트 생성 및 정답 파싱 단위 테스트', () 
 
     // Case 9: 문항 수 불일치 시 null
     expect(parseDocpleAiAnswerIndices('{"answers": [1]}', 2)).toBeNull();
+  });
+});
+
+describe('handleUnknownQuestions 백그라운드 AI 요청 테스트', () => {
+  const originalFetch = globalThis.fetch;
+
+  const questions: SurveyQuestion[] = [
+    {
+      questionNumber: 1,
+      questionText: '다음 중 당뇨병 1차 치료제는?',
+      options: [
+        { index: 1, text: '메트포르민', value: '1' },
+        { index: 2, text: '인슐린', value: '2' },
+      ],
+      inputType: 'radio',
+      isRequired: true,
+      marker: '[퀴즈]',
+      kind: 'quiz',
+    },
+  ];
+
+  const results: QuizResult[] = [
+    {
+      questionIndex: 1,
+      questionText: '다음 중 당뇨병 1차 치료제는?',
+      selectedIndex: null,
+      selectedText: null,
+      matchedKeyword: null,
+      multipleMatches: null,
+      marker: '[퀴즈]',
+      kind: 'quiz',
+    },
+  ];
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  afterEach(async () => {
+    await drainLlmQueue();
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  it('AI 응답을 기다리지 않고 미등록 퀴즈 안내만 발송한 채 먼저 반환한다', async () => {
+    let fetchResolved = false;
+    globalThis.fetch = vi.fn().mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      fetchResolved = true;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ choices: [{ message: { content: 'Q1: 1번이 정답입니다.' } }] }),
+      } as unknown as Response;
+    }) as unknown as typeof fetch;
+
+    const sendTelegramSpy = vi.spyOn(utilsModule, 'sendTelegram').mockResolvedValue(true);
+
+    await handleUnknownQuestions(questions, results);
+
+    // AI 응답 대기 없이 반환되었으므로(백그라운드 큐) 안내 메시지만 발송된 상태다
+    expect(fetchResolved).toBe(false);
+    expect(sendTelegramSpy).toHaveBeenCalledTimes(1);
+    expect(String(sendTelegramSpy.mock.calls[0][0])).toContain('족보에 없는 퀴즈');
+
+    await drainLlmQueue();
+
+    expect(fetchResolved).toBe(true);
+    expect(sendTelegramSpy).toHaveBeenCalledTimes(2);
+    expect(String(sendTelegramSpy.mock.calls[1][0])).toContain('[미등록 퀴즈 AI 추천 정답]');
   });
 });

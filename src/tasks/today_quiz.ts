@@ -11,6 +11,7 @@ import {
   type QuizQuestion,
 } from './seminar_quiz';
 import { getTodayVerifiedQuizAnswers } from '../modules/quiz_api';
+import { enqueueLlmJob } from '../services/llm_queue';
 
 const QUIZ_LIST_URLS = [
   'https://www.doctorville.co.kr/product/medicineList',
@@ -145,17 +146,19 @@ export async function notifyTodayQuizUnknownQuestions(
 
     const promptText = generateTodayQuizUnknownPromptText(productTitle, questions);
     if (promptText) {
-      try {
-        const aiAnswer = await requestHermesAiSurveyAnswer(promptText, '오늘의 퀴즈 AI 추천 정답');
-        if (aiAnswer && aiAnswer.trim()) {
-          const aiMessage = `🤖 <b>[오늘의 퀴즈 AI 추천 정답]</b>\n\n<pre><code class="language-text">${escapeHtml(aiAnswer.trim())}</code></pre>`;
-          await sendTelegram(aiMessage, null, { parse_mode: 'HTML' }).catch((err) => {
-            console.error('[today_quiz] 오늘의 퀴즈 AI 답변 텔레그램 발송 실패:', err);
-          });
-        }
-      } catch (aiErr) {
-        console.warn('[today_quiz] 오늘의 퀴즈 AI 답변 생성/발송 실패:', aiErr);
-      }
+      // AI 추천 정답 요청/발송은 백그라운드 큐에서 실행하여 퀴즈 작업이 응답 대기로 멈추지 않도록 한다
+      enqueueLlmJob({
+        label: '오늘의 퀴즈 AI 추천 정답',
+        run: () => requestHermesAiSurveyAnswer(promptText, '오늘의 퀴즈 AI 추천 정답'),
+        onResult: async (aiAnswer) => {
+          if (aiAnswer && aiAnswer.trim()) {
+            const aiMessage = `🤖 <b>[오늘의 퀴즈 AI 추천 정답]</b>\n\n<pre><code class="language-text">${escapeHtml(aiAnswer.trim())}</code></pre>`;
+            await sendTelegram(aiMessage, null, { parse_mode: 'HTML' }).catch((err) => {
+              console.error('[today_quiz] 오늘의 퀴즈 AI 답변 텔레그램 발송 실패:', err);
+            });
+          }
+        },
+      });
     }
   } catch (err) {
     console.error('[today_quiz] 족보 미등록 질문 파싱/알림 중 오류:', err);

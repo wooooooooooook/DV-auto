@@ -8,6 +8,7 @@ import { replyWithSplit } from '../../../modules/utils';
 import { getChannelMessagesByDate, getSeoulDateString } from '../../channel_message_repository';
 import { runShellCommand, runShellCommandWithAllowedExitCodes } from '../quiz_cheatsheet';
 import { requestHermesAiSurveyAnswer, HERMES_API_BASE_URL, HERMES_DEFAULT_MODEL } from '../../../tasks/seminar_quiz';
+import { enqueueLlmJob } from '../../../services/llm_queue';
 
 export function setupSystemCommands(adminBot: Telegraf): void {
   adminBot.command('schedules', (ctx) => {
@@ -278,22 +279,33 @@ export function setupSystemCommands(adminBot: Telegraf): void {
       );
 
       const startTime = Date.now();
+      // LLM 응답 대기 동안 명령어 핸들러가 멈추지 않도록 백그라운드 큐에서 실행하고,
+      // 응답이 도착하면 결과를 나중에 회신한다.
       // 명령어 핸들러가 직접 실패 안내 메시지를 회신하므로 중복 알림을 생략한다
-      const aiAnswer = await requestHermesAiSurveyAnswer(prompt, 'Hermes LLM 테스트', false);
-      const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(2);
+      enqueueLlmJob({
+        label: 'Hermes LLM 테스트',
+        run: () => requestHermesAiSurveyAnswer(prompt, 'Hermes LLM 테스트', false),
+        onResult: async (aiAnswer) => {
+          const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(2);
 
-      if (!aiAnswer) {
-        await replyWithSplit(
-          ctx,
-          `❌ [Hermes AI 테스트 실패] (${elapsedSec}s)\n\n서버 응답이 없거나 에러가 발생했습니다.\n- Endpoint: ${url}\n- Model: ${model}\n- API Key: ${hasApiKey ? '설정됨' : '미설정'}\n\nHERMES_AI_URL, HERMES_API_KEY 설정 및 Hermes 서버 상태를 확인해주세요.`,
-        );
-        return;
-      }
+          if (!aiAnswer) {
+            await replyWithSplit(
+              ctx,
+              `❌ [Hermes AI 테스트 실패] (${elapsedSec}s)\n\n서버 응답이 없거나 에러가 발생했습니다.\n- Endpoint: ${url}\n- Model: ${model}\n- API Key: ${hasApiKey ? '설정됨' : '미설정'}\n\nHERMES_AI_URL, HERMES_API_KEY 설정 및 Hermes 서버 상태를 확인해주세요.`,
+            );
+            return;
+          }
 
-      await replyWithSplit(
-        ctx,
-        `🤖 [Hermes AI 테스트 성공] (${elapsedSec}s)\n- Model: ${model}\n- Endpoint: ${url}\n\n📝 [질의 내용]\n${prompt}\n\n💡 [AI 응답]\n${aiAnswer}`,
-      );
+          await replyWithSplit(
+            ctx,
+            `🤖 [Hermes AI 테스트 성공] (${elapsedSec}s)\n- Model: ${model}\n- Endpoint: ${url}\n\n📝 [질의 내용]\n${prompt}\n\n💡 [AI 응답]\n${aiAnswer}`,
+          );
+        },
+        onError: async (err) => {
+          const message = err instanceof Error ? err.message : String(err);
+          await replyWithSplit(ctx, `❌ [Hermes AI 테스트 에러]: ${message}`);
+        },
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.error('LLM test command failed', err);

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Page } from 'playwright';
 import { processSeminarQuiz } from '../src/tasks/seminar_quiz';
 import * as utilsModule from '../src/modules/utils';
+import { drainLlmQueue } from '../src/services/llm_queue';
 
 describe('seminar_quiz 다중 페이지 탐색 및 제출하기 감지 테스트', () => {
   let sendTelegramSpy: ReturnType<typeof vi.spyOn>;
@@ -195,6 +196,8 @@ describe('seminar_quiz 다중 페이지 탐색 및 제출하기 감지 테스트
     });
 
     const result = await processSeminarQuiz(mockPage, '5642', true);
+    // AI 추천 답변 발송은 백그라운드 큐에서 처리되므로 완료될 때까지 대기한다
+    await drainLlmQueue();
     globalThis.fetch = originalFetch;
 
     expect(result.success).toBe(true);
@@ -209,28 +212,35 @@ describe('seminar_quiz 다중 페이지 탐색 및 제출하기 감지 테스트
     expect(clickedButtons).not.toContain('submit');
 
     // 텔레그램 심화설문 프롬프트 알림, AI 답변 알림, 미등록 퀴즈 알림, 미등록 퀴즈 AI 답변 전송 확인 (총 4회)
+    // AI 답변은 백그라운드 큐에서 발송되므로 전송 순서 대신 내용으로 찾는다
+    const findMsg = (marker: string): string => {
+      const call = sendTelegramSpy.mock.calls.find((c) => String(c[0]).includes(marker));
+      return String(call?.[0] ?? '');
+    };
+    const findOptions = (marker: string): Record<string, unknown> | undefined => {
+      const call = sendTelegramSpy.mock.calls.find((c) => String(c[0]).includes(marker));
+      return call?.[2] as Record<string, unknown> | undefined;
+    };
+
     expect(sendTelegramSpy).toHaveBeenCalledTimes(4);
-    const sentMsg1 = sendTelegramSpy.mock.calls[0]?.[0] as string;
-    expect(sentMsg1).toContain('[심화설문] 퀴즈 정답 추출 완료 (자동 제출 제외)');
+    const noticeMarker = '[심화설문] 퀴즈 정답 추출 완료 (자동 제출 제외)';
+    const sentMsg1 = findMsg(noticeMarker);
+    expect(sentMsg1).toContain(noticeMarker);
     expect(sentMsg1).toContain('<pre><code class="language-text">');
     expect(sentMsg1).toContain('10년 차 로컬의원');
     expect(sentMsg1).toContain('강의 내용에 만족하십니까?');
     expect(sentMsg1).toContain('향후 추가 희망 주제가 있으십니까?');
-    const sentOptions1 = sendTelegramSpy.mock.calls[0]?.[2] as Record<string, unknown> | undefined;
-    expect(sentOptions1?.parse_mode).toBe('HTML');
+    expect(findOptions(noticeMarker)?.parse_mode).toBe('HTML');
 
     expect(hermesFetchCalled).toBe(true);
-    const sentMsg2 = sendTelegramSpy.mock.calls[1]?.[0] as string;
+    const sentMsg2 = findMsg('[심화설문 AI 추천 답변]');
     expect(sentMsg2).toContain('[심화설문 AI 추천 답변]');
     expect(sentMsg2).toContain('10년 차 로컬의원 입장에서 강의 내용이 매우 유익했스빈다');
-    const sentOptions2 = sendTelegramSpy.mock.calls[1]?.[2] as Record<string, unknown> | undefined;
-    expect(sentOptions2?.parse_mode).toBe('HTML');
+    expect(findOptions('[심화설문 AI 추천 답변]')?.parse_mode).toBe('HTML');
 
-    const sentMsg3 = sendTelegramSpy.mock.calls[2]?.[0] as string;
-    expect(sentMsg3).toContain('족보에 없는 퀴즈');
+    expect(findMsg('족보에 없는 퀴즈')).toContain('족보에 없는 퀴즈');
 
-    const sentMsg4 = sendTelegramSpy.mock.calls[3]?.[0] as string;
-    expect(sentMsg4).toContain('[미등록 퀴즈 AI 추천 정답]');
+    expect(findMsg('[미등록 퀴즈 AI 추천 정답]')).toContain('[미등록 퀴즈 AI 추천 정답]');
   });
 
   it('일반설문: 1페이지에서 [다음] 클릭 -> 2페이지에서 [제출하기] 감지 시 루프 탈출 후 [제출하기]를 클릭한다', async () => {
@@ -257,6 +267,8 @@ describe('seminar_quiz 다중 페이지 탐색 및 제출하기 감지 테스트
     });
 
     const result = await processSeminarQuiz(mockPage, '9999', false);
+    // 백그라운드 큐에 남은 AI 작업이 있을 수 있으므로 종료 전에 비운다
+    await drainLlmQueue();
 
     expect(result.success).toBe(true);
     expect(result.hasQuizResult).toBe(true);
