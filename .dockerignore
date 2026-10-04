@@ -1,0 +1,11 @@
+node_modules
+dist
+data
+.git
+.github
+.env
+*.log
+screenshot
+coverage
+.vscode
+.idea

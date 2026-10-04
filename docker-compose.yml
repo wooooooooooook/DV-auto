@@ -1,0 +1,24 @@
+services:
+  dv-auto:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    container_name: dv-auto
+
+    restart: unless-stopped
+    init: true
+
+    env_file:
+      - .env
+
+    environment:
+      NODE_ENV: production
+      TZ: Asia/Seoul
+      HEADLESS: "true"
+      SQLITE_DB_PATH: /app/data/app.db
+
+    volumes:
+      - ./data:/app/data
+
+    stop_grace_period: 30s
