@@ -10,7 +10,7 @@
     "start": "node dist/core/main.js",
     "dev": "ts-node src/core/main.ts",
     "restart:app": "pnpm run build && systemctl restart doctorville-auto.service",
-    "update:app": "git pull && pnpm install --frozen-lockfile && pnpm run build && cp deploy/doctorville-auto.service /etc/systemd/system/ && systemctl daemon-reload && systemctl restart doctorville-auto.service",
+    "update:app": "bash deploy/update-app.sh",
     "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\"",
     "lint": "eslint .",
