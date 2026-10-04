@@ -46,7 +46,7 @@ export const adminCommands = [
   { command: 'test_llm', description: 'Hermes LLM 질의 및 연결 테스트 [프롬프트]' },
   { command: 'schedules', description: '스케줄된 작업 목록 확인' },
   { command: 'log', description: '최근 로그 확인' },
-  { command: 'update_app', description: '앱 업데이트 (시스템드: 빌드+재시작 / 도커: 재빌드 안내)' },
+  { command: 'update_app', description: '앱 업데이트 (시스템드: 빌드+재시작 / 도커: Portainer 재배포)' },
   { command: 'inspect', description: '페이지 요소 검사' },
   // 5. 공지방 메시지 관리
   { command: 'channel_messages', description: '공지방 메시지 ID 목록 조회 [날짜]' },

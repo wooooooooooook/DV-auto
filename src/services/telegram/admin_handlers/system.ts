@@ -7,6 +7,7 @@ import { inspect } from '../../../modules/inspect';
 import { replyWithSplit } from '../../../modules/utils';
 import { getChannelMessagesByDate, getSeoulDateString } from '../../channel_message_repository';
 import { isDockerEnv } from '../../../core/runtime_env';
+import { isPortainerConfigured, triggerPortainerStackRedeploy } from '../../portainer_client';
 import { runShellCommand, runShellCommandWithAllowedExitCodes } from '../quiz_cheatsheet';
 import { requestHermesAiSurveyAnswer, HERMES_API_BASE_URL, HERMES_DEFAULT_MODEL } from '../../../tasks/seminar_quiz';
 import { enqueueLlmJob } from '../../../services/llm_queue';
@@ -99,14 +100,34 @@ export function setupSystemCommands(adminBot: Telegraf): void {
     logger.info('User requested to run update_app', { from: ctx.from?.username });
 
     // 도커 컨테이너에서는 systemd/git 소스 트리가 없어 자체 재빌드가 불가능합니다.
-    // 호스트에서 재빌드·재시작 하도록 안내합니다.
+    // Portainer 가 설정되면 Portainer API 로 스택을 재배포하고, 아니면 호스트에서의 재빌드를 안내합니다.
     if (isDockerEnv()) {
+      if (isPortainerConfigured()) {
+        await replyWithSplit(
+          ctx,
+          '🔄 Portainer로 스택 업데이트(git pull + 빌드 + 재배포)를 요청합니다...\n' +
+            '재배포 중에는 컨테이너가 교체되어 이 채팅의 응답이 중단될 수 있습니다.\n' +
+            '(새 컨테이너의 "앱이 온라인 상태입니다" 메시지로 완료를 확인하세요)',
+        );
+        triggerPortainerStackRedeploy()
+          .then(async (message) => {
+            await replyWithSplit(ctx, `✅ Portainer 재배포 완료\n${message}`).catch(() => {});
+          })
+          .catch(async (error) => {
+            const message = error instanceof Error ? error.message : String(error);
+            logger.error('Portainer update_app failed', error);
+            await replyWithSplit(ctx, `❌ Portainer 업데이트 실패: ${message}`).catch(() => {});
+          });
+        return;
+      }
+
       await replyWithSplit(
         ctx,
         '🐳 도커 컨테이너 환경에서는 /update_app 으로 재빌드할 수 없습니다.\n' +
           '호스트 서버에서 아래 명령을 실행해주세요:\n\n' +
           'cd <프로젝트 디렉터리> && git pull && docker compose up -d --build\n\n' +
-          '재시작 시 현재 실행 중인 작업은 중단될 수 있습니다.',
+          '재시작 시 현재 실행 중인 작업은 중단될 수 있습니다.\n' +
+          '(Portainer 사용 시 PORTAINER_URL/PORTAINER_API_KEY 를 설정하면 봇에서 자동 업데이트됩니다)',
       );
       return;
     }
@@ -395,7 +416,7 @@ export function setupSystemCommands(adminBot: Telegraf): void {
 - /test_llm [프롬프트]: Hermes LLM 연결 및 질의 테스트 (/llm 으로도 실행 가능)
 - /schedules: 스케줄된 작업 목록을 확인합니다.
 - /log [수량]: 최근 로그를 가져옵니다. (기본값: 20, 도커에서는 인메모리 로그)
-- /update_app: 앱 업데이트를 실행합니다. (시스템드: 빌드+재시작 / 도커: 호스트 재빌드 안내)
+- /update_app: 앱 업데이트를 실행합니다. (시스템드: 빌드+재시작 / 도커: Portainer 재배포 또는 호스트 안내)
 - /inspect <url> <selector> [waitUntil]: 지정한 URL에서 셀렉터에 해당하는 요소를 검사하고 스크린샷을 전송합니다.
 
 사용 예: /inspect https://example.com "div.article" networkidle`;

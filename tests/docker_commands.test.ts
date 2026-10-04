@@ -208,6 +208,7 @@ describe('/update_app 명령어: 도커 vs 시스템드 분기', () => {
 
   it('도커 환경에서는 셸 명령 없이 호스트 재빌드 안내를 회신한다', async () => {
     process.env.DV_DOCKER = '1';
+    delete process.env.PORTAINER_URL;
     const execSpy = vi.spyOn(cheatsheetModule, 'runShellCommand');
 
     const handler = commandHandlers.get('update_app')!;

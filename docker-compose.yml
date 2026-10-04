@@ -10,7 +10,7 @@ services:
     init: true
 
     environment:
-      # �ڷ��׷� /log��/update_app ������ ��Ŀ �б� ���� �÷���
+      # 텔레그램 /log·/update_app 명령의 도커 분기 감지 플래그
       DV_DOCKER: 1
 
       DV_USER: ${DV_USER}
@@ -42,9 +42,18 @@ services:
       
       HERMES_API_KEY: ${HERMES_API_KEY}
 
-      # ���� ��� git ����ȭ (��Ŀ): ����ȭ ����Ҹ� ������ �����ϰ� PAT �� push
+      # 퀴즈 등록 git 동기화 (도커): 동기화 저장소를 볼륨에 유지하고 PAT 로 push
       DV_GIT_REPO_DIR: /app/runtime-data/repo
       GITHUB_TOKEN: ${GITHUB_TOKEN}
+
+      # Portainer 스택 업데이트 (/update_app). PORTAINER_URL 미설정 시 기존 안내 메시지로 동작
+      PORTAINER_URL: ${PORTAINER_URL}
+      PORTAINER_API_KEY: ${PORTAINER_API_KEY}
+      PORTAINER_USERNAME: ${PORTAINER_USERNAME}
+      PORTAINER_PASSWORD: ${PORTAINER_PASSWORD}
+      PORTAINER_ENDPOINT_ID: ${PORTAINER_ENDPOINT_ID}
+      PORTAINER_STACK_ID: ${PORTAINER_STACK_ID}
+      PORTAINER_STACK_NAME: ${PORTAINER_STACK_NAME}
     volumes:
       - /opt/dv-auto/data:/app/runtime-data
 
