@@ -1,6 +1,8 @@
 node_modules
 dist
-data
+data/*
+!data/
+!data/quiz.json
 .git
 .github
 .env

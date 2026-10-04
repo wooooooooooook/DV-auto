@@ -39,6 +39,6 @@ services:
       
       HERMES_API_KEY: ${HERMES_API_KEY}
     volumes:
-      - /opt/dv-auto/data:/app/data
+      - /opt/dv-auto/data:/app/runtime-data
 
     stop_grace_period: 30s

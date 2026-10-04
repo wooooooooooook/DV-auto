@@ -14,14 +14,15 @@ RUN pnpm exec playwright install --with-deps chromium
 
 COPY tsconfig.json ./
 COPY src ./src
+COPY data/quiz.json ./data/quiz.json
 
 RUN pnpm run build
 
-RUN mkdir -p /app/data
+RUN mkdir -p /app/runtime-data
 
 ENV NODE_ENV=production
 ENV TZ=Asia/Seoul
 ENV HEADLESS=true
-ENV SQLITE_DB_PATH=/app/data/app.db
+ENV SQLITE_DB_PATH=/app/runtime-data/app.db
 
 CMD ["node", "dist/core/main.js"]
