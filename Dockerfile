@@ -14,7 +14,7 @@ RUN pnpm exec playwright install --with-deps chromium
 
 COPY tsconfig.json ./
 COPY src ./src
-COPY data ./data
+COPY data/quiz.json ./data/quiz.json
 
 RUN pnpm run build
 
