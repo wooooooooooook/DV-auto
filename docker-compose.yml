@@ -10,6 +10,9 @@ services:
     init: true
 
     environment:
+      # 텔레그램 /log·/update_app 명령의 도커 분기 감지 플래그
+      DV_DOCKER: 1
+
       DV_USER: ${DV_USER}
       DV_PASS: ${DV_PASS}
       INTERMD_USER_ID: ${INTERMD_USER_ID}

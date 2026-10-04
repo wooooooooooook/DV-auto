@@ -6,6 +6,7 @@ import * as scheduler from '../../../core/scheduler';
 import { inspect } from '../../../modules/inspect';
 import { replyWithSplit } from '../../../modules/utils';
 import { getChannelMessagesByDate, getSeoulDateString } from '../../channel_message_repository';
+import { isDockerEnv } from '../../../core/runtime_env';
 import { runShellCommand, runShellCommandWithAllowedExitCodes } from '../quiz_cheatsheet';
 import { requestHermesAiSurveyAnswer, HERMES_API_BASE_URL, HERMES_DEFAULT_MODEL } from '../../../tasks/seminar_quiz';
 import { enqueueLlmJob } from '../../../services/llm_queue';
@@ -40,6 +41,25 @@ export function setupSystemCommands(adminBot: Telegraf): void {
     }
 
     logger.info(`User requested to fetch recent ${lineCount} logs`, { from: ctx.from?.username });
+
+    // 도커 컨테이너에는 systemd/journalctl 이 없어 인메모리 로그 버퍼로 대체합니다
+    if (isDockerEnv()) {
+      try {
+        const lines = logger.getRecentLogs(lineCount);
+        let message = `로그 결과 (${lines.length}줄, 인메모리 버퍼)`;
+        if (lines.length > 0) {
+          message += `\n\nstdout:\n${lines.join('\n')}`;
+        } else {
+          message += '\n\n출력된 로그가 없습니다.';
+        }
+        await replyWithSplit(ctx, message);
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        logger.error('log fetch failed', e);
+        await replyWithSplit(ctx, `로그 가져오기 실패: ${message}`);
+      }
+      return;
+    }
 
     try {
       await replyWithSplit(ctx, `최근 ${lineCount}개 로그를 불러옵니다... (최대 5초)`);
@@ -77,6 +97,20 @@ export function setupSystemCommands(adminBot: Telegraf): void {
 
   adminBot.command('update_app', async (ctx) => {
     logger.info('User requested to run update_app', { from: ctx.from?.username });
+
+    // 도커 컨테이너에서는 systemd/git 소스 트리가 없어 자체 재빌드가 불가능합니다.
+    // 호스트에서 재빌드·재시작 하도록 안내합니다.
+    if (isDockerEnv()) {
+      await replyWithSplit(
+        ctx,
+        '🐳 도커 컨테이너 환경에서는 /update_app 으로 재빌드할 수 없습니다.\n' +
+          '호스트 서버에서 아래 명령을 실행해주세요:\n\n' +
+          'cd <프로젝트 디렉터리> && git pull && docker compose up -d --build\n\n' +
+          '재시작 시 현재 실행 중인 작업은 중단될 수 있습니다.',
+      );
+      return;
+    }
+
     try {
       await replyWithSplit(
         ctx,
@@ -360,8 +394,8 @@ export function setupSystemCommands(adminBot: Telegraf): void {
 ⚙️ 시스템 & 관리:
 - /test_llm [프롬프트]: Hermes LLM 연결 및 질의 테스트 (/llm 으로도 실행 가능)
 - /schedules: 스케줄된 작업 목록을 확인합니다.
-- /log [수량]: 최근 로그를 가져옵니다. (기본값: 20)
-- /update_app: pnpm update:app 명령어를 실행합니다. (서버 권한 필요, 재시작으로 응답 중단 가능)
+- /log [수량]: 최근 로그를 가져옵니다. (기본값: 20, 도커에서는 인메모리 로그)
+- /update_app: 앱 업데이트를 실행합니다. (시스템드: 빌드+재시작 / 도커: 호스트 재빌드 안내)
 - /inspect <url> <selector> [waitUntil]: 지정한 URL에서 셀렉터에 해당하는 요소를 검사하고 스크린샷을 전송합니다.
 
 사용 예: /inspect https://example.com "div.article" networkidle`;
