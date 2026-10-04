@@ -17,9 +17,9 @@ services:
       NODE_ENV: production
       TZ: Asia/Seoul
       HEADLESS: "true"
-      SQLITE_DB_PATH: /app/data/app.db
+      SQLITE_DB_PATH: /app/runtime-data/app.db
 
     volumes:
-      - /opt/dv-auto/data:/app/data
+      - /opt/dv-auto/data:/app/runtime-data
 
     stop_grace_period: 30s
