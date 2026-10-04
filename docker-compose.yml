@@ -12,13 +12,32 @@ services:
     environment:
       DV_USER: ${DV_USER}
       DV_PASS: ${DV_PASS}
+      INTERMD_USER_ID: ${INTERMD_USER_ID}
+      INTERMD_USER_PW: ${INTERMD_USER_PW}
+
+      KEYMEDI_USER: ${KEYMEDI_USER}
+      KEYMEDI_PASS: ${KEYMEDI_PASS}
+      HMP_USER: ${HMP_USER}
+      HMP_PASS: ${HMP_PASS}
+      DOCPLE_USER: ${DOCPLE_USER}
+      DOCPLE_PASS: ${DOCPLE_PASS}
+      MEDIGATE_USER: ${MEDIGATE_USER}
+      MEDIGATE_PASS: ${MEDIGATE_PASS}
+
+      USER_NAME: ${USER_NAME}
+      USER_PHONE_1: ${USER_PHONE_1}
+      USER_PHONE_2: ${USER_PHONE_2}
+      USER_PHONE_3: ${USER_PHONE_3}
+
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
-      NODE_ENV: production
-      TZ: Asia/Seoul
-      HEADLESS: "true"
-      SQLITE_DB_PATH: /app/data/app.db
 
+      NOTICE_BOT_TOKEN: ${NOTICE_BOT_TOKEN}
+      NOTICE_CHANNEL_I: ${NOTICE_CHANNEL_I}
+
+      HEADLESS: ${HEADLESS}
+      
+      HERMES_API_KEY: ${HERMES_API_KEY}
     volumes:
       - /opt/dv-auto/data:/app/data
 
