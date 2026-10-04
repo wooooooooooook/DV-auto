@@ -9,16 +9,17 @@ services:
     restart: unless-stopped
     init: true
 
-    env_file:
-      - .env
-
     environment:
+      DV_USER: ${DV_USER}
+      DV_PASS: ${DV_PASS}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
       NODE_ENV: production
       TZ: Asia/Seoul
       HEADLESS: "true"
       SQLITE_DB_PATH: /app/data/app.db
 
     volumes:
-      - ./data:/app/data
+      - /opt/dv-auto/data:/app/data
 
     stop_grace_period: 30s
