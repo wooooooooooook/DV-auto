@@ -10,6 +10,7 @@ import {
   convertApiItemToSeminarListItem,
   isLowCapacitySeminar,
   ProcessState,
+  type FetchFutureSeminarsResult,
 } from '../modules/seminar_api';
 import * as storage from '../services/storage';
 import * as logger from '../services/logger';
@@ -423,6 +424,60 @@ export type SyncSeminarsResult = TaskResult & {
   hasApplyTarget?: boolean;
 };
 
+/**
+ * 세션 만료를 복구하기 위해 Playwright 브라우저를 띄워 로그인한다.
+ * 성공하면 cookies.json 이 갱신되므로 이후 HTTP 호출이 새 쿠키를 사용한다.
+ */
+async function refreshSessionByBrowser(): Promise<boolean> {
+  let browser: Awaited<ReturnType<(typeof import('playwright'))['chromium']['launch']>> | undefined;
+  try {
+    const { chromium } = await import('playwright');
+    const HEADLESS = (process.env.HEADLESS || 'true').toLowerCase() === 'true';
+    browser = await chromium.launch({ headless: HEADLESS, args: ['--no-sandbox'] });
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await ensureLoggedIn({ page, context });
+      return true;
+    } finally {
+      await page.close().catch(() => {});
+      await context.close().catch(() => {});
+    }
+  } catch (error) {
+    logger.error('세미나 목록 갱신: 세션 갱신용 재로그인 실패', error);
+    return false;
+  } finally {
+    await browser?.close().catch(() => {});
+  }
+}
+
+/**
+ * 세미나 목록 API 를 호출하되, 세션 만료면 재로그인 후 1회 재시도한다.
+ *
+ * fetchMainFutureSeminars 는 httpGet + 저장된 쿠키만 쓰므로 스스로 로그인하지 못한다.
+ * 로그인 태스크도 cron 에 등록되어 있지 않아, 다른 태스크가 우연히 로그인해 세션을
+ * 갱신해 주지 않으면 세션이 만료된 상태로 목록 갱신이 실패하고, 자가 복구되지 않는다.
+ */
+async function fetchMainFutureWithRelogin(): Promise<FetchFutureSeminarsResult> {
+  const first = await fetchMainFutureSeminars();
+  if (first.success || !first.isAuthExpired) {
+    return first;
+  }
+
+  logger.warn('세미나 목록 API 세션 만료 감지. 재로그인 후 1회 재시도합니다.');
+  await sendTelegram('🔒 세션 만료로 세미나 목록 갱신 실패. 자동 재로그인을 시도합니다...').catch(() => {});
+
+  if (!(await refreshSessionByBrowser())) {
+    return first;
+  }
+
+  const retried = await fetchMainFutureSeminars();
+  if (!retried.success && retried.isAuthExpired) {
+    logger.error('재로그인 후에도 세미나 목록 API 가 세션 만료 응답을 반환했습니다.');
+  }
+  return retried;
+}
+
 export async function syncSeminars(options: ApplySeminarOptions = {}): Promise<SyncSeminarsResult> {
   const {
     notifyNewSeminarsToChannel = true,
@@ -435,7 +490,7 @@ export async function syncSeminars(options: ApplySeminarOptions = {}): Promise<S
     let normalizedCurrentSeminars: SeminarListItem[] = [];
     const referenceDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
 
-    const apiRes = await fetchMainFutureSeminars();
+    const apiRes = await fetchMainFutureWithRelogin();
     if (!apiRes.success) {
       if (apiRes.isAuthExpired) {
         const msg = '🔒 세션이 만료되었습니다. 로그인이 필요합니다.';

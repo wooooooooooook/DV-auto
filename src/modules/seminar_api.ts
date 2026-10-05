@@ -445,6 +445,19 @@ export async function fetchMainFutureSeminars(
       };
     }
 
+    // 비로그인 상태에서는 HTTP 200 과 함께 빈 객체({}) 가 반환된다 (실측 확인).
+    // code 도 message 도 없어 위 401 판정을 모두 빠져나가고, HTML 도 아니므로
+    // isAuthExpiredHtml() 도 걸리지 않는다. 그 결과 'API 응답 구조 이상' 으로
+    // 오인되어 세션 만료라는 사실이 사용자에게 전달되지 않는다.
+    if (Object.keys(parsed).length === 0) {
+      return {
+        success: false,
+        isAuthExpired: true,
+        errorMessage: '세션이 만료되었습니다. 로그인이 필요합니다. (API 가 빈 객체를 반환했습니다)',
+        rawResponse: parsed,
+      };
+    }
+
     const items = parsed.futureSeminarList?.items;
     if (!Array.isArray(items)) {
       return {

@@ -325,7 +325,10 @@ describe('apply_seminar HTTP pre-check 및 조건부 Playwright 실행 테스트
       assert.strictEqual(resultE1.success, false);
       assert.ok((resultE1.message || '').includes('로그인이 필요합니다'));
       assert.strictEqual(safeGotoCallCount, 0, 'safeGoto should NOT be called on AUTH_EXPIRED');
-      assert.strictEqual(browserLaunchCount, 0, 'Chromium should NOT be launched on AUTH_EXPIRED');
+      // 세션 만료 시 재로그인 폴백이 브라우저를 정확히 1회 띄운 뒤 1회 재시도한다.
+      // (요청으로 추가된 자동 복구. 이전 계약인 '브라우저 미기동' 에서 변경되었으며,
+      //  무제한 재시도 없이 1회로 제한되는지 함께 검증한다)
+      assert.strictEqual(browserLaunchCount, 1, 'Chromium should be launched exactly once for re-login');
 
       // E-2: 일반 API 오류 시 즉시 실패 반환
       fetchMainFutureSpy.mockResolvedValue({
