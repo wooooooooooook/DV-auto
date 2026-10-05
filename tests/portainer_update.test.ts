@@ -185,10 +185,11 @@ describe('Portainer 클라이언트', () => {
       PORTAINER_ENDPOINT_ID: '1',
       PORTAINER_STACK_ID: '5',
     });
+    // 실 Portainer 응답은 소문자 키다: portainer.Pair 의 json 태그가 "name"/"value".
     const env = [
-      { Name: 'DV_USER', Value: 'user' },
-      { Name: 'DV_PASS', Value: 'pw' },
-      { Name: 'TELEGRAM_BOT_TOKEN', Value: 'token' },
+      { name: 'DV_USER', value: 'user' },
+      { name: 'DV_PASS', value: 'pw' },
+      { name: 'TELEGRAM_BOT_TOKEN', value: 'token' },
     ];
     fetchHandler = (url) => {
       if (url.endsWith('/api/stacks')) return { body: [{ Id: 5, Name: 'dv-auto', EndpointId: 1 }] };
@@ -220,7 +221,7 @@ describe('Portainer 클라이언트', () => {
       if (url.endsWith('/api/stacks')) return { body: [{ Id: 5, Name: 'dv-auto', EndpointId: 1 }] };
       if (url.endsWith('/api/stacks/5'))
         return {
-          body: { Env: [{ Name: 'A', Value: '1' }], CurrentDeploymentInfo: { ReferenceName: 'refs/heads/dev' } },
+          body: { Env: [{ name: 'A', value: '1' }], CurrentDeploymentInfo: { ReferenceName: 'refs/heads/dev' } },
         };
       return { body: {} };
     };
@@ -230,7 +231,7 @@ describe('Portainer 클라이언트', () => {
     const redeployCall = fetchMock.mock.calls.find((c) => String(c[0]).includes('/git/redeploy'));
     const payload = JSON.parse(String((redeployCall![1] as RequestInit).body));
     expect(payload.RepositoryReferenceName).toBe('refs/heads/dev');
-    expect(payload.Env).toEqual([{ Name: 'A', Value: '1' }]);
+    expect(payload.Env).toEqual([{ name: 'A', value: '1' }]);
   });
 
   it('비공개 저장소 자격증명이 있으면 재사용을 요청한다', async () => {
@@ -245,7 +246,7 @@ describe('Portainer 클라이언트', () => {
       if (url.endsWith('/api/stacks/5'))
         return {
           body: {
-            Env: [{ Name: 'A', Value: '1' }],
+            Env: [{ name: 'A', value: '1' }],
             GitConfig: { ReferenceName: 'refs/heads/main', Authentication: { Username: 'git-user' } },
           },
         };
@@ -298,7 +299,7 @@ describe('Portainer 클라이언트', () => {
     fetchHandler = (url) => {
       if (url.endsWith('/api/stacks')) return { body: [{ Id: 5, Name: 'dv-auto', EndpointId: 1 }] };
       if (url.endsWith('/api/stacks/5'))
-        return { body: { Env: [{ Name: 'A', Value: '1' }], GitConfig: { ReferenceName: '' } } };
+        return { body: { Env: [{ name: 'A', value: '1' }], GitConfig: { ReferenceName: '' } } };
       return { body: {} };
     };
 
@@ -324,6 +325,90 @@ describe('Portainer 클라이언트', () => {
 
     await expect(triggerPortainerStackRedeploy()).rejects.toThrow(/Env 필드를 읽지 못해 재배포를 중단/);
     expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('/git/redeploy'))).toBe(false);
+  });
+
+  it('환경변수 키를 아무것도 못 읽었으면 빈 배열을 보내지 않고 중단한다 (전멸 방지)', async () => {
+    // 회귀: 소문자 응답(name/value)을 PascalCase(Name)로 읽어 필터가 0건이 되고
+    // payload.Env = [] 가 전송돼 26개 환경변수가 통째로 삭제된 사건.
+    setPortainerEnv({
+      PORTAINER_URL: 'https://portainer.example:9443',
+      PORTAINER_API_KEY: 'k',
+      PORTAINER_ENDPOINT_ID: '1',
+      PORTAINER_STACK_ID: '5',
+    });
+    fetchHandler = (url) => {
+      if (url.endsWith('/api/stacks')) return { body: [{ Id: 5, Name: 'dv-auto', EndpointId: 1 }] };
+      if (url.endsWith('/api/stacks/5'))
+        return { body: { Env: [{ KEY: 'DV_USER', VAL: 'x' }], GitConfig: { ReferenceName: 'refs/heads/main' } } };
+      return { body: {} };
+    };
+
+    await expect(triggerPortainerStackRedeploy()).rejects.toThrow(/환경변수 1건을 읽지 못해 재배포를 중단/);
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('/git/redeploy'))).toBe(false);
+  });
+
+  it('대문자(PascalCase) 응답도 읽어서 소문자로 되돌려 보낸다', async () => {
+    setPortainerEnv({
+      PORTAINER_URL: 'https://portainer.example:9443',
+      PORTAINER_API_KEY: 'k',
+      PORTAINER_ENDPOINT_ID: '1',
+      PORTAINER_STACK_ID: '5',
+    });
+    fetchHandler = (url) => {
+      if (url.endsWith('/api/stacks')) return { body: [{ Id: 5, Name: 'dv-auto', EndpointId: 1 }] };
+      if (url.endsWith('/api/stacks/5'))
+        return { body: { Env: [{ Name: 'A', Value: '1' }], GitConfig: { ReferenceName: 'refs/heads/main' } } };
+      return { body: {} };
+    };
+
+    await triggerPortainerStackRedeploy();
+
+    const redeployCall = fetchMock.mock.calls.find((c) => String(c[0]).includes('/git/redeploy'));
+    const payload = JSON.parse(String((redeployCall![1] as RequestInit).body));
+    expect(payload.Env).toEqual([{ name: 'A', value: '1' }]);
+  });
+
+  it('redeploy 감사 기록이 컨테이너 교체와 무관하게 남는 파일에 기록된다', async () => {
+    // 인메모리 로그 버퍼와 stdout 는 컨테이너 교체와 함께 사라진다.
+    // 정작 필요한 순간(재배포 직전 상태)의 기록을 볼 수 없으므로 볼륨 파일에 남긴다.
+    const fs = await import('fs/promises');
+    const path = await import('path');
+    const os = await import('os');
+
+    const originalDbPath = process.env.SQLITE_DB_PATH;
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'portainer-audit-'));
+    process.env.SQLITE_DB_PATH = path.join(tmpDir, 'app.db');
+    const auditFile = path.join(tmpDir, 'portainer-redeploy-audit.log');
+
+    try {
+      setPortainerEnv({
+        PORTAINER_URL: 'https://portainer.example:9443',
+        PORTAINER_API_KEY: 'k',
+        PORTAINER_ENDPOINT_ID: '1',
+        PORTAINER_STACK_ID: '5',
+      });
+      fetchHandler = (url) => {
+        if (url.endsWith('/api/stacks')) return { body: [{ Id: 5, Name: 'dv-auto', EndpointId: 1 }] };
+        if (url.endsWith('/api/stacks/5'))
+          return { body: { Env: [{ name: 'DV_USER', value: 'secret' }], GitConfig: { ReferenceName: 'main' } } };
+        return { body: {} };
+      };
+
+      await triggerPortainerStackRedeploy();
+
+      const content = await fs.readFile(auditFile, 'utf8');
+      expect(content).toContain('"event":"preflight"');
+      expect(content).toContain('"hasEnvField":true');
+      expect(content).toContain('DV_USER');
+      expect(content).toContain('"event":"redeploy-request"');
+      expect(content).toContain('"event":"redeploy-response"');
+      // 환경변수 값은 비밀이라 기록되면 안 된다.
+      expect(content).not.toContain('secret');
+    } finally {
+      if (originalDbPath === undefined) delete process.env.SQLITE_DB_PATH;
+      else process.env.SQLITE_DB_PATH = originalDbPath;
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
   });
 
   it('git 기반 스택이 아니면(400) 유형 안내와 함께 실패한다', async () => {

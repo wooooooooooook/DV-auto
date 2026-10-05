@@ -1,4 +1,36 @@
+import fs from 'fs/promises';
+import path from 'path';
 import * as logger from './logger';
+
+/**
+ * Portainer 스택 재배포 감사 기록 파일 경로.
+ *
+ * in-memory 로그 버퍼와 stdout 는 컨테이너가 교체되면 사라져,
+ * 정작 필요한 순간(재배포 직전 상태)에 기록을 볼 수 없게 된다.
+ * 볼륨에 마운트된 데이터 디렉터리에 남겨 컨테이너 교체 후에도 확인한다.
+ * 환경변수 값은 비밀일 수 있으므로 기록하지 않는다.
+ */
+function getAuditLogPath(): string | null {
+  // SQLITE_DB_PATH 는 컨테이너에서 볼륨 경로(/app/runtime-data/app.db)로 설정된다.
+  // 그 경로 옆에 남겨야 컨테이너 교체 후에도 기록이 살아남는다.
+  // 설정이 없으면(테스트 등) 저장소 디렉터리에 파일을 남기지 않도록 기록을 생략한다.
+  const dbPath = process.env.SQLITE_DB_PATH?.trim();
+  if (!dbPath) return null;
+  return path.join(path.dirname(dbPath), 'portainer-redeploy-audit.log');
+}
+
+/** 감사 기록을 파일에 덧붙인다. 진단 목적이므로 실패해도 본 작업을 막지 않는다. */
+async function appendAuditLog(record: Record<string, unknown>): Promise<void> {
+  const target = getAuditLogPath();
+  if (!target) return;
+  const line = `${new Date().toISOString()} ${JSON.stringify(record)}`;
+  try {
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.appendFile(target, `${line}\n`, 'utf8');
+  } catch (error) {
+    logger.warn('Portainer 감사 기록 저장 실패', error);
+  }
+}
 
 /**
  * Portainer REST API 클라이언트.
@@ -145,12 +177,28 @@ async function requestJson<T>(path: string, init: RequestInit = {}, retryOn401 =
 type EndpointSummary = { Id: number; Name: string };
 type StackSummary = { Id: number; Name: string; EndpointId?: number };
 
-/** portainer.Pair 에 해당하는 환경변수 한 건. */
-type StackEnvPair = { Name: string; Value: string };
+/**
+ * portainer.Pair 에 해당하는 환경변수 한 건.
+ *
+ * Portainer 의 JSON 직렬화 태그는 소문자다: {"name":"FOO","value":"bar"}.
+ * (Go 의 `json:"name"` 태그) 과거에는 PascalCase 로 가정해서 필터가 0건이 되고
+ * payload.Env = [] 가 전송돼 스택 환경변수가 통째로 삭제되었다.
+ * 응답에 대문자가 섞여 있어도 읽을 수 있게 정규화해서 소문자로 되돌려 보낸다.
+ */
+type RawStackEnvPair = { name?: unknown; Name?: unknown; value?: unknown; Value?: unknown };
+type StackEnvPair = { name: string; value: string };
+
+function normalizeEnvPair(raw: RawStackEnvPair | null | undefined): StackEnvPair | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const name = typeof raw.name === 'string' ? raw.name : typeof raw.Name === 'string' ? raw.Name : '';
+  const value = typeof raw.value === 'string' ? raw.value : typeof raw.Value === 'string' ? raw.Value : '';
+  if (!name) return null;
+  return { name, value };
+}
 
 /** GET /api/stacks/{id} 응답에서 redeploy 보존용으로 필요한 부분. */
 type StackDetail = {
-  Env?: StackEnvPair[] | null;
+  Env?: RawStackEnvPair[] | null;
   GitConfig?: {
     ReferenceName?: string | null;
     Authentication?: { Username?: string | null } | null;
@@ -236,7 +284,18 @@ async function fetchStackPreserveSettings(stackId: number): Promise<{
   const detail = await requestJson<StackDetail>(`/api/stacks/${stackId}`);
 
   const hasEnvField = Boolean(detail) && Object.prototype.hasOwnProperty.call(detail, 'Env');
-  const env = Array.isArray(detail?.Env) ? detail.Env.filter((pair): pair is StackEnvPair => Boolean(pair?.Name)) : [];
+  const rawEnv = Array.isArray(detail?.Env) ? detail.Env : [];
+  const env = rawEnv.map((pair) => normalizeEnvPair(pair)).filter((pair): pair is StackEnvPair => pair !== null);
+
+  // Env 배열이 비어 있지 않은데 정규화 결과가 0건이면 필드를 못 읽은 것이다.
+  // 이 상태로 빈 배열을 보내면 Portainer 의 stack.Env = payload.Env 가 그대로
+  // 실행돼 스택 환경변수가 통째로 삭제된다. 반드시 중단한다.
+  if (rawEnv.length > 0 && env.length === 0) {
+    throw new PortainerApiError(
+      `스택 환경변수 ${rawEnv.length}건을 읽지 못해 재배포를 중단했습니다. ` +
+        '응답 형식이 예상과 달라 환경변수를 보존할 수 없습니다. Portainer 에서 스택 환경변수를 확인해 주세요.',
+    );
+  }
 
   // 구버전은 stack.GitConfig, 신버전은 CurrentDeploymentInfo 에 브랜치를 둔다.
   const legacyRef = detail?.GitConfig?.ReferenceName;
@@ -245,15 +304,17 @@ async function fetchStackPreserveSettings(stackId: number): Promise<{
   const referenceName = (legacyRef ?? currentRef ?? '').trim();
 
   // 진단용. 환경변수 값은 비밀일 수 있으므로 이름만 기록한다.
-  logger.info('Portainer 스택 배포 전 설정 조회', {
+  const audit = {
     stackId,
     responseKeys: detail ? Object.keys(detail) : [],
     hasEnvField,
     envCount: env.length,
-    envNames: env.map((pair) => pair.Name),
+    envNames: env.map((pair) => pair.name),
     hasReferenceNameField,
     referenceName: referenceName || '(비어 있음)',
-  });
+  };
+  logger.info('Portainer 스택 배포 전 설정 조회', audit);
+  await appendAuditLog({ event: 'preflight', ...audit });
 
   return {
     env,
@@ -321,14 +382,31 @@ export async function triggerPortainerStackRedeploy(): Promise<string> {
     sentEnvCount: settings.hasEnvField ? settings.env.length : '(미전송)',
     sentReferenceName: settings.hasReferenceNameField ? settings.referenceName || '(빈 값)' : '(미전송)',
   });
+  await appendAuditLog({
+    event: 'redeploy-request',
+    stackId: stack.id,
+    stackName: stack.name,
+    endpointId,
+    sentEnvCount: settings.hasEnvField ? settings.env.length : '(미전송)',
+    sentReferenceName: settings.hasReferenceNameField ? settings.referenceName || '(빈 값)' : '(미전송)',
+    payloadKeys: Object.keys(payload),
+  });
 
   try {
     await requestJson<unknown>(`/api/stacks/${stack.id}/git/redeploy?endpointId=${endpointId}`, {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
+    await appendAuditLog({ event: 'redeploy-response', stackId: stack.id, ok: true });
   } catch (error) {
     const status = error instanceof PortainerApiError ? error.status : undefined;
+    await appendAuditLog({
+      event: 'redeploy-response',
+      stackId: stack.id,
+      ok: false,
+      status,
+      error: error instanceof Error ? error.message : String(error),
+    });
     if (status === 409) {
       throw new PortainerApiError('이미 배포가 진행 중입니다. 잠시 후 다시 시도해주세요.', status);
     }
