@@ -1,0 +1,6 @@
+# 저장소 전체 줄바꿈을 LF 로 통일한다.
+#
+# core.autocrlf=true 였기 때문에 커밋 blob 은 LF 인데 워킹 트리만 CRLF 로
+# 체크아웃되고, prettier/eslint 가 "Delete ␍" 를 1436건 보고했다.
+# 이 규칙이 core.autocrlf 보다 우선하므로 이후 체크아웃부터 LF 로 나온다.
+* text=auto eol=lf
