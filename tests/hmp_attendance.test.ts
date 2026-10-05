@@ -432,4 +432,293 @@ describe('HMP Attendance & Capsules Workflow Tests', () => {
       expect(result.roulette?.spins[0].prizeName).toBe('100 캡슐');
     });
   });
+
+  describe('fetch 타임아웃 및 재시도 정책', () => {
+    it('읽기 요청(사용자 정보 조회)은 3초 타임아웃을 적용한다', async () => {
+      const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(JSON.stringify({ knowCommUserInfo: { memId: 'user' } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+      await new HmpClient().getUserInfo();
+
+      expect(timeoutSpy).toHaveBeenCalledWith(3_000);
+    });
+
+    it('상태 변경 요청(룰렛 회전)은 10초 타임아웃을 적용한다', async () => {
+      const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(JSON.stringify({ code: '800', winNum: '8' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+      await new HmpClient().spinRoulette('1', 'user', '6712');
+
+      expect(timeoutSpy).toHaveBeenCalledWith(10_000);
+    });
+
+    it('모든 요청에 AbortSignal 이 붙는다', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(JSON.stringify({ code: '800', winNum: '8' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+      await new HmpClient().spinRoulette('1', 'user', '6712');
+
+      const init = fetchSpy.mock.calls[0][1] as RequestInit;
+      expect(init.signal).toBeInstanceOf(AbortSignal);
+    });
+
+    it('멱등 요청은 일시적 서버 오류(HTTP 500) 후 재시도하여 성공한다', async () => {
+      const fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(new Response('', { status: 500 }))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ knowCommUserInfo: { memId: 'user' } }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        );
+
+      const res = await new HmpClient().getUserInfo();
+
+      expect(res.memId).toBe('user');
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('멱등 요청은 네트워크 오류 후 재시도하여 성공한다', async () => {
+      const fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockRejectedValueOnce(new TypeError('fetch failed'))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ knowCommUserInfo: { memId: 'user' } }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        );
+
+      const res = await new HmpClient().getUserInfo();
+
+      expect(res.memId).toBe('user');
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('멱등 요청은 최대 3회까지만 시도하고 마지막 오류를 그대로 전달한다', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('fetch failed'));
+
+      await expect(new HmpClient().getUserInfo()).rejects.toThrow('fetch failed');
+      expect(fetchSpy).toHaveBeenCalledTimes(3);
+    });
+
+    it('멱등 요청도 HTTP 4xx(429 제외)는 재시도하지 않는다', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('', { status: 404 }));
+
+      await expect(new HmpClient().getUserInfo()).rejects.toThrow('HTTP 404');
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('멱등 요청은 HTTP 429 면 재시도한다', async () => {
+      const fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(new Response('', { status: 429 }))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ knowCommUserInfo: { memId: 'user' } }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        );
+
+      const res = await new HmpClient().getUserInfo();
+
+      expect(res.memId).toBe('user');
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('상태 변경 요청(룰렛 회전)은 네트워크 오류에도 재시도하지 않는다', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('fetch failed'));
+
+      const res = await new HmpClient().spinRoulette('1', 'user', '6712');
+
+      expect(res.success).toBe(false);
+      expect(res.message).toContain('룰렛 참여 중 오류');
+      // 재시도했다면 당첨 결과가 두 번 소비될 수 있다.
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('상태 변경 요청(출석 캡슐 수령)은 네트워크 오류에도 재시도하지 않는다', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('fetch failed'));
+
+      await expect(
+        new HmpClient().submitAttendance({
+          cntntCd: '09',
+          cntntSeq: '6712',
+          pointTitle: '출석 체크 룰렛 이벤트',
+          bizGbn: '009',
+          loginCount: 5,
+          isAlreadyAttended: false,
+          maxLoginCount: 30,
+          month: '09',
+          memId: 'user',
+          phoneNo: '01012345678',
+          rouelette10: '',
+          rouelette20: '',
+          rouelette30: '',
+          win10: '',
+          win20: '',
+          win30: '',
+          win10Yn: '',
+          win20Yn: '',
+          win30Yn: '',
+        }),
+      ).rejects.toThrow('fetch failed');
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('재시도 대기 시간이 실패 횟수에 따라 지수적으로 증가한다', async () => {
+      const delays: number[] = [];
+      const delaySpy = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number) => {
+        delays.push(ms ?? 0);
+        fn();
+        return 0 as unknown as NodeJS.Timeout;
+      }) as typeof setTimeout);
+
+      vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('fetch failed'));
+      await expect(new HmpClient().getUserInfo()).rejects.toThrow('fetch failed');
+
+      expect(delays).toEqual([500, 1000]);
+      delaySpy.mockRestore();
+    });
+  });
+
+  describe('부분 성공 보존 (일일퀘스트 보고 정확도)', () => {
+    const baseInfo = {
+      cntntCd: '09',
+      cntntSeq: '6712',
+      pointTitle: '출석 체크 룰렛 이벤트',
+      bizGbn: '009',
+      loginCount: 5,
+      isAlreadyAttended: false,
+      maxLoginCount: 30,
+      month: '09',
+      memId: 'user',
+      phoneNo: '01012345678',
+      rouelette10: 'Y',
+      rouelette20: 'Y',
+      rouelette30: 'Y',
+      win10: '',
+      win20: '',
+      win30: '',
+      win10Yn: '',
+      win20Yn: '',
+      win30Yn: '',
+    };
+
+    it('출석 캡슐 수령 후 캡슐 조회가 실패해도 출석 성공으로 보고한다', async () => {
+      const client = new HmpClient();
+      vi.spyOn(client, 'login').mockResolvedValue(true);
+      vi.spyOn(client, 'getAttendanceInfo').mockResolvedValue({ ...baseInfo });
+      vi.spyOn(client, 'submitAttendance').mockResolvedValue({
+        status: 'SUCCESS',
+        point: 10,
+        message: '출석 캡슐 받기 완료 (+10 캡슐)',
+      });
+      vi.spyOn(client, 'runRouletteWorkflow').mockResolvedValue({ attempted: false, spins: [] });
+      vi.spyOn(client, 'getUserInfo').mockRejectedValue(new Error('The operation was aborted due to timeout'));
+
+      const result = await client.runAttendanceWorkflow('user', 'pass');
+
+      // 캡슐은 실제로 들어갔으므로 성공이어야 한다.
+      expect(result.success).toBe(true);
+      expect(result.attendance.status).toBe('SUCCESS');
+      expect(result.userInfo).toBeUndefined();
+      expect(result.degradedReason).toContain('캡슐 현황 조회 실패');
+    });
+
+    it('부분 성공 상태는 텔레그램 메시지에서 출석 실패로 표시되지 않는다', async () => {
+      const client = new HmpClient();
+      vi.spyOn(client, 'login').mockResolvedValue(true);
+      vi.spyOn(client, 'getAttendanceInfo').mockResolvedValue({ ...baseInfo });
+      vi.spyOn(client, 'submitAttendance').mockResolvedValue({
+        status: 'SUCCESS',
+        point: 10,
+        message: '출석 캡슐 받기 완료 (+10 캡슐)',
+      });
+      vi.spyOn(client, 'runRouletteWorkflow').mockResolvedValue({ attempted: false, spins: [] });
+      vi.spyOn(client, 'getUserInfo').mockRejectedValue(new Error('timeout'));
+
+      const result = await client.runAttendanceWorkflow('user', 'pass');
+      // run() 은 내부에서 새 HmpClient 를 생성하므로 프로토타입을 스파이한다.
+      vi.spyOn(HmpClient.prototype, 'runAttendanceWorkflow').mockResolvedValue(result);
+
+      const taskResult = await runHmpAttendance();
+
+      expect(taskResult.success).toBe(true);
+      expect(taskResult.message).not.toContain('❌ [HMP 출석체크 실패]');
+      expect(taskResult.message).toContain('✅ 출석 완료 (+10 캡슐)');
+      expect(taskResult.message).toContain('일부 처리 실패');
+      expect(taskResult.message).toContain('보유 캡슐: 조회 실패');
+    });
+
+    it('출석 후 상태 재조회가 실패해도 출석 성공으로 보고한다', async () => {
+      const client = new HmpClient();
+      vi.spyOn(client, 'login').mockResolvedValue(true);
+      vi.spyOn(client, 'getAttendanceInfo')
+        .mockResolvedValueOnce({ ...baseInfo })
+        .mockRejectedValue(new Error('timeout'));
+      vi.spyOn(client, 'submitAttendance').mockResolvedValue({
+        status: 'SUCCESS',
+        point: 10,
+        message: '출석 캡슐 받기 완료 (+10 캡슐)',
+      });
+      vi.spyOn(client, 'runRouletteWorkflow').mockResolvedValue({ attempted: false, spins: [] });
+      vi.spyOn(client, 'getUserInfo').mockResolvedValue({ memId: 'user', capsules: 100 });
+
+      const result = await client.runAttendanceWorkflow('user', 'pass');
+
+      expect(result.success).toBe(true);
+      expect(result.attendance.status).toBe('SUCCESS');
+      expect(result.degradedReason).toContain('출석 후 상태 재조회 실패');
+    });
+
+    it('로그인 실패는 여전히 전체 실패로 보고한다', async () => {
+      const client = new HmpClient();
+      vi.spyOn(client, 'login').mockResolvedValue(false);
+
+      const result = await client.runAttendanceWorkflow('user', 'pass');
+
+      expect(result.success).toBe(false);
+      expect(result.attendance.status).toBe('FAILED');
+    });
+
+    it('로그인 중 타임아웃은 전체 실패로 보고한다', async () => {
+      const client = new HmpClient();
+      vi.spyOn(client, 'login').mockRejectedValue(new Error('timeout'));
+
+      const result = await client.runAttendanceWorkflow('user', 'pass');
+
+      expect(result.success).toBe(false);
+      expect(result.attendance.status).toBe('FAILED');
+      expect(result.message).toContain('HMP 로그인 중 오류');
+    });
+
+    it('출석 캡슐 요청 자체가 실패하면 전체 실패로 보고한다', async () => {
+      const client = new HmpClient();
+      vi.spyOn(client, 'login').mockResolvedValue(true);
+      vi.spyOn(client, 'getAttendanceInfo').mockResolvedValue({ ...baseInfo });
+      vi.spyOn(client, 'submitAttendance').mockRejectedValue(new Error('timeout'));
+
+      const result = await client.runAttendanceWorkflow('user', 'pass');
+
+      expect(result.success).toBe(false);
+      expect(result.attendance.status).toBe('FAILED');
+      expect(result.message).toContain('출석 캡슐 요청 실패');
+    });
+  });
 });

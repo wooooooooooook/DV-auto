@@ -33,7 +33,8 @@ export function formatHmpAttendanceMessage(result: HmpAttendanceWorkflowResult):
     attendStatusText = `⚠️ 출석 실패 (${result.attendance.message})`;
   }
 
-  const currentCapsules = (result.userInfo?.capsules ?? 0).toLocaleString();
+  const currentCapsules =
+    result.userInfo?.capsules !== undefined ? `${result.userInfo.capsules.toLocaleString()} 캡슐` : '조회 실패';
 
   const lines = [
     '💊 [HMP 출석체크 & 캡슐 현황]',
@@ -41,6 +42,11 @@ export function formatHmpAttendanceMessage(result: HmpAttendanceWorkflowResult):
     `📅 일시: ${kstDateStr}`,
     `📌 출석 상태: ${attendStatusText}${accumulateDays}`,
   ];
+
+  // 출석은 성공했지만 후속 조회/처리가 실패한 경우. 실패로 뭉뚱그리면 실제 완료된 작업을 놓친다.
+  if (result.degradedReason) {
+    lines.push(`⚠️ 일부 처리 실패 (출석 결과에는 영향 없음): ${result.degradedReason}`);
+  }
 
   if (result.roulette && result.roulette.spins.length > 0) {
     const rouletteLines: string[] = [];
@@ -56,7 +62,7 @@ export function formatHmpAttendanceMessage(result: HmpAttendanceWorkflowResult):
     lines.push(`🎰 룰렛 결과:\n${rouletteLines.join('\n')}`);
   }
 
-  lines.push(`💰 보유 캡슐: ${currentCapsules} 캡슐`);
+  lines.push(`💰 보유 캡슐: ${currentCapsules}`);
 
   return lines.join('\n');
 }

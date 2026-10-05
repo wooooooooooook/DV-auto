@@ -81,6 +81,11 @@ export interface HmpAttendanceWorkflowResult {
   attendance: HmpAttendanceResult;
   loginCount?: number;
   roulette?: HmpRouletteWorkflowResult;
+  /**
+   * 출석 등 상태 변경은 이미 성공했지만, 그 뒤 조회/처리 단계가 실패한 사유.
+   * 이 경우에도 success 는 true 다. 실제로 완료된 작업이 실패로 보고되면 안 되기 때문.
+   */
+  degradedReason?: string;
 }
 
 export class HmpClient {
@@ -121,6 +126,78 @@ export class HmpClient {
     }
   }
 
+  /** 읽기 계열(GET, 조회, 로그인) 요청의 타임아웃. */
+  private static readonly READ_TIMEOUT_MS = 3_000;
+  /** 상태 변경 요청(출석 캡슐 수령, 룰렛 회전, 경품 신청)의 타임아웃. 정상 처리에 시간이 더 걸릴 수 있어 넉넉하게 잡는다. */
+  private static readonly WRITE_TIMEOUT_MS = 10_000;
+  /** 멱등 요청의 최대 시도 횟수 (최초 1회 + 재시도 2회). */
+  private static readonly MAX_ATTEMPTS = 3;
+  /** 재시도 대기 시간의 기준값. */
+  private static readonly RETRY_BASE_DELAY_MS = 500;
+  private static readonly RETRY_MAX_DELAY_MS = 5_000;
+
+  /**
+   * 지수 백오프 대기 시간. 1회째 실패 500ms, 2회째 1000ms, ...
+   * 고정 간격으로 재시도하면 부하가 걸린 서버에 같은 속도로 계속 부딪혀
+   * 429·5xx 를 악화시키므로 실패 횟수에 따라 간격을 늘린다.
+   * attempt 는 1부터 시작한다.
+   */
+  private static retryDelayMs(attempt: number): number {
+    return Math.min(HmpClient.RETRY_BASE_DELAY_MS * 2 ** (attempt - 1), HmpClient.RETRY_MAX_DELAY_MS);
+  }
+
+  /** 일시적인 서버 부하로 판단하여 재시도할 수 있는 응답 코드. */
+  private static isRetryableStatus(status: number): boolean {
+    return status === 408 || status === 425 || status === 429 || status >= 500;
+  }
+
+  private static delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * fetch 래퍼. 모든 요청에 타임아웃을 적용하고, 멱등 요청에 한해 재시도한다.
+   *
+   * 상태를 변경하는 요청(출석 캡슐 수령, 룰렛 회전, 경품 신청)은 재시도하지 않는다.
+   * 타임아웃은 요청이 실패했다는 뜻이 아니라 응답이 늦게 도착했다는 뜻이며,
+   * 서버는 이미 처리를 마쳤을 수 있다. 재시도하면 출석 캡슐 중복 수령이나
+   * 룰렛 두 회전처럼 되돌릴 수 없는 부작용이 생긴다.
+   */
+  private async fetchWithRetry(
+    url: string,
+    init: RequestInit,
+    { timeoutMs, retryable }: { timeoutMs: number; retryable: boolean },
+  ): Promise<Response> {
+    const maxAttempts = retryable ? HmpClient.MAX_ATTEMPTS : 1;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        // signal 은 시도마다 새로 만들어야 한다. 한 번 abort 된 signal 은 재사용할 수 없다.
+        const res = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+
+        if (attempt < maxAttempts && HmpClient.isRetryableStatus(res.status)) {
+          const wait = HmpClient.retryDelayMs(attempt);
+          logger.warn(
+            `[HMP] HTTP ${res.status} 응답으로 ${attempt}/${maxAttempts}차 시도 실패. ${wait}ms 후 재시도합니다.`,
+          );
+          await HmpClient.delay(wait);
+          continue;
+        }
+
+        return res;
+      } catch (error) {
+        if (attempt >= maxAttempts) throw error;
+
+        const msg = error instanceof Error ? error.message : String(error);
+        const wait = HmpClient.retryDelayMs(attempt);
+        logger.warn(`[HMP] 요청 오류(${msg})로 ${attempt}/${maxAttempts}차 시도 실패. ${wait}ms 후 재시도합니다.`);
+        await HmpClient.delay(wait);
+      }
+    }
+
+    throw new Error('HMP 요청 실패: 재시도를 모두 사용했으나 응답을 받지 못했습니다.');
+  }
+
   public async login(username?: string, password?: string): Promise<boolean> {
     const memId = username || process.env.HMP_USER;
     const passwd = password || process.env.HMP_PASS;
@@ -133,12 +210,16 @@ export class HmpClient {
 
     // 1. Initial GET to obtain session cookies (WMONID, JSESSIONID)
     logger.info('[HMP] 로그인 폼 접근 및 초기 세션 발급 중...');
-    const formRes = await fetch(`${this.baseUrl}/login/loginForm.hm`, {
-      method: 'GET',
-      headers: {
-        'User-Agent': this.userAgent,
+    const formRes = await this.fetchWithRetry(
+      `${this.baseUrl}/login/loginForm.hm`,
+      {
+        method: 'GET',
+        headers: {
+          'User-Agent': this.userAgent,
+        },
       },
-    });
+      { timeoutMs: HmpClient.READ_TIMEOUT_MS, retryable: true },
+    );
     this.extractCookies(formRes);
 
     // 2. Submit credentials
@@ -165,17 +246,21 @@ export class HmpClient {
       passwd,
     });
 
-    const loginRes = await fetch(`${this.baseUrl}/login/loginProcess.hm`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Cookie: this.getCookieHeader(),
-        'User-Agent': this.userAgent,
-        Referer: `${this.baseUrl}/login/loginForm.hm`,
+    const loginRes = await this.fetchWithRetry(
+      `${this.baseUrl}/login/loginProcess.hm`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Cookie: this.getCookieHeader(),
+          'User-Agent': this.userAgent,
+          Referer: `${this.baseUrl}/login/loginForm.hm`,
+        },
+        body: params.toString(),
+        redirect: 'manual',
       },
-      body: params.toString(),
-      redirect: 'manual',
-    });
+      { timeoutMs: HmpClient.READ_TIMEOUT_MS, retryable: true },
+    );
 
     this.extractCookies(loginRes);
 
@@ -191,16 +276,20 @@ export class HmpClient {
   }
 
   public async getUserInfo(): Promise<HmpUserInfo> {
-    const res = await fetch(`${this.baseUrl}/ajax/main/userInfo.hm`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-        Cookie: this.getCookieHeader(),
-        'User-Agent': this.userAgent,
-        Referer: `${this.baseUrl}/main/hmpMain.hm`,
-        'X-Requested-With': 'XMLHttpRequest',
+    const res = await this.fetchWithRetry(
+      `${this.baseUrl}/ajax/main/userInfo.hm`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+          Cookie: this.getCookieHeader(),
+          'User-Agent': this.userAgent,
+          Referer: `${this.baseUrl}/main/hmpMain.hm`,
+          'X-Requested-With': 'XMLHttpRequest',
+        },
       },
-    });
+      { timeoutMs: HmpClient.READ_TIMEOUT_MS, retryable: true },
+    );
 
     if (!res.ok) {
       throw new Error(`사용자 정보 조회 실패 (HTTP ${res.status})`);
@@ -245,14 +334,18 @@ export class HmpClient {
   }
 
   public async getAttendanceInfo(seq: string = '6712'): Promise<HmpAttendanceInfo> {
-    const res = await fetch(`${this.baseUrl}/event/attendanceRouletteMain.hm?seq=${seq}`, {
-      method: 'GET',
-      headers: {
-        Cookie: this.getCookieHeader(),
-        'User-Agent': this.userAgent,
-        Referer: `${this.baseUrl}/main/hmpMain.hm`,
+    const res = await this.fetchWithRetry(
+      `${this.baseUrl}/event/attendanceRouletteMain.hm?seq=${seq}`,
+      {
+        method: 'GET',
+        headers: {
+          Cookie: this.getCookieHeader(),
+          'User-Agent': this.userAgent,
+          Referer: `${this.baseUrl}/main/hmpMain.hm`,
+        },
       },
-    });
+      { timeoutMs: HmpClient.READ_TIMEOUT_MS, retryable: true },
+    );
 
     if (!res.ok) {
       throw new Error(`출석 이벤트 페이지 조회 실패 (HTTP ${res.status})`);
@@ -339,17 +432,22 @@ export class HmpClient {
       seq: info.cntntSeq,
     });
 
-    const res = await fetch(`${this.baseUrl}/ajax/event/capsuleHist.hm`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-        Cookie: this.getCookieHeader(),
-        'User-Agent': this.userAgent,
-        Referer: `${this.baseUrl}/event/attendanceRouletteMain.hm?seq=${info.cntntSeq}`,
-        'X-Requested-With': 'XMLHttpRequest',
+    // 출석 캡슐 수령은 상태를 바꾸므로 재시도하지 않는다.
+    const res = await this.fetchWithRetry(
+      `${this.baseUrl}/ajax/event/capsuleHist.hm`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+          Cookie: this.getCookieHeader(),
+          'User-Agent': this.userAgent,
+          Referer: `${this.baseUrl}/event/attendanceRouletteMain.hm?seq=${info.cntntSeq}`,
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+        body: params.toString(),
       },
-      body: params.toString(),
-    });
+      { timeoutMs: HmpClient.WRITE_TIMEOUT_MS, retryable: false },
+    );
 
     if (!res.ok) {
       return {
@@ -416,17 +514,22 @@ export class HmpClient {
     });
 
     try {
-      const res = await fetch(`${this.baseUrl}/ajax/event/rouelettePercentage.hm`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-          Cookie: this.getCookieHeader(),
-          'User-Agent': this.userAgent,
-          Referer: `${this.baseUrl}/event/attendanceRouletteMain.hm?seq=${seq}`,
-          'X-Requested-With': 'XMLHttpRequest',
+      // 룰렛 회전은 당첨 결과가 이미 확정되었을 수 있으므로 재시도하지 않는다.
+      const res = await this.fetchWithRetry(
+        `${this.baseUrl}/ajax/event/rouelettePercentage.hm`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+            Cookie: this.getCookieHeader(),
+            'User-Agent': this.userAgent,
+            Referer: `${this.baseUrl}/event/attendanceRouletteMain.hm?seq=${seq}`,
+            'X-Requested-With': 'XMLHttpRequest',
+          },
+          body: params.toString(),
         },
-        body: params.toString(),
-      });
+        { timeoutMs: HmpClient.WRITE_TIMEOUT_MS, retryable: false },
+      );
 
       if (!res.ok) {
         return {
@@ -486,17 +589,22 @@ export class HmpClient {
     });
 
     try {
-      const res = await fetch(`${this.baseUrl}/ajax/event/arSendGiftiShow.hm`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-          Cookie: this.getCookieHeader(),
-          'User-Agent': this.userAgent,
-          Referer: `${this.baseUrl}/event/attendanceRouletteMain.hm?seq=${seq}`,
-          'X-Requested-With': 'XMLHttpRequest',
+      // 경품 신청은 중복 제출을 막기 위해 재시도하지 않는다.
+      const res = await this.fetchWithRetry(
+        `${this.baseUrl}/ajax/event/arSendGiftiShow.hm`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+            Cookie: this.getCookieHeader(),
+            'User-Agent': this.userAgent,
+            Referer: `${this.baseUrl}/event/attendanceRouletteMain.hm?seq=${seq}`,
+            'X-Requested-With': 'XMLHttpRequest',
+          },
+          body: params.toString(),
         },
-        body: params.toString(),
-      });
+        { timeoutMs: HmpClient.WRITE_TIMEOUT_MS, retryable: false },
+      );
 
       if (!res.ok) {
         return { success: false, message: `기프티쇼 전송 실패 (HTTP ${res.status})` };
@@ -596,61 +704,100 @@ export class HmpClient {
   }
 
   public async runAttendanceWorkflow(username?: string, password?: string): Promise<HmpAttendanceWorkflowResult> {
+    const failResult = (message: string): HmpAttendanceWorkflowResult => ({
+      success: false,
+      message,
+      attendance: { status: 'FAILED', message },
+    });
+
+    // === 1단계: 로그인. 실패 시 아직 아무 요청도 하지 않은 상태이므로 전체 실패 ===
+    let loginSuccess: boolean;
     try {
-      const loginSuccess = await this.login(username, password);
-      if (!loginSuccess) {
-        return {
-          success: false,
-          message: 'HMP 로그인에 실패했습니다. 아이디 및 비밀번호를 확인해주세요.',
-          attendance: {
-            status: 'FAILED',
-            message: '로그인 실패',
-          },
-        };
-      }
-
-      // 1. Get attendance info
-      let attInfo = await this.getAttendanceInfo();
-      let attendanceResult: HmpAttendanceResult;
-
-      if (attInfo.isAlreadyAttended) {
-        logger.info('[HMP] 이미 당일 출석 캡슐 수령 완료 상태 확인');
-        attendanceResult = {
-          status: 'ALREADY',
-          message: '오늘 이미 출석 캡슐을 수령했습니다.',
-        };
-      } else {
-        logger.info('[HMP] 오늘의 출석 캡슐 받기 시도...');
-        attendanceResult = await this.submitAttendance(attInfo);
-        if (attendanceResult.status === 'SUCCESS') {
-          attInfo = await this.getAttendanceInfo(attInfo.cntntSeq);
-        }
-      }
-
-      // 2. 룰렛 참여 가능한 경우 룰렛 참여
-      const rouletteResult = await this.runRouletteWorkflow(attInfo);
-
-      // 3. Get latest user info & capsules
-      const userInfo = await this.getUserInfo();
-
-      return {
-        success: true,
-        userInfo,
-        attendance: attendanceResult,
-        loginCount: attInfo.loginCount,
-        roulette: rouletteResult,
-      };
+      loginSuccess = await this.login(username, password);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      logger.error('[HMP] 출석 워크플로우 수행 중 오류:', err);
-      return {
-        success: false,
-        message: msg,
-        attendance: {
-          status: 'FAILED',
-          message: msg,
-        },
-      };
+      logger.error('[HMP] 로그인 중 오류:', err);
+      return failResult(`HMP 로그인 중 오류: ${msg}`);
     }
+
+    if (!loginSuccess) {
+      return failResult('HMP 로그인에 실패했습니다. 아이디 및 비밀번호를 확인해주세요.');
+    }
+
+    // === 2단계: 출석 이벤트 정보 조회. 여기서 실패해도 아직 아무것도 실행되지 않은 상태 ===
+    let attInfo: HmpAttendanceInfo;
+    try {
+      attInfo = await this.getAttendanceInfo();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error('[HMP] 출석 정보 조회 중 오류:', err);
+      return failResult(`출석 이벤트 정보 조회 실패: ${msg}`);
+    }
+
+    let attendanceResult: HmpAttendanceResult;
+    if (attInfo.isAlreadyAttended) {
+      logger.info('[HMP] 이미 당일 출석 캡슐 수령 완료 상태 확인');
+      attendanceResult = {
+        status: 'ALREADY',
+        message: '오늘 이미 출석 캡슐을 수령했습니다.',
+      };
+    } else {
+      logger.info('[HMP] 오늘의 출석 캡슐 받기 시도...');
+      try {
+        attendanceResult = await this.submitAttendance(attInfo);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logger.error('[HMP] 출석 캡슐 요청 중 오류:', err);
+        return failResult(`출석 캡슐 요청 실패: ${msg}`);
+      }
+    }
+
+    // === 3단계 이후: 출석 상태가 이미 확정됨 ===
+    // 여기부터는 이후 조회/처리 단계가 실패해도 출석 결과 자체는 성공이다.
+    // 기존 구현처럼 전체를 하나의 try/catch로 감싸면 캡슐을 이미 수령했는데도
+    // '출석 실패'로 보고되어, 재실행하면 '이미 수령 완료'로 보여 원인을 알 수 없었다.
+    const degraded: string[] = [];
+    let loginCount = attInfo.loginCount;
+
+    if (attendanceResult.status === 'SUCCESS') {
+      try {
+        const refreshed = await this.getAttendanceInfo(attInfo.cntntSeq);
+        attInfo = refreshed;
+        loginCount = refreshed.loginCount;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logger.warn('[HMP] 출석 후 상태 재조회 실패 (출석 결과 자체는 정상):', msg);
+        degraded.push(`출석 후 상태 재조회 실패: ${msg}`);
+      }
+    }
+
+    // 4. 룰렛 참여 가능한 경우 룰렛 참여
+    let rouletteResult: HmpRouletteWorkflowResult | undefined;
+    try {
+      rouletteResult = await this.runRouletteWorkflow(attInfo);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn('[HMP] 룰렛 참여 중 오류 (출석 결과 자체는 정상):', msg);
+      degraded.push(`룰렛 참여 실패: ${msg}`);
+    }
+
+    // 5. 최신 사용자 정보 및 캡슐 조회
+    let userInfo: HmpUserInfo | undefined;
+    try {
+      userInfo = await this.getUserInfo();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn('[HMP] 사용자 정보 조회 실패 (출석 결과 자체는 정상):', msg);
+      degraded.push(`캡슐 현황 조회 실패: ${msg}`);
+    }
+
+    return {
+      success: true,
+      userInfo,
+      attendance: attendanceResult,
+      loginCount,
+      roulette: rouletteResult,
+      ...(degraded.length > 0 ? { degradedReason: degraded.join('\n') } : {}),
+    };
   }
 }
