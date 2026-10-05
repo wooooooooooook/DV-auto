@@ -9,9 +9,17 @@ import * as logger from './logger';
  * 확인된 API (Portainer 소스코드 기준):
  * - 인증: X-API-Key 헤더(권장) 또는 POST /api/auth → JWT
  * - PUT /api/stacks/{id}/git/redeploy?endpointId=N
- *   body: {"prune": false, "repullImageAndRedeploy": true}
+ *   body: {"prune": false, "repullImageAndRedeploy": true, "Env": [...], "RepositoryReferenceName": "..."}
  *   (swagger: "Pull and redeploy a stack via Git", 빈 body는 EOF 거부됨)
  * - 409 = 이미 배포 진행 중, 400 "not created from git" = git 스택 아님
+ * - GET /api/stacks/{id} → 스택 환경변수·브랜치 조회
+ *
+ * 중요: Env 와 RepositoryReferenceName 은 반드시 그대로 되돌려 보내야 한다.
+ * 구버전 Portainer(예: 2.21.4)는 redeploy payload 값을 stack 에 무조건 대입한다.
+ *   stack.Env = payload.Env
+ *   stack.GitConfig.ReferenceName = payload.RepositoryReferenceName
+ * 담지 않으면 둘 다 비어 스택 환경변수와 브랜치가 함께 사라진다.
+ * 신버전은 Env 를 있을 때만 대입하므로 되돌려 보내면 어느 버전에서도 안전하다.
  *
  * 필요한 환경변수:
  * - PORTAINER_URL (필수, 미설정 시 비활성화)
@@ -137,6 +145,19 @@ async function requestJson<T>(path: string, init: RequestInit = {}, retryOn401 =
 type EndpointSummary = { Id: number; Name: string };
 type StackSummary = { Id: number; Name: string; EndpointId?: number };
 
+/** portainer.Pair 에 해당하는 환경변수 한 건. */
+type StackEnvPair = { Name: string; Value: string };
+
+/** GET /api/stacks/{id} 응답에서 redeploy 보존용으로 필요한 부분. */
+type StackDetail = {
+  Env?: StackEnvPair[] | null;
+  GitConfig?: {
+    ReferenceName?: string | null;
+    Authentication?: { Username?: string | null } | null;
+  } | null;
+  CurrentDeploymentInfo?: { ReferenceName?: string | null } | null;
+};
+
 async function resolveEndpointId(): Promise<number> {
   const fromEnv = Number.parseInt(process.env.PORTAINER_ENDPOINT_ID?.trim() || '', 10);
   if (!Number.isNaN(fromEnv)) {
@@ -195,6 +216,29 @@ async function resolveStackId(endpointId: number): Promise<{ id: number; name: s
 }
 
 /**
+ * redeploy 전에 스택 설정을 읽는다.
+ *
+ * 구버전 Portainer 는 redeploy payload 의 Env/RepositoryReferenceName 을
+ * stack 에 무조건 대입해 버린다. 안 읽어 보내면 스택 환경변수와 브랜치가 함께 사라지므로,
+ * redeploy 직전 값을 그대로 다시 넣어 보존한다.
+ */
+async function fetchStackPreserveSettings(stackId: number): Promise<{
+  env: StackEnvPair[];
+  referenceName: string;
+  repositoryUsername: string;
+}> {
+  const detail = await requestJson<StackDetail>(`/api/stacks/${stackId}`);
+
+  // 신버전은 git 설정을 별도 source 로 옮겼고, 구버전은 stack.GitConfig 에 둔다.
+  const referenceName =
+    detail?.GitConfig?.ReferenceName?.trim() || detail?.CurrentDeploymentInfo?.ReferenceName?.trim() || '';
+
+  const env = Array.isArray(detail?.Env) ? detail.Env.filter((pair): pair is StackEnvPair => Boolean(pair?.Name)) : [];
+
+  return { env, referenceName, repositoryUsername: detail?.GitConfig?.Authentication?.Username?.trim() || '' };
+}
+
+/**
  * git 기반 Portainer 스택을 pull + 재빌드 + 재배포한다.
  * (컨테이너가 교체되므로 호출한 컨테이너는 재배포 도중 종료될 수 있다)
  *
@@ -204,12 +248,43 @@ export async function triggerPortainerStackRedeploy(): Promise<string> {
   const endpointId = await resolveEndpointId();
   const stack = await resolveStackId(endpointId);
 
-  logger.info('Portainer 스택 재배포 요청', { stackId: stack.id, stackName: stack.name, endpointId });
+  const settings = await fetchStackPreserveSettings(stack.id);
+
+  if (settings.env.length === 0) {
+    // 스택에 환경변수가 없으면 compose 의 ${VAR} 치환값이 전부 빈 문자열이 된다.
+    logger.warn('Portainer 스택에 환경변수가 없습니다. docker-compose.yml 의 ${VAR} 는 빈 값으로 배포됩니다.', {
+      stackId: stack.id,
+    });
+  }
+
+  const payload: Record<string, unknown> = {
+    prune: false,
+    repullImageAndRedeploy: true,
+  };
+  if (settings.env.length > 0) {
+    payload.Env = settings.env;
+  }
+  if (settings.referenceName) {
+    payload.RepositoryReferenceName = settings.referenceName;
+  }
+  if (settings.repositoryUsername) {
+    // 비밀번호는 비워 보낸다. 빈 값이면 저장된 자격증명을 유지한다.
+    payload.RepositoryAuthentication = true;
+    payload.RepositoryUsername = settings.repositoryUsername;
+  }
+
+  logger.info('Portainer 스택 재배포 요청', {
+    stackId: stack.id,
+    stackName: stack.name,
+    endpointId,
+    preservedEnvCount: settings.env.length,
+    referenceName: settings.referenceName || '(없음)',
+  });
 
   try {
     await requestJson<unknown>(`/api/stacks/${stack.id}/git/redeploy?endpointId=${endpointId}`, {
       method: 'PUT',
-      body: JSON.stringify({ prune: false, repullImageAndRedeploy: true }),
+      body: JSON.stringify(payload),
     });
   } catch (error) {
     const status = error instanceof PortainerApiError ? error.status : undefined;

@@ -162,10 +162,116 @@ describe('Portainer 클라이언트', () => {
     });
     fetchHandler = (url) => {
       if (url.endsWith('/api/stacks')) return { body: [{ Id: 5, Name: 'dv-auto', EndpointId: 1 }] };
+      if (url.endsWith('/api/stacks/5')) return { body: { Env: [], GitConfig: { ReferenceName: 'refs/heads/main' } } };
       return { status: 409, body: { message: 'conflict' } };
     };
 
     await expect(triggerPortainerStackRedeploy()).rejects.toThrow(/이미 배포가 진행 중/);
+  });
+
+  it('재배포 시 스택 환경변수가 사라지지 않도록 redeploy 페이로드에 그대로 실어 보낸다', async () => {
+    setPortainerEnv({
+      PORTAINER_URL: 'https://portainer.example:9443',
+      PORTAINER_API_KEY: 'k',
+      PORTAINER_ENDPOINT_ID: '1',
+      PORTAINER_STACK_ID: '5',
+    });
+    const env = [
+      { Name: 'DV_USER', Value: 'user' },
+      { Name: 'DV_PASS', Value: 'pw' },
+      { Name: 'TELEGRAM_BOT_TOKEN', Value: 'token' },
+    ];
+    fetchHandler = (url) => {
+      if (url.endsWith('/api/stacks')) return { body: [{ Id: 5, Name: 'dv-auto', EndpointId: 1 }] };
+      if (url.endsWith('/api/stacks/5')) return { body: { Env: env, GitConfig: { ReferenceName: 'refs/heads/main' } } };
+      return { body: {} };
+    };
+
+    await triggerPortainerStackRedeploy();
+
+    const redeployCall = fetchMock.mock.calls.find((c) => String(c[0]).includes('/git/redeploy'));
+    expect(redeployCall).toBeDefined();
+    const payload = JSON.parse(String((redeployCall![1] as RequestInit).body));
+
+    // 구버전 Portainer 는 stack.Env = payload.Env 로 무조건 덮어쓴다.
+    expect(payload.Env).toEqual(env);
+    // 브랜치도 무조건 덮어써지므로 되돌려 보내야 한다.
+    expect(payload.RepositoryReferenceName).toBe('refs/heads/main');
+    expect(payload.repullImageAndRedeploy).toBe(true);
+  });
+
+  it('신버전(git 설정이 CurrentDeploymentInfo 에만 있는 경우)에서도 브랜치를 보존한다', async () => {
+    setPortainerEnv({
+      PORTAINER_URL: 'https://portainer.example:9443',
+      PORTAINER_API_KEY: 'k',
+      PORTAINER_ENDPOINT_ID: '1',
+      PORTAINER_STACK_ID: '5',
+    });
+    fetchHandler = (url) => {
+      if (url.endsWith('/api/stacks')) return { body: [{ Id: 5, Name: 'dv-auto', EndpointId: 1 }] };
+      if (url.endsWith('/api/stacks/5'))
+        return {
+          body: { Env: [{ Name: 'A', Value: '1' }], CurrentDeploymentInfo: { ReferenceName: 'refs/heads/dev' } },
+        };
+      return { body: {} };
+    };
+
+    await triggerPortainerStackRedeploy();
+
+    const redeployCall = fetchMock.mock.calls.find((c) => String(c[0]).includes('/git/redeploy'));
+    const payload = JSON.parse(String((redeployCall![1] as RequestInit).body));
+    expect(payload.RepositoryReferenceName).toBe('refs/heads/dev');
+    expect(payload.Env).toEqual([{ Name: 'A', Value: '1' }]);
+  });
+
+  it('비공개 저장소 자격증명이 있으면 재사용을 요청한다', async () => {
+    setPortainerEnv({
+      PORTAINER_URL: 'https://portainer.example:9443',
+      PORTAINER_API_KEY: 'k',
+      PORTAINER_ENDPOINT_ID: '1',
+      PORTAINER_STACK_ID: '5',
+    });
+    fetchHandler = (url) => {
+      if (url.endsWith('/api/stacks')) return { body: [{ Id: 5, Name: 'dv-auto', EndpointId: 1 }] };
+      if (url.endsWith('/api/stacks/5'))
+        return {
+          body: {
+            Env: [{ Name: 'A', Value: '1' }],
+            GitConfig: { ReferenceName: 'refs/heads/main', Authentication: { Username: 'git-user' } },
+          },
+        };
+      return { body: {} };
+    };
+
+    await triggerPortainerStackRedeploy();
+
+    const redeployCall = fetchMock.mock.calls.find((c) => String(c[0]).includes('/git/redeploy'));
+    const payload = JSON.parse(String((redeployCall![1] as RequestInit).body));
+    expect(payload.RepositoryAuthentication).toBe(true);
+    expect(payload.RepositoryUsername).toBe('git-user');
+    // 비밀번호는 비워 보냅니다(빈 값이면 저장된 자격증명 유지).
+    expect(payload.RepositoryPassword).toBeUndefined();
+  });
+
+  it('스택에 환경변수가 하나도 없으면 Env 를 payload 에 넣지 않는다', async () => {
+    setPortainerEnv({
+      PORTAINER_URL: 'https://portainer.example:9443',
+      PORTAINER_API_KEY: 'k',
+      PORTAINER_ENDPOINT_ID: '1',
+      PORTAINER_STACK_ID: '5',
+    });
+    fetchHandler = (url) => {
+      if (url.endsWith('/api/stacks')) return { body: [{ Id: 5, Name: 'dv-auto', EndpointId: 1 }] };
+      if (url.endsWith('/api/stacks/5')) return { body: { Env: [], GitConfig: { ReferenceName: 'refs/heads/main' } } };
+      return { body: {} };
+    };
+
+    await triggerPortainerStackRedeploy();
+
+    const redeployCall = fetchMock.mock.calls.find((c) => String(c[0]).includes('/git/redeploy'));
+    const payload = JSON.parse(String((redeployCall![1] as RequestInit).body));
+    expect(payload.Env).toBeUndefined();
+    expect(payload.RepositoryReferenceName).toBe('refs/heads/main');
   });
 
   it('git 기반 스택이 아니면(400) 유형 안내와 함께 실패한다', async () => {
@@ -177,6 +283,7 @@ describe('Portainer 클라이언트', () => {
     });
     fetchHandler = (url) => {
       if (url.endsWith('/api/stacks')) return { body: [{ Id: 5, Name: 'dv-auto', EndpointId: 1 }] };
+      if (url.endsWith('/api/stacks/5')) return { body: { Env: [], GitConfig: { ReferenceName: 'refs/heads/main' } } };
       return { status: 400, body: { message: 'Stack is not created from git' } };
     };
 
