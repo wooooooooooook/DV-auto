@@ -218,24 +218,50 @@ async function resolveStackId(endpointId: number): Promise<{ id: number; name: s
 /**
  * redeploy 전에 스택 설정을 읽는다.
  *
- * 구버전 Portainer 는 redeploy payload 의 Env/RepositoryReferenceName 을
- * stack 에 무조건 대입해 버린다. 안 읽어 보내면 스택 환경변수와 브랜치가 함께 사라지므로,
- * redeploy 직전 값을 그대로 다시 넣어 보존한다.
+ * Portainer 는 2.39 까지 redeploy payload 값을 stack 에 무조건 대입한다.
+ *   stack.Env = payload.Env
+ *   stack.GitConfig.ReferenceName = payload.RepositoryReferenceName
+ * 따라서 필드를 '비어 있다' 는 이유로 빼면 안 된다. 빼면 그 필드가 nil 로 덮여
+ * 환경변수와 브랜치가 사라진다. 응답에 존재하는 필드는 있는 그대로(빈 배열이어도) 되돌려 보낸다.
+ *
+ * 반대로 응답에 필드가 아예 없으면 값을 되돌려 보낼 근거가 없으므로 redeploy 를 중단한다.
  */
 async function fetchStackPreserveSettings(stackId: number): Promise<{
   env: StackEnvPair[];
+  hasEnvField: boolean;
   referenceName: string;
+  hasReferenceNameField: boolean;
   repositoryUsername: string;
 }> {
   const detail = await requestJson<StackDetail>(`/api/stacks/${stackId}`);
 
-  // 신버전은 git 설정을 별도 source 로 옮겼고, 구버전은 stack.GitConfig 에 둔다.
-  const referenceName =
-    detail?.GitConfig?.ReferenceName?.trim() || detail?.CurrentDeploymentInfo?.ReferenceName?.trim() || '';
-
+  const hasEnvField = Boolean(detail) && Object.prototype.hasOwnProperty.call(detail, 'Env');
   const env = Array.isArray(detail?.Env) ? detail.Env.filter((pair): pair is StackEnvPair => Boolean(pair?.Name)) : [];
 
-  return { env, referenceName, repositoryUsername: detail?.GitConfig?.Authentication?.Username?.trim() || '' };
+  // 구버전은 stack.GitConfig, 신버전은 CurrentDeploymentInfo 에 브랜치를 둔다.
+  const legacyRef = detail?.GitConfig?.ReferenceName;
+  const currentRef = detail?.CurrentDeploymentInfo?.ReferenceName;
+  const hasReferenceNameField = legacyRef !== undefined || currentRef !== undefined;
+  const referenceName = (legacyRef ?? currentRef ?? '').trim();
+
+  // 진단용. 환경변수 값은 비밀일 수 있으므로 이름만 기록한다.
+  logger.info('Portainer 스택 배포 전 설정 조회', {
+    stackId,
+    responseKeys: detail ? Object.keys(detail) : [],
+    hasEnvField,
+    envCount: env.length,
+    envNames: env.map((pair) => pair.Name),
+    hasReferenceNameField,
+    referenceName: referenceName || '(비어 있음)',
+  });
+
+  return {
+    env,
+    hasEnvField,
+    referenceName,
+    hasReferenceNameField,
+    repositoryUsername: detail?.GitConfig?.Authentication?.Username?.trim() || '',
+  };
 }
 
 /**
@@ -250,21 +276,36 @@ export async function triggerPortainerStackRedeploy(): Promise<string> {
 
   const settings = await fetchStackPreserveSettings(stack.id);
 
+  // 되돌려 보낼 근거가 없으면 배포하지 않는다. 이 경로로 진행하면 Portainer 가
+  // payload 의 nil 을 stack.Env 에 그대로 대입해 환경변수를 비운다.
+  if (!settings.hasEnvField) {
+    throw new PortainerApiError(
+      '스택 설정에서 Env 필드를 읽지 못해 재배포를 중단했습니다. ' +
+        '계속 진행할 경우 환경변수가 삭제될 수 있습니다. Portainer 에서 스택 환경변수를 확인해 주세요.',
+    );
+  }
+
   if (settings.env.length === 0) {
-    // 스택에 환경변수가 없으면 compose 의 ${VAR} 치환값이 전부 빈 문자열이 된다.
-    logger.warn('Portainer 스택에 환경변수가 없습니다. docker-compose.yml 의 ${VAR} 는 빈 값으로 배포됩니다.', {
-      stackId: stack.id,
-    });
+    // 이미 비워진 상태를 그대로 되돌려 보낸다(더 나빠지지 않는다).
+    // 다만 docker-compose.yml 의 ${VAR} 가 전부 빈 문자열로 배포된다는 사실을 알린다.
+    logger.warn(
+      'Portainer 스택에 환경변수가 없습니다. docker-compose.yml 의 ${VAR} 는 빈 값으로 배포됩니다. ' +
+        'Portainer UI 에서 스택 환경변수를 다시 입력해야 합니다.',
+      { stackId: stack.id },
+    );
   }
 
   const payload: Record<string, unknown> = {
     prune: false,
     repullImageAndRedeploy: true,
   };
-  if (settings.env.length > 0) {
+
+  // 존재하는 필드는 빈 배열이어도 반드시 되돌려 보낸다.
+  // '비어 있다' 는 이유로 빼면 그 값이 nil 로 덮여 지워진다.
+  if (settings.hasEnvField) {
     payload.Env = settings.env;
   }
-  if (settings.referenceName) {
+  if (settings.hasReferenceNameField) {
     payload.RepositoryReferenceName = settings.referenceName;
   }
   if (settings.repositoryUsername) {
@@ -277,8 +318,8 @@ export async function triggerPortainerStackRedeploy(): Promise<string> {
     stackId: stack.id,
     stackName: stack.name,
     endpointId,
-    preservedEnvCount: settings.env.length,
-    referenceName: settings.referenceName || '(없음)',
+    sentEnvCount: settings.hasEnvField ? settings.env.length : '(미전송)',
+    sentReferenceName: settings.hasReferenceNameField ? settings.referenceName || '(빈 값)' : '(미전송)',
   });
 
   try {

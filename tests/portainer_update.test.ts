@@ -88,7 +88,8 @@ describe('Portainer 클라이언트', () => {
     });
     fetchHandler = (url) => {
       if (url.includes('/api/endpoints')) return { body: [{ Id: 1, Name: 'local' }] };
-      if (url.includes('/api/stacks/')) return { body: { Id: 7 } };
+      if (url.includes('/api/stacks/'))
+        return { body: { Id: 7, Env: [], GitConfig: { ReferenceName: 'refs/heads/main' } } };
       if (url.endsWith('/api/stacks')) return { body: [{ Id: 7, Name: 'dv-auto', EndpointId: 1 }] };
       return { body: {} };
     };
@@ -102,7 +103,14 @@ describe('Portainer 클라이언트', () => {
     // 끝의 / 를 정규화한 베이스 URL + endpointId 쿼리
     expect(String(redeployCall![0])).toBe('https://portainer.example:9443/api/stacks/7/git/redeploy?endpointId=1');
     expect(redeployCall![1]).toMatchObject({ method: 'PUT' });
-    expect(JSON.parse(String(redeployCall![1]!.body))).toEqual({ prune: false, repullImageAndRedeploy: true });
+    // Env/RepositoryReferenceName 을 빼면 Portainer 2.39 의 stack.Env = payload.Env 가
+    // nil 을 대입해 환경변수와 브랜치를 지운다. 둘 다 반드시 포함되어야 한다.
+    expect(JSON.parse(String(redeployCall![1]!.body))).toEqual({
+      prune: false,
+      repullImageAndRedeploy: true,
+      Env: [],
+      RepositoryReferenceName: 'refs/heads/main',
+    });
     const headers = redeployCall![1]!.headers as Record<string, string>;
     expect(headers['X-API-Key']).toBe('secret-key');
     expect(headers['Authorization']).toBeUndefined();
@@ -117,7 +125,8 @@ describe('Portainer 클라이언트', () => {
     fetchHandler = (url) => {
       if (url.endsWith('/api/auth')) return { body: { jwt: 'jwt-token-1' } };
       if (url.includes('/api/endpoints')) return { body: [{ Id: 2, Name: 'local' }] };
-      if (url.includes('/api/stacks/')) return { body: { Id: 3 } };
+      if (url.includes('/api/stacks/'))
+        return { body: { Id: 3, Env: [], GitConfig: { ReferenceName: 'refs/heads/main' } } };
       if (url.endsWith('/api/stacks')) return { body: [{ Id: 3, Name: 'only-stack', EndpointId: 2 }] };
       return { body: {} };
     };
@@ -143,7 +152,7 @@ describe('Portainer 클라이언트', () => {
     });
     fetchHandler = (url) => {
       if (url.endsWith('/api/stacks')) return { body: [{ Id: 9, Name: 'dv-auto', EndpointId: 3 }] };
-      return { body: { Id: 9 } };
+      return { body: { Id: 9, Env: [], GitConfig: { ReferenceName: 'refs/heads/main' } } };
     };
 
     await triggerPortainerStackRedeploy();
@@ -253,7 +262,9 @@ describe('Portainer 클라이언트', () => {
     expect(payload.RepositoryPassword).toBeUndefined();
   });
 
-  it('스택에 환경변수가 하나도 없으면 Env 를 payload 에 넣지 않는다', async () => {
+  it('환경변수가 비어 있어도 Env 를 payload 에 반드시 담아 보낸다', async () => {
+    // Portainer 2.39 는 stack.Env = payload.Env 를 무조건 수행한다.
+    // 빈 배열이라서 빼면 payload.Env 가 nil 로 덮여 환경변수가 삭제된다.
     setPortainerEnv({
       PORTAINER_URL: 'https://portainer.example:9443',
       PORTAINER_API_KEY: 'k',
@@ -269,9 +280,50 @@ describe('Portainer 클라이언트', () => {
     await triggerPortainerStackRedeploy();
 
     const redeployCall = fetchMock.mock.calls.find((c) => String(c[0]).includes('/git/redeploy'));
+    expect(redeployCall).toBeDefined();
     const payload = JSON.parse(String((redeployCall![1] as RequestInit).body));
-    expect(payload.Env).toBeUndefined();
+    // undefined 면 안 된다. Env 키가 없으면 Portainer 가 stack.Env 를 nil 로 덮어쓴다.
+    expect(payload.Env).toEqual([]);
     expect(payload.RepositoryReferenceName).toBe('refs/heads/main');
+  });
+
+  it('브랜치가 빈 문자열이어도 payload 에 포함해 보낸다', async () => {
+    // RepositoryReferenceName 도 무조건 대입되므로, 값이 비어 있어도 필드 자체를 보낸다.
+    setPortainerEnv({
+      PORTAINER_URL: 'https://portainer.example:9443',
+      PORTAINER_API_KEY: 'k',
+      PORTAINER_ENDPOINT_ID: '1',
+      PORTAINER_STACK_ID: '5',
+    });
+    fetchHandler = (url) => {
+      if (url.endsWith('/api/stacks')) return { body: [{ Id: 5, Name: 'dv-auto', EndpointId: 1 }] };
+      if (url.endsWith('/api/stacks/5'))
+        return { body: { Env: [{ Name: 'A', Value: '1' }], GitConfig: { ReferenceName: '' } } };
+      return { body: {} };
+    };
+
+    await triggerPortainerStackRedeploy();
+
+    const redeployCall = fetchMock.mock.calls.find((c) => String(c[0]).includes('/git/redeploy'));
+    const payload = JSON.parse(String((redeployCall![1] as RequestInit).body));
+    expect(payload.RepositoryReferenceName).toBe('');
+  });
+
+  it('Env 필드 자체를 못 읽으면 환경변수 삭제 위험이 있으므로 재배포를 중단한다', async () => {
+    setPortainerEnv({
+      PORTAINER_URL: 'https://portainer.example:9443',
+      PORTAINER_API_KEY: 'k',
+      PORTAINER_ENDPOINT_ID: '1',
+      PORTAINER_STACK_ID: '5',
+    });
+    fetchHandler = (url) => {
+      if (url.endsWith('/api/stacks')) return { body: [{ Id: 5, Name: 'dv-auto', EndpointId: 1 }] };
+      if (url.endsWith('/api/stacks/5')) return { body: { GitConfig: { ReferenceName: 'refs/heads/main' } } };
+      return { body: {} };
+    };
+
+    await expect(triggerPortainerStackRedeploy()).rejects.toThrow(/Env 필드를 읽지 못해 재배포를 중단/);
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('/git/redeploy'))).toBe(false);
   });
 
   it('git 기반 스택이 아니면(400) 유형 안내와 함께 실패한다', async () => {
@@ -372,7 +424,7 @@ describe('/update_app 명령어 Portainer 연동', () => {
     });
     fetchHandler = (url) => {
       if (url.endsWith('/api/stacks')) return { body: [{ Id: 4, Name: 'dv-auto', EndpointId: 1 }] };
-      return { body: { Id: 4 } };
+      return { body: { Id: 4, Env: [], GitConfig: { ReferenceName: 'refs/heads/main' } } };
     };
 
     const handler = commandHandlers.get('update_app')!;
