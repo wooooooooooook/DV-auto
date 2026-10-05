@@ -15,11 +15,8 @@ import {
 } from '../../../modules/docple_api';
 import {
   SEMINAR_QUIZ_CHEATSHEET_FILE,
-  QUIZ_FILE,
   loadSeminarQuizCheatsheet,
   saveSeminarQuizCheatsheet,
-  loadQuizMapping,
-  saveQuizMapping,
   parseQuizQuestionsFromText,
   registerQuizAnswersToCheatsheet,
   commitAndPushIfChanged,
@@ -419,84 +416,6 @@ export function setupQuizCommands(adminBot: Telegraf): void {
       const message = error instanceof Error ? error.message : String(error);
       logger.error('세미나 퀴즈 족보 삭제 실패', error);
       await replyWithSplit(ctx, `❌ 족보 삭제 실패: ${message}`);
-    }
-  });
-
-  adminBot.command('list_quiz', async (ctx) => {
-    logger.info('User requested to list quiz.json', { from: ctx.from?.username });
-    const messageText = ctx.message?.text || '';
-    const searchKeyword = messageText.replace(/^\/list_quiz\s*/, '').trim();
-
-    try {
-      const data = await loadQuizMapping();
-      let entries = Object.entries(data);
-
-      if (searchKeyword) {
-        entries = entries.filter(
-          ([product, answers]) => product.includes(searchKeyword) || JSON.stringify(answers).includes(searchKeyword),
-        );
-      }
-
-      if (entries.length === 0) {
-        if (searchKeyword) {
-          return replyWithSplit(ctx, `📋 quiz.json "${searchKeyword}" 검색 결과가 없습니다.`);
-        } else {
-          return replyWithSplit(ctx, '📋 quiz.json에 등록된 항목이 없습니다.');
-        }
-      }
-
-      let message = searchKeyword
-        ? `📋 quiz.json "${searchKeyword}" 검색 결과 (${entries.length}개)\n\n`
-        : `📋 quiz.json 목록 (${entries.length}개)\n\n`;
-
-      for (const [product, answers] of entries) {
-        message += `• ${product} → [${answers.join(', ')}]\n`;
-      }
-
-      await replyWithSplit(ctx, message);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      await replyWithSplit(ctx, `❌ quiz.json 목록 조회 실패: ${message}`);
-    }
-  });
-
-  adminBot.command('delete_quiz', async (ctx) => {
-    logger.info('User requested to delete quiz mapping', { from: ctx.from?.username });
-    const messageText = ctx.message?.text || '';
-    const target = messageText.replace(/^\/delete_quiz\s*/, '').trim();
-
-    if (!target) {
-      return replyWithSplit(ctx, '사용법: /delete_quiz <제품명>\n예) /delete_quiz 글리아타민');
-    }
-
-    try {
-      const data = await loadQuizMapping();
-
-      if (!(target in data)) {
-        return replyWithSplit(ctx, `❌ "${target}" 제품이 quiz.json에 없습니다.`);
-      }
-
-      const deletedAnswer = data[target];
-      delete data[target];
-      await saveQuizMapping(data);
-      let gitNotice = '';
-      try {
-        const result = await commitAndPushIfChanged([QUIZ_FILE], `delete ${target} from quiz.json`);
-        gitNotice = `\n\n${result.notice}`;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        logger.error('quiz.json 삭제 Git 커밋/푸시 실패', error);
-        gitNotice = `\n\n⚠️ Git 커밋/푸시 실패: ${message}`;
-      }
-
-      await replyWithSplit(
-        ctx,
-        `🗑️ quiz.json 항목 삭제 완료\n\n제품: ${target}\n정답: ${JSON.stringify(deletedAnswer)}${gitNotice}`,
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      logger.error('quiz.json 삭제 실패', error);
-      await replyWithSplit(ctx, `❌ quiz.json 삭제 실패: ${message}`);
     }
   });
 }

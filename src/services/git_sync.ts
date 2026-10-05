@@ -5,6 +5,14 @@ import * as logger from './logger';
 
 export type GitPushResult = { performed: boolean; notice: string };
 
+/**
+ * 컨테이너 재생성 시 사라지는 데이터 파일 목록.
+ *
+ * 컨테이너의 작업 디렉터리는 이미지에 baked-in 된 파일만 가지고, recreate 마다 초기화된다.
+ * 반면 동기화 저장소(DV_GIT_REPO_DIR)는 볼륨에 유지되므로, 여기 있는 파일만 startup 복원이 필요하다.
+ */
+export const GIT_SYNC_RESTORE_FILES = ['data/seminar_quiz_cheatsheet.json'];
+
 type ShellResult = { stdout: string; stderr: string };
 type ShellError = Error & { stdout?: string; stderr?: string };
 
@@ -142,6 +150,57 @@ async function addAndCommit(repoDir: string, files: string[], message: string): 
   const fileArgs = files.map(shellQuote).join(' ');
   await run(`git add ${fileArgs}`, repoDir);
   await run(`git commit -m ${shellQuote(message)}`, repoDir);
+}
+
+/**
+ * 컨테이너 시작 시 동기화 저장소(볼륨)의 데이터 파일을 앱 작업 디렉터리로 복원한다.
+ *
+ * syncFilesIntoRepo 의 역방향 복사다. 컨테이너 recreate 후 /app/data 는 비어 있는 상태로
+ * 부팅되므로, 이 함수가 없으면 세미나 퀴즈 족보가 빈 객체로 로드되어 정답 조회가 대부분
+ * API 경로(1순위)로만 처리되고, 미등록 제품에 대한 관리자 알림이 폭증한다.
+ *
+ * 정책:
+ * - 동기화 저장소 미설정/준비 실패 시 경고만 남기고 기동을 계속한다 (복원은 부가 기능).
+ * - 목적지가 이미 있으면 덮어쓰지 않는다. 앱이 쓰기 직전 항상 repo로 푸시하므로
+ *   로컬에 파일이 있다는 것은 그 파일이 이미 최신이라는 뜻이다.
+ *
+ * @returns 실제로 복원된 파일 경로 목록
+ */
+export async function restoreDataFilesFromSyncRepo(files: string[] = GIT_SYNC_RESTORE_FILES): Promise<string[]> {
+  if (!getRepoDir()) {
+    logger.warn('Git 동기화 미설정: 데이터 파일 복원을 건너뜁니다. (DV_GIT_REPO_DIR 없음)');
+    return [];
+  }
+
+  let repoDir: string;
+  try {
+    repoDir = await prepareGitSyncRepo();
+  } catch (error) {
+    // 오프라인/인증 실패여도 앱 기동은 계속되어야 한다.
+    logger.warn('Git 동기화 저장소 준비 실패, 데이터 파일 복원을 건너뜁니다.', error);
+    return [];
+  }
+
+  const restored: string[] = [];
+  for (const file of files) {
+    const src = path.resolve(repoDir, file);
+    const dst = path.resolve(process.cwd(), file);
+    if (src === dst) continue;
+
+    try {
+      if (!(await pathExists(src)) || (await pathExists(dst))) continue;
+      await fs.mkdir(path.dirname(dst), { recursive: true });
+      await fs.copyFile(src, dst);
+      restored.push(file);
+    } catch (error) {
+      logger.warn(`데이터 파일 복원 실패: ${file}`, error);
+    }
+  }
+
+  if (restored.length > 0) {
+    logger.info(`Git 동기화 저장소에서 데이터 파일 ${restored.length}개를 복원했습니다.`, { restored });
+  }
+  return restored;
 }
 
 /**

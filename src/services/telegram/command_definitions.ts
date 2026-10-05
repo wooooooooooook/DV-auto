@@ -27,8 +27,6 @@ export const adminCommands = [
   { command: 'add_seminar_answer_batch', description: '족보 일괄 등록' },
   { command: 'list_seminar_quiz', description: '등록된 족보 목록' },
   { command: 'delete_seminar_quiz', description: '족보 삭제' },
-  { command: 'list_quiz', description: 'quiz.json 등록 제품 목록' },
-  { command: 'delete_quiz', description: 'quiz.json 항목 삭제' },
   { command: 'seminar_detail', description: '세미나 번호로 상세 정보 실시간 조회' },
   { command: 'delete_seminar', description: '세미나 DB 항목 삭제 (seminarId [seminarId...])' },
   // 3. 포인트 & 교환

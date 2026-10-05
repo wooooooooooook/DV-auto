@@ -1,4 +1,3 @@
-import quizMapping from '../../data/quiz.json';
 import { safeGoto, sendTelegram, escapeHtml } from '../modules/utils';
 import * as storage from '../services/storage';
 import type { PlaywrightRunArgs } from '../types';
@@ -381,19 +380,12 @@ async function run({ page }: PlaywrightRunArgs) {
       const cheatsheetResult = await findAnswersByCheatsheet(page);
       answers = cheatsheetResult.answers || [];
 
-      // [3순위] 족보 미등록 시 관리자 알림 발송 및 quiz.json 매핑 탐색
+      // [3순위] 족보 미등록 시 관리자 알림 발송 (정답은 API/족보에서만 조회한다)
       if (answers.length === 0) {
         console.log(
-          `[today_quiz] "${productTitle}" 족보에서 정답을 찾지 못했습니다 (이유: ${cheatsheetResult.reason}). 관리자 알림을 발송하고 quiz.json에서 찾기를 시도합니다.`,
+          `[today_quiz] "${productTitle}" 족보에서 정답을 찾지 못했습니다 (이유: ${cheatsheetResult.reason}). 관리자 알림을 발송합니다.`,
         );
         await notifyTodayQuizUnknownQuestions(page, productTitle, href);
-
-        const mapping = quizMapping as Record<string, Array<string | number>>;
-        const mappingAnswers = mapping[productTitle];
-        if (mappingAnswers && Array.isArray(mappingAnswers) && mappingAnswers.length > 0) {
-          console.log(`[today_quiz] quiz.json에서 "${productTitle}"에 대한 정답을 찾았습니다:`, mappingAnswers);
-          answers = mappingAnswers;
-        }
       }
     }
 

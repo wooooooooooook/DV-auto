@@ -393,8 +393,6 @@ export function setupSystemCommands(adminBot: Telegraf): void {
 - /add_seminar_answer_batch: 알림 내용을 복사하여 일괄 등록 (마지막 줄에 정답번호 포함)
 - /list_seminar_quiz: 등록된 족보 목록
 - /delete_seminar_quiz <키워드>: 족보 삭제
-- /list_quiz: quiz.json 등록 제품 목록
-- /delete_quiz <제품명>: quiz.json 항목 삭제
 - /seminar_detail <세미나번호>: 세미나 상세 정보 실시간 조회 (예: /seminar_detail 5566 또는 /seminar_detail 5566 5567)
 
 💰 포인트 & 교환:

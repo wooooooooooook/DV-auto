@@ -33,6 +33,8 @@ import { sendToTopicSubscribers, sendHourlyTodayLinksToSubscribers } from '../se
 import { shouldResumeSeminarMonitor } from '../services/channel_message_repository';
 import { refreshPastUncompletedSeminars } from '../services/seminar_sync_service';
 import { checkAndWatchMedigateSymposiums } from '../services/medigate_monitor_service';
+import { restoreDataFilesFromSyncRepo } from '../services/git_sync';
+import { isDockerEnv } from './runtime_env';
 import type { Task } from '../types';
 
 dns.setDefaultResultOrder('ipv4first');
@@ -605,19 +607,52 @@ if (clearedLocks > 0) {
 }
 
 // 봇을 먼저 초기화하여 task 및 autoResume 중 editChannelMessage와 알림이 정상 동작하도록 보장
-telegram.launch();
+// 단, 도커에서는 컨테이너 recreate 시 /app/data 가 비어 부팅되므로 데이터 파일(세미나 퀴즈 족보)을
+// 볼륨의 Git 동기화 저장소에서 먼저 복원해야 한다. 복원이 끝나기 전에 task/봇이 빈 족보를 읽으면
+// 정답 조회가 API 경로로만 처리되고 미등록 알림이 폭증한다.
+const DATA_RESTORE_TIMEOUT_MS = Number(process.env.DV_DATA_RESTORE_TIMEOUT_MS || 30_000);
 
-const nowStr = new Date().toLocaleString('ko-KR', { timeZone: TIMEZONE });
-utils
-  .sendTelegram(`🚀 앱이 온라인 상태입니다. (${nowStr})`)
-  .catch((err) => logger.error('Failed to send startup notification:', err));
+async function restoreDockerDataFiles(): Promise<void> {
+  if (!isDockerEnv()) return;
 
-// 앱 시작 시 지나간 세미나 중 미완료 상태인 세미나들을 동시 3개, 250ms 간격으로 detail API 동기화
-refreshPastUncompletedSeminars(3, 250).catch((err) =>
-  logger.error('Startup refreshPastUncompletedSeminars failed:', err),
-);
+  // clone/pull 이 네트워크 문제로 무한정 걸리면 부팅 전체가 블록되므로 상한을 둔다.
+  let timer: NodeJS.Timeout | null = null;
+  const timeout = new Promise<'timeout'>((resolve) => {
+    timer = setTimeout(() => resolve('timeout'), DATA_RESTORE_TIMEOUT_MS);
+    timer.unref?.();
+  });
 
-checkAndNotifyPointConversion().catch((err) => logger.error('Startup point-conversion check failed:', err));
-checkAndResumeTasks();
-runTask(syncSeminarsTask).catch((err) => logger.error('Startup sync_seminars check failed:', err));
-checkAndWatchMedigateSymposiums().catch((err) => logger.error('Startup medigate monitor check failed:', err));
+  try {
+    const outcome = await Promise.race([restoreDataFilesFromSyncRepo().then((restored) => ({ restored })), timeout]);
+    if (outcome === 'timeout') {
+      logger.warn(`데이터 파일 복원이 ${DATA_RESTORE_TIMEOUT_MS}ms 안에 끝나지 않아 건너뜁니다. 앱은 정상 기동합니다.`);
+    }
+  } catch (err) {
+    logger.error('Startup 데이터 파일 복원 실패:', err);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function bootstrap(): Promise<void> {
+  await restoreDockerDataFiles();
+
+  telegram.launch();
+
+  const nowStr = new Date().toLocaleString('ko-KR', { timeZone: TIMEZONE });
+  utils
+    .sendTelegram(`🚀 앱이 온라인 상태입니다. (${nowStr})`)
+    .catch((err) => logger.error('Failed to send startup notification:', err));
+
+  // 앱 시작 시 지나간 세미나 중 미완료 상태인 세미나들을 동시 3개, 250ms 간격으로 detail API 동기화
+  refreshPastUncompletedSeminars(3, 250).catch((err) =>
+    logger.error('Startup refreshPastUncompletedSeminars failed:', err),
+  );
+
+  checkAndNotifyPointConversion().catch((err) => logger.error('Startup point-conversion check failed:', err));
+  checkAndResumeTasks();
+  runTask(syncSeminarsTask).catch((err) => logger.error('Startup sync_seminars check failed:', err));
+  checkAndWatchMedigateSymposiums().catch((err) => logger.error('Startup medigate monitor check failed:', err));
+}
+
+bootstrap().catch((err) => logger.error('Bootstrap 실패:', err));

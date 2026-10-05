@@ -7,11 +7,8 @@ import { commitAndPushInRepo } from '../git_sync';
 
 export const SEMINAR_QUIZ_CHEATSHEET_FILE = 'data/seminar_quiz_cheatsheet.json';
 export const SEMINAR_QUIZ_CHEATSHEET_PATH = path.join(process.cwd(), SEMINAR_QUIZ_CHEATSHEET_FILE);
-export const QUIZ_FILE = 'data/quiz.json';
-export const QUIZ_PATH = path.join(process.cwd(), QUIZ_FILE);
 
 export type SeminarQuizCheatsheet = Record<string, string>;
-export type QuizMapping = Record<string, Array<string | number>>;
 export type CommandResult = { stdout: string; stderr: string };
 export type CommandResultWithExitCode = CommandResult & { exitCode?: number };
 
@@ -99,26 +96,6 @@ export async function saveSeminarQuizCheatsheet(data: SeminarQuizCheatsheet): Pr
   } catch (error) {
     logger.error('세미나 퀴즈 족보 저장 실패', error);
     throw new Error('세미나 퀴즈 족보 파일을 저장할 수 없습니다.');
-  }
-}
-
-// --- Quiz Mapping (quiz.json) Functions ---
-export async function loadQuizMapping(): Promise<QuizMapping> {
-  try {
-    const raw = await fs.readFile(QUIZ_PATH, 'utf8');
-    return JSON.parse(raw) as QuizMapping;
-  } catch (error) {
-    logger.warn('quiz.json 로드 실패, 빈 객체 반환', error);
-    return {};
-  }
-}
-
-export async function saveQuizMapping(data: QuizMapping): Promise<void> {
-  try {
-    await fs.writeFile(QUIZ_PATH, `${JSON.stringify(data, null, 4)}\n`, 'utf8');
-  } catch (error) {
-    logger.error('quiz.json 저장 실패', error);
-    throw new Error('quiz.json 파일을 저장할 수 없습니다.');
   }
 }
 
