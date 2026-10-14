@@ -13,3 +13,4 @@ dist/
 storage/
 scratch/
 *.tsbuildinfo
+.freebuff/

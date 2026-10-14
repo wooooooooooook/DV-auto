@@ -295,6 +295,47 @@ describe('Medigate Watch Symposium Tests', () => {
     expect(utils.sendTelegram).toHaveBeenCalled();
   });
 
+  it('시청 시 5분마다 알림(onProgress)은 미등록되고 시작 및 종료 보고만 발송되는지 검증', async () => {
+    let capturedOptions: Parameters<MedigateClient['watchSymposiumLive']>[1];
+    vi.spyOn(MedigateClient.prototype, 'watchSymposiumLive').mockImplementationOnce(async (_idx, options) => {
+      capturedOptions = options;
+      if (options?.onStart) {
+        await options.onStart({ webinarIdx: 5011, subject: '테스트 심포지움', durationMinutes: 22 });
+      }
+      return {
+        webinarIdx: 5011,
+        subject: '테스트 심포지움',
+        success: true,
+        message: '시청 완료',
+        startedAt: '2026-09-14T19:00:00.000Z',
+        endedAt: '2026-09-14T19:22:00.000Z',
+        durationMinutes: 22,
+        heartbeatCount: 11,
+        platform: 'nownnow',
+      };
+    });
+
+    const sendTelegramSpy = vi.spyOn(utils, 'sendTelegram');
+    sendTelegramSpy.mockClear();
+
+    await runMedigateWatch({ args: { webinarIdx: '5011' } });
+
+    // onProgress 콜백이 등록되지 않았는지 확인
+    expect(capturedOptions?.onProgress).toBeUndefined();
+
+    // 텔레그램 메시지 전송 확인 (시작 1회 + 종료 보고 1회 = 총 2회)
+    expect(sendTelegramSpy).toHaveBeenCalledTimes(2);
+
+    const firstMsg = sendTelegramSpy.mock.calls[0][0];
+    expect(firstMsg).toContain('🩺 [메디게이트 심포지움 시청 시작]');
+    expect(firstMsg).toContain('⏱️ 목표 시청 시간: 22분');
+    expect(firstMsg).not.toContain('5분 간격 진행 보고');
+
+    const secondMsg = sendTelegramSpy.mock.calls[1][0];
+    expect(secondMsg).toContain('🩺 [메디게이트 심포지움 시청 완료]');
+    expect(secondMsg).toContain('⏱️ 시청 시간: 22분');
+  });
+
   it('MedigateClient.watchSymposiumLive 방송 도중 종료 시 조기 종료 테스트', async () => {
     const client = new MedigateClient({
       accessToken: 'test-token',
