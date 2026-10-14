@@ -147,7 +147,7 @@ export async function checkAndTriggerSeminarMonitors(
           `[아침세미나 트리거] 입장 가능/진행 중인 세미나 감지 -> monitor_morning_seminars 시작 (세미나: ${morningSeminars.length}건, activeOrEnded: true, noticeCompleted: false, running: false)`,
         );
         triggeredMorning = true;
-        runTask(morningTask).catch((err) => {
+        runTask(morningTask, { isAutoResume: true }).catch((err) => {
           logger.error('monitor_morning_seminars 비동기 트리거 실패:', err);
         });
       }
@@ -176,7 +176,7 @@ export async function checkAndTriggerSeminarMonitors(
           `[점심세미나 트리거] 입장 가능/진행 중인 세미나 감지 -> monitor_lunch_seminars 시작 (세미나: ${lunchSeminars.length}건, activeOrEnded: true, noticeCompleted: false, running: false)`,
         );
         triggeredLunch = true;
-        runTask(lunchTask).catch((err) => {
+        runTask(lunchTask, { isAutoResume: true }).catch((err) => {
           logger.error('monitor_lunch_seminars 비동기 트리거 실패:', err);
         });
       }
@@ -205,7 +205,7 @@ export async function checkAndTriggerSeminarMonitors(
           `[저녁세미나 트리거] 입장 가능/진행 중인 세미나 감지 -> monitor_dinner_seminars 시작 (세미나: ${dinnerSeminars.length}건, activeOrEnded: true, noticeCompleted: false, running: false)`,
         );
         triggeredDinner = true;
-        runTask(dinnerTask).catch((err) => {
+        runTask(dinnerTask, { isAutoResume: true }).catch((err) => {
           logger.error('monitor_dinner_seminars 비동기 트리거 실패:', err);
         });
       }
