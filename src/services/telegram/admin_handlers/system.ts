@@ -124,10 +124,11 @@ export function setupSystemCommands(adminBot: Telegraf): void {
       await replyWithSplit(
         ctx,
         '🐳 도커 컨테이너 환경에서는 /update_app 으로 재빌드할 수 없습니다.\n' +
-          '호스트 서버에서 아래 명령을 실행해주세요:\n\n' +
-          'cd <프로젝트 디렉터리> && git pull && docker compose up -d --build\n\n' +
+          'Portainer의 Stack을 통해 업데이트해주세요:\n\n' +
+          'Portainer 웹 콘솔 > Stacks > 해당 스택 선택 후 [Update the stack] (Pull latest image and redeploy) 버튼을 눌러 업데이트를 진행해주세요.\n' +
+          '(호스트 직접 실행 시: docker compose up -d --build)\n\n' +
           '재시작 시 현재 실행 중인 작업은 중단될 수 있습니다.\n' +
-          '(Portainer 사용 시 PORTAINER_URL/PORTAINER_API_KEY 를 설정하면 봇에서 자동 업데이트됩니다)',
+          '(PORTAINER_URL/PORTAINER_API_KEY 설정 시 봇에서 /update_app 으로 즉시 자동 재배포됩니다)',
       );
       return;
     }

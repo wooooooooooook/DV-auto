@@ -6,7 +6,7 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "build": "tsc",
+    "build": "tsc && node scripts/generate-build-info.js",
     "start": "node dist/core/main.js",
     "dev": "ts-node src/core/main.ts",
     "restart:app": "pnpm run build && systemctl restart doctorville-auto.service",

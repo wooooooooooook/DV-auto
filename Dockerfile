@@ -12,8 +12,16 @@ RUN pnpm install --frozen-lockfile
 
 RUN pnpm exec playwright install --with-deps chromium
 
+ARG GIT_COMMIT=""
+ARG GIT_COMMIT_DATE=""
+
 COPY tsconfig.json ./
+COPY scripts ./scripts
 COPY src ./src
+COPY .git* ./.git_build/
+
+RUN node scripts/generate-build-info.js "$GIT_COMMIT" "$GIT_COMMIT_DATE" && \
+    rm -rf ./.git_build
 
 RUN pnpm run build
 
@@ -26,5 +34,7 @@ ENV NODE_ENV=production
 ENV TZ=Asia/Seoul
 ENV HEADLESS=true
 ENV SQLITE_DB_PATH=/app/runtime-data/app.db
+ENV GIT_COMMIT=${GIT_COMMIT}
+ENV GIT_COMMIT_DATE=${GIT_COMMIT_DATE}
 
 CMD ["node", "dist/core/main.js"]

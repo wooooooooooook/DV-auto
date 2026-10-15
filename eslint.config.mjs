@@ -50,12 +50,15 @@ export default tseslint.config(
     },
   },
   {
-    files: ['.prettierrc.js'],
+    files: ['.prettierrc.js', 'scripts/**/*.js'],
     languageOptions: {
       sourceType: 'commonjs',
       globals: {
         ...globals.node,
       },
+    },
+    rules: {
+      '@typescript-eslint/no-require-imports': 'off',
     },
   },
 );
