@@ -19,6 +19,15 @@ import type { PlaywrightRunArgs } from '../src/types';
 import { describe, it, vi } from 'vitest';
 
 describe('apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스트', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-24T12:00:00+09:00'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('정보 변경 및 포인트 신규 지급 감지 종합 테스트', async () => {
     console.log('===========================================================');
     console.log('  apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스트');

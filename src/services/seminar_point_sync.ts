@@ -58,6 +58,10 @@ export async function refreshSeminarPointStatus(
     }
 
     if (currentItem.pointPaid === true) {
+      if (!currentItem.isAdvancedSurvey) {
+        currentItem.isAdvancedSurvey = true;
+        hasChanged = true;
+      }
       if (hasChanged) {
         changedSeminars.push(currentItem);
       }
@@ -87,6 +91,7 @@ export async function refreshSeminarPointStatus(
           pointText: pointResult.pointText,
           pointContent: pointResult.content,
           pointCheckedAt: checkedAt,
+          isAdvancedSurvey: true,
         };
         changedSeminars.push(updatedItem);
         updatedSeminars.push(updatedItem);
@@ -120,7 +125,7 @@ export async function refreshSeminarPointStatus(
         currentCount: detailInfo.currentCount || '',
         totalCount: detailInfo.totalCount || '',
         nightTime: detailInfo.nightTime ?? false,
-        isAdvancedSurvey: detailInfo.isAdvancedSurvey ?? false,
+        isAdvancedSurvey: true,
         isPointExcluded: detailInfo.isPointExcluded ?? false,
         processState: detailInfo.processState,
         cancelProcessState: detailInfo.cancelProcessState,

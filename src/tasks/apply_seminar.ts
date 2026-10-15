@@ -308,6 +308,27 @@ export function isSeminarRecordChanged(existing: SeminarListItem, incoming: Semi
   return false;
 }
 
+export function isSeminarInPast(
+  seminar: Pick<SeminarListItem, 'date' | 'time' | 'detectedDate'>,
+  referenceDate: string,
+): boolean {
+  const normDate = normalizeSeminarDate(seminar.date, seminar.detectedDate || referenceDate) || seminar.date;
+  if (!normDate) return false;
+
+  if (normDate < referenceDate) {
+    return true;
+  }
+
+  if (normDate === referenceDate) {
+    const todayKst = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+    if (referenceDate === todayKst) {
+      return isPastSeminar(seminar, Date.now());
+    }
+  }
+
+  return false;
+}
+
 export function refreshStoredSeminarList(
   current: SeminarListItem[],
   stored: SeminarListItem[],
@@ -329,18 +350,22 @@ export function refreshStoredSeminarList(
     const existing = storedByKey.get(key);
 
     if (existing) {
-      const fieldChanges = getSeminarInfoChanges(existing, seminar);
-      if (fieldChanges.length > 0) {
-        infoChanges.push({
-          seminarId: existing.seminarId || seminar.seminarId || '',
-          name: seminar.name || existing.name || '',
-          date: seminar.date || existing.date,
-          url:
-            seminar.url ||
-            existing.url ||
-            (seminar.seminarId ? `https://m.doctorville.co.kr/cme/seminar/${seminar.seminarId}` : ''),
-          changes: fieldChanges,
-        });
+      // 이미 지나간 세미나의 정보 변경은 알림 제외
+      const isPast = isSeminarInPast(existing, referenceDate) || isSeminarInPast(seminar, referenceDate);
+      if (!isPast) {
+        const fieldChanges = getSeminarInfoChanges(existing, seminar);
+        if (fieldChanges.length > 0) {
+          infoChanges.push({
+            seminarId: existing.seminarId || seminar.seminarId || '',
+            name: seminar.name || existing.name || '',
+            date: seminar.date || existing.date,
+            url:
+              seminar.url ||
+              existing.url ||
+              (seminar.seminarId ? `https://m.doctorville.co.kr/cme/seminar/${seminar.seminarId}` : ''),
+            changes: fieldChanges,
+          });
+        }
       }
     }
 

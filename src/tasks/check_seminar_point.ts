@@ -214,6 +214,7 @@ export async function syncSeminarPointResultToDb(
 
     await seminarRepo.updateSeminarPointStatus(seminarId, {
       pointPaid: true,
+      isAdvancedSurvey: true,
       point: result.point,
       pointText: result.pointText,
       pointDate: result.date,

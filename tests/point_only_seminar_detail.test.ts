@@ -185,7 +185,7 @@ describe('Point-Only 세미나 발견 시 세미나 상세 API 연동 테스트'
       assert.strictEqual(sem5888.date, '2026-08-21', '일자가 보강되어야 함');
       assert.strictEqual(sem5888.time, '19:00~20:00');
       assert.strictEqual(sem5888.nightTime, true, '19시는 야간 세미나');
-      assert.strictEqual(sem5888.isAdvancedSurvey, false);
+      assert.strictEqual(sem5888.isAdvancedSurvey, true, '포인트 지급 확인 시 심화 세미나로 변경');
       assert.strictEqual(sem5888.pointPaid, true);
       console.log('  ✓ [Pass] 기존 비어있던 세미나(5888) 메타데이터 보강 확인\n');
 
@@ -207,6 +207,10 @@ describe('Point-Only 세미나 발견 시 세미나 상세 API 연동 테스트'
         '5999 심화 세미나가 check_advanced_seminars 목록에 포함되어야 함',
       );
       assert(checkResult.message.includes('5,000P 지급됨'), '5999 심화 세미나의 포인트 지급 상태가 표기되어야 함');
+      assert(
+        checkResult.message.includes('5888') && checkResult.message.includes('1,000P 지급됨'),
+        '포인트 지급 확인된 5888 세미나도 check_advanced_seminars에 포함되어야 함',
+      );
       console.log('  ✓ [Pass] check_advanced_seminars에서 point-only 심화 세미나 정상 조회 확인\n');
 
       console.log('--- Case 5: pointChanges 이벤트 알림 발생 검증 ---');

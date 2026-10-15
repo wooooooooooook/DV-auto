@@ -11,6 +11,7 @@ import {
 } from '../modules/utils';
 import { DEFAULT_NOTICE_OPTIONS, formatRecentCommentsSection } from '../services/channel_notice_service';
 import { isLowCapacitySeminar } from '../modules/seminar_api';
+import { isPastSeminar } from '../services/seminar_sync_service';
 
 export { truncateSeminarName, formatPrivateSeminarTag, formatSeminarDisplayName };
 
@@ -54,8 +55,18 @@ export const MEANINGFUL_FIELDS: Array<{
 
 export const BOOLEAN_FIELDS = new Set<keyof SeminarListItem>(['isPointExcluded', 'isAdvancedSurvey']);
 
-export function getSeminarInfoChanges(existing: SeminarListItem, incoming: SeminarListItem): SeminarFieldChange[] {
+export function getSeminarInfoChanges(
+  existing: SeminarListItem,
+  incoming: SeminarListItem,
+  options?: { filterPast?: boolean; referenceNowMs?: number },
+): SeminarFieldChange[] {
   if (isLowCapacitySeminar(existing) || isLowCapacitySeminar(incoming)) {
+    return [];
+  }
+  if (
+    options?.filterPast &&
+    (isPastSeminar(existing, options.referenceNowMs) || isPastSeminar(incoming, options.referenceNowMs))
+  ) {
     return [];
   }
   const changes: SeminarFieldChange[] = [];
@@ -88,6 +99,10 @@ export function getSeminarInfoChanges(existing: SeminarListItem, incoming: Semin
 
     if (BOOLEAN_FIELDS.has(key)) {
       if (oldVal !== newVal) {
+        // 포인트 지급으로 인해 심화세미나로 변경된 경우(또는 이미 포인트가 지급된 세미나)는 심화설문 변경 알림 제외
+        if (key === 'isAdvancedSurvey' && (existing.pointPaid === true || incoming.pointPaid === true)) {
+          continue;
+        }
         changes.push({
           field: key,
           label,
@@ -113,8 +128,13 @@ export function getSeminarInfoChanges(existing: SeminarListItem, incoming: Semin
 export function formatSeminarChangeNotification(
   infoChanges: SeminarInfoChange[],
   pointChanges: SeminarPointChange[],
+  options?: { filterPast?: boolean; referenceNowMs?: number },
 ): string | null {
-  if (infoChanges.length === 0 && pointChanges.length === 0) {
+  const filteredInfoChanges = options?.filterPast
+    ? infoChanges.filter((info) => !isPastSeminar(info, options.referenceNowMs))
+    : infoChanges;
+
+  if (filteredInfoChanges.length === 0 && pointChanges.length === 0) {
     return null;
   }
 
@@ -143,10 +163,10 @@ export function formatSeminarChangeNotification(
     }
   }
 
-  if (infoChanges.length > 0) {
+  if (filteredInfoChanges.length > 0) {
     if (pointChanges.length > 0) sections.push('');
     sections.push('[정보 변경]');
-    for (const info of infoChanges) {
+    for (const info of filteredInfoChanges) {
       const lines: string[] = [];
       lines.push(info.name || '세미나');
       lines.push(`seminarId: ${info.seminarId}`);
