@@ -18,12 +18,12 @@ ARG GIT_COMMIT_DATE=""
 COPY tsconfig.json ./
 COPY scripts ./scripts
 COPY src ./src
-COPY .git* ./.git_build/
+COPY .git ./.git
 
 RUN node scripts/generate-build-info.js "$GIT_COMMIT" "$GIT_COMMIT_DATE" && \
-    rm -rf ./.git_build
+    rm -rf .git
 
-RUN pnpm run build
+RUN pnpm run build && cp build-info.json dist/build-info.json
 
 # /app/data 는 컨테이너 recreate 시 비어 있는 상태로 부팅되며 startup hydration
 # (services/git_sync.ts restoreDataFilesFromSyncRepo) 이 채운다. hydration 이 건너뛰어져도

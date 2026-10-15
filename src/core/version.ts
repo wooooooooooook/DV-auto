@@ -11,7 +11,9 @@ export function formatCommitHash(raw?: string | null): string | null {
   if (!raw || !raw.trim()) return null;
   const trimmed = raw.trim();
   const lower = trimmed.toLowerCase();
-  if (lower === 'unknown' || lower === 'null' || lower === 'undefined') return null;
+  if (lower === 'unknown' || lower === 'null' || lower === 'undefined' || lower === '""' || lower === "''") {
+    return null;
+  }
 
   // 40자리 git sha1인 경우 앞 7자리로 축약
   if (/^[0-9a-f]{40}$/i.test(trimmed)) {
@@ -24,7 +26,9 @@ export function formatCommitDate(raw?: string | null): string | null {
   if (!raw || !raw.trim()) return null;
   const trimmed = raw.trim();
   const lower = trimmed.toLowerCase();
-  if (lower === 'unknown' || lower === 'null' || lower === 'undefined') return null;
+  if (lower === 'unknown' || lower === 'null' || lower === 'undefined' || lower === '""' || lower === "''") {
+    return null;
+  }
 
   // 이미 YYYY-MM-DD HH:mm:ss 형식인 경우 그대로 사용
   if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(trimmed)) {
