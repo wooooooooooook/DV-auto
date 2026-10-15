@@ -172,3 +172,74 @@ export function formatCommitInfo(): string | null {
   }
   return commit;
 }
+
+const GITHUB_REPO = 'wooooooooooook/DV-auto';
+const GITHUB_BRANCH = 'main';
+
+/**
+ * Portainer 배포 등 .git 이 없는 환경에서 GitHub API를 통해 최신 커밋 정보를 비동기 조회합니다.
+ */
+export async function fetchCommitFromGithub(): Promise<CommitInfo | null> {
+  try {
+    const url = `https://api.github.com/repos/${GITHUB_REPO}/commits/${GITHUB_BRANCH}`;
+    const headers: Record<string, string> = {
+      'User-Agent': 'DV-auto',
+      Accept: 'application/vnd.github.v3+json',
+    };
+    const token = process.env.GITHUB_TOKEN?.trim();
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+
+    const res = await fetch(url, {
+      headers,
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!res.ok) return null;
+
+    const data = (await res.json()) as {
+      sha?: string;
+      commit?: { committer?: { date?: string } };
+    };
+    if (!data.sha) return null;
+
+    const commit = formatCommitHash(data.sha);
+    const commitDate = formatCommitDate(data.commit?.committer?.date);
+    return { commit, commitDate };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 환경변수/빌드정보를 확인하고, 없으면 GitHub API를 통해 커밋 정보를 비동기 조회합니다.
+ */
+export async function fetchCommitInfo(): Promise<CommitInfo> {
+  const current = getCommitInfo();
+  if (current.commit) {
+    return current;
+  }
+
+  const githubInfo = await fetchCommitFromGithub();
+  if (githubInfo?.commit) {
+    if (!process.env.GIT_COMMIT) process.env.GIT_COMMIT = githubInfo.commit;
+    if (githubInfo.commitDate && !process.env.GIT_COMMIT_DATE) {
+      process.env.GIT_COMMIT_DATE = githubInfo.commitDate;
+    }
+    return { commit: githubInfo.commit, commitDate: githubInfo.commitDate ?? null };
+  }
+
+  return current;
+}
+
+/**
+ * 비동기로 커밋 정보를 확인하여 포맷팅된 문자열을 반환합니다.
+ */
+export async function fetchFormattedCommitInfo(): Promise<string | null> {
+  const { commit, commitDate } = await fetchCommitInfo();
+  if (!commit) return null;
+  if (commitDate) {
+    return `${commit} (${commitDate})`;
+  }
+  return commit;
+}

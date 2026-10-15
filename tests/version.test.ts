@@ -89,5 +89,29 @@ describe('Version & Commit Info 모듈 테스트', () => {
       expect(startupMsg).toContain('🚀 앱이 온라인 상태입니다.');
       expect(startupMsg).toContain('• 커밋: f0e1d2c (2026-10-15 19:00:00)');
     });
+
+    it('fetchCommitFromGithub 는 GitHub API를 통해 최신 커밋 정보를 가져온다', async () => {
+      const mockCommitSha = '433d42e73da06cb6b668e3a3baa73dd33affb307';
+      const mockDateIso = '2026-10-15T11:24:32Z';
+
+      const originalFetch = global.fetch;
+      global.fetch = async () =>
+        ({
+          ok: true,
+          json: async () => ({
+            sha: mockCommitSha,
+            commit: { committer: { date: mockDateIso } },
+          }),
+        }) as unknown as Response;
+
+      try {
+        const { fetchCommitFromGithub } = await import('../src/core/version');
+        const info = await fetchCommitFromGithub();
+        expect(info?.commit).toBe('433d42e');
+        expect(info?.commitDate).toBe('2026-10-15 20:24:32');
+      } finally {
+        global.fetch = originalFetch;
+      }
+    });
   });
 });

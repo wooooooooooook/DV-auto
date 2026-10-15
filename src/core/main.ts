@@ -35,7 +35,7 @@ import { refreshPastUncompletedSeminars } from '../services/seminar_sync_service
 import { checkAndWatchMedigateSymposiums } from '../services/medigate_monitor_service';
 import { restoreDataFilesFromSyncRepo } from '../services/git_sync';
 import { isDockerEnv } from './runtime_env';
-import { formatCommitInfo } from './version';
+import { fetchFormattedCommitInfo, formatCommitInfo } from './version';
 import type { Task } from '../types';
 
 dns.setDefaultResultOrder('ipv4first');
@@ -641,7 +641,7 @@ async function bootstrap(): Promise<void> {
   telegram.launch();
 
   const nowStr = new Date().toLocaleString('ko-KR', { timeZone: TIMEZONE });
-  const commitInfo = formatCommitInfo();
+  const commitInfo = await fetchFormattedCommitInfo().catch(() => formatCommitInfo());
   let startupMsg = `🚀 앱이 온라인 상태입니다. (${nowStr})`;
   if (commitInfo) {
     startupMsg += `\n• 커밋: ${commitInfo}`;
