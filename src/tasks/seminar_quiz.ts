@@ -237,11 +237,23 @@ async function parseAllSurveyQuestions(
       options: Option[];
     };
 
-    const items = document.querySelectorAll('li[data-question-number]');
+    const items = Array.from(document.querySelectorAll('li[data-question-number]'));
+    const visibleItems = items.filter((el) => {
+      const htmlEl = el as HTMLElement;
+      return htmlEl.offsetParent !== null || (htmlEl.offsetWidth > 0 && htmlEl.offsetHeight > 0);
+    });
+    const targetItems = visibleItems.length > 0 ? visibleItems : items;
+    const seenQuestionNums = new Set<number>();
     const result: ParsedQ[] = [];
 
-    items.forEach((li) => {
+    targetItems.forEach((li) => {
       const questionNumber = parseInt((li as HTMLElement).dataset['questionNumber'] ?? '0', 10);
+      if (questionNumber > 0 && seenQuestionNums.has(questionNumber)) {
+        return;
+      }
+      if (questionNumber > 0) {
+        seenQuestionNums.add(questionNumber);
+      }
 
       // 마커 탐색: li 내부의 모든 태그(span, div, p, label 등)에서 [퀴즈] 등 패턴 탐색
       const allTextNodes = Array.from(li.querySelectorAll('span, div, p, label, b, strong, em'));
@@ -599,9 +611,12 @@ export function formatUnknownQuestions(
   }
   let message = `${header}:\n\n`;
 
+  const seenIndices = new Set<number>();
   for (let i = 0; i < results.length; i++) {
     const result = results[i];
     if (result.selectedIndex === null && result.kind === 'quiz') {
+      if (seenIndices.has(result.questionIndex)) continue;
+      seenIndices.add(result.questionIndex);
       const q = questions.find((item) => item.questionNumber === result.questionIndex) || questions[i];
       if (!q) continue;
       message += `Q${result.questionIndex}: ${q.questionText}\n`;
@@ -624,10 +639,13 @@ export function formatUnknownQuestions(
  */
 export function generateUnknownQuizPromptText(questions: SurveyQuestion[], results: QuizResult[]): string {
   const unknownList: Array<{ qNum: number; text: string; options: Array<{ index: number; text: string }> }> = [];
+  const seenIndices = new Set<number>();
 
   for (let i = 0; i < results.length; i++) {
     const result = results[i];
     if (result.selectedIndex === null && result.kind === 'quiz') {
+      if (seenIndices.has(result.questionIndex)) continue;
+      seenIndices.add(result.questionIndex);
       const q = questions.find((item) => item.questionNumber === result.questionIndex) || questions[i];
       if (!q) continue;
       unknownList.push({
@@ -841,8 +859,6 @@ async function processSeminarQuiz(
 
       for (let i = 0; i < pageQuestions.length; i++) {
         const q = pageQuestions[i];
-        accumulatedQuestions.push(q);
-
         const qNum = q.questionNumber > 0 ? q.questionNumber : i + 1;
         let selectedIndex: number | null = null;
         let selectedText: string | null = null;
@@ -887,7 +903,22 @@ async function processSeminarQuiz(
           marker: q.marker,
           kind: isQuiz ? 'quiz' : q.kind,
         };
-        accumulatedResults.push(result);
+
+        const existingResultIdx = accumulatedResults.findIndex((r) => r.questionIndex === qNum);
+        if (existingResultIdx >= 0) {
+          if (selectedIndex !== null || accumulatedResults[existingResultIdx].selectedIndex === null) {
+            accumulatedResults[existingResultIdx] = result;
+          }
+        } else {
+          accumulatedResults.push(result);
+        }
+
+        const existingQIdx = accumulatedQuestions.findIndex((item) => item.questionNumber === qNum);
+        if (existingQIdx >= 0) {
+          accumulatedQuestions[existingQIdx] = q;
+        } else {
+          accumulatedQuestions.push(q);
+        }
 
         // UI 선택 처리
         await page.waitForTimeout(200);
@@ -1057,6 +1088,17 @@ async function processSeminarQuiz(
         kind: 'quiz',
       }));
     }
+
+    // questionIndex 기준 중복 방어
+    const seenQuizIndices = new Set<number>();
+    channelResults = channelResults.filter((r) => {
+      if (seenQuizIndices.has(r.questionIndex)) return false;
+      seenQuizIndices.add(r.questionIndex);
+      return true;
+    });
+
+    _hasUnknown = channelResults.some((r) => r.selectedIndex === null);
+    _hasMultipleMatches = channelResults.some((r) => r.multipleMatches && r.multipleMatches.length > 1);
 
     if (channelResults.length === 0 && accumulatedQuestions.length === 0) {
       const message = seminarName

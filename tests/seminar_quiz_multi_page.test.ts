@@ -286,4 +286,145 @@ describe('seminar_quiz 다중 페이지 탐색 및 제출하기 감지 테스트
     const sentMsg = sendTelegramSpy.mock.calls[0]?.[0] as string;
     expect(sentMsg).toContain('설문 제출');
   });
+
+  it('동일 페이지가 재탐색되거나 퀴즈 문항이 중복 파싱되더라도 채널 결과와 족보 미등록 알림에서 중복되지 않는다', async () => {
+    let callCount = 0;
+    const clickedButtons: string[] = [];
+
+    // 1페이지가 2번 evaluate 된 후(페이지 전환 지연 시뮬레이션), 2페이지(심화설문)로 이동
+    const mockPage: Partial<Page> = {
+      url: vi.fn().mockImplementation(() => `https://m.doctorville.co.kr/cme/seminar/5808`),
+      waitForLoadState: vi.fn().mockResolvedValue(undefined),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+      waitForSelector: vi.fn().mockResolvedValue(null),
+      waitForFunction: vi.fn().mockResolvedValue(undefined),
+      screenshot: vi.fn().mockResolvedValue(Buffer.from('fake-screenshot')),
+      on: vi.fn(),
+      locator: vi.fn().mockImplementation((selector: string) => {
+        const createLocatorObj = (opts: { isNext?: boolean; isSubmit?: boolean }) => ({
+          first: vi.fn().mockReturnValue({
+            isVisible: vi.fn().mockImplementation(async () => {
+              if (opts.isNext) return callCount < 2; // 처음 2회는 다음 버튼 노출
+              if (opts.isSubmit) return callCount >= 2; // 이후 제출 버튼 노출
+              return false;
+            }),
+            waitFor: vi.fn().mockResolvedValue(undefined),
+            scrollIntoViewIfNeeded: vi.fn().mockResolvedValue(undefined),
+            click: vi.fn().mockImplementation(async () => {
+              if (opts.isNext) {
+                clickedButtons.push('next');
+              }
+              if (opts.isSubmit) {
+                clickedButtons.push('submit');
+              }
+            }),
+            count: vi.fn().mockResolvedValue(0),
+            check: vi.fn().mockResolvedValue(undefined),
+            locator: vi.fn().mockImplementation(() => createLocatorObj({})),
+          }),
+          count: vi.fn().mockResolvedValue(0),
+          all: vi.fn().mockResolvedValue([]),
+          locator: vi.fn().mockImplementation(() => createLocatorObj({})),
+        });
+
+        if (selector.includes('btn-next') || selector.includes('다음') || selector.includes('Next')) {
+          return createLocatorObj({ isNext: true });
+        }
+        if (selector.includes('btn-primary') || selector.includes('제출')) {
+          return createLocatorObj({ isSubmit: true });
+        }
+        return createLocatorObj({});
+      }),
+      evaluate: vi.fn().mockImplementation(async () => {
+        callCount++;
+        // 1~2번째 호출에서는 동일한 퀴즈 3문항 (족보 미등록) 반환
+        if (callCount <= 2) {
+          return [
+            {
+              questionNumber: 1,
+              questionLine: '[퀴즈] 다음 중 코그테라의 핵심 메시지가 아닌 것은?',
+              marker: '[퀴즈]',
+              isRequired: true,
+              inputType: 'radio',
+              options: [
+                { index: 1, text: '옵션1', value: '1' },
+                { index: 2, text: '옵션2', value: '2' },
+              ],
+            },
+            {
+              questionNumber: 2,
+              questionLine: '[퀴즈] 코그테라의 식약처 허가 사용 대상으로 알맞은 것은?',
+              marker: '[퀴즈]',
+              isRequired: true,
+              inputType: 'radio',
+              options: [
+                { index: 1, text: '옵션1', value: '1' },
+                { index: 2, text: '옵션2', value: '2' },
+              ],
+            },
+            {
+              questionNumber: 3,
+              questionLine: '[퀴즈] 다음 중 코그테라 훈련의 핵심 원리로 알맞은 것은?',
+              marker: '[퀴즈]',
+              isRequired: true,
+              inputType: 'radio',
+              options: [
+                { index: 1, text: '옵션1', value: '1' },
+                { index: 2, text: '옵션2', value: '2' },
+              ],
+            },
+          ];
+        }
+        // 3번째 호출에서는 2페이지 심화설문 1문항 반환
+        return [
+          {
+            questionNumber: 9,
+            questionLine: '경도인지장애 디지털치료기기는...',
+            marker: null,
+            isRequired: true,
+            inputType: 'text',
+            options: [{ index: 1, text: '[주관식]', value: '' }],
+          },
+        ];
+      }),
+    };
+
+    // 족보에는 해당 퀴즈가 등록되어 있지 않음
+    vi.spyOn(await import('../src/tasks/seminar_quiz'), 'loadCheatsheet').mockResolvedValue({});
+
+    const surveyApiModule = await import('../src/modules/seminar_survey_api');
+    vi.spyOn(surveyApiModule, 'fetchSeminarSurveyQuizHttp').mockResolvedValue({
+      success: true,
+      seminarId: '5808',
+      totalPageCnt: 2,
+      totalQuestionCnt: 4,
+      quizQuestionCnt: 3,
+      depthSurveyQuestionCnt: 1,
+      isAdvancedSurvey: true,
+      quizzes: [],
+      allQuestions: [],
+      quizSummaryMessage: '',
+    });
+
+    const result = await processSeminarQuiz(mockPage as Page, '5808', true);
+    await drainLlmQueue();
+
+    expect(result.success).toBe(true);
+    // 퀴즈 결과 메시지에 Q1, Q2, Q3이 각각 1회만 존재해야 함 (총 3문항)
+    const matchesQ1 = result.message.match(/Q1:/g) || [];
+    const matchesQ2 = result.message.match(/Q2:/g) || [];
+    const matchesQ3 = result.message.match(/Q3:/g) || [];
+    expect(matchesQ1.length).toBe(1);
+    expect(matchesQ2.length).toBe(1);
+    expect(matchesQ3.length).toBe(1);
+    // 퀴즈 정답 요약은 '-' 3개 (---) + 심화1 이어야 함 (------ 가 아님)
+    expect(result.message).toContain('정답 --- + 심화1');
+
+    // '족보에 없는 퀴즈' 알림 메시지에서도 Q1, Q2, Q3이 각각 1회만 존재해야 함
+    const unknownCall = sendTelegramSpy.mock.calls.find((c) => String(c[0]).includes('족보에 없는 퀴즈'));
+    const unknownText = String(unknownCall?.[0] ?? '');
+    expect(unknownText.match(/Q1:/g)?.length).toBe(1);
+    expect(unknownText.match(/Q2:/g)?.length).toBe(1);
+    expect(unknownText.match(/Q3:/g)?.length).toBe(1);
+  });
 });
