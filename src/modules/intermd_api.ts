@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { FormData, request } from 'undici';
 import * as dbStorage from '../services/storage';
 
 export interface InterMDMemberInfo {
@@ -219,7 +218,7 @@ export class InterMDClient {
       reqHeaders['Cookie'] = cookieStr;
     }
 
-    let bodyData: string | FormData | undefined = undefined;
+    let bodyData: BodyInit | undefined = undefined;
     if (options.body) {
       if (typeof options.body === 'string') {
         bodyData = options.body;
@@ -247,22 +246,25 @@ export class InterMDClient {
       }
     }
 
-    const res = await request(url, {
+    const res = await fetch(url, {
       method,
       headers: reqHeaders,
       body: bodyData,
+      redirect: 'manual',
     });
 
     const resHeaders: Record<string, string | string[]> = {};
-    for (const [k, v] of Object.entries(res.headers)) {
-      if (v !== undefined) {
-        resHeaders[k.toLowerCase()] = v;
-      }
+    for (const [k, v] of res.headers.entries()) {
+      resHeaders[k.toLowerCase()] = v;
+    }
+    const setCookies =
+      typeof res.headers.getSetCookie === 'function' ? res.headers.getSetCookie() : res.headers.get('set-cookie');
+    if (setCookies) {
+      resHeaders['set-cookie'] = setCookies;
+      this.extractAndStoreCookies(setCookies);
     }
 
-    this.extractAndStoreCookies(resHeaders['set-cookie']);
-
-    const text = await res.body.text();
+    const text = await res.text();
     let data: unknown = null;
     try {
       data = JSON.parse(text);
@@ -271,7 +273,7 @@ export class InterMDClient {
     }
 
     return {
-      status: res.statusCode,
+      status: res.status,
       data: data as T,
       headers: resHeaders,
     };

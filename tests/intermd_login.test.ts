@@ -20,7 +20,7 @@ describe('InterMD Login Tests', () => {
     let checkEncCalled = false;
     let loginCalled = false;
     let loginContentType = '';
-    let receivedFields: Record<string, string> = {};
+    const receivedFields: Record<string, string> = {};
 
     // 2. Mock HTTP 서버 생성
     const server = http.createServer((req, res) => {
@@ -135,11 +135,7 @@ describe('InterMD Login Tests', () => {
           Buffer.from(encPw, 'base64'),
         )
         .toString('utf8');
-      assert.strictEqual(
-        decryptedPw,
-        testUserPw,
-        '서버에서 복호화한 비밀번호가 원래 비밀번호와 일치해야 함',
-      );
+      assert.strictEqual(decryptedPw, testUserPw, '서버에서 복호화한 비밀번호가 원래 비밀번호와 일치해야 함');
 
       // 로그인 결과 검증
       assert.strictEqual(result.success, true);
