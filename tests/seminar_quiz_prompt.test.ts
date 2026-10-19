@@ -165,6 +165,35 @@ describe('requestHermesAiSurveyAnswer 단위 테스트', () => {
     }
   });
 
+  it('HERMES_URL 환경변수가 설정되어 있으면 해당 URL(/chat/completions 자동 부착)로 요청한다', async () => {
+    const prevUrl = process.env.HERMES_URL;
+    process.env.HERMES_URL = 'http://custom-hermes:8000/v1';
+
+    let requestedUrl = '';
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+      requestedUrl = url;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { content: '응답' } }],
+        }),
+      } as unknown as Response;
+    });
+
+    try {
+      const result = await requestHermesAiSurveyAnswer('프롬프트');
+      expect(result).toBe('응답');
+      expect(requestedUrl).toBe('http://custom-hermes:8000/v1/chat/completions');
+    } finally {
+      if (prevUrl !== undefined) {
+        process.env.HERMES_URL = prevUrl;
+      } else {
+        delete process.env.HERMES_URL;
+      }
+    }
+  });
+
   it('Hermes AI 서버가 에러를 반환하면 null을 반환하고 실패 알림을 전송한다', async () => {
     vi.spyOn(await import('../src/modules/utils'), 'sendTelegram').mockResolvedValue(true);
 

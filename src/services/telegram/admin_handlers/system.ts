@@ -322,7 +322,8 @@ export function setupSystemCommands(adminBot: Telegraf): void {
         prompt = '안녕하세요! 연결 및 응답 테스트입니다. 1줄 이내로 간단하게 자기소개와 현재 상태를 응답해주세요.';
       }
 
-      const url = process.env.HERMES_AI_URL || `${HERMES_API_BASE_URL}/chat/completions`;
+      const rawUrl = process.env.HERMES_URL || `${HERMES_API_BASE_URL}/chat/completions`;
+      const url = rawUrl.endsWith('/chat/completions') ? rawUrl : `${rawUrl.replace(/\/+$/, '')}/chat/completions`;
       const model = process.env.HERMES_MODEL || HERMES_DEFAULT_MODEL;
       const hasApiKey = Boolean(process.env.HERMES_API_KEY?.trim());
 
@@ -346,7 +347,7 @@ export function setupSystemCommands(adminBot: Telegraf): void {
           if (!aiAnswer) {
             await replyWithSplit(
               ctx,
-              `❌ [Hermes AI 테스트 실패] (${elapsedSec}s)\n\n서버 응답이 없거나 에러가 발생했습니다.\n- Endpoint: ${url}\n- Model: ${model}\n- API Key: ${hasApiKey ? '설정됨' : '미설정'}\n\nHERMES_AI_URL, HERMES_API_KEY 설정 및 Hermes 서버 상태를 확인해주세요.`,
+              `❌ [Hermes AI 테스트 실패] (${elapsedSec}s)\n\n서버 응답이 없거나 에러가 발생했습니다.\n- Endpoint: ${url}\n- Model: ${model}\n- API Key: ${hasApiKey ? '설정됨' : '미설정'}\n\nHERMES_URL, HERMES_API_KEY 설정 및 Hermes 서버 상태를 확인해주세요.`,
             );
             return;
           }

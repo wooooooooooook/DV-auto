@@ -40,6 +40,7 @@ services:
 
       HEADLESS: ${HEADLESS}
       
+      HERMES_URL: ${HERMES_URL}
       HERMES_API_KEY: ${HERMES_API_KEY}
 
       # 퀴즈 등록 git 동기화 (도커): 동기화 저장소를 볼륨에 유지하고 PAT 로 push

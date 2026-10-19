@@ -471,7 +471,7 @@ async function notifyHermesFailure(
   model: string,
 ): Promise<void> {
   const elapsedSec = ((Date.now() - startedAt) / 1000).toFixed(1);
-  const message = `⚠️ [${contextLabel} 요청 실패] (${elapsedSec}s)\n- 사유: ${reason}\n- Endpoint: ${url}\n- Model: ${model}\n\nHermes 서버 상태 및 HERMES_AI_URL / HERMES_API_KEY 설정을 확인해주세요.`;
+  const message = `⚠️ [${contextLabel} 요청 실패] (${elapsedSec}s)\n- 사유: ${reason}\n- Endpoint: ${url}\n- Model: ${model}\n\nHermes 서버 상태 및 HERMES_URL / HERMES_API_KEY 설정을 확인해주세요.`;
   await sendTelegram(message).catch((notifyErr) => {
     console.warn('[seminar_quiz] Hermes AI 실패 알림 전송 실패:', notifyErr);
   });
@@ -488,7 +488,7 @@ export async function requestHermesAiSurveyAnswer(
 ): Promise<string | null> {
   if (!promptText || !promptText.trim()) return null;
 
-  const rawUrl = process.env.HERMES_AI_URL || `${HERMES_API_BASE_URL}/chat/completions`;
+  const rawUrl = process.env.HERMES_URL || `${HERMES_API_BASE_URL}/chat/completions`;
   const url = rawUrl.endsWith('/chat/completions') ? rawUrl : `${rawUrl.replace(/\/+$/, '')}/chat/completions`;
   const model = process.env.HERMES_MODEL || HERMES_DEFAULT_MODEL;
 
