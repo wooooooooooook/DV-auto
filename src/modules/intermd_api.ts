@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
-import { request } from 'undici';
+import crypto from 'crypto';
+import { FormData, request } from 'undici';
 import * as dbStorage from '../services/storage';
 
 export interface InterMDMemberInfo {
@@ -197,7 +198,7 @@ export class InterMDClient {
     endpoint: string,
     options: {
       method?: 'GET' | 'POST';
-      body?: Record<string, string | number | undefined> | string;
+      body?: Record<string, string | number | undefined> | string | FormData;
       headers?: Record<string, string>;
     } = {},
   ): Promise<{ status: number; data: T; headers: Record<string, string | string[]> }> {
@@ -218,10 +219,20 @@ export class InterMDClient {
       reqHeaders['Cookie'] = cookieStr;
     }
 
-    let bodyData: string | undefined = undefined;
+    let bodyData: string | FormData | undefined = undefined;
     if (options.body) {
       if (typeof options.body === 'string') {
         bodyData = options.body;
+      } else if (
+        options.body instanceof FormData ||
+        (typeof globalThis.FormData !== 'undefined' && options.body instanceof globalThis.FormData)
+      ) {
+        bodyData = options.body as unknown as FormData;
+        for (const k of Object.keys(reqHeaders)) {
+          if (k.toLowerCase() === 'content-type') {
+            delete reqHeaders[k];
+          }
+        }
       } else {
         const params = new URLSearchParams();
         for (const [k, v] of Object.entries(options.body)) {
@@ -279,25 +290,71 @@ export class InterMDClient {
       };
     }
 
+    const encRes = await this.requestHttp<{ pukey?: string; keyno?: string | number }>('/login/checkEnc.do', {
+      method: 'GET',
+    });
+
+    const pukey = encRes.data?.pukey;
+    const keyno = encRes.data?.keyno;
+
+    if (!pukey || keyno === undefined || keyno === null) {
+      return {
+        success: false,
+        status_code: '-1',
+        message: '암호화 키 조회에 실패했습니다 (/login/checkEnc.do)',
+        raw: encRes.data,
+      };
+    }
+
+    let encPw: string;
+    try {
+      const pubKey = crypto.createPublicKey({
+        key: Buffer.from(pukey, 'base64'),
+        format: 'der',
+        type: 'spki',
+      });
+      encPw = crypto
+        .publicEncrypt(
+          {
+            key: pubKey,
+            padding: crypto.constants.RSA_PKCS1_PADDING,
+          },
+          Buffer.from(pw, 'utf8'),
+        )
+        .toString('base64');
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      return {
+        success: false,
+        status_code: '-1',
+        message: `비밀번호 암호화 실패: ${errMsg}`,
+      };
+    }
+
+    const form = new FormData();
+    form.append('memberId', id);
+    form.append('memberPw', encPw);
+    form.append('renewYn', '');
+    form.append('uuid', '');
+    form.append('pushKey', '');
+    form.append('device', '');
+    form.append('keyno', String(keyno));
+    form.append('memberOsInfo', 'P');
+    form.append('DM_FINAL_DATA', 'A');
+
     const res = await this.requestHttp<{
+      code?: string;
+      msg?: string;
       loginStatus?: string | number;
       sessionKey?: string;
       memberInfo?: InterMDMemberInfo;
     }>('/login/login.do', {
       method: 'POST',
-      body: {
-        memberId: id,
-        memberPw: pw,
-        renewYn: '',
-        uuid: '',
-        pushKey: '',
-        device: 'W',
-        DM_FINAL_DATA: 'A',
-      },
+      body: form,
     });
 
     const data = res.data || {};
-    const status = String(data.loginStatus || '');
+    const status = String(data.loginStatus ?? '');
 
     if (['1', '5', '6'].includes(status)) {
       this.sessionKey = data.sessionKey || null;
@@ -319,7 +376,11 @@ export class InterMDClient {
         '-8': '로그인 처리 중 서버 오류가 발생하였습니다.',
         '-9': '입력한 아이디와 비밀번호가 일치하지 않습니다.',
       };
-      const msg = errorMessages[status] || `로그인 실패 (코드: ${status})`;
+      const msg =
+        errorMessages[status] ||
+        (typeof data.msg === 'string' && data.msg
+          ? data.msg
+          : `로그인 실패 (코드: ${status || data.code || 'UNKNOWN'})`);
       return {
         success: false,
         status_code: status,
