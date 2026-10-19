@@ -274,4 +274,203 @@ describe('seminar_survey_api (fetchSeminarSurveyQuizHttp)', () => {
     expect(result.depthSurveyQuestionCnt).toBe(3); // 2페이지의 심화설문 3문항
     expect(result.quizSummaryMessage).toContain('심화3');
   });
+
+  it('제목에 "만족도"가 포함되어 있어도 useDepthSurvey === "N"이고 마지막 페이지에 객관식만 있는 경우 심화설문으로 오판되지 않는다 (5716 호흡기 증례강의 케이스)', async () => {
+    const mockCheatsheet = {
+      '호흡기 증례 퀴즈 1': '정답4',
+      '호흡기 증례 퀴즈 2': '정답1',
+      '호흡기 증례 퀴즈 3': '정답2',
+    };
+
+    const createMockResponse = (body: string, status = 200): httpClient.HttpResponse => ({
+      status,
+      statusText: status === 200 ? 'OK' : 'Not Found',
+      body,
+      headers: {},
+      url: 'https://survey.villeway.com',
+      redirected: false,
+      resultType: status === 200 ? 'SUCCESS' : 'HTTP_ERROR',
+    });
+
+    vi.spyOn(httpClient, 'sendDoctorVilleRequest').mockImplementation(async (url: string) => {
+      if (url.includes('/survey-url')) {
+        return createMockResponse(JSON.stringify({ surveyUrl: 'https://survey.villeway.com/s/c/test/u/token5716' }));
+      }
+      if (url.includes('/auth/authenticate-via-client')) {
+        return createMockResponse(JSON.stringify({ data: { accessToken: 'token-5716' } }));
+      }
+      if (url.includes('/user/survey-detail')) {
+        return createMockResponse(
+          JSON.stringify({
+            data: {
+              config: { title: '호흡기내과 증례강의 만족도 설문', useDepthSurvey: 'N' },
+              pageCnt: 2,
+              questionCnt: 14,
+            },
+          }),
+        );
+      }
+      if (url.includes('/user/survey-page/1')) {
+        return createMockResponse(
+          JSON.stringify({
+            data: {
+              questions: [
+                {
+                  id: 1,
+                  questionNumber: 1,
+                  subject: '[퀴즈] 호흡기 증례 퀴즈 1',
+                  type: { key: 'QUIZ_MULTIPLE_CHOICE' },
+                  options: [
+                    { id: 11, text: '오답' },
+                    { id: 12, text: '오답' },
+                    { id: 13, text: '오답' },
+                    { id: 14, text: '정답4' },
+                  ],
+                },
+                {
+                  id: 2,
+                  questionNumber: 2,
+                  subject: '[퀴즈] 호흡기 증례 퀴즈 2',
+                  type: { key: 'QUIZ_MULTIPLE_CHOICE' },
+                  options: [
+                    { id: 21, text: '정답1' },
+                    { id: 22, text: '오답' },
+                  ],
+                },
+                {
+                  id: 3,
+                  questionNumber: 3,
+                  subject: '[퀴즈] 호흡기 증례 퀴즈 3',
+                  type: { key: 'QUIZ_MULTIPLE_CHOICE' },
+                  options: [
+                    { id: 31, text: '오답' },
+                    { id: 32, text: '정답2' },
+                  ],
+                },
+              ],
+            },
+          }),
+        );
+      }
+      if (url.includes('/user/survey-page/2')) {
+        // 2페이지: 객관식 문항 11개
+        return createMockResponse(
+          JSON.stringify({
+            data: {
+              questions: Array.from({ length: 11 }, (_, i) => ({
+                id: 10 + i,
+                questionNumber: 4 + i,
+                subject: `강의 평가 문항 ${i + 1}`,
+                type: { key: 'MC_SELECT', nameKo: '객관식' },
+                options: [
+                  { id: 100 + i * 2, text: '매우 만족' },
+                  { id: 101 + i * 2, text: '만족' },
+                ],
+              })),
+            },
+          }),
+        );
+      }
+      return createMockResponse('', 404);
+    });
+
+    const result = await fetchSeminarSurveyQuizHttp('5716', mockCheatsheet);
+    expect(result.success).toBe(true);
+    expect(result.isAdvancedSurvey).toBe(false); // 만족도가 있어도 useDepthSurvey: 'N'이므로 심화설문 아님!
+    expect(result.isSuspectedAdvancedSurvey).toBe(false); // 주관식이 없으므로 의심도 아님!
+    expect(result.quizQuestionCnt).toBe(3);
+    expect(result.quizSummaryMessage).toBe('퀴즈 정답 412'); // + 심화11 이 붙지 않아야 함!
+  });
+
+  it('useDepthSurvey === "N"이지만 마지막 페이지에 주관식 문항이 1~3개 있으면 "심화설문?"으로 표시되고, 4개 이상이면 표시되지 않는다', async () => {
+    const mockCheatsheet = {
+      '단일 퀴즈 문항': '정답1',
+    };
+
+    const createMockResponse = (body: string, status = 200): httpClient.HttpResponse => ({
+      status,
+      statusText: status === 200 ? 'OK' : 'Not Found',
+      body,
+      headers: {},
+      url: 'https://survey.villeway.com',
+      redirected: false,
+      resultType: status === 200 ? 'SUCCESS' : 'HTTP_ERROR',
+    });
+
+    vi.spyOn(httpClient, 'sendDoctorVilleRequest').mockImplementation(async (url: string) => {
+      if (url.includes('/survey-url')) {
+        return createMockResponse(JSON.stringify({ surveyUrl: 'https://survey.villeway.com/s/c/test/u/token8888' }));
+      }
+      if (url.includes('/auth/authenticate-via-client')) {
+        return createMockResponse(JSON.stringify({ data: { accessToken: 'token-8888' } }));
+      }
+      if (url.includes('/user/survey-detail')) {
+        return createMockResponse(
+          JSON.stringify({
+            data: {
+              config: { title: '일반 강의 설문', useDepthSurvey: 'N' },
+              pageCnt: 2,
+              questionCnt: 4,
+            },
+          }),
+        );
+      }
+      if (url.includes('/user/survey-page/1')) {
+        return createMockResponse(
+          JSON.stringify({
+            data: {
+              questions: [
+                {
+                  id: 1,
+                  questionNumber: 1,
+                  subject: '[퀴즈] 단일 퀴즈 문항',
+                  type: { key: 'QUIZ_MULTIPLE_CHOICE' },
+                  options: [{ id: 11, text: '정답1' }],
+                },
+              ],
+            },
+          }),
+        );
+      }
+      if (url.includes('/user/survey-page/2')) {
+        // 2페이지: 주관식 3개 (1~3개 범위 내)
+        return createMockResponse(
+          JSON.stringify({
+            data: {
+              questions: [
+                {
+                  id: 2,
+                  questionNumber: 2,
+                  subject: '강사님께 전달하고 싶은 의견 1',
+                  type: { key: 'TEXT', nameKo: '주관식 서술형' },
+                  options: [],
+                },
+                {
+                  id: 3,
+                  questionNumber: 3,
+                  subject: '강사님께 전달하고 싶은 의견 2',
+                  type: { key: 'TEXT', nameKo: '주관식 서술형' },
+                  options: [],
+                },
+                {
+                  id: 4,
+                  questionNumber: 4,
+                  subject: '강사님께 전달하고 싶은 의견 3',
+                  type: { key: 'TEXT', nameKo: '주관식 서술형' },
+                  options: [],
+                },
+              ],
+            },
+          }),
+        );
+      }
+      return createMockResponse('', 404);
+    });
+
+    const result = await fetchSeminarSurveyQuizHttp('8888', mockCheatsheet);
+    expect(result.success).toBe(true);
+    expect(result.isAdvancedSurvey).toBe(false);
+    expect(result.isSuspectedAdvancedSurvey).toBe(true); // 마지막 페이지 주관식 3개 (1~3개 범위)
+    expect(result.quizSummaryMessage).toBe('퀴즈 정답 1 + 심화설문?');
+  });
 });

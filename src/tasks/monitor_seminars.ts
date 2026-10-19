@@ -492,6 +492,9 @@ export async function setupMonitoredSeminarItem(
       if (httpQuizRes.isAdvancedSurvey !== undefined) {
         info.isAdvancedSurvey = httpQuizRes.isAdvancedSurvey;
       }
+      if (httpQuizRes.isSuspectedAdvancedSurvey !== undefined) {
+        info.isSuspectedAdvancedSurvey = httpQuizRes.isSuspectedAdvancedSurvey;
+      }
     }
 
     try {
@@ -843,6 +846,9 @@ async function monitorSeminars(
           if (httpQuizRes.isAdvancedSurvey !== undefined) {
             item.isAdvancedSurvey = httpQuizRes.isAdvancedSurvey;
           }
+          if (httpQuizRes.isSuspectedAdvancedSurvey !== undefined) {
+            item.isSuspectedAdvancedSurvey = httpQuizRes.isSuspectedAdvancedSurvey;
+          }
 
           if (lastStatusNoticeMessageId) {
             const boardRes = await updateStatusBoardNotice(
@@ -1115,6 +1121,9 @@ async function monitorSeminars(
             quizResultMessage = httpQuizRes.quizResultMessage;
             if (httpQuizRes.isAdvancedSurvey !== undefined) {
               currentSeminar.isAdvancedSurvey = httpQuizRes.isAdvancedSurvey;
+            }
+            if (httpQuizRes.isSuspectedAdvancedSurvey !== undefined) {
+              currentSeminar.isSuspectedAdvancedSurvey = httpQuizRes.isSuspectedAdvancedSurvey;
             }
           }
 

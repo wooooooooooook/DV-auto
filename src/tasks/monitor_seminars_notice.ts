@@ -39,6 +39,7 @@ export interface MonitoredSeminarItem {
   hasSurvey?: boolean;
   isSurveyPointExcluded?: boolean;
   isAdvancedSurvey?: boolean;
+  isSuspectedAdvancedSurvey?: boolean;
   hasEntryHistory?: boolean;
   autoEnterDone?: boolean;
   isEntryStarted?: boolean;

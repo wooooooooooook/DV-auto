@@ -14,7 +14,11 @@ import { SEMINAR_DETAIL_PAGE } from './monitor_seminars_notice';
 export async function tryFetchSeminarQuizHttpFast(
   seminarId: string | null | undefined,
   isAdvancedSurvey?: boolean,
-): Promise<{ quizResultMessage: string | null; isAdvancedSurvey?: boolean } | null> {
+): Promise<{
+  quizResultMessage: string | null;
+  isAdvancedSurvey?: boolean;
+  isSuspectedAdvancedSurvey?: boolean;
+} | null> {
   if (!seminarId) return null;
   try {
     const cheatsheet = await loadCheatsheet();
@@ -24,6 +28,7 @@ export async function tryFetchSeminarQuizHttpFast(
       return {
         quizResultMessage,
         isAdvancedSurvey: httpResult.isAdvancedSurvey || isAdvancedSurvey,
+        isSuspectedAdvancedSurvey: httpResult.isSuspectedAdvancedSurvey,
       };
     }
   } catch (err) {

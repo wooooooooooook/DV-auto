@@ -354,18 +354,26 @@ export function formatQuizResults(
   _hasUnknown: boolean,
   _hasMultipleMatches: boolean,
   depthSurveyCount?: number,
+  isSuspectedAdvancedSurvey?: boolean,
 ): string {
   if (results.length === 0) {
-    return depthSurveyCount && depthSurveyCount > 0 ? `심화${depthSurveyCount}` : '퀴즈 없음';
+    if (depthSurveyCount && depthSurveyCount > 0) return `심화${depthSurveyCount}`;
+    if (isSuspectedAdvancedSurvey) return '심화설문?';
+    return '퀴즈 없음';
   }
 
   let message = '';
 
-  // 정답 요약 (예: "퀴즈 정답 412 + 심화1" 또는 "퀴즈 정답 412")
+  // 정답 요약 (예: "퀴즈 정답 412 + 심화1" 또는 "퀴즈 정답 412 + 심화설문?")
   const answerSummary = results.map((r) => (r.selectedIndex !== null ? String(r.selectedIndex) : '-')).join('');
   const hasAnyUnknown = results.some((r) => r.selectedIndex === null);
   const prefix = results.length > 0 && results[0].marker ? `${results[0].marker} ` : '퀴즈 ';
-  const depthSuffix = depthSurveyCount && depthSurveyCount > 0 ? ` + 심화${depthSurveyCount}` : '';
+  let depthSuffix = '';
+  if (depthSurveyCount && depthSurveyCount > 0) {
+    depthSuffix = ` + 심화${depthSurveyCount}`;
+  } else if (isSuspectedAdvancedSurvey) {
+    depthSuffix = ' + 심화설문?';
+  }
   message += `${prefix.trim()}정답 ${answerSummary}${depthSuffix}${hasAnyUnknown ? ' (일부 미해결)' : ''}\n\n`;
 
   // 상세 내역

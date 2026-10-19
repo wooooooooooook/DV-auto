@@ -990,6 +990,7 @@ export interface SeminarDisplayItem {
   diseaseCategoryNm?: string;
   isPointExcluded?: boolean;
   isAdvancedSurvey?: boolean;
+  isSuspectedAdvancedSurvey?: boolean;
 }
 
 /**
@@ -1041,6 +1042,8 @@ function formatSeminarDisplayName(item: SeminarDisplayItem, options: FormatSemin
 
   if (item.isAdvancedSurvey) {
     flags.push('✨<b>[심화설문]</b>');
+  } else if (item.isSuspectedAdvancedSurvey) {
+    flags.push('✨<b>[심화설문?]</b>');
   }
 
   // 3. 세미나 제목

@@ -89,6 +89,14 @@ describe('formatSeminarDisplayName 공통 함수 테스트', () => {
     expect(formatSeminarDisplayName(advancedSurvey)).toBe('✨<b>[심화설문]</b> 심화설문 세미나');
   });
 
+  it('7-1. 심화설문 의심 플래그 검증 (useDepthSurvey=N이지만 마지막페이지 주관식 <3개)', () => {
+    const suspectedSurvey: SeminarDisplayItem = {
+      name: '심화설문 의심 세미나',
+      isSuspectedAdvancedSurvey: true,
+    };
+    expect(formatSeminarDisplayName(suspectedSurvey)).toBe('✨<b>[심화설문?]</b> 심화설문 의심 세미나');
+  });
+
   it('8. 정원(현재/총원) 표시 검증 (둘 다 유효할 때만 표시, 하나라도 누락되면 미표시)', () => {
     const item: SeminarDisplayItem = {
       name: '정원 세미나',

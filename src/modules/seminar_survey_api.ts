@@ -37,6 +37,7 @@ export interface SurveyQuizHttpResult {
   quizQuestionCnt: number;
   depthSurveyQuestionCnt: number;
   isAdvancedSurvey: boolean;
+  isSuspectedAdvancedSurvey?: boolean;
   quizzes: HttpQuizQuestion[];
   allQuestions: HttpQuizQuestion[];
   depthSurveyQuestions?: HttpQuizQuestion[];
@@ -44,6 +45,35 @@ export interface SurveyQuizHttpResult {
   quizSummaryMessage: string;
   quizResultMessage?: string;
   errorMessage?: string;
+}
+
+/**
+ * 설문 문항이 주관식(서술형/단답형)인지 판별합니다.
+ */
+export function isSubjectiveQuestion(q: {
+  typeKey?: string;
+  typeName?: string;
+  questionText?: string;
+  options?: Array<{ text?: string }>;
+}): boolean {
+  const typeKey = (q.typeKey || '').toUpperCase();
+  const typeName = q.typeName || '';
+  const text = q.questionText || '';
+
+  // 1. typeKey 기반 (TEXT, ESSAY, SUBJECTIVE, SHORT, INPUT, TEXTAREA 등)
+  if (/TEXT|ESSAY|SUBJECTIVE|SHORT|INPUT|TEXTAREA/.test(typeKey)) return true;
+
+  // 2. typeName 기반 (주관식, 서술형, 단답형, 텍스트 입력 등)
+  if (/주관식|서술형|단답형|텍스트/.test(typeName)) return true;
+
+  // 3. 지문 마커 기반 ([주관식])
+  if (/\[\s*주관식\s*\]/i.test(text)) return true;
+
+  // 4. options 기반 (선택지가 전혀 없거나, 유일한 옵션이 '[주관식]')
+  if (!q.options || q.options.length === 0) return true;
+  if (q.options.length === 1 && /^\s*\[?\s*주관식\s*\]?\s*$/i.test(q.options[0].text || '')) return true;
+
+  return false;
 }
 
 export const DOCTORVILLE_SURVEY_URL_API = 'https://m-api.doctorville.co.kr/api/mw/seminars';
@@ -230,12 +260,11 @@ export async function fetchSeminarSurveyQuizHttp(
     const totalQuestionCnt = typeof surveyData.questionCnt === 'number' ? surveyData.questionCnt : 0;
     const surveyTitle = surveyData.config?.title || '';
 
-    // 심화설문 판별: 플래그(인자 또는 config) 및 제목("심화"/"만족도") 기반
+    // 심화설문 판별: 플래그(인자 또는 config) 및 제목("심화") 기반 ('만족도'는 제외)
     const isAdvancedSurvey =
       Boolean(isAdvancedSurveyParam) ||
       checkIsAdvancedSurvey(surveyData.config?.useDepthSurvey) ||
-      surveyTitle.includes('심화') ||
-      surveyTitle.includes('만족도');
+      surveyTitle.includes('심화');
 
     // 4. 각 페이지 순회 및 문항 수집
     const allQuestions: HttpQuizQuestion[] = [];
@@ -331,9 +360,19 @@ export async function fetchSeminarSurveyQuizHttp(
         ? formatAdvancedSurveyPrompt(depthSurveyQuestions)
         : undefined;
 
-    // 퀴즈 정답 요약 메시지 생성 (예: "퀴즈 정답 412 + 심화1" 또는 "퀴즈 정답 412")
+    // useDepthSurvey === 'N' (심화설문 아님)인데 설문 마지막 페이지에 주관식 항목이 1~3개 있으면 "심화설문?"으로 표시
+    const lastPageSubjectiveQuestions = lastPageQuestions.filter(isSubjectiveQuestion);
+    const isSuspectedAdvancedSurvey =
+      !isAdvancedSurvey && lastPageSubjectiveQuestions.length >= 1 && lastPageSubjectiveQuestions.length <= 3;
+
+    // 퀴즈 정답 요약 메시지 생성 (예: "퀴즈 정답 412 + 심화1" 또는 "퀴즈 정답 412 + 심화설문?")
     let quizSummaryMessage = '';
-    const depthSuffix = isAdvancedSurvey && depthSurveyQuestionCnt > 0 ? ` + 심화${depthSurveyQuestionCnt}` : '';
+    let depthSuffix = '';
+    if (isAdvancedSurvey && depthSurveyQuestionCnt > 0) {
+      depthSuffix = ` + 심화${depthSurveyQuestionCnt}`;
+    } else if (isSuspectedAdvancedSurvey) {
+      depthSuffix = ' + 심화설문?';
+    }
 
     if (quizzes.length > 0) {
       const ansNums = quizzes.map((q) => (q.selectedIndex !== null ? String(q.selectedIndex) : '-')).join('');
@@ -341,11 +380,13 @@ export async function fetchSeminarSurveyQuizHttp(
       quizSummaryMessage = `퀴즈 정답 ${ansNums}${depthSuffix}${hasUnknown ? ' (일부 미해결)' : ''}`;
     } else if (isAdvancedSurvey && depthSurveyQuestionCnt > 0) {
       quizSummaryMessage = `심화${depthSurveyQuestionCnt}`;
+    } else if (isSuspectedAdvancedSurvey) {
+      quizSummaryMessage = '심화설문?';
     }
 
     // 상세 내역을 포함한 전체 퀴즈 결과 메시지 생성
     let quizResultMessage = quizSummaryMessage;
-    if (quizzes.length > 0 || (isAdvancedSurvey && depthSurveyQuestionCnt > 0)) {
+    if (quizzes.length > 0 || (isAdvancedSurvey && depthSurveyQuestionCnt > 0) || isSuspectedAdvancedSurvey) {
       const channelResults: QuizResult[] = quizzes.map((q) => ({
         questionIndex: q.questionNumber,
         questionText: q.questionText,
@@ -361,6 +402,7 @@ export async function fetchSeminarSurveyQuizHttp(
         quizzes.some((q) => q.selectedIndex === null),
         quizzes.some((q) => q.multipleMatches && q.multipleMatches.length > 1),
         depthSurveyQuestionCnt,
+        isSuspectedAdvancedSurvey,
       );
     }
 
@@ -374,6 +416,7 @@ export async function fetchSeminarSurveyQuizHttp(
       quizQuestionCnt: quizzes.length,
       depthSurveyQuestionCnt,
       isAdvancedSurvey,
+      isSuspectedAdvancedSurvey,
       quizzes,
       allQuestions,
       depthSurveyQuestions,
