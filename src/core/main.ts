@@ -35,6 +35,7 @@ import { refreshPastUncompletedSeminars } from '../services/seminar_sync_service
 import { checkAndWatchMedigateSymposiums } from '../services/medigate_monitor_service';
 import { restoreDataFilesFromSyncRepo } from '../services/git_sync';
 import { isDockerEnv } from './runtime_env';
+import { fetchFormattedCommitInfo, formatCommitInfo } from './version';
 import type { Task } from '../types';
 
 dns.setDefaultResultOrder('ipv4first');
@@ -640,9 +641,13 @@ async function bootstrap(): Promise<void> {
   telegram.launch();
 
   const nowStr = new Date().toLocaleString('ko-KR', { timeZone: TIMEZONE });
-  utils
-    .sendTelegram(`🚀 앱이 온라인 상태입니다. (${nowStr})`)
-    .catch((err) => logger.error('Failed to send startup notification:', err));
+  const commitInfo = await fetchFormattedCommitInfo().catch(() => formatCommitInfo());
+  let startupMsg = `🚀 앱이 온라인 상태입니다. (${nowStr})`;
+  if (commitInfo) {
+    startupMsg += `\n• 커밋: ${commitInfo}`;
+  }
+  logger.info(`앱 온라인 알림 전송 (커밋: ${commitInfo ?? '미확인'})`);
+  utils.sendTelegram(startupMsg).catch((err) => logger.error('Failed to send startup notification:', err));
 
   // 앱 시작 시 지나간 세미나 중 미완료 상태인 세미나들을 동시 3개, 250ms 간격으로 detail API 동기화
   refreshPastUncompletedSeminars(3, 250).catch((err) =>

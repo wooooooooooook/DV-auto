@@ -524,7 +524,7 @@ export async function setupMonitoredSeminarItem(
   if (isReadyToEnter && currentStatus !== '종료') {
     currentStatus = '입장가능';
     info.isEntryStarted = true;
-    if (isAutoResume) {
+    if (isAutoResume || matchedPrev?.status === '입장가능' || matchedPrev?.status === '종료') {
       startNotified = true;
     }
   }
@@ -696,7 +696,7 @@ async function monitorSeminars(
   }
 
   const {
-    isAutoResume,
+    isAutoResume: explicitAutoResume,
     pollIntervalMs = API_POLL_INTERVAL_MS,
     waitForSurveyClose = process.env.NODE_ENV !== 'test',
   } = options;
@@ -712,14 +712,14 @@ async function monitorSeminars(
   try {
     console.log(`[${periodName}] API 기반 세미나 모니터링 시작 (시간대: ${startHour}시 ~ ${endHour}시)`);
 
-    // isAutoResume 시 당일 기존에 전송된 세미나 현황 메시지 ID 확인
-    if (isAutoResume) {
-      const existingMsg = getSeminarStatusChannelMessage(periodName, todayIsoDate);
-      if (existingMsg) {
-        lastStatusNoticeMessageId = existingMsg.messageId;
-        console.log(`[${periodName}] [isAutoResume] 기존 세미나 현황 메시지 감지 (ID: ${lastStatusNoticeMessageId})`);
-      }
+    // 외부 isAutoResume 플래그에 의존하지 않고, 당일 기존에 전송된 세미나 현황 공지가 있는지 DB 기준으로 항상 자율 확인
+    const existingMsg = getSeminarStatusChannelMessage(periodName, todayIsoDate);
+    if (existingMsg) {
+      lastStatusNoticeMessageId = existingMsg.messageId;
+      console.log(`[${periodName}] 기존 세미나 현황 메시지 감지 (ID: ${lastStatusNoticeMessageId})`);
     }
+
+    const isAutoResume = explicitAutoResume ?? Boolean(existingMsg);
 
     // 당일 기존 공지 메시지가 있는 경우 이전 퀴즈 정답 및 상태 정보 파싱
     const prevNoticeSeminars = getPrevNoticeSeminarsForPeriod(periodName, todayIsoDate, lastStatusNoticeMessageId);
@@ -791,7 +791,7 @@ async function monitorSeminars(
     let lastStatusNoticeText: string | null = null;
 
     if (hasInitialActiveOrEnded) {
-      if (isAutoResume && lastStatusNoticeMessageId) {
+      if (lastStatusNoticeMessageId) {
         const boardRes = await updateStatusBoardNotice(periodName, monitoredSeminarsMap, lastStatusNoticeMessageId, {
           isAllCompleted: isAllInitiallyCompleted,
           isAutoResume: true,

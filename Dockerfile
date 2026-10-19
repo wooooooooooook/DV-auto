@@ -12,9 +12,14 @@ RUN pnpm install --frozen-lockfile
 
 RUN pnpm exec playwright install --with-deps chromium
 
+ARG GIT_COMMIT=""
+ARG GIT_COMMIT_DATE=""
+
 COPY tsconfig.json ./
+COPY scripts ./scripts
 COPY src ./src
 
+RUN node scripts/generate-build-info.js "$GIT_COMMIT" "$GIT_COMMIT_DATE"
 RUN pnpm run build
 
 # /app/data 는 컨테이너 recreate 시 비어 있는 상태로 부팅되며 startup hydration
@@ -26,5 +31,7 @@ ENV NODE_ENV=production
 ENV TZ=Asia/Seoul
 ENV HEADLESS=true
 ENV SQLITE_DB_PATH=/app/runtime-data/app.db
+ENV GIT_COMMIT=${GIT_COMMIT}
+ENV GIT_COMMIT_DATE=${GIT_COMMIT_DATE}
 
 CMD ["node", "dist/core/main.js"]

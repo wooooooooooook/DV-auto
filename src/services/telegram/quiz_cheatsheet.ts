@@ -99,6 +99,42 @@ export async function saveSeminarQuizCheatsheet(data: SeminarQuizCheatsheet): Pr
   }
 }
 
+export type ExtractedSeminarInfo = {
+  seminarId: string | null;
+  isAdvancedSurvey: boolean;
+};
+
+export function extractSeminarInfoFromText(text: string): ExtractedSeminarInfo {
+  if (!text) {
+    return { seminarId: null, isAdvancedSurvey: false };
+  }
+
+  const patterns = [
+    /\[세미나\s*[:#]?\s*(\d+)\]?/i,
+    /세미나\s*(?:ID|id|번호)?\s*[:#]\s*(\d+)/i,
+    /\/run_seminar_quiz\s+(\d+)/i,
+    /seminar\/(\d+)/i,
+    /seminarId[=:]\s*(\d+)/i,
+  ];
+
+  let seminarId: string | null = null;
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match && match[1]) {
+      seminarId = match[1];
+      break;
+    }
+  }
+
+  const isAdvancedSurvey =
+    text.includes('(심화)') ||
+    text.includes('심화설문') ||
+    text.includes('심화 설문') ||
+    /\/run_seminar_quiz\s+\d+\s+(?:advanced|심화)/i.test(text);
+
+  return { seminarId, isAdvancedSurvey };
+}
+
 export type ParsedQuizQuestion = { keyword: string; options: string[] };
 
 export function parseQuizQuestionsFromText(content: string): ParsedQuizQuestion[] {

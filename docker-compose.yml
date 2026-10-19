@@ -3,6 +3,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-}
+        GIT_COMMIT_DATE: ${GIT_COMMIT_DATE:-}
 
     container_name: dv-auto
 
@@ -12,6 +15,10 @@ services:
     environment:
       # 텔레그램 /log·/update_app 명령의 도커 분기 감지 플래그
       DV_DOCKER: 1
+
+      # Git 커밋 정보 (호스트 환경변수 또는 빌드 주입)
+      GIT_COMMIT: ${GIT_COMMIT:-}
+      GIT_COMMIT_DATE: ${GIT_COMMIT_DATE:-}
 
       DV_USER: ${DV_USER}
       DV_PASS: ${DV_PASS}

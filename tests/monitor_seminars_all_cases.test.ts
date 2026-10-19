@@ -310,4 +310,68 @@ describe('monitor_seminars_all_cases (앱 재시작 및 공지방 상태 기반 
     expect(resolvedExistingEndedAt).toBe(customEndedAt);
     expect(getSurveyRemainingMinutes({ endedAt: resolvedExistingEndedAt }, now)).toBe(40);
   });
+
+  it('isAutoResume 옵션이 주어지지 않아도 당일 기존 공지 메시지가 있으면 새 메시지를 발송하지 않고 기존 공지를 수정함', async () => {
+    const todayStr = '2026-08-28';
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(`${todayStr} 12:00:00+09:00`));
+
+    // 당일 기존 공지 메시지 등록 (ID: 2844)
+    channelRepo.recordChannelMessage({
+      channelId: 'test_chan',
+      messageId: 2844,
+      date: todayStr,
+      text: '🔔 [08월 28일] 점심세미나\n\n🟢 입장가능 | 11:30 고혈압 세미나',
+      status: 'sent',
+    });
+
+    vi.spyOn(seminarApiModule, 'fetchMainFutureSeminars').mockResolvedValue({
+      success: true,
+      items: [
+        {
+          seminarId: 903,
+          seminarNm: '고혈압 세미나',
+          startDt: `${todayStr} 11:30:00`,
+          endDt: `${todayStr} 12:30:00`,
+          useSurvey: 'Y',
+          processState: 8,
+          seminarCompleted: 1,
+        },
+      ],
+      rawResponse: {},
+    });
+
+    vi.spyOn(seminarApiModule, 'fetchSeminarDetail').mockResolvedValue({
+      success: true,
+      seminarId: '903',
+      surveyState: 3,
+      isPointExcluded: false,
+      hasEntryHistory: true,
+      rawResponse: { surveyState: 3, seminarDetail: { processState: 8, seminarCompleted: 1 } },
+    });
+
+    const editChannelMessageSpy = vi.spyOn(channelRepo, 'editChannelMessage').mockResolvedValue({
+      success: true,
+      message: 'edited',
+    });
+    const sendNotificationSpy = vi.spyOn(utilsModule, 'sendNotificationToChannel');
+    vi.spyOn(utilsModule, 'sendTelegram').mockResolvedValue(true);
+
+    // isAutoResume 옵션 없이(일반 실행) monitorSeminars 호출!
+    const result = await monitorSeminars('점심', 11, 15, {
+      pollIntervalMs: 10,
+      waitForSurveyClose: true,
+    });
+
+    expect(result).toBe(true);
+    // 새 공지 발송(sendNotificationToChannel)은 호출되지 않아야 함!
+    expect(sendNotificationSpy).not.toHaveBeenCalled();
+    // 기존 공지 2844가 인플레이스 수정되어야 함!
+    expect(editChannelMessageSpy).toHaveBeenCalledWith(
+      2844,
+      expect.stringContaining('🏁 점심세미나가 모두 종료되었습니다.'),
+    );
+
+    vi.useRealTimers();
+  });
 });

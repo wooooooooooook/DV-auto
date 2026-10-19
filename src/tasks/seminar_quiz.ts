@@ -579,8 +579,17 @@ export async function requestHermesAiSurveyAnswer(
 /**
  * 미등록 문제를 텔레그램 메시지 형식으로 포맷
  */
-export function formatUnknownQuestions(questions: SurveyQuestion[], results: QuizResult[]): string {
-  let message = '❓ 족보에 없는 퀴즈:\n\n';
+export function formatUnknownQuestions(
+  questions: SurveyQuestion[],
+  results: QuizResult[],
+  seminarId?: string,
+  isAdvancedSurvey?: boolean,
+): string {
+  let header = '❓ 족보에 없는 퀴즈';
+  if (seminarId) {
+    header += ` [세미나: ${seminarId}${isAdvancedSurvey ? ' (심화)' : ''}]`;
+  }
+  let message = `${header}:\n\n`;
 
   for (let i = 0; i < results.length; i++) {
     const result = results[i];
@@ -596,6 +605,9 @@ export function formatUnknownQuestions(questions: SurveyQuestion[], results: Qui
   }
 
   message += `💡 족보 등록 방법:\n• 이 메시지에 답장(Reply)으로 정답 번호(예: 123)만 전송\n• 또는 /add_seminar_answer_batch 사용`;
+  if (seminarId) {
+    message += `\n• 등록 완료 시 /run_seminar_quiz ${seminarId}${isAdvancedSurvey ? ' advanced' : ''} 가 자동 실행됩니다.`;
+  }
   return message;
 }
 
@@ -641,8 +653,13 @@ ${qLines.join('\n\n')}
 /**
  * 족보 미등록 퀴즈 안내 메시지를 보내고, Hermes AI에게 추천 정답을 요청하여 추가로 전송합니다.
  */
-export async function handleUnknownQuestions(questions: SurveyQuestion[], results: QuizResult[]): Promise<void> {
-  const unknownMessage = formatUnknownQuestions(questions, results);
+export async function handleUnknownQuestions(
+  questions: SurveyQuestion[],
+  results: QuizResult[],
+  seminarId?: string,
+  isAdvancedSurvey?: boolean,
+): Promise<void> {
+  const unknownMessage = formatUnknownQuestions(questions, results, seminarId, isAdvancedSurvey);
   await sendTelegram(unknownMessage).catch((err) => {
     console.error('[seminar_quiz] 미등록 퀴즈 알림 전송 실패:', err);
   });
@@ -655,7 +672,10 @@ export async function handleUnknownQuestions(questions: SurveyQuestion[], result
       run: () => requestHermesAiSurveyAnswer(promptText, '미등록 퀴즈 AI 추천 정답'),
       onResult: async (aiAnswer) => {
         if (aiAnswer && aiAnswer.trim()) {
-          const aiMessage = `🤖 <b>[미등록 퀴즈 AI 추천 정답]</b>\n\n<pre><code class="language-text">${escapeHtml(aiAnswer.trim())}</code></pre>`;
+          const title = seminarId
+            ? `🤖 <b>[미등록 퀴즈 AI 추천 정답] (세미나: ${seminarId}${isAdvancedSurvey ? ', 심화' : ''})</b>`
+            : `🤖 <b>[미등록 퀴즈 AI 추천 정답]</b>`;
+          const aiMessage = `${title}\n\n<pre><code class="language-text">${escapeHtml(aiAnswer.trim())}</code></pre>`;
           await sendTelegram(aiMessage, null, { parse_mode: 'HTML' }).catch((err) => {
             console.error('[seminar_quiz] 미등록 퀴즈 AI 답변 텔레그램 발송 실패:', err);
           });
@@ -1119,7 +1139,7 @@ async function processSeminarQuiz(
       }
 
       if (_hasUnknown) {
-        await handleUnknownQuestions(accumulatedQuestions, accumulatedResults);
+        await handleUnknownQuestions(accumulatedQuestions, accumulatedResults, seminarId, isAdvancedSurvey);
       }
 
       return {
@@ -1211,7 +1231,7 @@ async function processSeminarQuiz(
 
     // 미등록 [퀴즈] 문제가 있으면 관리자에게 상세 전송 및 AI 추천 정답 전송
     if (_hasUnknown) {
-      await handleUnknownQuestions(accumulatedQuestions, accumulatedResults);
+      await handleUnknownQuestions(accumulatedQuestions, accumulatedResults, seminarId, isAdvancedSurvey);
     }
 
     return { success: true, hasQuizResult: channelResults.length > 0, message: resultMessage };

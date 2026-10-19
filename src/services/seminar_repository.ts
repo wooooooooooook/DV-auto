@@ -111,7 +111,11 @@ export function extractSeminarId(seminar: Pick<SeminarListItem, 'url' | 'seminar
  */
 export function mergeSeminarRecord(existing: SeminarListItem | undefined, incoming: SeminarListItem): SeminarListItem {
   if (!existing) {
-    return { ...incoming };
+    const isPaid = incoming.pointPaid === true;
+    return {
+      ...incoming,
+      isAdvancedSurvey: isPaid ? true : (incoming.isAdvancedSurvey ?? false),
+    };
   }
 
   const sid = incoming.seminarId || existing.seminarId || null;
@@ -121,6 +125,9 @@ export function mergeSeminarRecord(existing: SeminarListItem | undefined, incomi
   const isClosed = incoming.isClosed ?? existing.isClosed ?? false;
   const hiddenYn = incoming.hiddenYn || existing.hiddenYn || 'N';
   const diseaseCategoryNm = incoming.diseaseCategoryNm || existing.diseaseCategoryNm || undefined;
+
+  // 포인트 지급이 확인된 경우 심화세미나로 변경 및 유지
+  const isAdvancedSurvey = pointPaid ? true : (incoming.isAdvancedSurvey ?? existing.isAdvancedSurvey ?? false);
 
   return {
     ...existing,
@@ -133,7 +140,7 @@ export function mergeSeminarRecord(existing: SeminarListItem | undefined, incomi
     currentCount: incoming.currentCount || existing.currentCount || '',
     totalCount: incoming.totalCount || existing.totalCount || '',
     nightTime: incoming.nightTime ?? existing.nightTime ?? false,
-    isAdvancedSurvey: incoming.isAdvancedSurvey ?? existing.isAdvancedSurvey ?? false,
+    isAdvancedSurvey,
     isPointExcluded: incoming.isPointExcluded ?? existing.isPointExcluded,
     processState: incoming.processState ?? existing.processState,
     cancelProcessState: incoming.cancelProcessState ?? existing.cancelProcessState,
@@ -329,6 +336,7 @@ export interface UpdateSeminarPointStatusOptions {
   pointContent?: string | null;
   pointCheckedAt?: string;
   initialData?: Partial<SeminarListItem>;
+  isAdvancedSurvey?: boolean;
 }
 
 /**
@@ -393,11 +401,18 @@ export async function updateSeminarPointStatus(
           ? options.pointContent
           : (existing.pointContent ?? null)
         : null;
+      const newIsAdvanced =
+        options.isAdvancedSurvey !== undefined
+          ? options.isAdvancedSurvey
+          : isPaid
+            ? true
+            : (existing.isAdvancedSurvey ?? false);
 
       db.prepare(
         `
         UPDATE seminars
         SET point_paid = ?,
+            is_advanced_survey = ?,
             point = ?,
             point_text = ?,
             point_date = ?,
@@ -406,7 +421,17 @@ export async function updateSeminarPointStatus(
             updated_at = ?
         WHERE seminar_id = ?
       `,
-      ).run(isPaid ? 1 : 0, newPoint, newPointText, newPointDate, newPointContent, checkedAt, now, seminarId);
+      ).run(
+        isPaid ? 1 : 0,
+        newIsAdvanced ? 1 : 0,
+        newPoint,
+        newPointText,
+        newPointDate,
+        newPointContent,
+        checkedAt,
+        now,
+        seminarId,
+      );
 
       const refreshedRow = db.prepare('SELECT * FROM seminars WHERE seminar_id = ?').get(seminarId) as SeminarDbRow;
       updatedRecord = rowToSeminarListItem(refreshedRow);
@@ -416,6 +441,12 @@ export async function updateSeminarPointStatus(
       const newPointText = isPaid ? (options.pointText ?? null) : null;
       const newPointDate = isPaid ? (options.pointDate ?? null) : null;
       const newPointContent = isPaid ? (options.pointContent ?? null) : null;
+      const newIsAdvanced =
+        options.isAdvancedSurvey !== undefined
+          ? options.isAdvancedSurvey
+          : isPaid
+            ? true
+            : (initial.isAdvancedSurvey ?? false);
 
       const stmt = db.prepare(`
         INSERT INTO seminars (
@@ -443,7 +474,7 @@ export async function updateSeminarPointStatus(
         initial.totalCount || '',
         initial.nightTime ? 1 : 0,
         typeof initial.isPointExcluded === 'boolean' ? (initial.isPointExcluded ? 1 : 0) : null,
-        initial.isAdvancedSurvey ? 1 : 0,
+        newIsAdvanced ? 1 : 0,
         typeof initial.processState === 'number' ? initial.processState : null,
         typeof initial.cancelProcessState === 'number' ? initial.cancelProcessState : null,
         typeof initial.seminarCompleted === 'number' ? initial.seminarCompleted : null,

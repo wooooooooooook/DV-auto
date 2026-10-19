@@ -2,7 +2,7 @@ node_modules
 dist
 data/*
 !data/
-.git
+# .git 은 빌드 시 커밋 정보(build-info) 추출을 위해 컨텍스트에 포함되며, 빌드 직후 이미지에서 삭제됩니다
 .github
 .env
 *.log

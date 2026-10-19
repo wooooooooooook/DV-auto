@@ -20,7 +20,65 @@ import {
   parseQuizQuestionsFromText,
   registerQuizAnswersToCheatsheet,
   commitAndPushIfChanged,
+  extractSeminarInfoFromText,
 } from '../quiz_cheatsheet';
+
+export async function executeRunSeminarQuiz(ctx: Context, seminarId: string, isAdvancedSurvey = false): Promise<void> {
+  const task = taskRegistry.getByName('run_seminar_quiz');
+  if (!task) {
+    logger.error('run_seminar_quiz task not found, cannot run');
+    await replyWithSplit(ctx, 'run_seminar_quiz task not found!');
+    return;
+  }
+
+  try {
+    await replyWithSplit(
+      ctx,
+      `Starting run_seminar_quiz (seminarId=${seminarId}${isAdvancedSurvey ? ', 심화설문' : ''})... (백그라운드 실행)`,
+    );
+    const args: Record<string, string> = { seminarId };
+    if (isAdvancedSurvey) args.isAdvancedSurvey = 'true';
+    runner
+      .runTask(task, { args })
+      .then(async (result) => {
+        if (result && typeof result === 'object' && (result as { message?: string }).message) {
+          await replyWithSplit(
+            ctx,
+            (result as { message: string }).message,
+            (result as { options?: Record<string, unknown> }).options as Parameters<Context['reply']>[1],
+          );
+          if (
+            (result as { imagePath?: string }).imagePath &&
+            fsSync.existsSync((result as { imagePath: string }).imagePath)
+          ) {
+            await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
+            await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
+          } else {
+            const shotPaths = (result as { screenshotPaths?: string[] }).screenshotPaths;
+            if (shotPaths) {
+              for (const p of shotPaths) {
+                await ctx.replyWithPhoto({ source: p });
+                await fs.unlink(p).catch(() => {});
+              }
+            }
+          }
+        } else if (typeof result === 'string') {
+          await replyWithSplit(ctx, result);
+        } else if (result === true) {
+          await replyWithSplit(ctx, 'run_seminar_quiz finished successfully.');
+        } else {
+          await replyWithSplit(ctx, 'run_seminar_quiz finished.');
+        }
+      })
+      .catch((e) => {
+        const message = e instanceof Error ? e.message : String(e);
+        replyWithSplit(ctx, `run_seminar_quiz failed: ${message}`);
+      });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    replyWithSplit(ctx, `Failed to start run_seminar_quiz: ${message}`);
+  }
+}
 
 export function setupQuizCommands(adminBot: Telegraf): void {
   // /run_seminar_quiz <seminarId> [advanced] — 수동 세미나 퀴즈 실행
@@ -38,59 +96,7 @@ export function setupQuizCommands(adminBot: Telegraf): void {
       );
     }
 
-    const task = taskRegistry.getByName('run_seminar_quiz');
-    if (!task) {
-      logger.error('run_seminar_quiz task not found, cannot run');
-      return replyWithSplit(ctx, 'run_seminar_quiz task not found!');
-    }
-
-    try {
-      await replyWithSplit(
-        ctx,
-        `Starting run_seminar_quiz (seminarId=${seminarId}${isAdvancedSurvey ? ', 심화설문' : ''})... (백그라운드 실행)`,
-      );
-      const args: Record<string, string> = { seminarId };
-      if (isAdvancedSurvey) args.isAdvancedSurvey = 'true';
-      runner
-        .runTask(task, { args })
-        .then(async (result) => {
-          if (result && typeof result === 'object' && (result as { message?: string }).message) {
-            await replyWithSplit(
-              ctx,
-              (result as { message: string }).message,
-              (result as { options?: Record<string, unknown> }).options as Parameters<Context['reply']>[1],
-            );
-            if (
-              (result as { imagePath?: string }).imagePath &&
-              fsSync.existsSync((result as { imagePath: string }).imagePath)
-            ) {
-              await ctx.replyWithPhoto({ source: (result as { imagePath: string }).imagePath });
-              await fs.unlink((result as { imagePath: string }).imagePath).catch(() => {});
-            } else {
-              const shotPaths = (result as { screenshotPaths?: string[] }).screenshotPaths;
-              if (shotPaths) {
-                for (const p of shotPaths) {
-                  await ctx.replyWithPhoto({ source: p });
-                  await fs.unlink(p).catch(() => {});
-                }
-              }
-            }
-          } else if (typeof result === 'string') {
-            await replyWithSplit(ctx, result);
-          } else if (result === true) {
-            await replyWithSplit(ctx, 'run_seminar_quiz finished successfully.');
-          } else {
-            await replyWithSplit(ctx, 'run_seminar_quiz finished.');
-          }
-        })
-        .catch((e) => {
-          const message = e instanceof Error ? e.message : String(e);
-          replyWithSplit(ctx, `run_seminar_quiz failed: ${message}`);
-        });
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      replyWithSplit(ctx, `Failed to start run_seminar_quiz: ${message}`);
-    }
+    await executeRunSeminarQuiz(ctx, seminarId, isAdvancedSurvey);
   });
 
   // /set_seminar_quiz <seminarId> <정답텍스트> — 공지방 세미나 항목의 퀴즈 정답 수동 등록/수정
@@ -184,10 +190,25 @@ export function setupQuizCommands(adminBot: Telegraf): void {
         logger.error('공지 채널 세미나 메시지 동기화 실패:', syncErr);
       }
 
+      const seminarInfo = extractSeminarInfoFromText(content);
+      let runSeminarNotice = '';
+      if (seminarInfo.seminarId) {
+        runSeminarNotice = `\n\n🚀 세미나(${seminarInfo.seminarId}${seminarInfo.isAdvancedSurvey ? ', 심화' : ''}) 퀴즈 자동 풀이를 연동 실행합니다.`;
+      }
+
       await replyWithSplit(
         ctx,
-        `✅ 세미나 퀴즈 ${registered.length}개 일괄 등록 완료\n\n${registered.join('\n')}${gitNotice}${syncNotice}`,
+        `✅ 세미나 퀴즈 ${registered.length}개 일괄 등록 완료\n\n${registered.join('\n')}${gitNotice}${syncNotice}${runSeminarNotice}`,
       );
+
+      if (seminarInfo.seminarId) {
+        logger.info('Auto-running run_seminar_quiz after batch quiz registration', {
+          seminarId: seminarInfo.seminarId,
+          isAdvancedSurvey: seminarInfo.isAdvancedSurvey,
+          from: ctx.from?.username,
+        });
+        executeRunSeminarQuiz(ctx, seminarInfo.seminarId, seminarInfo.isAdvancedSurvey);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.error('세미나 퀴즈 족보 일괄 등록 실패', error);
@@ -329,10 +350,25 @@ export function setupQuizCommands(adminBot: Telegraf): void {
         }
       }
 
+      const seminarInfo = extractSeminarInfoFromText(replyText);
+      let runSeminarNotice = '';
+      if (seminarInfo.seminarId) {
+        runSeminarNotice = `\n\n🚀 세미나(${seminarInfo.seminarId}${seminarInfo.isAdvancedSurvey ? ', 심화' : ''}) 퀴즈 자동 풀이를 연동 실행합니다.`;
+      }
+
       await replyWithSplit(
         ctx,
-        `✅ 퀴즈 ${registered.length}개 족보 등록 완료 (답장 등록)\n\n${registered.join('\n')}${gitNotice}${syncNotice}${docpleSubmitNotice}\n\n재실행: /run_quiz_now`,
+        `✅ 퀴즈 ${registered.length}개 족보 등록 완료 (답장 등록)\n\n${registered.join('\n')}${gitNotice}${syncNotice}${docpleSubmitNotice}${runSeminarNotice}\n\n재실행: /run_quiz_now`,
       );
+
+      if (seminarInfo.seminarId) {
+        logger.info('Auto-running run_seminar_quiz after reply quiz registration', {
+          seminarId: seminarInfo.seminarId,
+          isAdvancedSurvey: seminarInfo.isAdvancedSurvey,
+          from: ctx.from?.username,
+        });
+        executeRunSeminarQuiz(ctx, seminarInfo.seminarId, seminarInfo.isAdvancedSurvey);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.error('답장을 통한 퀴즈 족보 등록 실패', error);
