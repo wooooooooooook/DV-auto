@@ -97,7 +97,7 @@ async function checkAndNotifyPointConversion(): Promise<void> {
           '네이버페이포인트 전환이 가능해졌습니다',
           'https://www.doctorville.co.kr/my/point/pointUseHistoryList',
           '',
-          '[Q&A]',
+          '[FAQ]',
           'Q. 연동된 네이버 계정 없음',
           'A. 아닙니다 광클하세요',
           '',
