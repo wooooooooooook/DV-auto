@@ -549,5 +549,50 @@ https://m.doctorville.co.kr/cme/seminar/5001
 
       assert.strictEqual(hasSeminarStatusTransition('', currentSeminars), true);
     });
+
+    it('이전 공지에서 대기였으나 재개 시 입장가능 또는 종료로 전이된 경우 상태 전이 있음(true) 반환 검증', () => {
+      const prevText = `🔔 [10월 19일] 저녁세미나
+
+⏳ 대기 | [19:00~20:00] 세미나 A
+https://m.doctorville.co.kr/cme/seminar/5001`;
+
+      const currentStarted: MonitoredSeminarItem[] = [
+        {
+          seminarId: '5001',
+          name: '세미나 A',
+          url: 'https://m.doctorville.co.kr/cme/seminar/5001',
+          status: '입장가능',
+        },
+      ];
+      assert.strictEqual(
+        hasSeminarStatusTransition(prevText, currentStarted),
+        true,
+        '대기 -> 입장가능 상태 변경 시 true 반환해야 함',
+      );
+
+      const currentEnded: MonitoredSeminarItem[] = [
+        {
+          seminarId: '5001',
+          name: '세미나 A',
+          url: 'https://m.doctorville.co.kr/cme/seminar/5001',
+          status: '종료',
+        },
+      ];
+      assert.strictEqual(
+        hasSeminarStatusTransition(prevText, currentEnded),
+        true,
+        '대기 -> 종료 상태 변경 시 true 반환해야 함',
+      );
+
+      const currentSame: MonitoredSeminarItem[] = [
+        {
+          seminarId: '5001',
+          name: '세미나 A',
+          url: 'https://m.doctorville.co.kr/cme/seminar/5001',
+          status: '대기',
+        },
+      ];
+      assert.strictEqual(hasSeminarStatusTransition(prevText, currentSame), false, '상태 동일 시 false 반환해야 함');
+    });
   });
 });

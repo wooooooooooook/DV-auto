@@ -454,4 +454,56 @@ describe('buildSeminarMonitorStatusMessage 세미나 모니터 현황 메시지 
     expect(sendCalls).toBe(0);
     expect(result.messageId).toBe(2644);
   });
+
+  it('updateStatusBoardNotice: forcePublish: true 전달 시 새 메시지 발행(sendMessage) 검증', async () => {
+    process.env.NOTICE_CHANNEL_ID = '-1001234567890';
+    const { updateStatusBoardNotice } = await import('../src/tasks/monitor_seminars');
+    const { setBot } = await import('../src/services/bot_instance');
+
+    let editCalls = 0;
+    let sendCalls = 0;
+    let deleteCalls = 0;
+
+    const mockBot = {
+      command: () => {},
+      telegram: {
+        editMessageText: async () => {
+          editCalls++;
+          return true;
+        },
+        sendMessage: async () => {
+          sendCalls++;
+          return { message_id: 3001 };
+        },
+        deleteMessage: async () => {
+          deleteCalls++;
+          return true;
+        },
+      },
+    } as unknown as Telegraf;
+
+    setBot('notice', mockBot);
+
+    const map = new Map();
+    map.set('5580', {
+      seminarId: '5580',
+      url: 'https://m.doctorville.co.kr/cme/seminar/5580',
+      name: '종료된 세미나',
+      status: '종료',
+      isEnded: true,
+    });
+
+    // forcePublish: true (세미나 시작/종료 시)
+    const result = await updateStatusBoardNotice('저녁', map, 2644, { forcePublish: true });
+    expect(sendCalls).toBe(1);
+    expect(deleteCalls).toBe(1);
+    expect(editCalls).toBe(0);
+    expect(result.messageId).toBe(3001);
+
+    // forcePublish: false (기타 텍스트 변경/퀴즈 갱신 시)
+    const resultEdit = await updateStatusBoardNotice('저녁', map, 3001, { forcePublish: false });
+    expect(editCalls).toBe(1);
+    expect(sendCalls).toBe(1);
+    expect(resultEdit.messageId).toBe(3001);
+  });
 });

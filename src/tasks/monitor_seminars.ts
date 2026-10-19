@@ -40,6 +40,7 @@ import {
   publishSeminarStatusNotice,
   findPrevSeminarInfo,
   getPrevNoticeSeminarsForPeriod,
+  hasSeminarStatusTransition,
   activeMonitors,
   type SeminarStatus,
   type MonitoredSeminarItem,
@@ -384,7 +385,7 @@ export async function setupMonitoredSeminarItem(
     providedContext?: BrowserContext;
   } = {},
 ): Promise<{ trackingKey: string; item: MonitoredSeminarItem | null }> {
-  const { isAutoResume = false, isNewDiscovery = false, providedContext } = options;
+  const { isAutoResume: _isAutoResume = false, isNewDiscovery = false, providedContext } = options;
   const trackingKey = getSeminarTrackingKey(info.url, info.seminarId) || key;
 
   if (isLowCapacitySeminar(info)) {
@@ -476,7 +477,7 @@ export async function setupMonitoredSeminarItem(
   }
 
   let startNotified = false;
-  const endNotified = initialIsEnded;
+  const endNotified = matchedPrev ? matchedPrev.status === '종료' : initialIsEnded;
 
   // 신규 감지 시 이미 종료 상태이고 퀴즈 결과가 없으면 선제 퀴즈 조회
   if (
@@ -527,7 +528,7 @@ export async function setupMonitoredSeminarItem(
   if (isReadyToEnter && currentStatus !== '종료') {
     currentStatus = '입장가능';
     info.isEntryStarted = true;
-    if (isAutoResume || matchedPrev?.status === '입장가능' || matchedPrev?.status === '종료') {
+    if (matchedPrev?.status === '입장가능' || matchedPrev?.status === '종료') {
       startNotified = true;
     }
   }
@@ -793,16 +794,29 @@ async function monitorSeminars(
     const hasInitialActiveOrEnded = seminarList.some((s) => s.status === '입장가능' || s.status === '종료');
     let lastStatusNoticeText: string | null = null;
 
+    // autoResume 시 이전 공지 텍스트와 비교하여 시작/종료 상태 전이가 발생했는지 확인
+    const hasStatusTransitionOnResume = Boolean(
+      existingMsg?.text && hasSeminarStatusTransition(existingMsg.text, seminarList),
+    );
+
     if (hasInitialActiveOrEnded) {
-      if (lastStatusNoticeMessageId) {
+      if (lastStatusNoticeMessageId && !hasStatusTransitionOnResume) {
+        // 상태 전이가 없는 경우: 기존 메시지 인플레이스 수정 (또는 동일 내용 시 유지)
         const boardRes = await updateStatusBoardNotice(periodName, monitoredSeminarsMap, lastStatusNoticeMessageId, {
           isAllCompleted: isAllInitiallyCompleted,
           isAutoResume: true,
+          forcePublish: false,
         });
         lastStatusNoticeMessageId = boardRes.messageId;
         lastStatusNoticeText = boardRes.statusText;
       } else {
-        const boardRes = await updateStatusBoardNotice(periodName, monitoredSeminarsMap, null, {
+        // 1) 최초 발송이거나 2) autoResume 중 세미나 시작/종료 상태 변경이 발생한 경우: 새 메시지 발행하여 채널 알림 트리거
+        if (hasStatusTransitionOnResume) {
+          console.log(
+            `[${periodName}] [autoResume] 세미나 시작/종료 상태 변경 감지 -> 채널 새 메시지 발행 (알림 트리거)`,
+          );
+        }
+        const boardRes = await updateStatusBoardNotice(periodName, monitoredSeminarsMap, lastStatusNoticeMessageId, {
           isAllCompleted: isAllInitiallyCompleted,
           isAutoResume: false,
           forcePublish: true,
@@ -818,6 +832,12 @@ async function monitorSeminars(
         item.startNotified = true;
         await sendSeminarLiveStartNotice(item).catch((err) => {
           logger.warn(`[${periodName}] 초기 토픽 구독자 입장 알림 발송 실패 (무시됨): ${item.name}`, err);
+        });
+      }
+      if (item.status === '종료' && !item.endNotified && !item.isSurveyPointExcluded) {
+        item.endNotified = true;
+        await sendSeminarLiveEndNotice(item).catch((err) => {
+          logger.warn(`[${periodName}] 초기 토픽 구독자 종료 알림 발송 실패 (무시됨): ${item.name}`, err);
         });
       }
     }
@@ -954,7 +974,6 @@ async function monitorSeminars(
         continue;
       }
 
-      let hasStateChanged = false;
       const detailCheckMap = new Map<string, Awaited<ReturnType<typeof checkSeminarEndStatusFromApi>>>();
       const getOrFetchDetailCheck = async (sid: string) => {
         const cached = detailCheckMap.get(sid);
@@ -991,7 +1010,6 @@ async function monitorSeminars(
             await sendTelegram(
               `⚠️ [${periodName}] 세미나가 삭제/취소되어 모니터링에서 제외되었습니다:\n${currentSeminar.name} (ID: ${sid})`,
             ).catch(() => {});
-            hasStateChanged = true;
           } else if (detailCheck.errorType === 'network_or_server' || detailCheck.errorType === 'auth_expired') {
             console.warn(`[${periodName}] 세미나(${sid}) 상세 조회 일시 오류(timeout/5xx/auth), 기존 상태 유지`);
           } else if (detailCheck.isPrivate) {
@@ -1015,7 +1033,6 @@ async function monitorSeminars(
           );
           if (newItem) {
             monitoredSeminarsMap.set(trackingKey, newItem);
-            hasStateChanged = true;
           }
         }
       }
@@ -1056,6 +1073,7 @@ async function monitorSeminars(
         });
       }
 
+      let newlyStartedSeminarsCount = 0;
       for (const [key, currentSeminar] of monitoredSeminarsMap.entries()) {
         const apiInfo =
           pollRes.seminars[key] ||
@@ -1127,7 +1145,7 @@ async function monitorSeminars(
             }
           }
 
-          // 2. 상태 갱신 및 구독자 종료 알림 + 공지채널 현황판 1차 갱신 즉시 발송
+          // 2. 상태 갱신 및 세미나 종료 새 메시지 발송(채널 알림 트리거) + 구독자 종료 알림
           currentSeminar.status = '종료';
           currentSeminar.isEnded = true;
           if (realtimeSurveyEndDt) currentSeminar.surveyEndDt = realtimeSurveyEndDt;
@@ -1135,18 +1153,25 @@ async function monitorSeminars(
           if (realtimeSurveyMinutesLeft !== null) currentSeminar.surveyMinutesLeft = realtimeSurveyMinutesLeft;
           currentSeminar.endedAt = currentSeminar.endedAt || Date.now();
           currentSeminar.quizResultMessage = quizResultMessage;
-          hasStateChanged = true;
 
-          // 공지채널 현황판 1차 즉시 갱신 (선제 갱신)
-          if (lastStatusNoticeMessageId) {
-            const boardRes = await updateStatusBoardNotice(
-              periodName,
-              monitoredSeminarsMap,
-              lastStatusNoticeMessageId,
-              { isAllCompleted: false },
-            );
-            lastStatusNoticeText = boardRes.statusText;
-          }
+          // 공지채널 현황판: 세미나 종료 시 새 메시지 발송하여 채널 알림 트리거 (이전 메시지 삭제 후 재발행)
+          const currentListForEndCheck = Array.from(monitoredSeminarsMap.values());
+          const isAllEndedNow =
+            currentListForEndCheck.length > 0 && currentListForEndCheck.every((s) => s.status === '종료');
+          const isAllSurveysClosedNow = currentListForEndCheck.every((s) => {
+            if (s.status !== '종료') return false;
+            if (s.hasSurvey === false) return true;
+            const minutesLeft = getSurveyRemainingMinutes(s, currentSeminar.endedAt || Date.now());
+            return minutesLeft === null || minutesLeft === 0;
+          });
+          const isAllCompletedNow = isAllEndedNow && (!waitForSurveyClose || isAllSurveysClosedNow);
+
+          const boardRes = await updateStatusBoardNotice(periodName, monitoredSeminarsMap, lastStatusNoticeMessageId, {
+            isAllCompleted: isAllCompletedNow,
+            forcePublish: true,
+          });
+          lastStatusNoticeMessageId = boardRes.messageId;
+          lastStatusNoticeText = boardRes.statusText;
 
           // 공지채널 현황판 갱신 완료 후 개별 구독자 종료 알림 발송 (공지채널 발송 우선)
           if (!currentSeminar.endNotified) {
@@ -1170,7 +1195,7 @@ async function monitorSeminars(
             browserQuizMessage = res.message;
           });
 
-          // 4. 브라우저에서 새로운 정답이 획득되었거나 갱신된 경우 현황판 2차 갱신
+          // 4. 브라우저에서 새로운 정답이 획득되었거나 갱신된 경우 현황판 2차 갱신 (인플레이스 수정)
           if (browserQuizMessage && browserQuizMessage !== quizResultMessage) {
             currentSeminar.quizResultMessage = browserQuizMessage;
             if (lastStatusNoticeMessageId) {
@@ -1178,7 +1203,7 @@ async function monitorSeminars(
                 periodName,
                 monitoredSeminarsMap,
                 lastStatusNoticeMessageId,
-                { isAllCompleted: false },
+                { isAllCompleted: isAllCompletedNow, forcePublish: false },
               );
               lastStatusNoticeText = boardRes.statusText;
             }
@@ -1210,13 +1235,29 @@ async function monitorSeminars(
             if (!currentSeminar.startDt && endCheckForEntry?.startDt) {
               currentSeminar.startDt = endCheckForEntry.startDt;
             }
-            hasStateChanged = true;
+            newlyStartedSeminarsCount++;
           }
         }
       }
 
-      // ── D. 설문 마감 임박 알림 (20분 전, 10분 전) 감시
       const currentNowMs = Date.now();
+
+      // ── C-2. 세미나 시작 감지 시 새 메시지 발송하여 채널 알림 트리거 (이전 메시지 삭제 후 재발행)
+      if (newlyStartedSeminarsCount > 0) {
+        console.log(
+          `[${periodName}] ${newlyStartedSeminarsCount}개 세미나 시작 감지 -> 채널 새 메시지 발행 (알림 트리거)`,
+        );
+        const boardRes = await updateStatusBoardNotice(periodName, monitoredSeminarsMap, lastStatusNoticeMessageId, {
+          isAllCompleted: false,
+          isAutoResume: false,
+          forcePublish: true,
+          currentNowMs,
+        });
+        lastStatusNoticeMessageId = boardRes.messageId;
+        lastStatusNoticeText = boardRes.statusText;
+      }
+
+      // ── D. 설문 마감 임박 알림 (20분 전, 10분 전) 감시
       for (const currentSeminar of monitoredSeminarsMap.values()) {
         if (
           currentSeminar.status === '종료' &&
@@ -1247,7 +1288,7 @@ async function monitorSeminars(
         }
       }
 
-      // ── E. 상태 변화 및 10분 단위 설문 잔여 시간 변경 시 공지 수정/발송
+      // ── E. 상태 변화 및 10분 단위 설문 잔여 시간 변경 시 공지 수정 (인플레이스)
       const currentList = Array.from(monitoredSeminarsMap.values());
       const isAllSeminarsEnded = currentList.length > 0 && currentList.every((s) => s.status === '종료');
       const isAllSurveysClosed = currentList.every((s) => {
@@ -1273,26 +1314,8 @@ async function monitorSeminars(
         currentNowMs,
       ).text;
 
-      if (hasStateChanged) {
-        // 주요 상태 변화: 이전 메시지 삭제 후 재전송하여 채널 알림 발송
-        const boardRes = await updateStatusBoardNotice(periodName, monitoredSeminarsMap, lastStatusNoticeMessageId, {
-          isAllCompleted,
-          isAutoResume,
-          forcePublish: true,
-          currentNowMs,
-        });
-        lastStatusNoticeMessageId = boardRes.messageId;
-        lastStatusNoticeText = boardRes.statusText;
-
-        if (isAllCompleted) {
-          console.log(`[${periodName}] 모든 세미나 및 설문이 종료되었습니다. 모니터링을 완료합니다.`);
-          await syncSeminarsDetailToDb(currentList, 3, 250).catch((err) =>
-            logger.error(`[${periodName}] 세미나 종료 후 detail 동기화 실패:`, err),
-          );
-          break;
-        }
-      } else if (lastStatusNoticeText !== currentStatusText) {
-        // 인플레이스 수정
+      if (lastStatusNoticeText !== currentStatusText) {
+        // 세미나 시작/종료 외의 모든 변경사항(설문 잔여시간 카운트다운, 퀴즈 정답 갱신, 신규/삭제 등)은 인플레이스 메시지 수정
         const boardRes = await updateStatusBoardNotice(periodName, monitoredSeminarsMap, lastStatusNoticeMessageId, {
           isAllCompleted,
           isAutoResume,
@@ -1301,14 +1324,14 @@ async function monitorSeminars(
         });
         lastStatusNoticeMessageId = boardRes.messageId;
         lastStatusNoticeText = currentStatusText;
+      }
 
-        if (isAllCompleted) {
-          console.log(`[${periodName}] 모든 세미나 및 설문이 종료되었습니다. 모니터링을 완료합니다.`);
-          await syncSeminarsDetailToDb(currentList, 3, 250).catch((err) =>
-            logger.error(`[${periodName}] 세미나 종료 후 detail 동기화 실패:`, err),
-          );
-          break;
-        }
+      if (isAllCompleted) {
+        console.log(`[${periodName}] 모든 세미나 및 설문이 종료되었습니다. 모니터링을 완료합니다.`);
+        await syncSeminarsDetailToDb(currentList, 3, 250).catch((err) =>
+          logger.error(`[${periodName}] 세미나 종료 후 detail 동기화 실패:`, err),
+        );
+        break;
       }
 
       // ── F. 공지채널 발송/수정 완료 후, 개별 토픽 구독자 알림 발송 (공지채널 발송 우선)

@@ -384,10 +384,11 @@ export function hasSeminarStatusTransition(prevText: string, currentSeminars: Mo
     let matched: ParsedPrevSeminar | undefined;
 
     if (currentId) {
-      // seminarId 존재 시 ID 매칭만 사용
+      // seminarId 존재 시 ID 매칭 우선 시도
       matched = prevSeminars.find((p) => p.seminarId === currentId);
-    } else {
-      // seminarId가 없는 경우에만 URL 또는 제목으로 매칭
+    }
+    if (!matched) {
+      // seminarId가 없거나 이전 텍스트에 ID가 없는 경우 URL 또는 제목으로 폴백 매칭
       matched = prevSeminars.find((p) => {
         if (current.url && p.url && p.url === current.url) return true;
         const truncatedName = current.name.length > 20 ? current.name.slice(0, 20) : current.name;

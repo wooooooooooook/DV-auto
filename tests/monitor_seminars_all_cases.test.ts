@@ -219,10 +219,11 @@ describe('monitor_seminars_all_cases (앱 재시작 및 공지방 상태 기반 
     });
 
     expect(result).toBe(true);
-    // 1. 새 메시지 발송 대신 editChannelMessage를 통해 기존 메시지가 인플레이스 update 되었는지 검증 (새 푸시 알림 없음)
-    expect(editChannelMessageSpy).toHaveBeenCalledWith(
-      801,
+    // 1. autoResume 시 세미나 상태 변경(입장가능 -> 종료)이 감지되었으므로 새 메시지 발송(알림 트리거) 검증
+    expect(sendNotificationToChannelSpy).toHaveBeenCalledWith(
       expect.stringContaining('🏁 점심세미나가 모두 종료되었습니다.'),
+      null,
+      expect.any(Object),
     );
     // 2. 관리자 텔레그램봇으로 autoResume 재개 사실이 전송되었는지 검증
     expect(sendTelegramSpy).toHaveBeenCalledWith(expect.stringContaining('세미나 감시가 재개(autoResume)되었으며'));
@@ -321,7 +322,7 @@ describe('monitor_seminars_all_cases (앱 재시작 및 공지방 상태 기반 
       channelId: 'test_chan',
       messageId: 2844,
       date: todayStr,
-      text: '🔔 [08월 28일] 점심세미나\n\n🟢 입장가능 | 11:30 고혈압 세미나',
+      text: '🔔 [08월 28일] 점심세미나\n\n🔴 종료 | 11:30 고혈압 세미나',
       status: 'sent',
     });
 
