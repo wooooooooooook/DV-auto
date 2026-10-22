@@ -997,6 +997,110 @@ Q2: 복용 방법은?
       expect(res.message).toContain('수령 완료');
     });
 
+    it('processDocpleCastReward: 시청 미완료 거부는 ALREADY 가 아니라 FAILED 로 보고하고 서버 사유를 남긴다', async () => {
+      vi.stubEnv('DOCPLE_CAST_MAX_WATCH_SECONDS', '0');
+      try {
+        // 1. 상세 조회 (시청 필요)
+        mockRequest.mockResolvedValueOnce(
+          createMockJsonResponse({
+            success: true,
+            data: {
+              id: 30,
+              title: '고베 골프여행 완전정복',
+              rewardCash: 100,
+              rewardType: 'ONCE',
+              isTermsAgreed: true,
+              watchProgress: { isRewardGranted: false },
+            },
+          }),
+        );
+        // 2. 시청 세션 시작
+        mockRequest.mockResolvedValueOnce(
+          createMockJsonResponse({
+            success: true,
+            data: { sessionId: 'sess-30', canClaimReward: false },
+          }),
+        );
+        // 3. 진행률 보고 (아직 시청 미완료 + 서버 사유)
+        mockRequest.mockResolvedValueOnce(
+          createMockJsonResponse({
+            success: true,
+            data: { success: true, canClaimReward: false, failureReasons: ['시청 시간이 부족합니다'] },
+          }),
+        );
+        // 4. 세션 종료
+        mockRequest.mockResolvedValueOnce(createMockJsonResponse({ success: true }));
+        // 5. 리워드 수령 거부
+        mockRequest.mockResolvedValueOnce(
+          createMockJsonResponse({
+            success: true,
+            data: { rewardGranted: false, message: '시청 완료 후 리워드를 받을 수 있습니다.' },
+          }),
+        );
+
+        const res = await processDocpleCastReward('mock-token', 30);
+        expect(res.status).toBe('FAILED');
+        expect(res.message).toContain('시청 완료 후 리워드를 받을 수 있습니다.');
+        expect(res.message).toContain('시청 시간이 부족합니다');
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
+
+    it('processDocpleCastReward: 시청 완료 전까지 경과 시간에 맞춰 진행률을 여러 번 보고한다', async () => {
+      vi.stubEnv('DOCPLE_CAST_MAX_WATCH_SECONDS', '2');
+      vi.stubEnv('DOCPLE_CAST_WATCH_INTERVAL_MS', '50');
+      const progressRequests: Array<{ watchedStart: number; watchedEnd: number }> = [];
+
+      try {
+        mockRequest.mockImplementation(async (url, init) => {
+          const target = String(url);
+          const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as Record<string, number>;
+
+          if (target.endsWith('/watch/start')) {
+            return createMockJsonResponse({
+              success: true,
+              data: { sessionId: 'sess-31', canClaimReward: false },
+            });
+          }
+          if (target.endsWith('/watch/progress')) {
+            progressRequests.push({ watchedStart: body.watchedStart, watchedEnd: body.watchedEnd });
+            return createMockJsonResponse({
+              success: true,
+              data: { success: true, canClaimReward: progressRequests.length >= 2 },
+            });
+          }
+          if (target.endsWith('/watch/end')) {
+            return createMockJsonResponse({ success: true });
+          }
+          if (target.endsWith('/watch/claim-reward')) {
+            return createMockJsonResponse({
+              success: true,
+              data: { rewardGranted: true, rewardCash: 100, rewardType: 'ONCE' },
+            });
+          }
+          return createMockJsonResponse({
+            success: true,
+            data: {
+              id: 31,
+              title: 'VOD 31',
+              rewardCash: 100,
+              rewardType: 'ONCE',
+              isTermsAgreed: true,
+              watchProgress: { isRewardGranted: false },
+            },
+          });
+        });
+
+        const res = await processDocpleCastReward('mock-token', 31);
+        expect(res.status).toBe('SUCCESS');
+        expect(progressRequests.length).toBeGreaterThanOrEqual(2);
+        expect(progressRequests[1].watchedEnd).toBeGreaterThanOrEqual(progressRequests[0].watchedEnd);
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
+
     it('processAllDocpleCastRewards: 인기 및 일반 목록 중 리워드 대상 세미나들을 찾아 순차 수령', async () => {
       // 1. 인기 목록
       mockRequest.mockResolvedValueOnce(

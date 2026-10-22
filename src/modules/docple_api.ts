@@ -2031,7 +2031,20 @@ export async function claimDocpleSeminarReward(
 }
 
 /**
+ * 환경변수를 0 이상의 정수로 읽고, 값이 없거나 올바르지 않으면 기본값을 사용합니다.
+ */
+function readIntEnv(name: string, fallback: number): number {
+  const raw = Number(process.env[name]);
+  return Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : fallback;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
  * 단일 닥플캐스트 세미나의 리워드 수령 처리 (약관동의 -> 시청세션/진행률 -> 리워드수령)
+ * - 서버가 시청 완료를 인정할 때까지 실제 경과 시간에 맞춰 진행률(heartbeat)을 나눠 보고합니다.
  */
 export async function processDocpleCastReward(
   accessToken: string,
@@ -2164,20 +2177,65 @@ export async function processDocpleCastReward(
     }
 
     // 5. 시청 진행률 보고 및 세션 종료
+    // 서버는 0->N초로 한 번에 건너뛴 보고를 시청으로 인정하지 않으므로, 실제 경과 시간에 맞춰 나눠 보고한다.
     const sessionId = watchStart.sessionId;
-    const watchedEnd = 600; // 충분한 시청 시간 보고
-    logger.info(`Docple Cast: Reporting watch progress for seminar ${seminarId}...`);
-    await reportDocpleSeminarWatchProgress(accessToken, seminarId, {
-      sessionId,
-      watchedStart: 0,
-      watchedEnd,
-    });
+    const maxWatchSeconds = readIntEnv('DOCPLE_CAST_MAX_WATCH_SECONDS', 600);
+    const intervalMs = readIntEnv('DOCPLE_CAST_WATCH_INTERVAL_MS', 15000);
+    const watchStartedAt = Date.now();
+
+    let watchedEnd = 0;
+    let canClaimReward = false;
+    let failureReasons: string[] | undefined;
+
+    logger.info(
+      `Docple Cast: Reporting watch progress for seminar ${seminarId} (최대 ${maxWatchSeconds}초, ${intervalMs}ms 간격)...`,
+    );
+
+    for (;;) {
+      const elapsedSec = Math.floor((Date.now() - watchStartedAt) / 1000);
+      watchedEnd = Math.min(maxWatchSeconds, Math.max(1, elapsedSec));
+
+      const progress = await reportDocpleSeminarWatchProgress(accessToken, seminarId, {
+        sessionId,
+        watchedStart: 0,
+        watchedEnd,
+      });
+
+      if (progress.rewardsExhausted) {
+        await endDocpleSeminarWatch(accessToken, seminarId, { sessionId, watchedStart: 0, watchedEnd });
+        return {
+          seminarId,
+          title,
+          status: 'EXHAUSTED',
+          rewardCash: 0,
+          message: '리워드가 마감되었습니다.',
+          rewardType,
+        };
+      }
+
+      if (progress.canClaimReward) {
+        canClaimReward = true;
+        break;
+      }
+
+      if (progress.failureReasons && progress.failureReasons.length > 0) {
+        failureReasons = progress.failureReasons;
+      }
+
+      if (elapsedSec >= maxWatchSeconds) break;
+
+      await sleep(Math.min(intervalMs, Math.max(0, (maxWatchSeconds - elapsedSec) * 1000)));
+    }
 
     await endDocpleSeminarWatch(accessToken, seminarId, {
       sessionId,
       watchedStart: 0,
       watchedEnd,
     });
+
+    logger.info(
+      `Docple Cast: Watch finished for seminar ${seminarId} (watched ${watchedEnd}초, canClaimReward=${canClaimReward})`,
+    );
 
     // 6. 리워드 수령 호출
     logger.info(`Docple Cast: Claiming reward after watch for seminar ${seminarId}...`);
@@ -2206,7 +2264,9 @@ export async function processDocpleCastReward(
         rewardType,
       };
     }
-    if (msg.includes('이미') || msg.includes('완료')) {
+    // "시청 완료 후 리워드를 받을 수 있습니다" 처럼 시청 미완료 안내를 '이미 수령'으로 오인하지 않도록,
+    // 이미 수령/지급된 경우에만 ALREADY 로 분류한다.
+    if (/이미|금일|오늘/.test(msg) && /수령|지급/.test(msg)) {
       return {
         seminarId,
         title,
@@ -2217,12 +2277,13 @@ export async function processDocpleCastReward(
       };
     }
 
+    const reasonSuffix = failureReasons && failureReasons.length > 0 ? ` [사유: ${failureReasons.join(', ')}]` : '';
     return {
       seminarId,
       title,
       status: 'FAILED',
       rewardCash: 0,
-      message: msg || '리워드 수령에 실패했습니다.',
+      message: `${msg || '리워드 수령에 실패했습니다.'}${reasonSuffix}`,
       rewardType,
     };
   } catch (error) {
