@@ -5,6 +5,16 @@ import { checkNoticeCooldown, clearNoticeCooldowns, setBot } from '../src/servic
 import type { Telegraf } from 'telegraf';
 import { describe, it } from 'vitest';
 
+/**
+ * 오늘(서울 기준)로부터 days일 떨어진 날짜를 YYYY-MM-DD 로 반환합니다.
+ * 고정 날짜를 쓰면 60일 보존 정책에 걸려 실행 시점에 따라 테스트가 깨지므로 상대 날짜를 사용합니다.
+ */
+function seoulDateOffset(days: number): string {
+  const base = new Date();
+  base.setDate(base.getDate() + days);
+  return base.toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+}
+
 describe('공지봇 어뷰징 방지 및 세미나 60일 보존 테스트', () => {
   it('쿨다운 차단 및 60일 보존 정책 검증', async () => {
     console.log('=== [Test] 공지봇 어뷰징 방지 및 세미나 60일 보존 테스트 시작 ===\n');
@@ -72,21 +82,22 @@ describe('공지봇 어뷰징 방지 및 세미나 60일 보존 테스트', () =
       // 3-2. updateStoredSeminarFromDetail 로 60일 초과 세미나 저장 방지 검증
       seminarRepo.clearSeminars();
 
-      // 60일 초과된 오래된 세미나 (2026-05-01)
+      // 60일 초과된 오래된 세미나 (오늘 기준 120일 전)
+      const oldDate = seoulDateOffset(-120);
       const oldSeminarDetail: SeminarDetail = {
         seminarId: 1001,
         seminarTy: 1,
         seminarNm: '오래된 세미나 1001',
         regUsn: 1,
-        startDt: '2026-05-01 19:00:00',
-        endDt: '2026-05-01 20:00:00',
+        startDt: `${oldDate} 19:00:00`,
+        endDt: `${oldDate} 20:00:00`,
         maxPeopleCnt: 100,
         intro: '',
         tutorId: 1,
         tutorNm: '',
         surveyId: null,
         categoryCd: 1,
-        createDt: '2026-05-01',
+        createDt: oldDate,
         updateDt: null,
         introImg: '',
         attachFileOrigin: '',
@@ -136,13 +147,15 @@ describe('공지봇 어뷰징 방지 및 세미나 60일 보존 테스트', () =
       const listAfterOld = seminarRepo.getAllSeminars();
       assert.strictEqual(listAfterOld.length, 0, '60일 초과된 오래된 세미나는 seminar_list에 저장되지 않아야 함');
 
-      // 최근 세미나 (2026-08-20)
+      // 최근 세미나 (오늘 기준 3일 전)
+      const recentDate = seoulDateOffset(-3);
       const recentSeminarDetail: SeminarDetail = {
         ...oldSeminarDetail,
         seminarId: 2002,
         seminarNm: '최근 세미나 2002',
-        startDt: '2026-08-20 19:00:00',
-        endDt: '2026-08-20 20:00:00',
+        startDt: `${recentDate} 19:00:00`,
+        endDt: `${recentDate} 20:00:00`,
+        createDt: recentDate,
       };
 
       updateStoredSeminarFromDetail(recentSeminarDetail);

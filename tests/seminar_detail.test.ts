@@ -30,6 +30,16 @@ function assert(condition: boolean, msg: string) {
   }
 }
 
+/**
+ * 오늘(서울 기준)로부터 days일 떨어진 날짜를 YYYY-MM-DD 로 반환합니다.
+ * 고정 날짜를 쓰면 60일 보존 정책에 걸려 실행 시점에 따라 테스트가 깨지므로 상대 날짜를 사용합니다.
+ */
+function seoulDateOffset(days: number): string {
+  const base = new Date();
+  base.setDate(base.getDate() + days);
+  return base.toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+}
+
 describe('seminar_detail 단위 테스트', () => {
   it('상태값 및 포맷팅 검증', async () => {
     console.log('\n===========================================================');
@@ -388,19 +398,30 @@ describe('seminar_detail 단위 테스트', () => {
     const convertedPrivate = convertDetailToSeminarListItem(mockPrivateDetail);
     assert(convertedPrivate.hiddenYn === 'Y', '비공개 세미나: hiddenYn=Y 유지');
     assert(convertedPrivate.diseaseCategoryNm === '내분비질환', '비공개 세미나: diseaseCategoryNm 변환');
-    console.log('  ✓ [Pass] convertDetailToSeminarListItem 변환 검증 성공');
-
-    // Case 7: updateStoredSeminarFromDetail 신규 세미나 추가 검증
+    console.log('  ✓ [Pass] convertDetailToSeminarListItem 변환 검증 성공'); // Case 7: updateStoredSeminarFromDetail 신규 세미나 추가 검증
     console.log('\n--- Case 7: updateStoredSeminarFromDetail 신규 세미나 추가 검증 ---');
+    // 저장(보존) 검증은 60일 만료 기준을 타므로, 표시/포맷팅 검증과 별개로 최근 날짜를 사용한다
+    const recentStoredDate = seoulDateOffset(-3);
+    const mockRecent5574Detail: SeminarDetail = {
+      ...mock5574Detail,
+      startDt: `${recentStoredDate} 17:00:00.0`,
+      endDt: `${recentStoredDate} 18:30:00.0`,
+    };
+    const mockRecent5574Raw: SeminarDetailResponse = { ...mock5574Raw, seminarDetail: mockRecent5574Detail };
+    const mockRecent5572Detail: SeminarDetail = {
+      ...mock5572Detail,
+      startDt: `${recentStoredDate} 13:00:00.0`,
+      endDt: `${recentStoredDate} 13:40:00.0`,
+    };
     const backupList = seminarRepo.getAllSeminars();
     try {
       seminarRepo.clearSeminars(); // 초기화
-      const updated1 = updateStoredSeminarFromDetail(mock5574Detail, mock5574Raw);
+      const updated1 = updateStoredSeminarFromDetail(mockRecent5574Detail, mockRecent5574Raw);
       assert(updated1.length === 1, '리스트에 1개 추가됨');
       assert(updated1[0].seminarId === '5574', '추가된 세미나 ID 5574');
       assert(updated1[0].name === '[재] ALL 4 ONE Symposium', '추가된 세미나 명 일치');
 
-      const updated2 = updateStoredSeminarFromDetail(mock5572Detail, mock5572Raw);
+      const updated2 = updateStoredSeminarFromDetail(mockRecent5572Detail, mock5572Raw);
       assert(updated2.length === 2, '리스트에 2개 추가됨');
       assert(
         updated2.some((s) => s.seminarId === '5572'),
@@ -432,7 +453,7 @@ describe('seminar_detail 단위 테스트', () => {
         },
       ]);
 
-      const merged = updateStoredSeminarFromDetail(mock5574Detail, mock5574Raw);
+      const merged = updateStoredSeminarFromDetail(mockRecent5574Detail, mockRecent5574Raw);
       assert(merged.length === 1, '동일 ID 세미나는 병합되어 1개 유지');
       const item = merged[0];
       assert(item.name === '[재] ALL 4 ONE Symposium', '최신 이름으로 갱신');
@@ -449,7 +470,7 @@ describe('seminar_detail 단위 테스트', () => {
       seminarRepo.clearSeminars();
       const httpGetJsonSpy = vi.spyOn(httpClient, 'httpGetJson').mockImplementation(async (url: string) => {
         if (url.includes('5574')) {
-          return mock5574Raw;
+          return mockRecent5574Raw;
         }
         throw new Error('Not found');
       });
@@ -484,8 +505,9 @@ describe('seminar_detail 단위 테스트', () => {
       console.log('\n--- Case 11: 복수 세미나 ID 조회 시 run() 통합 검증 ---');
       seminarRepo.clearSeminars();
       httpGetJsonSpy.mockImplementation(async (url: string) => {
-        if (url.includes('5574')) return mock5574Raw;
-        if (url.includes('5572')) return mock5572Raw;
+        // 보존 정책(60일) 검증과 무관하게 저장되는지 보기 위해 최근 날짜 상세를 사용한다
+        if (url.includes('5574')) return mockRecent5574Raw;
+        if (url.includes('5572')) return { ...mock5572Raw, seminarDetail: mockRecent5572Detail };
         throw new Error('Not found');
       });
 
@@ -755,7 +777,7 @@ describe('seminar_detail 단위 테스트', () => {
           seminarId: '7701',
           name: '신청 가능 신규 세미나',
           url: 'https://m.doctorville.co.kr/cme/seminar/7701',
-          date: '2026-09-10',
+          date: seoulDateOffset(-3),
           time: '13:00~14:00',
           currentCount: '10',
           totalCount: '1000',
@@ -834,15 +856,15 @@ describe('seminar_detail 단위 테스트', () => {
             seminarTy: 1,
             seminarNm: '상세 조회로 발견된 신규 세미나',
             regUsn: 0,
-            startDt: '2026-09-11 13:00:00.0',
-            endDt: '2026-09-11 14:00:00.0',
+            startDt: `${seoulDateOffset(1)} 13:00:00.0`,
+            endDt: `${seoulDateOffset(1)} 14:00:00.0`,
             maxPeopleCnt: 1000,
             intro: '',
             tutorId: 0,
             tutorNm: '강사',
             surveyId: null,
             categoryCd: 1,
-            createDt: '2026-09-09 10:00:00.0',
+            createDt: `${seoulDateOffset(-1)} 10:00:00.0`,
             updateDt: null,
             introImg: '',
             attachFileOrigin: '',
