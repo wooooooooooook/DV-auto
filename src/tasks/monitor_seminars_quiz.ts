@@ -42,7 +42,13 @@ export async function tryFetchSeminarQuizHttpFast(
  */
 export async function handleSeminarEndAndQuiz(
   context: BrowserContext,
-  seminar: { name: string; seminarId: string | null; isSurveyPointExcluded?: boolean; isAdvancedSurvey?: boolean },
+  seminar: {
+    name: string;
+    seminarId: string | null;
+    isSurveyPointExcluded?: boolean;
+    isAdvancedSurvey?: boolean;
+    isSuspectedAdvancedSurvey?: boolean;
+  },
   fallbackUrl: string,
 ): Promise<{ message: string | null; foundSurveyButton: boolean }> {
   // 포인트미지급 세미나는 설문/퀴즈 처리 건너뛰기
@@ -135,14 +141,24 @@ export async function handleSeminarEndAndQuiz(
       await quizPage.waitForTimeout(5000);
 
       // 퀴즈 처리 (댓글로 결과 전송)
-      const quizResult = await processSeminarQuiz(quizPage, seminar.seminarId ?? undefined, seminar.isAdvancedSurvey);
+      const quizResult = await processSeminarQuiz(
+        quizPage,
+        seminar.seminarId ?? undefined,
+        seminar.isAdvancedSurvey,
+        seminar.isSuspectedAdvancedSurvey,
+      );
       if (quizResult.success && quizResult.hasQuizResult) {
         quizResultMessage = quizResult.message;
       }
     } else {
       console.log(`[monitor_seminars] "설문참여" 버튼을 찾지 못함 (${seminar.seminarId})`);
       // 버튼이 없어도 현재 페이지에서 퀴즈 찾기 시도
-      const quizResult = await processSeminarQuiz(quizPage, seminar.seminarId ?? undefined, seminar.isAdvancedSurvey);
+      const quizResult = await processSeminarQuiz(
+        quizPage,
+        seminar.seminarId ?? undefined,
+        seminar.isAdvancedSurvey,
+        seminar.isSuspectedAdvancedSurvey,
+      );
       if (quizResult.success && quizResult.hasQuizResult) {
         quizResultMessage = quizResult.message;
       }

@@ -507,6 +507,7 @@ export async function setupMonitoredSeminarItem(
             seminarId,
             isSurveyPointExcluded: false,
             isAdvancedSurvey: info.isAdvancedSurvey,
+            isSuspectedAdvancedSurvey: info.isSuspectedAdvancedSurvey,
           },
           targetUrl,
         );
@@ -892,6 +893,7 @@ async function monitorSeminars(
                 seminarId: item.seminarId,
                 isSurveyPointExcluded: false,
                 isAdvancedSurvey: item.isAdvancedSurvey,
+                isSuspectedAdvancedSurvey: item.isSuspectedAdvancedSurvey,
               },
               item.url,
             );
@@ -1189,6 +1191,7 @@ async function monitorSeminars(
                 seminarId,
                 isSurveyPointExcluded: false,
                 isAdvancedSurvey: currentSeminar.isAdvancedSurvey,
+                isSuspectedAdvancedSurvey: currentSeminar.isSuspectedAdvancedSurvey,
               },
               currentSeminar.url || targetUrl,
             );

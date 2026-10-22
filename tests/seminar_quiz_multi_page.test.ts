@@ -287,6 +287,141 @@ describe('seminar_quiz 다중 페이지 탐색 및 제출하기 감지 테스트
     expect(sentMsg).toContain('설문 제출');
   });
 
+  it('심화설문 의심(심화설문?): 퀴즈가 없어도 자동 제출하지 않고 주관식 문항 프롬프트를 전송한다', async () => {
+    const clickedButtons: string[] = [];
+
+    const mockPage: Partial<Page> = {
+      url: vi.fn().mockReturnValue('https://m.doctorville.co.kr/cme/seminar/5814'),
+      waitForLoadState: vi.fn().mockResolvedValue(undefined),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+      waitForSelector: vi.fn().mockResolvedValue(null),
+      waitForFunction: vi.fn().mockResolvedValue(undefined),
+      screenshot: vi.fn().mockResolvedValue(Buffer.from('fake-screenshot')),
+      on: vi.fn(),
+      getByRole: vi.fn().mockReturnValue({
+        first: vi.fn().mockReturnValue({
+          isVisible: vi.fn().mockResolvedValue(false),
+          click: vi.fn().mockResolvedValue(undefined),
+        }),
+      }),
+      locator: vi.fn().mockImplementation((selector: string) => {
+        const createLocatorObj = (opts: { isSubmit?: boolean } = {}) => ({
+          first: vi.fn().mockReturnValue({
+            isVisible: vi.fn().mockImplementation(async () => Boolean(opts.isSubmit)),
+            waitFor: vi.fn().mockResolvedValue(undefined),
+            scrollIntoViewIfNeeded: vi.fn().mockResolvedValue(undefined),
+            click: vi.fn().mockImplementation(async () => {
+              if (opts.isSubmit) clickedButtons.push('submit');
+            }),
+            count: vi.fn().mockResolvedValue(0),
+            check: vi.fn().mockResolvedValue(undefined),
+            locator: vi.fn().mockImplementation(() => createLocatorObj()),
+          }),
+          count: vi.fn().mockResolvedValue(0),
+          all: vi.fn().mockResolvedValue([]),
+          locator: vi.fn().mockImplementation(() => createLocatorObj()),
+        });
+
+        if (
+          selector.includes('btn-primary') ||
+          selector.includes('제출하기') ||
+          selector.includes('설문완료') ||
+          selector.includes('응답완료')
+        ) {
+          return createLocatorObj({ isSubmit: true });
+        }
+        return createLocatorObj();
+      }),
+      // 단일 페이지: 일반 설문 1문항 + 주관식 2문항 (퀴즈 없음)
+      evaluate: vi.fn().mockResolvedValue([
+        {
+          questionNumber: 1,
+          questionLine: '세미나에 대한 전반적인 만족도는?',
+          marker: null,
+          isRequired: true,
+          inputType: 'radio',
+          options: [
+            { index: 1, text: '매우 만족', value: '1' },
+            { index: 2, text: '보통', value: '2' },
+          ],
+        },
+        {
+          questionNumber: 2,
+          questionLine: '강사님께 전달하고 싶은 의견을 적어주세요.',
+          marker: null,
+          isRequired: false,
+          inputType: 'text',
+          options: [{ index: 1, text: '[주관식]', value: '' }],
+        },
+        {
+          questionNumber: 3,
+          questionLine: '향후 다루었으면 하는 주제는?',
+          marker: null,
+          isRequired: false,
+          inputType: 'text',
+          options: [{ index: 1, text: '[주관식]', value: '' }],
+        },
+      ]),
+    };
+
+    vi.spyOn(await import('../src/tasks/seminar_quiz'), 'loadCheatsheet').mockResolvedValue({});
+
+    const surveyApiModule = await import('../src/modules/seminar_survey_api');
+    vi.spyOn(surveyApiModule, 'fetchSeminarSurveyQuizHttp').mockResolvedValue({
+      success: true,
+      seminarId: '5814',
+      totalPageCnt: 2,
+      totalQuestionCnt: 4,
+      quizQuestionCnt: 0,
+      depthSurveyQuestionCnt: 0,
+      isAdvancedSurvey: false,
+      isSuspectedAdvancedSurvey: true,
+      quizzes: [],
+      allQuestions: [],
+      quizSummaryMessage: '심화설문?',
+    });
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes('hermes:20128')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            choices: [{ message: { content: 'Q2: 강의 내용이 임상에 도움이 되었스빈다.' } }],
+          }),
+        } as unknown as Response;
+      }
+      return { ok: false, status: 404 } as unknown as Response;
+    });
+
+    const result = await processSeminarQuiz(mockPage as Page, '5814', false);
+    await drainLlmQueue();
+    globalThis.fetch = originalFetch;
+
+    expect(result.success).toBe(true);
+    expect(result.hasQuizResult).toBe(false);
+    expect(result.message).toContain('심화설문?');
+
+    // 심화설문 의심이므로 [제출하기] 버튼은 클릭되지 않아야 함
+    expect(clickedButtons).not.toContain('submit');
+
+    const findMsg = (marker: string): string => {
+      const call = sendTelegramSpy.mock.calls.find((c) => String(c[0]).includes(marker));
+      return String(call?.[0] ?? '');
+    };
+
+    const sentMsg = findMsg('[심화설문?] 퀴즈 정답 추출 완료 (자동 제출 제외)');
+    expect(sentMsg).toContain('[심화설문?] 퀴즈 정답 추출 완료 (자동 제출 제외)');
+    expect(sentMsg).toContain('심화설문?');
+    // 의심 케이스 프롬프트는 주관식 문항만 포함한다
+    expect(sentMsg).toContain('강사님께 전달하고 싶은 의견을 적어주세요.');
+    expect(sentMsg).toContain('향후 다루었으면 하는 주제는?');
+    expect(sentMsg).not.toContain('세미나에 대한 전반적인 만족도는?');
+
+    expect(findMsg('[심화설문? AI 추천 답변]')).toContain('[심화설문? AI 추천 답변]');
+  });
+
   it('동일 페이지가 재탐색되거나 퀴즈 문항이 중복 파싱되더라도 채널 결과와 족보 미등록 알림에서 중복되지 않는다', async () => {
     let callCount = 0;
     const clickedButtons: string[] = [];

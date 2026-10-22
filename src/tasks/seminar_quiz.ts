@@ -424,7 +424,25 @@ export interface SurveyQuestionForPrompt {
   questionText: string;
   typeName?: string;
   typeKey?: string;
+  inputType?: SurveyQuestion['inputType'];
   options?: Array<{ index: number; text: string }>;
+}
+
+/**
+ * 프롬프트 구성용 문항이 주관식(서술형/단답형)인지 판별합니다.
+ * 수집 경로(UI 파싱 / HTTP API)에 따라 주관식 판별 정보가 다르므로 양쪽을 모두 지원합니다.
+ */
+export function isSubjectivePromptQuestion(q: SurveyQuestionForPrompt): boolean {
+  const typeKey = (q.typeKey || '').toUpperCase();
+  const typeName = q.typeName || '';
+
+  if (/TEXT|ESSAY|SUBJECTIVE|SHORT|INPUT|TEXTAREA/.test(typeKey)) return true;
+  if (/주관식|서술형|단답형|텍스트/.test(typeName)) return true;
+  if (q.inputType === 'text') return true;
+
+  const options = q.options || [];
+  if (options.length === 0) return true;
+  return options.length === 1 && /^\s*\[?\s*주관식\s*\]?\s*$/i.test(options[0].text || '');
 }
 
 /**
@@ -730,6 +748,7 @@ async function processSeminarQuiz(
   page: Page,
   seminarId?: string,
   isAdvancedSurvey?: boolean,
+  isSuspectedAdvancedSurvey?: boolean,
 ): Promise<SeminarQuizResult> {
   const seminarName = seminarId;
   try {
@@ -803,6 +822,11 @@ async function processSeminarQuiz(
 
     const effectiveIsAdvancedSurvey =
       Boolean(isAdvancedSurvey) || Boolean(httpQuizResult?.isAdvancedSurvey) || isDbAdvanced;
+
+    // 확정된 심화설문은 아니지만 HTTP 조회에서 심화설문 의심(마지막 페이지 주관식 1~3개)으로 판정된 경우
+    const suspectedAdvancedSurvey =
+      !effectiveIsAdvancedSurvey &&
+      (Boolean(isSuspectedAdvancedSurvey) || Boolean(httpQuizResult?.isSuspectedAdvancedSurvey));
 
     // 채널 송신 자격: quiz ONLY ([퀴즈] 마커 및 퀴즈 문항)
     const CHANNEL_ELIGIBLE_KINDS: ReadonlySet<QuizQuestion['kind']> = new Set(['quiz']);
@@ -1120,11 +1144,18 @@ async function processSeminarQuiz(
       }
     }
 
-    const resultMessage = formatQuizResults(channelResults, _hasUnknown, _hasMultipleMatches, depthSurveyCount);
+    const resultMessage = formatQuizResults(
+      channelResults,
+      _hasUnknown,
+      _hasMultipleMatches,
+      depthSurveyCount,
+      suspectedAdvancedSurvey,
+    );
 
-    // ── 심화설문인 경우: 제출 금지 ───────────────────────────────────────
-    if (effectiveIsAdvancedSurvey) {
-      console.log(`[seminar_quiz] ⚠️ 심화설문 세미나(${seminarName})이므로 퀴즈 정답 추출 후 제출을 생략합니다.`);
+    // ── 심화설문(또는 심화설문 의심)인 경우: 제출 금지 ─────────────────────────
+    if (effectiveIsAdvancedSurvey || suspectedAdvancedSurvey) {
+      const surveyLabel = suspectedAdvancedSurvey ? '심화설문?' : '심화설문';
+      console.log(`[seminar_quiz] ⚠️ ${surveyLabel} 세미나(${seminarName})이므로 퀴즈 정답 추출 후 제출을 생략합니다.`);
 
       // 마지막 페이지(2페이지) UI 렌더링 안정화 대기
       await page.waitForTimeout(1000);
@@ -1135,11 +1166,12 @@ async function processSeminarQuiz(
       const advancedShotPath = path.join(baseDir, `quiz_advanced_${seminarName ?? 'unknown'}_${Date.now()}.png`);
 
       // 심화설문 문항 추출 및 AI 답변 생성용 프롬프트 포맷
-      const depthQuestionsForPrompt: SurveyQuestionForPrompt[] =
+      const lastPageQuestionsForPrompt: SurveyQuestionForPrompt[] =
         lastPageQuestions.length > 0
           ? lastPageQuestions.map((q) => ({
               questionNumber: q.questionNumber,
               questionText: q.questionText,
+              inputType: q.inputType,
               options: q.options,
             }))
           : (
@@ -1154,12 +1186,17 @@ async function processSeminarQuiz(
               options: q.options,
             }));
 
+      // 심화설문 의심(심화설문?)인 경우에는 마지막 페이지의 주관식 문항만 프롬프트로 구성한다
+      const depthQuestionsForPrompt = suspectedAdvancedSurvey
+        ? lastPageQuestionsForPrompt.filter(isSubjectivePromptQuestion)
+        : lastPageQuestionsForPrompt;
+
       const rawPromptText = generateAdvancedSurveyPromptText(depthQuestionsForPrompt);
       const promptBlock = rawPromptText
         ? `<pre><code class="language-text">${escapeHtml(rawPromptText)}</code></pre>`
         : '';
       const promptSection = promptBlock ? `\n\n${promptBlock}` : '';
-      const telegramNoticeText = `📋 ℹ️ [심화설문] 퀴즈 정답 추출 완료 (자동 제출 제외)\n${resultMessage}\n\n🔗 세미나 URL: ${seminarPageUrl}${promptSection}`;
+      const telegramNoticeText = `📋 ℹ️ [${surveyLabel}] 퀴즈 정답 추출 완료 (자동 제출 제외)\n${resultMessage}\n\n🔗 세미나 URL: ${seminarPageUrl}${promptSection}`;
 
       try {
         await fs.mkdir(baseDir, { recursive: true });
@@ -1179,7 +1216,7 @@ async function processSeminarQuiz(
           run: () => requestHermesAiSurveyAnswer(rawPromptText, '심화설문 AI 추천 답변'),
           onResult: async (aiAnswer) => {
             if (aiAnswer && aiAnswer.trim()) {
-              const aiTelegramText = `🤖 <b>[심화설문 AI 추천 답변]</b>\n\n<pre><code class="language-text">${escapeHtml(aiAnswer.trim())}</code></pre>`;
+              const aiTelegramText = `🤖 <b>[${surveyLabel} AI 추천 답변]</b>\n\n<pre><code class="language-text">${escapeHtml(aiAnswer.trim())}</code></pre>`;
               await sendTelegram(aiTelegramText, null, { parse_mode: 'HTML' }).catch((err) => {
                 console.error('[seminar_quiz] Hermes AI 답변 텔레그램 발송 실패:', err);
               });
