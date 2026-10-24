@@ -1,5 +1,6 @@
 import { request } from 'undici';
 import * as logger from '../services/logger';
+import { getVideoDurationSeconds } from './video_duration';
 
 export const DOCPLE_BASE_URL = 'https://docple-plus.com';
 
@@ -2042,6 +2043,216 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const POSITION_EXCEEDS_DURATION = 'POSITION_EXCEEDS_DURATION';
+// 영상 길이를 확인할 수 없을 때(YouTube 임베드 등)의 최대 시청 대기 시간
+const DEFAULT_MAX_WATCH_SECONDS = 3600;
+const ABSOLUTE_MAX_WATCH_SECONDS = 7200;
+
+function isPositionExceedsDuration(reasons?: string[]): boolean {
+  if (!reasons || reasons.length === 0) return false;
+  return reasons.some((reason) => String(reason).toUpperCase().includes(POSITION_EXCEEDS_DURATION));
+}
+
+/**
+ * POSITION_EXCEEDS_DURATION 이 발생했을 때, 서버가 허용하는 최대 재생 위치(영상 길이)를 이분 탐색으로 찾습니다.
+ * 영상 길이를 URL에서 확인하지 못한 경우(YouTube 임베드 등)를 위한 보조 수단입니다.
+ */
+export async function findDocpleCastPositionLimit(
+  rejectedPosition: number,
+  lastAcceptedPosition: number,
+  report: (
+    start: number,
+    end: number,
+  ) => Promise<{
+    success: boolean;
+    canClaimReward?: boolean;
+    failureReasons?: string[];
+  }>,
+): Promise<{ limit: number | null; canClaimReward: boolean }> {
+  let accepted = Math.max(0, Math.floor(lastAcceptedPosition));
+  let low = accepted;
+  let high = Math.floor(rejectedPosition);
+  let hasAccepted = false;
+
+  for (let attempt = 0; attempt < 16 && high - low > 1; attempt += 1) {
+    const mid = Math.floor((low + high) / 2);
+    if (mid <= low || mid >= high) break;
+
+    // 서버는 직전에 인정한 위치에서 이어지는 구간만 시청으로 인정합니다.
+    const res = await report(accepted, mid);
+    if (res.canClaimReward) {
+      return { limit: mid, canClaimReward: true };
+    }
+
+    if (isPositionExceedsDuration(res.failureReasons)) {
+      high = mid;
+    } else if (res.success) {
+      accepted = mid;
+      hasAccepted = true;
+      low = mid;
+    } else {
+      break;
+    }
+
+    await sleep(200);
+  }
+
+  return { limit: hasAccepted ? accepted : null, canClaimReward: false };
+}
+
+export interface DocpleCastGapFillResult {
+  filledSeconds: number;
+  viewingPercent?: number;
+  canClaimReward: boolean;
+  scannedSeconds: number;
+}
+
+/**
+ * 시청 종료 후 진행률이 100% 미만일 때, 시청하지 않은 구간을 5초 단위로 찾아 다시 보고합니다.
+ * 서버는 이미 시청한 구간을 다시 보고해도 누적 시청 시간을 늘리지 않으므로,
+ * 누락 구간을 발견해 채우면 totalWatchedSeconds 가 영상 길이에 도달합니다.
+ */
+export async function fillDocpleCastWatchGaps(
+  accessToken: string,
+  seminarId: number,
+  options: {
+    durationSeconds?: number;
+    suspiciousWindows?: Array<{ start: number; end: number }>;
+    maxScanSeconds?: number;
+    intervalSeconds?: number;
+    paceSeconds?: number;
+  } = {},
+): Promise<DocpleCastGapFillResult | null> {
+  const detail = await getDocpleSeminarDetail(accessToken, seminarId);
+  const watchProgress = detail?.watchProgress;
+  if (!watchProgress) return null;
+
+  let viewingPercent = watchProgress.viewingPercent;
+  let canClaimReward = !!watchProgress.canClaimReward;
+  const rawInitialTotal = Number(watchProgress.totalWatchedSeconds);
+  const initialTotal = Number.isFinite(rawInitialTotal) ? Math.max(0, Math.floor(rawInitialTotal)) : 0;
+
+  if (watchProgress.isRewardGranted) {
+    return { filledSeconds: 0, viewingPercent, canClaimReward: false, scannedSeconds: 0 };
+  }
+  if (canClaimReward || (typeof viewingPercent === 'number' && viewingPercent >= 100)) {
+    return { filledSeconds: 0, viewingPercent, canClaimReward, scannedSeconds: 0 };
+  }
+
+  const durationSeconds =
+    options.durationSeconds && options.durationSeconds > 0 ? Math.ceil(options.durationSeconds) : undefined;
+  if (!durationSeconds || initialTotal >= durationSeconds) {
+    return { filledSeconds: 0, viewingPercent, canClaimReward, scannedSeconds: 0 };
+  }
+
+  const intervalSeconds = Math.min(10, Math.max(1, Math.floor(options.intervalSeconds ?? 5)));
+  const maxScanSeconds = Math.max(0, options.maxScanSeconds ?? readIntEnv('DOCPLE_CAST_GAP_SCAN_MAX_SECONDS', 900));
+  const paceMs =
+    options.paceSeconds !== undefined
+      ? Math.max(10, options.paceSeconds * 1000)
+      : Math.max(10, readIntEnv('DOCPLE_CAST_GAP_SCAN_PACE_MS', Math.ceil(intervalSeconds * 1100)));
+
+  const started = await startDocpleSeminarWatch(accessToken, seminarId);
+  if (!started?.sessionId) return null;
+
+  const sessionId = started.sessionId;
+  if (started.canClaimReward) {
+    await endDocpleSeminarWatch(accessToken, seminarId, { sessionId, watchedStart: 0, watchedEnd: 0 });
+    return { filledSeconds: 0, viewingPercent, canClaimReward: true, scannedSeconds: 0 };
+  }
+
+  const windows: Array<{ start: number; end: number }> = [];
+  const seen = new Set<number>();
+  const pushWindows = (start: number, end: number) => {
+    const from = Math.max(0, Math.min(durationSeconds, Math.floor(start)));
+    const to = Math.max(0, Math.min(durationSeconds, Math.ceil(end)));
+    for (let s = from; s < to; s += intervalSeconds) {
+      if (seen.has(s)) continue;
+      seen.add(s);
+      windows.push({ start: s, end: Math.min(s + intervalSeconds, durationSeconds) });
+    }
+  };
+
+  // 이번 실행에서 실패했던 구간(세션 충돌/네트워크 오류)을 먼저 확인합니다.
+  for (const window of options.suspiciousWindows ?? []) pushWindows(window.start, window.end);
+  for (let s = 0; s < durationSeconds; s += intervalSeconds) pushWindows(s, s + intervalSeconds);
+
+  let total = initialTotal;
+  let scannedSeconds = 0;
+  let lastWindow = { start: 0, end: 0 };
+  const scanStartedAt = Date.now();
+
+  logger.info(
+    `Docple Cast: Filling watch gaps for seminar ${seminarId} (누적 ${initialTotal}/${durationSeconds}초, 스캔 상한 ${maxScanSeconds}초)...`,
+  );
+
+  try {
+    for (const window of windows) {
+      const scannedElapsed = Math.floor((Date.now() - scanStartedAt) / 1000);
+      if (scannedElapsed >= maxScanSeconds) break;
+      if (canClaimReward || total >= durationSeconds || (typeof viewingPercent === 'number' && viewingPercent >= 100)) {
+        break;
+      }
+
+      await sleep(paceMs);
+      lastWindow = window;
+      const res = await reportDocpleSeminarWatchProgress(accessToken, seminarId, {
+        sessionId,
+        watchedStart: window.start,
+        watchedEnd: window.end,
+      });
+      scannedSeconds = Math.floor((Date.now() - scanStartedAt) / 1000);
+
+      if (res.canClaimReward) {
+        canClaimReward = true;
+        break;
+      }
+      if (res.failureReasons?.some((reason) => reason === 'SESSION_MISMATCH' || reason === 'SESSION_EXPIRED')) {
+        logger.warn(`Docple Cast: gap scan session ended for seminar ${seminarId}: ${res.failureReasons.join(', ')}`);
+        break;
+      }
+
+      const after = await getDocpleSeminarDetail(accessToken, seminarId);
+      const afterProgress = after?.watchProgress;
+      if (!afterProgress) continue;
+
+      const afterTotal = Number(afterProgress.totalWatchedSeconds);
+      if (Number.isFinite(afterTotal)) total = Math.max(total, Math.floor(afterTotal));
+      viewingPercent = afterProgress.viewingPercent ?? viewingPercent;
+      if (afterProgress.isRewardGranted) {
+        canClaimReward = false;
+        break;
+      }
+      if (afterProgress.canClaimReward) {
+        canClaimReward = true;
+        break;
+      }
+    }
+  } finally {
+    await endDocpleSeminarWatch(accessToken, seminarId, {
+      sessionId,
+      watchedStart: lastWindow.start,
+      watchedEnd: lastWindow.start,
+    });
+  }
+
+  // 마지막 보고 직후 break 한 경우에도 정확한 누적 시간을 반영합니다.
+  const finalDetail = await getDocpleSeminarDetail(accessToken, seminarId);
+  const finalProgress = finalDetail?.watchProgress;
+  if (finalProgress) {
+    const finalTotal = Number(finalProgress.totalWatchedSeconds);
+    if (Number.isFinite(finalTotal)) total = Math.max(total, Math.floor(finalTotal));
+    viewingPercent = finalProgress.viewingPercent ?? viewingPercent;
+    if (finalProgress.canClaimReward) canClaimReward = true;
+  }
+
+  const filledSeconds = Math.max(0, total - initialTotal);
+  logger.info(
+    `Docple Cast: Gap scan finished for seminar ${seminarId} (채움 ${filledSeconds}초, 누적 ${total}초, 스캔 ${scannedSeconds}초)`,
+  );
+  return { filledSeconds, viewingPercent, canClaimReward, scannedSeconds };
+}
+
 /**
  * 단일 닥플캐스트 세미나의 리워드 수령 처리 (약관동의 -> 시청세션/진행률 -> 리워드수령)
  * - 서버가 시청 완료를 인정할 때까지 실제 경과 시간에 맞춰 진행률(heartbeat)을 나눠 보고합니다.
@@ -2178,31 +2389,77 @@ export async function processDocpleCastReward(
 
     // 5. 시청 진행률 보고 및 세션 종료
     // 서버는 0->N초로 한 번에 건너뛴 보고를 시청으로 인정하지 않으므로, 실제 경과 시간에 맞춰 나눠 보고한다.
-    const sessionId = watchStart.sessionId;
-    const maxWatchSeconds = readIntEnv('DOCPLE_CAST_MAX_WATCH_SECONDS', 600);
-    const intervalMs = readIntEnv('DOCPLE_CAST_WATCH_INTERVAL_MS', 15000);
+    // 또한 재생 위치(watchedEnd)가 영상 길이를 넘으면 POSITION_EXCEEDS_DURATION 으로 거부하므로,
+    // 영상 길이를 확인해 그 이내로만 보고한다. (확인 불가 시 서버 거부 응답으로 길이를 역추적)
+    let activeSessionId = watchStart.sessionId;
+    // 프론트엔드도 5초마다 진행률을 보고합니다. 간격이 길면 서버가 한 구간에서 인정하는
+    // 시청 시간(약 10초)을 넘어 실제 시청 시간보다 적게 적립되므로 5초를 기본값으로 사용합니다.
+    const intervalMs = readIntEnv('DOCPLE_CAST_WATCH_INTERVAL_MS', 5000);
+    const configuredMaxWatchSeconds = readIntEnv('DOCPLE_CAST_MAX_WATCH_SECONDS', -1);
+    const videoDuration = await getVideoDurationSeconds(watchStart.signedVideoUrl);
+    let positionLimit = videoDuration && videoDuration > 0 ? Math.max(1, Math.floor(videoDuration)) : undefined;
+    const maxWatchSeconds =
+      configuredMaxWatchSeconds >= 0
+        ? Math.min(configuredMaxWatchSeconds, ABSOLUTE_MAX_WATCH_SECONDS)
+        : Math.min(positionLimit ?? DEFAULT_MAX_WATCH_SECONDS, ABSOLUTE_MAX_WATCH_SECONDS);
+    const initialPosition = Math.max(0, Math.floor(watchStart.lastPosition ?? 0));
+    const watchedStart = positionLimit !== undefined ? Math.min(initialPosition, positionLimit) : initialPosition;
     const watchStartedAt = Date.now();
 
-    let watchedEnd = 0;
+    // 서버는 직전에 인정한 위치에서 이어지는 구간(watchedStart -> watchedEnd)만 시청으로 인정합니다.
+    // 따라서 매 보고마다 '이전 보고 위치'를 시작점으로 사용해야 하며, 시작 위치를 고정하면 이후 보고가 무시됩니다.
+    let reportedPosition = watchedStart;
+    let watchedEnd = watchedStart;
     let canClaimReward = false;
     let failureReasons: string[] | undefined;
+    let lastRenewedAt = 0;
+    let lastLoggedFailure = '';
+    let hasReportedOnce = false;
+    const suspiciousWindows: Array<{ start: number; end: number }> = [];
 
     logger.info(
-      `Docple Cast: Reporting watch progress for seminar ${seminarId} (최대 ${maxWatchSeconds}초, ${intervalMs}ms 간격)...`,
+      `Docple Cast: Reporting watch progress for seminar ${seminarId} (${
+        positionLimit !== undefined ? `영상 ${positionLimit}초` : '영상 길이 미확인'
+      }, 최대 ${maxWatchSeconds}초, ${intervalMs}ms 간격)...`,
     );
+
+    const renewWatchSession = async (): Promise<boolean> => {
+      if (Date.now() - lastRenewedAt < 60_000) return false;
+      lastRenewedAt = Date.now();
+      const renewed = await startDocpleSeminarWatch(accessToken, seminarId);
+      if (!renewed?.sessionId) return false;
+      activeSessionId = renewed.sessionId;
+      return true;
+    };
 
     for (;;) {
       const elapsedSec = Math.floor((Date.now() - watchStartedAt) / 1000);
-      watchedEnd = Math.min(maxWatchSeconds, Math.max(1, elapsedSec));
+      const maxReach = positionLimit ?? watchedStart + maxWatchSeconds;
+      const target = Math.min(maxReach, watchedStart + elapsedSec);
+
+      // 아직 다음 정수 초에 도달하지 않았으면 보고하지 않습니다(0초 구간 보고 방지).
+      if (target <= reportedPosition) {
+        const reachedPositionLimit = positionLimit !== undefined && reportedPosition >= positionLimit;
+        if (reachedPositionLimit || elapsedSec >= maxWatchSeconds) break;
+        const waitMs = Math.min(intervalMs, Math.max(1, (maxWatchSeconds - elapsedSec) * 1000));
+        // 첫 보고는 1초 뒤에 보내 세션/서버 응답을 빠르게 확인합니다.
+        await sleep(hasReportedOnce ? waitMs : Math.min(waitMs, 1000));
+        continue;
+      }
 
       const progress = await reportDocpleSeminarWatchProgress(accessToken, seminarId, {
-        sessionId,
-        watchedStart: 0,
-        watchedEnd,
+        sessionId: activeSessionId,
+        watchedStart: reportedPosition,
+        watchedEnd: target,
       });
+      hasReportedOnce = true;
 
       if (progress.rewardsExhausted) {
-        await endDocpleSeminarWatch(accessToken, seminarId, { sessionId, watchedStart: 0, watchedEnd });
+        await endDocpleSeminarWatch(accessToken, seminarId, {
+          sessionId: activeSessionId,
+          watchedStart: reportedPosition,
+          watchedEnd: target,
+        });
         return {
           seminarId,
           title,
@@ -2215,23 +2472,98 @@ export async function processDocpleCastReward(
 
       if (progress.canClaimReward) {
         canClaimReward = true;
+        reportedPosition = target;
+        watchedEnd = target;
         break;
       }
 
       if (progress.failureReasons && progress.failureReasons.length > 0) {
         failureReasons = progress.failureReasons;
+        const reasonKey = progress.failureReasons.join(',');
+        if (reasonKey !== lastLoggedFailure) {
+          lastLoggedFailure = reasonKey;
+          logger.warn(
+            `Docple Cast: progress not accepted for seminar ${seminarId} (${reportedPosition}->${target}초): ${reasonKey}`,
+          );
+        }
       }
 
-      if (elapsedSec >= maxWatchSeconds) break;
+      // 세션 충돌/네트워크 오류로 인정받지 못한 구간은 나중에 재시청으로 채웁니다.
+      if (!progress.success && !isPositionExceedsDuration(progress.failureReasons)) {
+        suspiciousWindows.push({ start: reportedPosition, end: target });
+      }
 
-      await sleep(Math.min(intervalMs, Math.max(0, (maxWatchSeconds - elapsedSec) * 1000)));
+      // 영상 길이를 몰랐거나, 서버가 인정하는 길이가 영상 메타데이터보다 짧은 경우
+      if (isPositionExceedsDuration(progress.failureReasons)) {
+        const discovered = await findDocpleCastPositionLimit(target, reportedPosition, (start, end) =>
+          reportDocpleSeminarWatchProgress(accessToken, seminarId, {
+            sessionId: activeSessionId,
+            watchedStart: start,
+            watchedEnd: end,
+          }),
+        );
+
+        if (discovered.canClaimReward) {
+          canClaimReward = true;
+          reportedPosition = discovered.limit ?? target;
+          watchedEnd = reportedPosition;
+          break;
+        }
+        if (discovered.limit === null || discovered.limit <= reportedPosition) break;
+
+        positionLimit = discovered.limit;
+        reportedPosition = discovered.limit;
+        watchedEnd = discovered.limit;
+        failureReasons = undefined;
+        continue;
+      }
+
+      if (progress.success) {
+        reportedPosition = target;
+        watchedEnd = target;
+      } else if (
+        progress.failureReasons?.some((reason) => reason === 'SESSION_MISMATCH' || reason === 'SESSION_EXPIRED')
+      ) {
+        // 클라이언트와 동일하게, 세션이 만료/불일치하면 세션을 재시작합니다(최대 1분에 1회).
+        if (await renewWatchSession()) {
+          reportedPosition = target;
+          watchedEnd = target;
+        }
+      }
+
+      const reachedPositionLimit = positionLimit !== undefined && reportedPosition >= positionLimit;
+      if (reachedPositionLimit || elapsedSec >= maxWatchSeconds) break;
+
+      const waitMs = Math.min(intervalMs, Math.max(1, (maxWatchSeconds - elapsedSec) * 1000));
+      await sleep(hasReportedOnce ? waitMs : Math.min(waitMs, 1000));
     }
 
     await endDocpleSeminarWatch(accessToken, seminarId, {
-      sessionId,
-      watchedStart: 0,
-      watchedEnd,
+      sessionId: activeSessionId,
+      watchedStart: reportedPosition,
+      watchedEnd: Math.max(reportedPosition, watchedEnd),
     });
+
+    // 영상 끝까지 보고했는데도 완료되지 않았다면, 누락 구간을 찾아 재시청합니다.
+    // (사용자가 DOCPLE_CAST_MAX_WATCH_SECONDS 로 시간을 제한한 경우에는 추가 스캔을 하지 않습니다.)
+    const reachedPositionLimit = positionLimit !== undefined && reportedPosition >= positionLimit;
+    const usedDefaultMaxWatchSeconds = configuredMaxWatchSeconds < 0;
+    if (!canClaimReward && positionLimit !== undefined && (reachedPositionLimit || usedDefaultMaxWatchSeconds)) {
+      const gapFill = await fillDocpleCastWatchGaps(accessToken, seminarId, {
+        durationSeconds: positionLimit,
+        suspiciousWindows,
+      });
+      if (gapFill) {
+        if (gapFill.canClaimReward) canClaimReward = true;
+        if (gapFill.filledSeconds > 0) {
+          logger.info(
+            `Docple Cast: Filled ${gapFill.filledSeconds}초 of watch gaps for seminar ${seminarId} (진행률 ${
+              gapFill.viewingPercent ?? '?'
+            }%)`,
+          );
+        }
+      }
+    }
 
     logger.info(
       `Docple Cast: Watch finished for seminar ${seminarId} (watched ${watchedEnd}초, canClaimReward=${canClaimReward})`,

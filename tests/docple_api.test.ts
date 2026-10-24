@@ -24,7 +24,10 @@ import {
   claimDocpleSeminarReward,
   processDocpleCastReward,
   processAllDocpleCastRewards,
+  findDocpleCastPositionLimit,
+  fillDocpleCastWatchGaps,
 } from '../src/modules/docple_api';
+import { getVideoDurationSeconds } from '../src/modules/video_duration';
 import {
   executeDocpleDaily,
   formatDocpleDailyReport,
@@ -37,7 +40,12 @@ vi.mock('undici', () => ({
   request: vi.fn(),
 }));
 
+vi.mock('../src/modules/video_duration', () => ({
+  getVideoDurationSeconds: vi.fn(),
+}));
+
 const mockRequest = vi.mocked(request);
+const mockGetVideoDuration = vi.mocked(getVideoDurationSeconds);
 
 function createMockTextResponse(data: unknown, statusCode = 200) {
   return {
@@ -65,6 +73,7 @@ describe('Docple Plus API & Daily Task Tests', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(utilsModule, 'sendTelegram').mockResolvedValue(true);
+    mockGetVideoDuration.mockResolvedValue(null);
   });
 
   describe('API Client Methods', () => {
@@ -998,7 +1007,8 @@ Q2: 복용 방법은?
     });
 
     it('processDocpleCastReward: 시청 미완료 거부는 ALREADY 가 아니라 FAILED 로 보고하고 서버 사유를 남긴다', async () => {
-      vi.stubEnv('DOCPLE_CAST_MAX_WATCH_SECONDS', '0');
+      vi.stubEnv('DOCPLE_CAST_MAX_WATCH_SECONDS', '1');
+      vi.stubEnv('DOCPLE_CAST_WATCH_INTERVAL_MS', '100');
       try {
         // 1. 상세 조회 (시청 필요)
         mockRequest.mockResolvedValueOnce(
@@ -1095,7 +1105,266 @@ Q2: 복용 방법은?
         const res = await processDocpleCastReward('mock-token', 31);
         expect(res.status).toBe('SUCCESS');
         expect(progressRequests.length).toBeGreaterThanOrEqual(2);
-        expect(progressRequests[1].watchedEnd).toBeGreaterThanOrEqual(progressRequests[0].watchedEnd);
+        expect(progressRequests[1].watchedEnd).toBeGreaterThan(progressRequests[0].watchedEnd);
+        // 서버는 직전 보고 위치에서 이어지는 구간만 인정하므로, 구간이 끊기지 않아야 한다.
+        expect(progressRequests[0].watchedStart).toBe(0);
+        for (let i = 1; i < progressRequests.length; i += 1) {
+          expect(progressRequests[i].watchedStart).toBe(progressRequests[i - 1].watchedEnd);
+        }
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
+
+    it('processDocpleCastReward: 영상 길이를 확인하면 그 길이를 넘는 위치를 보고하지 않는다', async () => {
+      vi.stubEnv('DOCPLE_CAST_MAX_WATCH_SECONDS', '30');
+      vi.stubEnv('DOCPLE_CAST_WATCH_INTERVAL_MS', '50');
+      mockGetVideoDuration.mockResolvedValue(1);
+      const progressRequests: Array<{ watchedStart: number; watchedEnd: number }> = [];
+
+      try {
+        mockRequest.mockImplementation(async (url, init) => {
+          const target = String(url);
+          const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as Record<string, number>;
+
+          if (target.endsWith('/watch/start')) {
+            return createMockJsonResponse({
+              success: true,
+              data: {
+                sessionId: 'sess-32',
+                signedVideoUrl: 'https://cdn.example.com/cast32.mp4',
+                canClaimReward: false,
+              },
+            });
+          }
+          if (target.endsWith('/watch/progress')) {
+            progressRequests.push({ watchedStart: body.watchedStart, watchedEnd: body.watchedEnd });
+            return createMockJsonResponse({
+              success: true,
+              data: { success: true, canClaimReward: body.watchedEnd >= 1 },
+            });
+          }
+          if (target.endsWith('/watch/end')) {
+            return createMockJsonResponse({ success: true });
+          }
+          if (target.endsWith('/watch/claim-reward')) {
+            return createMockJsonResponse({
+              success: true,
+              data: { rewardGranted: true, rewardCash: 100, rewardType: 'ONCE' },
+            });
+          }
+          return createMockJsonResponse({
+            success: true,
+            data: {
+              id: 32,
+              title: 'VOD 32',
+              rewardCash: 100,
+              rewardType: 'ONCE',
+              isTermsAgreed: true,
+              watchProgress: { isRewardGranted: false },
+            },
+          });
+        });
+
+        const res = await processDocpleCastReward('mock-token', 32);
+        expect(res.status).toBe('SUCCESS');
+        expect(progressRequests.length).toBeGreaterThanOrEqual(1);
+        expect(progressRequests.every((req) => req.watchedEnd <= 1)).toBe(true);
+        expect(progressRequests.some((req) => req.watchedEnd === 1)).toBe(true);
+        expect(progressRequests[0].watchedStart).toBe(0);
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
+
+    it('findDocpleCastPositionLimit: POSITION_EXCEEDS_DURATION 응답으로 허용되는 최대 위치를 찾는다', async () => {
+      let stored = 0;
+      const ranges: Array<[number, number]> = [];
+      const res = await findDocpleCastPositionLimit(5, 0, async (start, end) => {
+        ranges.push([start, end]);
+        expect(start).toBe(stored);
+        if (end > 3) {
+          return { success: true, canClaimReward: false, failureReasons: ['POSITION_EXCEEDS_DURATION'] };
+        }
+        stored = end;
+        return { success: true, canClaimReward: end >= 3 };
+      });
+
+      expect(ranges.length).toBeGreaterThan(0);
+      expect(res).toEqual({ limit: 3, canClaimReward: true });
+    });
+
+    it('findDocpleCastPositionLimit: 리워드 조건이 충족되지 않으면 허용된 마지막 위치만 반환한다', async () => {
+      let stored = 0;
+      const res = await findDocpleCastPositionLimit(5, 0, async (start, end) => {
+        expect(start).toBe(stored);
+        if (end > 3) {
+          return { success: true, canClaimReward: false, failureReasons: ['POSITION_EXCEEDS_DURATION'] };
+        }
+        stored = end;
+        return { success: true, canClaimReward: false };
+      });
+
+      expect(res).toEqual({ limit: 3, canClaimReward: false });
+    });
+
+    it('fillDocpleCastWatchGaps: 누락된 5초 구간을 찾아 재시청하고 canClaimReward를 갱신한다', async () => {
+      const covered = new Set<number>();
+      for (let s = 0; s < 20; s += 1) covered.add(s);
+      for (let s = 25; s < 100; s += 1) covered.add(s);
+      let total = covered.size; // 95/100
+      const progressCalls: Array<{ watchedStart: number; watchedEnd: number }> = [];
+
+      mockRequest.mockImplementation(async (url, init) => {
+        const target = String(url);
+        const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as Record<string, number>;
+
+        if (target.endsWith('/watch/start')) {
+          return createMockJsonResponse({
+            success: true,
+            data: { sessionId: 'gap-session', lastPosition: 100, canClaimReward: false },
+          });
+        }
+        if (target.endsWith('/watch/progress')) {
+          progressCalls.push({ watchedStart: body.watchedStart, watchedEnd: body.watchedEnd });
+          for (let s = Math.floor(body.watchedStart); s < body.watchedEnd; s += 1) covered.add(s);
+          total = covered.size;
+          return createMockJsonResponse({
+            success: true,
+            data: { success: true, canClaimReward: total >= 100 },
+          });
+        }
+        if (target.endsWith('/watch/end')) {
+          return createMockJsonResponse({ success: true });
+        }
+        return createMockJsonResponse({
+          success: true,
+          data: {
+            id: 26,
+            title: 'VOD 26',
+            watchProgress: {
+              totalWatchedSeconds: total,
+              viewingPercent: Math.floor(total),
+              canClaimReward: total >= 100,
+              lastPosition: 100,
+              isRewardGranted: false,
+            },
+          },
+        });
+      });
+
+      const res = await fillDocpleCastWatchGaps('mock-token', 26, {
+        durationSeconds: 100,
+        paceSeconds: 0.01,
+      });
+
+      expect(res).not.toBeNull();
+      expect(res?.filledSeconds).toBe(5);
+      expect(res?.canClaimReward).toBe(true);
+      expect(progressCalls.length).toBe(5);
+      expect(progressCalls[4]).toEqual({ watchedStart: 20, watchedEnd: 25 });
+    });
+
+    it('fillDocpleCastWatchGaps: 이미 100%면 세션을 시작하지 않는다', async () => {
+      mockRequest.mockResolvedValueOnce(
+        createMockJsonResponse({
+          success: true,
+          data: {
+            id: 26,
+            title: 'VOD 26',
+            watchProgress: {
+              totalWatchedSeconds: 100,
+              viewingPercent: 100,
+              canClaimReward: false,
+              isRewardGranted: false,
+            },
+          },
+        }),
+      );
+
+      const res = await fillDocpleCastWatchGaps('mock-token', 26, {
+        durationSeconds: 100,
+        paceSeconds: 0.01,
+      });
+
+      expect(res?.scannedSeconds).toBe(0);
+      expect(mockRequest).toHaveBeenCalledTimes(1);
+    });
+
+    it('processDocpleCastReward: 영상 끝까지 시청했지만 100% 미만이면 누락 구간을 재시청한 뒤 수령한다', async () => {
+      vi.stubEnv('DOCPLE_CAST_MAX_WATCH_SECONDS', '2');
+      vi.stubEnv('DOCPLE_CAST_WATCH_INTERVAL_MS', '100');
+      vi.stubEnv('DOCPLE_CAST_GAP_SCAN_PACE_MS', '50');
+      mockGetVideoDuration.mockResolvedValue(2);
+
+      const covered = new Set<number>();
+      let total = 0;
+      let sessionSeq = 0;
+      let mainProgressCount = 0;
+
+      try {
+        mockRequest.mockImplementation(async (url, init) => {
+          const target = String(url);
+          const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as Record<string, number>;
+
+          if (target.endsWith('/watch/start')) {
+            sessionSeq += 1;
+            return createMockJsonResponse({
+              success: true,
+              data: {
+                sessionId: `sess-${sessionSeq}`,
+                signedVideoUrl: 'https://www.youtube.com/watch?v=gapfill',
+                canClaimReward: false,
+              },
+            });
+          }
+          if (target.endsWith('/watch/progress')) {
+            if (sessionSeq === 1) {
+              mainProgressCount += 1;
+              // 첫 번째 보고만 반영되고, 두 번째 보고는 서버에서 누락된 상황을 재현
+              if (mainProgressCount === 1) {
+                for (let s = 0; s < 1; s += 1) covered.add(s);
+              }
+            } else {
+              for (let s = Math.floor(body.watchedStart); s < body.watchedEnd; s += 1) covered.add(s);
+            }
+            total = covered.size;
+            return createMockJsonResponse({
+              success: true,
+              data: { success: true, canClaimReward: total >= 2 },
+            });
+          }
+          if (target.endsWith('/watch/end')) {
+            return createMockJsonResponse({ success: true });
+          }
+          if (target.endsWith('/watch/claim-reward')) {
+            return createMockJsonResponse({
+              success: true,
+              data: { rewardGranted: total >= 2, rewardCash: 100, rewardType: 'ONCE' },
+            });
+          }
+          return createMockJsonResponse({
+            success: true,
+            data: {
+              id: 33,
+              title: 'VOD 33',
+              rewardCash: 100,
+              rewardType: 'ONCE',
+              isTermsAgreed: true,
+              watchProgress: {
+                isRewardGranted: false,
+                canClaimReward: total >= 2,
+                totalWatchedSeconds: total,
+                viewingPercent: Math.floor((total / 2) * 100),
+                lastPosition: 2,
+              },
+            },
+          });
+        });
+
+        const res = await processDocpleCastReward('mock-token', 33);
+        expect(res.status).toBe('SUCCESS');
+        expect(mainProgressCount).toBe(2);
       } finally {
         vi.unstubAllEnvs();
       }
