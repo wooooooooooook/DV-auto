@@ -749,6 +749,7 @@ async function processSeminarQuiz(
   seminarId?: string,
   isAdvancedSurvey?: boolean,
   isSuspectedAdvancedSurvey?: boolean,
+  injectedCheatsheet?: Cheatsheet,
 ): Promise<SeminarQuizResult> {
   const seminarName = seminarId;
   try {
@@ -779,7 +780,7 @@ async function processSeminarQuiz(
     });
 
     // 족보 로드
-    const cheatsheet = await loadCheatsheet();
+    const cheatsheet = injectedCheatsheet || (await loadCheatsheet());
 
     // ── HTTP API 기반 퀴즈 사전 조회 (백업 및 퀴즈 번호/심화설문 확정용) ──
     let httpQuizResult: import('../modules/seminar_survey_api').SurveyQuizHttpResult | null = null;
@@ -803,6 +804,12 @@ async function processSeminarQuiz(
         console.warn('[seminar_quiz] HTTP API 퀴즈 조회 실패 fallback 진행:', err);
       }
     }
+
+    const httpHasUnknownQuiz = Boolean(
+      httpQuizResult?.success &&
+      httpQuizResult.quizzes.length > 0 &&
+      httpQuizResult.quizzes.some((q) => q.selectedIndex === null),
+    );
 
     let isDbAdvanced = false;
     if (seminarId && !isAdvancedSurvey) {
@@ -1038,6 +1045,13 @@ async function processSeminarQuiz(
       const hasSubmit = await submitBtn.isVisible({ timeout: 2000 }).catch(() => false);
 
       if (hasNext) {
+        if (httpQuizResult?.success && httpHasUnknownQuiz) {
+          console.log(
+            `[seminar_quiz] HTTP API로 전체 문제를 파악했으며 미해결 퀴즈가 존재하므로 페이지 이동을 중단합니다. (현재 페이지: ${currentPageNum})`,
+          );
+          break;
+        }
+
         console.log(`[seminar_quiz] 다음 페이지 이동 버튼 감지 (현재 페이지: ${currentPageNum}) -> 클릭`);
         const prevFirstQ = pageQuestions[0]?.questionNumber;
         await nextBtn.scrollIntoViewIfNeeded().catch(() => {});
@@ -1096,6 +1110,35 @@ async function processSeminarQuiz(
       }
     }
     // ── 다중 페이지 탐색 및 응답 루프 끝 ─────────────────────────────────────────
+
+    // HTTP API에서 파악한 퀴즈들을 accumulatedQuestions 및 accumulatedResults에 보강 병합
+    if (httpQuizResult && httpQuizResult.quizzes.length > 0) {
+      for (const hq of httpQuizResult.quizzes) {
+        if (!accumulatedQuestions.some((q) => q.questionNumber === hq.questionNumber)) {
+          accumulatedQuestions.push({
+            questionNumber: hq.questionNumber,
+            questionText: hq.questionText,
+            options: hq.options,
+            inputType: 'radio',
+            isRequired: true,
+            marker: '[퀴즈]',
+            kind: 'quiz',
+          });
+        }
+        if (!accumulatedResults.some((r) => r.questionIndex === hq.questionNumber)) {
+          accumulatedResults.push({
+            questionIndex: hq.questionNumber,
+            questionText: hq.questionText,
+            selectedIndex: hq.selectedIndex,
+            selectedText: hq.selectedText,
+            matchedKeyword: hq.matchedKeyword,
+            multipleMatches: hq.multipleMatches || null,
+            marker: '[퀴즈]',
+            kind: 'quiz',
+          });
+        }
+      }
+    }
 
     // 채널용 결과: [퀴즈] 문항만 필터링 (UI에서 누락되었더라도 HTTP API에서 발견된 경우 HTTP 결과로 채움)
     let channelResults = accumulatedResults.filter((r) => CHANNEL_ELIGIBLE_KINDS.has(r.kind));
@@ -1228,6 +1271,37 @@ async function processSeminarQuiz(
       if (_hasUnknown) {
         await handleUnknownQuestions(accumulatedQuestions, accumulatedResults, seminarId, isAdvancedSurvey);
       }
+
+      return {
+        success: true,
+        hasQuizResult: channelResults.length > 0,
+        message: resultMessage,
+      };
+    }
+
+    // ── 미해결 퀴즈가 있는 경우: 자동 제출 금지 및 보류 알림 ────────────────
+    if (_hasUnknown) {
+      console.log(`[seminar_quiz] ⚠️ 미해결 퀴즈가 존재하므로 세미나(${seminarName}) 자동 제출을 보류합니다.`);
+
+      await page.waitForTimeout(1000);
+      const initialUrl = page.url();
+      const seminarPageUrl = seminarId ? `https://m.doctorville.co.kr/cme/seminar/${seminarId}` : initialUrl;
+      const baseDir = path.join(process.cwd(), 'screenshot');
+      const pendingShotPath = path.join(baseDir, `quiz_pending_${seminarName ?? 'unknown'}_${Date.now()}.png`);
+
+      const telegramNoticeText = `📋 ⏸️ [일부 미해결] 퀴즈 정답 미등록으로 설문 제출 보류\n${resultMessage}\n\n🔗 세미나 URL: ${seminarPageUrl}`;
+
+      try {
+        await fs.mkdir(baseDir, { recursive: true });
+        await page.screenshot({ path: pendingShotPath, fullPage: true }).catch(() => {});
+        await sendTelegram(telegramNoticeText, pendingShotPath).catch(() => {});
+      } catch (_ssErr) {
+        await sendTelegram(telegramNoticeText).catch(() => {});
+      } finally {
+        await fs.unlink(pendingShotPath).catch(() => {});
+      }
+
+      await handleUnknownQuestions(accumulatedQuestions, accumulatedResults, seminarId, isAdvancedSurvey);
 
       return {
         success: true,

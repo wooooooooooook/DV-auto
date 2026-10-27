@@ -266,7 +266,7 @@ describe('seminar_quiz 다중 페이지 탐색 및 제출하기 감지 테스트
       quizSummaryMessage: '퀴즈 정답 13',
     });
 
-    const result = await processSeminarQuiz(mockPage, '9999', false);
+    const result = await processSeminarQuiz(mockPage, '9999', false, false, cheatsheet);
     // 백그라운드 큐에 남은 AI 작업이 있을 수 있으므로 종료 전에 비운다
     await drainLlmQueue();
 
@@ -561,5 +561,112 @@ describe('seminar_quiz 다중 페이지 탐색 및 제출하기 감지 테스트
     expect(unknownText.match(/Q1:/g)?.length).toBe(1);
     expect(unknownText.match(/Q2:/g)?.length).toBe(1);
     expect(unknownText.match(/Q3:/g)?.length).toBe(1);
+  });
+
+  it('미해결 퀴즈가 있는 일반설문 (HTTP API 사전 파악): 1페이지 후 페이지 이동을 즉시 중단하고 제출하기를 클릭하지 않은 채 제출 보류 알림을 전송한다', async () => {
+    const { mockPage, clickedButtons, getCurrentPage } = createMultiPageMock();
+
+    const surveyApiModule = await import('../src/modules/seminar_survey_api');
+    vi.spyOn(surveyApiModule, 'fetchSeminarSurveyQuizHttp').mockResolvedValue({
+      success: true,
+      seminarId: '5817',
+      totalPageCnt: 2,
+      totalQuestionCnt: 4,
+      quizQuestionCnt: 2,
+      depthSurveyQuestionCnt: 0,
+      isAdvancedSurvey: false,
+      quizzes: [
+        {
+          questionNumber: 1,
+          questionText: '[퀴즈] 알로푸리놀은 처방하기 전...',
+          options: [
+            { index: 1, text: 'O' },
+            { index: 2, text: 'X' },
+          ],
+          selectedIndex: 1,
+          selectedText: 'O',
+          matchedKeyword: '알로푸리놀',
+        },
+        {
+          questionNumber: 2,
+          questionText: '[퀴즈] 페브릭 40mg은 1 정당...',
+          options: [
+            { index: 1, text: '하루 5원' },
+            { index: 2, text: '하루 10원' },
+          ],
+          selectedIndex: null,
+          selectedText: null,
+          matchedKeyword: null,
+        },
+      ],
+      allQuestions: [],
+      quizSummaryMessage: '퀴즈 정답 1- (일부 미해결)',
+    });
+
+    const result = await processSeminarQuiz(mockPage, '5817', false, false, {});
+    await drainLlmQueue();
+
+    expect(result.success).toBe(true);
+
+    // API를 통해 이미 모든 문제를 알고 있고 미해결 퀴즈가 있으므로 [다음] 버튼 클릭 중단 확인
+    expect(clickedButtons).not.toContain('next');
+    expect(getCurrentPage()).toBe(1);
+
+    // [제출하기] 버튼은 절대 클릭되지 않아야 함
+    expect(clickedButtons).not.toContain('submit');
+
+    // 보류 알림 발송 확인
+    const pendingCall = sendTelegramSpy.mock.calls.find((c) =>
+      String(c[0]).includes('[일부 미해결] 퀴즈 정답 미등록으로 설문 제출 보류'),
+    );
+    expect(pendingCall).toBeDefined();
+    expect(String(pendingCall?.[0])).toContain('https://m.doctorville.co.kr/cme/seminar/5817');
+
+    // 미등록 퀴즈 알림 발송 확인
+    const unknownCall = sendTelegramSpy.mock.calls.find((c) => String(c[0]).includes('족보에 없는 퀴즈'));
+    expect(unknownCall).toBeDefined();
+  });
+
+  it('미해결 퀴즈가 있는 일반설문 (HTTP API 미제공 fallback): 2페이지까지 탐색하되 최종 제출하기는 클릭하지 않고 제출 보류 알림을 전송한다', async () => {
+    const { mockPage, clickedButtons, getCurrentPage } = createMultiPageMock();
+
+    const surveyApiModule = await import('../src/modules/seminar_survey_api');
+    // HTTP 조회가 실패하여 UI로 탐색해야 하는 상황
+    vi.spyOn(surveyApiModule, 'fetchSeminarSurveyQuizHttp').mockResolvedValue({
+      success: false,
+      error: 'HTTP 조회 불가',
+      seminarId: '5817',
+      totalPageCnt: 0,
+      totalQuestionCnt: 0,
+      quizQuestionCnt: 0,
+      depthSurveyQuestionCnt: 0,
+      isAdvancedSurvey: false,
+      quizzes: [],
+      allQuestions: [],
+      quizSummaryMessage: '',
+    });
+
+    // cheatsheet에 등록되지 않아 UI 파싱에서 _hasUnknown = true
+    const result = await processSeminarQuiz(mockPage, '5817', false, false, {});
+    await drainLlmQueue();
+
+    expect(result.success).toBe(true);
+
+    // 다음 페이지 내용을 봐야 하므로 [다음] 버튼을 눌러 2페이지까지 탐색함
+    expect(clickedButtons).toContain('next');
+    expect(getCurrentPage()).toBe(2);
+
+    // 하지만 미해결 퀴즈가 있으므로 최종 [제출하기] 버튼은 절대 클릭하지 않음
+    expect(clickedButtons).not.toContain('submit');
+
+    // 보류 알림 발송 확인
+    const pendingCall = sendTelegramSpy.mock.calls.find((c) =>
+      String(c[0]).includes('[일부 미해결] 퀴즈 정답 미등록으로 설문 제출 보류'),
+    );
+    expect(pendingCall).toBeDefined();
+
+    // 미등록 퀴즈 알림 발송 확인
+    const unknownCall = sendTelegramSpy.mock.calls.find((c) => String(c[0]).includes('족보에 없는 퀴즈'));
+    expect(unknownCall).toBeDefined();
   });
 });
