@@ -470,7 +470,95 @@ describe('seminar_survey_api (fetchSeminarSurveyQuizHttp)', () => {
     const result = await fetchSeminarSurveyQuizHttp('8888', mockCheatsheet);
     expect(result.success).toBe(true);
     expect(result.isAdvancedSurvey).toBe(false);
-    expect(result.isSuspectedAdvancedSurvey).toBe(true); // 마지막 페이지 주관식 3개 (1~3개 범위)
+    expect(result.isSuspectedAdvancedSurvey).toBe(true); // 마지막 페이지 주관식 3개 (1~3개 범위, 객관식 없음)
     expect(result.quizSummaryMessage).toBe('퀴즈 정답 1 + 심화설문?');
+  });
+
+  it('useDepthSurvey === "N"이고 마지막 페이지에 주관식이 1~3개 있더라도, 객관식이 함께 포함되어 있으면 "심화설문?"으로 분류되지 않는다', async () => {
+    const mockCheatsheet = {
+      '단일 퀴즈 문항': '정답1',
+    };
+
+    const createMockResponse = (body: string, status = 200): httpClient.HttpResponse => ({
+      status,
+      statusText: status === 200 ? 'OK' : 'Not Found',
+      body,
+      headers: {},
+      url: 'https://survey.villeway.com',
+      redirected: false,
+      resultType: status === 200 ? 'SUCCESS' : 'HTTP_ERROR',
+    });
+
+    vi.spyOn(httpClient, 'sendDoctorVilleRequest').mockImplementation(async (url: string) => {
+      if (url.includes('/survey-url')) {
+        return createMockResponse(JSON.stringify({ surveyUrl: 'https://survey.villeway.com/s/c/test/u/token7777' }));
+      }
+      if (url.includes('/auth/authenticate-via-client')) {
+        return createMockResponse(JSON.stringify({ data: { accessToken: 'token-7777' } }));
+      }
+      if (url.includes('/user/survey-detail')) {
+        return createMockResponse(
+          JSON.stringify({
+            data: {
+              config: { title: '일반 강의 설문', useDepthSurvey: 'N' },
+              pageCnt: 2,
+              questionCnt: 3,
+            },
+          }),
+        );
+      }
+      if (url.includes('/user/survey-page/1')) {
+        return createMockResponse(
+          JSON.stringify({
+            data: {
+              questions: [
+                {
+                  id: 1,
+                  questionNumber: 1,
+                  subject: '[퀴즈] 단일 퀴즈 문항',
+                  type: { key: 'QUIZ_MULTIPLE_CHOICE' },
+                  options: [{ id: 11, text: '정답1' }],
+                },
+              ],
+            },
+          }),
+        );
+      }
+      if (url.includes('/user/survey-page/2')) {
+        // 2페이지: 객관식 1개 + 주관식 1개 -> 객관식이 포함되어 있으므로 심화설문 의심(심화설문?)이 아니어야 함!
+        return createMockResponse(
+          JSON.stringify({
+            data: {
+              questions: [
+                {
+                  id: 2,
+                  questionNumber: 2,
+                  subject: '강의 만족도는 어떠셨나요?',
+                  type: { key: 'SINGLE_CHOICE', nameKo: '객관식' },
+                  options: [
+                    { id: 21, text: '매우 만족' },
+                    { id: 22, text: '보통' },
+                  ],
+                },
+                {
+                  id: 3,
+                  questionNumber: 3,
+                  subject: '강사님께 전달하고 싶은 의견',
+                  type: { key: 'TEXT', nameKo: '주관식 서술형' },
+                  options: [],
+                },
+              ],
+            },
+          }),
+        );
+      }
+      return createMockResponse('', 404);
+    });
+
+    const result = await fetchSeminarSurveyQuizHttp('7777', mockCheatsheet);
+    expect(result.success).toBe(true);
+    expect(result.isAdvancedSurvey).toBe(false);
+    expect(result.isSuspectedAdvancedSurvey).toBe(false); // 마지막 페이지에 객관식이 있으므로 의심 대상 제외!
+    expect(result.quizSummaryMessage).toBe('퀴즈 정답 1'); // + 심화설문? 이 붙지 않아야 함!
   });
 });

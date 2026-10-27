@@ -360,10 +360,14 @@ export async function fetchSeminarSurveyQuizHttp(
         ? formatAdvancedSurveyPrompt(depthSurveyQuestions)
         : undefined;
 
-    // useDepthSurvey === 'N' (심화설문 아님)인데 설문 마지막 페이지에 주관식 항목이 1~3개 있으면 "심화설문?"으로 표시
+    // useDepthSurvey === 'N' (심화설문 아님)인데 설문 마지막 페이지에 주관식 항목이 1~3개 있고 객관식이 없는 경우 "심화설문?"으로 표시
     const lastPageSubjectiveQuestions = lastPageQuestions.filter(isSubjectiveQuestion);
+    const hasObjectiveOnLastPage = lastPageQuestions.some((q) => !isSubjectiveQuestion(q));
     const isSuspectedAdvancedSurvey =
-      !isAdvancedSurvey && lastPageSubjectiveQuestions.length >= 1 && lastPageSubjectiveQuestions.length <= 3;
+      !isAdvancedSurvey &&
+      lastPageSubjectiveQuestions.length >= 1 &&
+      lastPageSubjectiveQuestions.length <= 3 &&
+      !hasObjectiveOnLastPage;
 
     // 퀴즈 정답 요약 메시지 생성 (예: "퀴즈 정답 412 + 심화1" 또는 "퀴즈 정답 412 + 심화설문?")
     let quizSummaryMessage = '';
