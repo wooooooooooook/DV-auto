@@ -144,6 +144,59 @@ describe('point_exchange URL and guid helpers', () => {
   });
 });
 
+describe('point_exchange 다중 상품 대상', () => {
+  it('JSON 문자열로 전달된 상품 목록의 URL과 수량을 파싱한다', () => {
+    const targets = pointExchangeTask.parseExchangeTargets(
+      JSON.stringify([
+        {
+          url: 'https://mcircle.bizmarketb2b.com/Goods/Content.aspx?guid=18138492&catecode=14828&eventuid=21006',
+          quantity: 2,
+        },
+        { guid: '18138388', catecode: '14828', quantity: 3 },
+        { guid: '18138480' },
+      ]),
+    );
+
+    expect(targets).toHaveLength(3);
+    expect(targets[0].url).toBe(
+      'https://mcircle.bizmarketb2b.com/Goods/Content.aspx?guid=18138492&catecode=14828&eventuid=21006',
+    );
+    expect(targets[0].quantity).toBe(2);
+    expect(targets[0].label).toBe('18138492');
+    expect(targets[1].url).toBe('https://mcircle.bizmarketb2b.com/Goods/Content.aspx?guid=18138388&catecode=14828');
+    expect(targets[1].quantity).toBe(3);
+    expect(targets[2].quantity).toBe(1);
+  });
+
+  it('상품 대상이 없으면 빈 배열을 반환한다', () => {
+    expect(pointExchangeTask.parseExchangeTargets(undefined)).toEqual([]);
+    expect(pointExchangeTask.parseExchangeTargets('')).toEqual([]);
+  });
+
+  it('상품별 수량만큼 실행 단계를 펼친다', () => {
+    const targets = pointExchangeTask.parseExchangeTargets([
+      { guid: '1', quantity: 2 },
+      { guid: '2', quantity: 1 },
+    ]);
+    const steps = pointExchangeTask.buildExchangeSteps(targets);
+
+    expect(steps.map((step) => step.guid)).toEqual(['1', '1', '2']);
+    expect(steps.map((step) => step.groupIndex)).toEqual([0, 0, 1]);
+  });
+
+  it('4개 상품을 2회씩 지정하면 총 8단계가 생성된다', () => {
+    const guids = ['18138492', '18138480', '18138477', '18138388'];
+    const targets = pointExchangeTask.parseExchangeTargets(
+      guids.map((guid) => ({
+        url: `https://mcircle.bizmarketb2b.com/Goods/Content.aspx?guid=${guid}&catecode=14828&eventuid=21006`,
+        quantity: 2,
+      })),
+    );
+
+    expect(pointExchangeTask.buildExchangeSteps(targets)).toHaveLength(8);
+  });
+});
+
 describe('Point Exchange Task execution check', () => {
   it('point_exchange 모듈에 run 함수가 정의되어 있어야 한다', () => {
     expect(typeof pointExchangeTask.run).toBe('function');

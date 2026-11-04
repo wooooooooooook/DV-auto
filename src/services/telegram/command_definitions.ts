@@ -35,7 +35,7 @@ export const adminCommands = [
   { command: 'set_seminar_point', description: '세미나 포인트 지급 상태 수동 갱신 (seminarId, [상태], [포인트])' },
   { command: 'check_advanced_seminars', description: '최근 2주 심화 세미나 포인트 일괄 확인 (방장 계정 기준)' },
   { command: 'point_exchange', description: '포인트교환 실행 (URL/guid, [횟수])' },
-  { command: 'naverpay_point_exchange', description: '네이버페이포인트교환 실행' },
+  { command: 'naverpay_point_exchange', description: '네이버페이포인트교환 실행 (4개 상품 2회씩)' },
   { command: 'baemin_point_exchange', description: '배민포인트교환 실행' },
   { command: 'kakaopay_point_exchange', description: '카카오페이포인트교환 실행 (1만원)' },
   { command: 'kakaopay5k_point_exchange', description: '카카오페이 5천원권 교환 실행' },

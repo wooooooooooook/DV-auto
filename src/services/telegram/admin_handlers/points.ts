@@ -6,12 +6,38 @@ import * as runner from '../../../core/runner';
 import * as taskRegistry from '../../../core/taskRegistry';
 import { replyWithSplit, TELEGRAM_SAFE_CAPTION_LENGTH } from '../../../modules/utils';
 
+export interface PresetExchangeProduct {
+  url: string;
+  quantity: number;
+}
+
 export interface PresetExchangeOptions {
   name: string;
-  guid: string;
+  guid?: string;
   catecode?: string;
   defaultAttempts?: number;
+  /** 지정 시 여러 상품을 각각 지정 수량만큼 교환합니다. 이때 [횟수] 인자는 상품별 수량으로 동작합니다. */
+  products?: PresetExchangeProduct[];
 }
+
+export const NAVERPAY_EXCHANGE_PRODUCTS: PresetExchangeProduct[] = [
+  {
+    url: 'https://mcircle.bizmarketb2b.com/Goods/Content.aspx?guid=18138492&catecode=14828&eventuid=21006',
+    quantity: 2,
+  },
+  {
+    url: 'https://mcircle.bizmarketb2b.com/Goods/Content.aspx?guid=18138480&catecode=14828&eventuid=21006',
+    quantity: 2,
+  },
+  {
+    url: 'https://mcircle.bizmarketb2b.com/Goods/Content.aspx?guid=18138477&catecode=14828&eventuid=21006',
+    quantity: 2,
+  },
+  {
+    url: 'https://mcircle.bizmarketb2b.com/Goods/Content.aspx?guid=18138388&catecode=14828&eventuid=21006',
+    quantity: 2,
+  },
+];
 
 export const createPointExchangeHandler = (options: PresetExchangeOptions) => {
   return async (ctx: Context) => {
@@ -24,6 +50,8 @@ export const createPointExchangeHandler = (options: PresetExchangeOptions) => {
 
     const messageText = ctx.message && 'text' in ctx.message ? ctx.message.text : '';
     const args = messageText.split(' ').slice(1);
+    const presetProducts = options.products ?? [];
+    const isMultiProduct = presetProducts.length > 0;
     let attempts = options.defaultAttempts ?? 1;
     if (args.length > 0) {
       const parsedAttempts = parseInt(args[0], 10);
@@ -32,19 +60,27 @@ export const createPointExchangeHandler = (options: PresetExchangeOptions) => {
       }
     }
 
+    const startMessage = isMultiProduct
+      ? `${options.name} 포인트교환 작업을 시작합니다... (상품 ${presetProducts.length}개 × ${attempts}회, 백그라운드 실행)`
+      : `${options.name} 포인트교환 작업을 시작합니다... (${attempts}회 시도, 백그라운드 실행)`;
+
+    const taskArgs: Record<string, string> = isMultiProduct
+      ? {
+          name: options.name,
+          products: JSON.stringify(presetProducts.map((product) => ({ url: product.url, quantity: attempts }))),
+        }
+      : {
+          name: options.name,
+          guid: options.guid || '',
+          catecode: options.catecode || '14592',
+        };
+
     try {
-      await replyWithSplit(
-        ctx,
-        `${options.name} 포인트교환 작업을 시작합니다... (${attempts}회 시도, 백그라운드 실행)`,
-      );
+      await replyWithSplit(ctx, startMessage);
       runner
         .runTask(task, {
-          args: {
-            name: options.name,
-            guid: options.guid,
-            catecode: options.catecode || '14592',
-          },
-          maxIterations: attempts,
+          args: taskArgs,
+          maxIterations: isMultiProduct ? undefined : attempts,
         })
         .then(async (result) => {
           if (result && typeof result === 'object' && (result as { message?: string }).message) {
@@ -220,7 +256,11 @@ export function setupPointsCommands(adminBot: Telegraf): void {
   // 단축 명령어 프리셋
   adminBot.command(
     'naverpay_point_exchange',
-    createPointExchangeHandler({ name: '네이버페이', guid: '14131415', defaultAttempts: 10 }),
+    createPointExchangeHandler({
+      name: '네이버페이',
+      products: NAVERPAY_EXCHANGE_PRODUCTS,
+      defaultAttempts: 2,
+    }),
   );
   adminBot.command(
     'baemin_point_exchange',

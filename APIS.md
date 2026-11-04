@@ -317,7 +317,11 @@
 
 ### 5.2 엠서클 비즈마켓 B2B 상품권 교환 (`mcircle.bizmarketb2b.com`)
 - **배달의민족 상품권 교환 URL**: `https://mcircle.bizmarketb2b.com/Goods/Content.aspx?guid=14152303&catecode=14592&eventuid=21006`
-- **네이버페이 상품권 교환 URL**: `https://mcircle.bizmarketb2b.com/Goods/Content.aspx?guid=14131415&catecode=14592`
+- **네이버페이 상품권 교환 URL (4개 상품, 각 2회)**:
+  - `https://mcircle.bizmarketb2b.com/Goods/Content.aspx?guid=18138492&catecode=14828&eventuid=21006`
+  - `https://mcircle.bizmarketb2b.com/Goods/Content.aspx?guid=18138480&catecode=14828&eventuid=21006`
+  - `https://mcircle.bizmarketb2b.com/Goods/Content.aspx?guid=18138477&catecode=14828&eventuid=21006`
+  - `https://mcircle.bizmarketb2b.com/Goods/Content.aspx?guid=18138388&catecode=14828&eventuid=21006`
 - **방식**: Playwright 자동화
 - **설명**: 바로구매 클릭 -> 수령인 정보(`USER_NAME`, `USER_PHONE_*`) 입력 -> 포인트 전액 결제 체크 -> 결제 완료 확인
 
