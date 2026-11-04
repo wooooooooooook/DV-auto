@@ -1,11 +1,10 @@
 services:
   dv-auto:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        GIT_COMMIT: ${GIT_COMMIT:-}
-        GIT_COMMIT_DATE: ${GIT_COMMIT_DATE:-}
+    # GitHub Actions(.github/workflows/docker-publish.yml)가 빌드해 GHCR 에 푸시한 이미지를 사용한다.
+    # 스택 업데이트는 이미지 pull 만 수행하므로 빌드/브라우저 다운로드가 발생하지 않는다.
+    # 로컬에서 직접 빌드하려면 docker-compose.build.yml 을 함께 사용한다.
+    image: ${DV_AUTO_IMAGE:-ghcr.io/wooooooooooook/dv-auto:latest}
+    pull_policy: always
 
     container_name: dv-auto
 
@@ -16,10 +15,7 @@ services:
       # 텔레그램 /log·/update_app 명령의 도커 분기 감지 플래그
       DV_DOCKER: 1
 
-      # Git 커밋 정보 (호스트 환경변수 또는 빌드 주입)
-      GIT_COMMIT: ${GIT_COMMIT:-}
-      GIT_COMMIT_DATE: ${GIT_COMMIT_DATE:-}
-
+      # Git 커밋 정보는 이미지 빌드 시 build-info.json 으로 구워지므로 런타임 주입하지 않는다.
       DV_USER: ${DV_USER}
       DV_PASS: ${DV_PASS}
       INTERMD_USER_ID: ${INTERMD_USER_ID}
@@ -46,7 +42,7 @@ services:
       NOTICE_CHANNEL_ID: ${NOTICE_CHANNEL_ID}
 
       HEADLESS: ${HEADLESS}
-      
+
       HERMES_URL: ${HERMES_URL}
       HERMES_API_KEY: ${HERMES_API_KEY}
 

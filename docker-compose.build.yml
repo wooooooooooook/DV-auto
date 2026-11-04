@@ -1,0 +1,12 @@
+# 로컬/CI 에서 직접 이미지를 빌드할 때 사용하는 오버레이.
+# 사용 예: docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+services:
+  dv-auto:
+    image: ${DV_AUTO_IMAGE:-ghcr.io/wooooooooooook/dv-auto:local}
+    pull_policy: build
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-}
+        GIT_COMMIT_DATE: ${GIT_COMMIT_DATE:-}

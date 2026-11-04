@@ -105,7 +105,7 @@ export function setupSystemCommands(adminBot: Telegraf): void {
       if (isPortainerConfigured()) {
         await replyWithSplit(
           ctx,
-          '🔄 Portainer로 스택 업데이트(git pull + 빌드 + 재배포)를 요청합니다...\n' +
+          '🔄 Portainer로 스택 업데이트(latest 이미지 pull + 재배포)를 요청합니다...\n' +
             '재배포 중에는 컨테이너가 교체되어 이 채팅의 응답이 중단될 수 있습니다.\n' +
             '(새 컨테이너의 "앱이 온라인 상태입니다" 메시지로 완료를 확인하세요)',
         );
