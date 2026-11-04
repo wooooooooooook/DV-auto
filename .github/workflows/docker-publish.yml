@@ -31,8 +31,8 @@ jobs:
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "date=$(git log -1 --format=%cI)" >> "$GITHUB_OUTPUT"
 
-      # 서버가 arm64 이므로 두 아키텍처를 하나의 manifest list 로 게시한다.
-      # arm64 는 QEMU 에뮬레이션으로 빌드되어 amd64 보다 오래 걸린다.
+      # 배포 서버가 arm64 이므로 arm64 이미지만 게시한다.
+      # arm64 빌드는 QEMU 에뮬레이션으로 수행되어 amd64 네이티브보다 오래 걸린다.
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -62,7 +62,7 @@ jobs:
         with:
           context: .
           push: true
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
