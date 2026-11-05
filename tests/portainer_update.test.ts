@@ -411,20 +411,87 @@ describe('Portainer 클라이언트', () => {
     }
   });
 
-  it('git 기반 스택이 아니면(400) 유형 안내와 함께 실패한다', async () => {
+  it('git 설정이 없는 Web Editor(Compose) 스택이면 스택 파일을 조회하여 Compose 재배포를 수행한다', async () => {
     setPortainerEnv({
       PORTAINER_URL: 'https://portainer.example:9443',
       PORTAINER_API_KEY: 'k',
       PORTAINER_ENDPOINT_ID: '1',
       PORTAINER_STACK_ID: '5',
     });
-    fetchHandler = (url) => {
+    let putUrl = '';
+    let putBody: Record<string, unknown> = {};
+
+    fetchHandler = (url, init) => {
       if (url.endsWith('/api/stacks')) return { body: [{ Id: 5, Name: 'dv-auto', EndpointId: 1 }] };
-      if (url.endsWith('/api/stacks/5')) return { body: { Env: [], GitConfig: { ReferenceName: 'refs/heads/main' } } };
-      return { status: 400, body: { message: 'Stack is not created from git' } };
+      if (url.endsWith('/api/stacks/5')) return { body: { Env: [{ name: 'FOO', value: 'BAR' }], GitConfig: null } };
+      if (url.endsWith('/api/stacks/5/file'))
+        return {
+          body: { StackFileContent: 'services:\n  dv-auto:\n    image: ghcr.io/wooooooooooook/dv-auto:latest' },
+        };
+      if (url.includes('/api/stacks/5?endpointId=1') && init?.method === 'PUT') {
+        putUrl = url;
+        putBody = JSON.parse(String(init.body));
+        return { body: { Id: 5, Name: 'dv-auto' } };
+      }
+      return { status: 404, body: {} };
     };
 
-    await expect(triggerPortainerStackRedeploy()).rejects.toThrow(/git\(Repository\) 기반/);
+    const result = await triggerPortainerStackRedeploy();
+    expect(result).toContain("스택 'dv-auto' (id: 5, Compose 스택) 이미지 pull + 재배포 완료");
+    expect(putUrl).toContain('/api/stacks/5?endpointId=1');
+    expect(putBody.pullImage).toBe(true);
+    expect(putBody.repullImageAndRedeploy).toBe(true);
+    expect(putBody.stackFileContent).toContain('ghcr.io/wooooooooooook/dv-auto:latest');
+    expect(putBody.env).toEqual([{ name: 'FOO', value: 'BAR' }]);
+  });
+
+  it('git/redeploy가 400 not created from git을 반환하면 Compose 재배포로 자동 폴백한다', async () => {
+    setPortainerEnv({
+      PORTAINER_URL: 'https://portainer.example:9443',
+      PORTAINER_API_KEY: 'k',
+      PORTAINER_ENDPOINT_ID: '1',
+      PORTAINER_STACK_ID: '5',
+    });
+    let fallbackCalled = false;
+
+    fetchHandler = (url, init) => {
+      if (url.endsWith('/api/stacks')) return { body: [{ Id: 5, Name: 'dv-auto', EndpointId: 1 }] };
+      if (url.endsWith('/api/stacks/5'))
+        return { body: { Env: [{ name: 'A', value: '1' }], GitConfig: { ReferenceName: 'refs/heads/main' } } };
+      if (url.includes('/git/redeploy')) {
+        return { status: 400, body: { message: 'Stack is not created from git' } };
+      }
+      if (url.endsWith('/api/stacks/5/file')) {
+        return { body: { StackFileContent: 'services: dv-auto' } };
+      }
+      if (url.includes('/api/stacks/5?endpointId=1') && init?.method === 'PUT') {
+        fallbackCalled = true;
+        return { body: { Id: 5 } };
+      }
+      return { status: 404, body: {} };
+    };
+
+    const result = await triggerPortainerStackRedeploy();
+    expect(result).toContain('Compose 스택');
+    expect(fallbackCalled).toBe(true);
+  });
+
+  it('Compose 스택 파일 내용이 비어 있으면 에러를 던진다', async () => {
+    setPortainerEnv({
+      PORTAINER_URL: 'https://portainer.example:9443',
+      PORTAINER_API_KEY: 'k',
+      PORTAINER_ENDPOINT_ID: '1',
+      PORTAINER_STACK_ID: '5',
+    });
+
+    fetchHandler = (url) => {
+      if (url.endsWith('/api/stacks')) return { body: [{ Id: 5, Name: 'dv-auto', EndpointId: 1 }] };
+      if (url.endsWith('/api/stacks/5')) return { body: { Env: [], GitConfig: null } };
+      if (url.endsWith('/api/stacks/5/file')) return { body: { StackFileContent: '' } };
+      return { status: 404, body: {} };
+    };
+
+    await expect(triggerPortainerStackRedeploy()).rejects.toThrow(/Compose 파일 내용/);
   });
 
   it('스택이 여러 개이고 이름 지정이 없으면 PORTAINER_STACK_NAME 안내와 함께 실패한다', async () => {

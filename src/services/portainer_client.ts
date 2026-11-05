@@ -200,6 +200,7 @@ function normalizeEnvPair(raw: RawStackEnvPair | null | undefined): StackEnvPair
 type StackDetail = {
   Env?: RawStackEnvPair[] | null;
   GitConfig?: {
+    URL?: string | null;
     ReferenceName?: string | null;
     Authentication?: { Username?: string | null } | null;
   } | null;
@@ -280,6 +281,7 @@ async function fetchStackPreserveSettings(stackId: number): Promise<{
   referenceName: string;
   hasReferenceNameField: boolean;
   repositoryUsername: string;
+  isGitStack: boolean;
 }> {
   const detail = await requestJson<StackDetail>(`/api/stacks/${stackId}`);
 
@@ -303,6 +305,9 @@ async function fetchStackPreserveSettings(stackId: number): Promise<{
   const hasReferenceNameField = legacyRef !== undefined || currentRef !== undefined;
   const referenceName = (legacyRef ?? currentRef ?? '').trim();
 
+  // git 기반 스택 여부: GitConfig 객체 존재 여부 또는 CurrentDeploymentInfo 존재 여부
+  const isGitStack = Boolean(detail?.GitConfig || detail?.CurrentDeploymentInfo?.ReferenceName);
+
   // 진단용. 환경변수 값은 비밀일 수 있으므로 이름만 기록한다.
   const audit = {
     stackId,
@@ -312,6 +317,7 @@ async function fetchStackPreserveSettings(stackId: number): Promise<{
     envNames: env.map((pair) => pair.name),
     hasReferenceNameField,
     referenceName: referenceName || '(비어 있음)',
+    isGitStack,
   };
   logger.info('Portainer 스택 배포 전 설정 조회', audit);
   await appendAuditLog({ event: 'preflight', ...audit });
@@ -322,7 +328,85 @@ async function fetchStackPreserveSettings(stackId: number): Promise<{
     referenceName,
     hasReferenceNameField,
     repositoryUsername: detail?.GitConfig?.Authentication?.Username?.trim() || '',
+    isGitStack,
   };
+}
+
+type StackFileResponse = {
+  StackFileContent?: string;
+  stackFileContent?: string;
+};
+
+/** Portainer 스택에 저장된 docker-compose.yml 내용을 가져온다. */
+async function fetchStackFileContent(stackId: number): Promise<string> {
+  const res = await requestJson<StackFileResponse>(`/api/stacks/${stackId}/file`);
+  const content = res?.StackFileContent ?? res?.stackFileContent;
+  if (!content || !content.trim()) {
+    throw new PortainerApiError(
+      `Portainer 스택(id: ${stackId})의 Compose 파일 내용(StackFileContent)을 읽지 못했습니다. ` +
+        'Portainer UI에서 스택 Editor를 확인해 주세요.',
+    );
+  }
+  return content;
+}
+
+/**
+ * Web Editor(Compose/Standalone) 스택의 이미지를 pull 하고 재배포한다.
+ * PUT /api/stacks/{id}?endpointId={endpointId}
+ */
+async function redeployComposeStack(
+  stackId: number,
+  stackName: string,
+  endpointId: number,
+  env: StackEnvPair[],
+): Promise<string> {
+  const stackFileContent = await fetchStackFileContent(stackId);
+  const payload: Record<string, unknown> = {
+    stackFileContent,
+    env,
+    prune: false,
+    pullImage: true,
+    repullImageAndRedeploy: true,
+  };
+
+  logger.info('Portainer Compose(Web Editor) 스택 재배포 요청', {
+    stackId,
+    stackName,
+    endpointId,
+    envCount: env.length,
+    payloadKeys: Object.keys(payload),
+  });
+  await appendAuditLog({
+    event: 'redeploy-compose-request',
+    stackId,
+    stackName,
+    endpointId,
+    envCount: env.length,
+    payloadKeys: Object.keys(payload),
+  });
+
+  try {
+    await requestJson<unknown>(`/api/stacks/${stackId}?endpointId=${endpointId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+    await appendAuditLog({ event: 'redeploy-compose-response', stackId, ok: true });
+  } catch (error) {
+    const status = error instanceof PortainerApiError ? error.status : undefined;
+    await appendAuditLog({
+      event: 'redeploy-compose-response',
+      stackId,
+      ok: false,
+      status,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    if (status === 409) {
+      throw new PortainerApiError('이미 배포가 진행 중입니다. 잠시 후 다시 시도해주세요.', status);
+    }
+    throw error;
+  }
+
+  return `스택 '${stackName}' (id: ${stackId}, Compose 스택) 이미지 pull + 재배포 완료 응답을 받았습니다.`;
 }
 
 /**
@@ -354,6 +438,15 @@ export async function triggerPortainerStackRedeploy(): Promise<string> {
         'Portainer UI 에서 스택 환경변수를 다시 입력해야 합니다.',
       { stackId: stack.id },
     );
+  }
+
+  // 1. 처음부터 Git 설정이 없는 Compose(Web Editor) 스택인 경우 바로 Compose 스택 재배포 API 호출
+  if (!settings.isGitStack) {
+    logger.info('스택에 Git 설정이 없어 Compose(Web Editor) 스택 재배포를 진행합니다.', {
+      stackId: stack.id,
+      stackName: stack.name,
+    });
+    return redeployComposeStack(stack.id, stack.name, endpointId, settings.env);
   }
 
   const payload: Record<string, unknown> = {
@@ -411,10 +504,10 @@ export async function triggerPortainerStackRedeploy(): Promise<string> {
       throw new PortainerApiError('이미 배포가 진행 중입니다. 잠시 후 다시 시도해주세요.', status);
     }
     if (status === 400 && error instanceof PortainerApiError && error.message.includes('not created from git')) {
-      throw new PortainerApiError(
-        '이 스택은 git(Repository) 기반이 아닙니다. Portainer 스택 유형을 확인해주세요.',
-        status,
-      );
+      logger.warn('git/redeploy가 거부되어(not created from git), Compose(Web Editor) 스택 재배포로 자동 전환합니다.', {
+        stackId: stack.id,
+      });
+      return redeployComposeStack(stack.id, stack.name, endpointId, settings.env);
     }
     throw error;
   }
