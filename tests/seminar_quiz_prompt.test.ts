@@ -6,6 +6,9 @@ import {
   HERMES_TIMEOUT_MS,
   generateUnknownQuizPromptText,
   handleUnknownQuestions,
+  cleanAndExtractQuestionText,
+  isMetaOrUiText,
+  containsAdvancedSurveyNotice,
   type SurveyQuestionForPrompt,
   type SurveyQuestion,
   type QuizResult,
@@ -475,5 +478,121 @@ describe('handleUnknownQuestions 백그라운드 AI 요청 테스트', () => {
     expect(fetchResolved).toBe(true);
     expect(sendTelegramSpy).toHaveBeenCalledTimes(2);
     expect(String(sendTelegramSpy.mock.calls[1][0])).toContain('[미등록 퀴즈 AI 추천 정답]');
+  });
+});
+
+describe('cleanAndExtractQuestionText 및 문제 번호 기반 끝까지 추출 테스트', () => {
+  it('단독 줄 번호("8.")와 여러 문단으로 이루어진 설문 지문을 끝까지 보존하고 UI 텍스트를 제거한다', () => {
+    const rawInput = `8.
+2025년 개정 국내 H. pylori 치료 가이드라인은 클래리스로마이신 내성률 증가(33.3%)로 표준 3제요법의 제균율이 66.9%까지 낮아짐에 따라, 맞춤치료와 경험적 4제요법(동시요법 등) 2축 전략으로 개정되었으며, P-CAB 기반 병용요법이 PPI 기반 요법을 대체할 수 있는 1차 요법으로 권고되었습니다.
+펙수프라잔 기반 3제요법은 허가 임상 3상에서 란소프라졸 기반 3제요법 대비 비열등한 제균율(83.6% vs 77.9%)을 입증하였으며, 클래리스로마이신 내성 환자에서도 54.76% vs 28.57%(p=0.0112)로 높은 제균율을 보였습니다.
+
+현재 H. pylori 제균치료를 하실 때 가장 어려운 점은 무엇이며, 펙수프라잔이 제균치료에서 어떤 환자나 상황에 쓰일 때 가장 의미가 있다고 보시는지 그 이유와 함께 말씀 부탁드립니다.
+(예: 환자 특성 / 치료 단계(1차·2차) / 요법 등 진료 경험을 바탕으로 자유롭게 작성) - (100자 이상)
+내용을 입력해주세요 (마우스 우클릭 금지, 복사&붙여넣기 기능 사용 불가)
+
+0 / 최소 100 자
+
+설문 마감 45분 전`;
+
+    const extracted = cleanAndExtractQuestionText(rawInput, 0);
+
+    expect(extracted.questionNumber).toBe(8);
+    // 첫 문단뿐만 아니라 2번째, 3번째, 4번째 문단까지 모두 포함되어야 함
+    expect(extracted.questionText).toContain('2025년 개정 국내 H. pylori 치료 가이드라인은');
+    expect(extracted.questionText).toContain('펙수프라잔 기반 3제요법은 허가 임상 3상에서');
+    expect(extracted.questionText).toContain('현재 H. pylori 제균치료를 하실 때 가장 어려운 점은 무엇이며');
+    expect(extracted.questionText).toContain(
+      '(예: 환자 특성 / 치료 단계(1차·2차) / 요법 등 진료 경험을 바탕으로 자유롭게 작성) - (100자 이상)',
+    );
+
+    // UI 메타 텍스트는 제외되어야 함
+    expect(extracted.questionText).not.toContain('내용을 입력해주세요');
+    expect(extracted.questionText).not.toContain('마우스 우클릭 금지');
+    expect(extracted.questionText).not.toContain('0 / 최소 100 자');
+    expect(extracted.questionText).not.toContain('설문 마감 45분 전');
+
+    // AI 프롬프트 생성 시 Q8: 아래에 전체 문단이 누락 없이 포맷되는지 검증
+    const promptQuestions: SurveyQuestionForPrompt[] = [
+      {
+        questionNumber: extracted.questionNumber,
+        questionText: extracted.questionText,
+      },
+    ];
+    const promptText = generateAdvancedSurveyPromptText(promptQuestions);
+
+    expect(promptText).toContain('Q8: 2025년 개정 국내 H. pylori 치료 가이드라인은');
+    expect(promptText).toContain('펙수프라잔 기반 3제요법은 허가 임상 3상에서');
+    expect(promptText).toContain('현재 H. pylori 제균치료를 하실 때 가장 어려운 점은 무엇이며');
+    expect(promptText).toContain(
+      '(예: 환자 특성 / 치료 단계(1차·2차) / 요법 등 진료 경험을 바탕으로 자유롭게 작성) - (100자 이상)',
+    );
+  });
+
+  it('마커와 문제 번호가 접두어로 붙어있을 때 마커와 번호를 분리하고 본문을 끝까지 추출한다', () => {
+    const rawInput = `[주관식] Q3. 본 약제를 처방하면서 경험하신 주요 효과는 무엇인가요?
+환자 반응과 복약 편의성 측면에서
+자세히 기술해 주십시오. *
+내용을 입력해주세요`;
+
+    const extracted = cleanAndExtractQuestionText(rawInput, 1);
+    expect(extracted.marker).toBe('[주관식]');
+    expect(extracted.questionNumber).toBe(3);
+    expect(extracted.questionText).toBe(
+      '본 약제를 처방하면서 경험하신 주요 효과는 무엇인가요?\n환자 반응과 복약 편의성 측면에서\n자세히 기술해 주십시오.',
+    );
+  });
+
+  it('isMetaOrUiText: UI 및 메타 안내 문구를 올바르게 판별한다', () => {
+    expect(isMetaOrUiText('내용을 입력해주세요')).toBe(true);
+    expect(isMetaOrUiText('마우스 우클릭 금지')).toBe(true);
+    expect(isMetaOrUiText('0 / 최소 100 자')).toBe(true);
+    expect(isMetaOrUiText('설문 마감 45분 전')).toBe(true);
+    expect(isMetaOrUiText('실제 임상 환자에서의 치료 효과')).toBe(false);
+  });
+});
+
+describe('containsAdvancedSurveyNotice 심화설문 안내 문구 인식 테스트', () => {
+  it('포인트 지급 및 제외 사유가 포함된 심화설문 안내 문구를 정확히 인식한다', () => {
+    const surveyNotice = `제출해주시는 답변은 제품 발전 및 개선을 위한 목적으로 수집되며,
+담당자 확인 후 소정의 포인트가 지급될 예정입니다. (영업일 기준 7일이내)
+
+단, 아래와 같은 사유는 담당자 검토 후 포인트 지급대상에서 제외될 수 있습니다.
+1. 문항별 최소 글자 수 기준 미 충족
+2. 의미 없는 문장 또는 반복 응답
+3. 질문과 무관한 내용
+4. 기타 직접 작성한 응답으로 보기 어려운 경우(AI 활용)`;
+
+    expect(containsAdvancedSurveyNotice(surveyNotice)).toBe(true);
+  });
+
+  it('키워드가 2개 이상일 때만 심화설문으로 인식한다 (단일 키워드 단독은 false)', () => {
+    // 키워드 2개 이상: "리뷰형" + "소정의 포인트 지급" -> true
+    const titleWithPoint = '[D-DDW 2026] 펙수클루 Triple Web Symposium 설문조사 (리뷰형, 소정의 포인트 지급)';
+    expect(containsAdvancedSurveyNotice(titleWithPoint)).toBe(true);
+
+    // 키워드 1개 단독: "리뷰형"만 있음 -> false
+    const titleOnly = '[D-DDW 2026] 펙수클루 Triple Web Symposium 설문조사 (펙수클루_리뷰형_총 8문항)';
+    expect(containsAdvancedSurveyNotice(titleOnly)).toBe(false);
+
+    // 키워드 1개 단독: "소정의 포인트"만 있음 -> false
+    expect(containsAdvancedSurveyNotice('소정의 포인트를 드립니다.')).toBe(false);
+
+    // 키워드 1개 단독: "최소 100자"만 있음 -> false
+    expect(containsAdvancedSurveyNotice('답변은 최소 100자 작성해 주세요.')).toBe(false);
+  });
+
+  it('최소 글자수와 포인트/AI 키워드가 2개 이상 조합된 문장을 인식한다', () => {
+    // 최소 글자수 + 담당자 검토 + 소정의 포인트 -> true
+    expect(containsAdvancedSurveyNotice('100자 이상 서술 시 담당자 검토 후 소정의 포인트 지급')).toBe(true);
+    // 최소 글자수 + AI 작성 + 포인트 지급 제외 -> true
+    expect(containsAdvancedSurveyNotice('문항당 최소 100자 미충족 또는 AI 작성 시 포인트 지급 제외')).toBe(true);
+  });
+
+  it('일반 설문 및 단순 퀴즈 문구에 대해서는 false를 반환한다', () => {
+    expect(containsAdvancedSurveyNotice('오늘 강의의 전반적인 만족도를 평가해 주세요.')).toBe(false);
+    expect(containsAdvancedSurveyNotice('[퀴즈] 다음 중 고혈압 치료제로 올바른 것은?')).toBe(false);
+    expect(containsAdvancedSurveyNotice('')).toBe(false);
+    expect(containsAdvancedSurveyNotice(null)).toBe(false);
   });
 });

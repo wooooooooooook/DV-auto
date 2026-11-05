@@ -19,7 +19,7 @@ describe('seminar_quiz 다중 페이지 탐색 및 제출하기 감지 테스트
   /**
    * 1페이지(다음 버튼) -> 2페이지(제출하기 버튼) 다중 페이지 동작을 시뮬레이션하는 mock Page 생성
    */
-  function createMultiPageMock() {
+  function createMultiPageMock(mockOpts?: { hasSubjectiveOnPage2?: boolean }) {
     let currentPageNum = 1;
     const clickedButtons: string[] = [];
 
@@ -118,7 +118,7 @@ describe('seminar_quiz 다중 페이지 탐색 및 제출하기 감지 테스트
             },
           ];
         }
-        // 2페이지 문항 (심화 설문 2개)
+        // 2페이지 문항: hasSubjectiveOnPage2가 true이면 주관식 1개 포함, 아니면 객관식만
         return [
           {
             questionNumber: 3,
@@ -131,17 +131,26 @@ describe('seminar_quiz 다중 페이지 탐색 및 제출하기 감지 테스트
               { index: 2, text: '보통', value: '2' },
             ],
           },
-          {
-            questionNumber: 4,
-            questionLine: '향후 추가 희망 주제가 있으십니까?',
-            marker: null,
-            isRequired: false,
-            inputType: 'radio',
-            options: [
-              { index: 1, text: '해당 없음', value: '1' },
-              { index: 2, text: '있음', value: '2' },
-            ],
-          },
+          mockOpts?.hasSubjectiveOnPage2
+            ? {
+                questionNumber: 4,
+                questionLine: '향후 추가 희망 주제가 있으십니까?',
+                marker: '[주관식]',
+                isRequired: false,
+                inputType: 'text',
+                options: [{ index: 1, text: '[주관식]', value: '' }],
+              }
+            : {
+                questionNumber: 4,
+                questionLine: '향후 추가 희망 주제가 있으십니까?',
+                marker: null,
+                isRequired: false,
+                inputType: 'radio',
+                options: [
+                  { index: 1, text: '해당 없음', value: '1' },
+                  { index: 2, text: '있음', value: '2' },
+                ],
+              },
         ];
       }),
     };
@@ -150,7 +159,7 @@ describe('seminar_quiz 다중 페이지 탐색 및 제출하기 감지 테스트
   }
 
   it('심화설문: 1페이지에서 [다음] 클릭 -> 2페이지에서 [제출하기] 감지 시 루프 탈출하고 제출하기를 클릭하지 않는다', async () => {
-    const { mockPage, clickedButtons, getCurrentPage } = createMultiPageMock();
+    const { mockPage, clickedButtons, getCurrentPage } = createMultiPageMock({ hasSubjectiveOnPage2: true });
 
     const cheatsheet = {
       데노수맙: '골절 고위험군',
@@ -241,6 +250,53 @@ describe('seminar_quiz 다중 페이지 탐색 및 제출하기 감지 테스트
     expect(findMsg('족보에 없는 퀴즈')).toContain('족보에 없는 퀴즈');
 
     expect(findMsg('[미등록 퀴즈 AI 추천 정답]')).toContain('[미등록 퀴즈 AI 추천 정답]');
+  });
+
+  it('심화설문: 심화정보(isAdvancedSurvey=true)가 있으나 주관식이 0개인 경우 [심화설문?]으로 변경되고 자동 제출은 생략 유지된다', async () => {
+    // 2페이지 문항이 모두 객관식(주관식 0개)인 mock 사용
+    const { mockPage, clickedButtons, getCurrentPage } = createMultiPageMock({ hasSubjectiveOnPage2: false });
+
+    const cheatsheet = {
+      데노수맙: '골절 고위험군',
+      바이오시밀러: 'PK/PD',
+    };
+    vi.spyOn(await import('../src/tasks/seminar_quiz'), 'loadCheatsheet').mockResolvedValue(cheatsheet);
+
+    const surveyApiModule = await import('../src/modules/seminar_survey_api');
+    vi.spyOn(surveyApiModule, 'fetchSeminarSurveyQuizHttp').mockResolvedValue({
+      success: true,
+      seminarId: '5642',
+      totalPageCnt: 2,
+      totalQuestionCnt: 4,
+      quizQuestionCnt: 2,
+      depthSurveyQuestionCnt: 2,
+      isAdvancedSurvey: true,
+      quizzes: [],
+      allQuestions: [],
+      quizSummaryMessage: '퀴즈 정답 13 + 심화설문?',
+    });
+
+    const result = await processSeminarQuiz(mockPage, '5642', true);
+    await drainLlmQueue();
+
+    expect(result.success).toBe(true);
+    expect(result.hasQuizResult).toBe(true);
+
+    // 1페이지에서 [다음] 클릭하여 2페이지 도달
+    expect(clickedButtons).toContain('next');
+    expect(getCurrentPage()).toBe(2);
+
+    // 심화정보가 있으므로 [제출하기] 버튼은 클릭되지 않아야 함 (자동 제출 안 함 유지)
+    expect(clickedButtons).not.toContain('submit');
+
+    // 주관식이 0개이므로 [심화설문?] 라벨로 알림이 발송되어야 함
+    const findMsg = (marker: string): string => {
+      const call = sendTelegramSpy.mock.calls.find((c) => String(c[0]).includes(marker));
+      return String(call?.[0] ?? '');
+    };
+    const noticeMarker = '[심화설문?] 퀴즈 정답 추출 완료 (자동 제출 제외)';
+    expect(findMsg(noticeMarker)).toContain(noticeMarker);
+    expect(findMsg(noticeMarker)).toContain('심화설문?');
   });
 
   it('일반설문: 1페이지에서 [다음] 클릭 -> 2페이지에서 [제출하기] 감지 시 루프 탈출 후 [제출하기]를 클릭한다', async () => {
@@ -439,8 +495,8 @@ describe('seminar_quiz 다중 페이지 탐색 및 제출하기 감지 테스트
         const createLocatorObj = (opts: { isNext?: boolean; isSubmit?: boolean }) => ({
           first: vi.fn().mockReturnValue({
             isVisible: vi.fn().mockImplementation(async () => {
-              if (opts.isNext) return callCount < 2; // 처음 2회는 다음 버튼 노출
-              if (opts.isSubmit) return callCount >= 2; // 이후 제출 버튼 노출
+              if (opts.isNext) return callCount <= 2; // 처음 2회는 다음 버튼 노출
+              if (opts.isSubmit) return callCount > 2; // 이후 제출 버튼 노출
               return false;
             }),
             waitFor: vi.fn().mockResolvedValue(undefined),

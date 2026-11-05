@@ -212,12 +212,165 @@ export function markerKind(
 }
 
 /**
+ * 설문 본문과 관련 없는 UI 요소, 플레이스홀더, 글자 수 카운터, 메타 안내 텍스트인지 판별합니다.
+ */
+export function isMetaOrUiText(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) return true;
+  if (trimmed === '*' || trimmed === '※' || trimmed === '•' || trimmed === '-') return true;
+
+  // textarea placeholder 및 입력 가이드
+  if (/^내용을\s*입력해\s*주세요/i.test(trimmed)) return true;
+  if (/마우스\s*우클릭\s*금지/i.test(trimmed)) return true;
+  if (/복사\s*&\s*붙여넣기/i.test(trimmed)) return true;
+  if (/복사&붙여넣기/i.test(trimmed)) return true;
+
+  // 글자 수 카운터 (예: "0 / 최소 100 자", "최소 100자", "15 / 100자", "0 / 100자")
+  if (/^\d+\s*\/\s*(?:최소\s*)?\d+\s*자/i.test(trimmed)) return true;
+  if (/^최소\s*\d+\s*자\s*(?:이상)?$/i.test(trimmed)) return true;
+
+  // 타이머 및 페이지 하단/상단 메타 정보
+  if (/^설문\s*마감\s*\d+\s*(?:분|초|시간)\s*전/i.test(trimmed)) return true;
+  if (/^설문\s*마감/i.test(trimmed)) return true;
+  if (/^설문\s*요약/i.test(trimmed)) return true;
+  if (/^\d+\s*페이지(?:\(총\s*\d+\s*문항\))?/i.test(trimmed)) return true;
+
+  // 설문 공통 안내 문구 (문항 지문에 잘못 섞여 들어간 경우 제외)
+  if (/^※?\s*아래\s*문항은\s*선택\s*응답\s*영역/i.test(trimmed)) return true;
+  if (/^제출해주시는\s*답변은\s*제품\s*발전/i.test(trimmed)) return true;
+  if (/^담당자\s*확인\s*후\s*소정의\s*포인트/i.test(trimmed)) return true;
+  if (/^단,\s*아래와\s*같은\s*사유는/i.test(trimmed)) return true;
+  if (/^\d+\.\s*문항별\s*최소\s*글자\s*수\s*기준/i.test(trimmed)) return true;
+  if (/^\d+\.\s*의미\s*없는\s*문장/i.test(trimmed)) return true;
+  if (/^\d+\.\s*질문과\s*무관한/i.test(trimmed)) return true;
+  if (/^\d+\.\s*기타\s*직접\s*작성한\s*응답/i.test(trimmed)) return true;
+
+  return false;
+}
+
+export interface ExtractedQuestionText {
+  questionNumber: number;
+  questionText: string;
+  marker: string | null;
+}
+
+/**
+ * 설문 문항 원시 텍스트에서 문제 번호(예: "8." 또는 "Q8."), 마커([퀴즈], [주관식] 등),
+ * 그리고 여러 문단으로 이루어진 본문 전체를 끝까지 추출합니다.
+ */
+export function cleanAndExtractQuestionText(rawText: string, defaultQuestionNumber: number = 0): ExtractedQuestionText {
+  if (!rawText || !rawText.trim()) {
+    return { questionNumber: defaultQuestionNumber, questionText: '', marker: null };
+  }
+
+  const rawLines = rawText.split('\n').map((l) => l.trim());
+  let marker: string | null = null;
+  let parsedQuestionNumber = defaultQuestionNumber;
+  let foundNumber = false;
+  const cleanLines: string[] = [];
+
+  for (let i = 0; i < rawLines.length; i++) {
+    let line = rawLines[i];
+    if (!line) {
+      if (cleanLines.length > 0 && cleanLines[cleanLines.length - 1] !== '') {
+        cleanLines.push('');
+      }
+      continue;
+    }
+
+    // 마커 감지 ([퀴즈], [OX], [주관식] 등)
+    const markerMatch = line.match(/^\[\s*(퀴즈|OX|O\s*X|주관식|설문|일반|poll)\s*\]/i);
+    if (markerMatch) {
+      if (!marker) marker = markerMatch[0].replace(/\s+/g, '');
+      line = line.replace(/^\[\s*(퀴즈|OX|O\s*X|주관식|설문|일반|poll)\s*\]\s*/i, '').trim();
+    }
+
+    // 문제 번호 감지 (아직 번호를 못 찾은 경우)
+    if (!foundNumber) {
+      const numMatch = line.match(/^(?:Q\s*)?(\d+)\s*(?:[.):-]\s*|\s+|$)/i);
+      if (numMatch) {
+        parsedQuestionNumber = parseInt(numMatch[1], 10);
+        foundNumber = true;
+        line = line.substring(numMatch[0].length).trim();
+        // 번호 단독 줄인 경우 다음 줄부터 본문 시작
+        if (!line) {
+          continue;
+        }
+      }
+    }
+
+    // 불필요한 메타/UI 텍스트 필터링
+    if (isMetaOrUiText(line)) {
+      continue;
+    }
+
+    // 줄 끝의 필수 표시 '*' 제거
+    line = line.replace(/\s*\*\s*$/, '').trim();
+    if (!line) continue;
+
+    cleanLines.push(line);
+  }
+
+  // 끝부분의 빈 줄 제거
+  while (cleanLines.length > 0 && cleanLines[cleanLines.length - 1] === '') {
+    cleanLines.pop();
+  }
+
+  const questionText = cleanLines.join('\n').trim();
+
+  return {
+    questionNumber: parsedQuestionNumber,
+    questionText,
+    marker,
+  };
+}
+
+/**
+ * 텍스트 내에 포인트 지급 및 심화설문 안내 문구 키워드가 2개 이상 포함되어 있는지 판별합니다.
+ * (예: "소정의 포인트", "최소 글자 수", "AI 활용", "담당자 확인", "반복 응답", "리뷰형" 등)
+ */
+export function containsAdvancedSurveyNotice(text?: unknown): boolean {
+  if (!text || typeof text !== 'string') return false;
+  const t = text.replace(/\s+/g, ' ');
+
+  // 심화설문 안내 키워드 독립 패턴 목록 (서로 다른 카테고리)
+  const patterns: RegExp[] = [
+    // 1. 포인트 지급 관련
+    /(?:소정의\s*포인트|포인트(?:가)?\s*지급|포인트\s*지급\s*대상)/i,
+    // 2. 글자 수 기준 관련
+    /(?:최소\s*글자\s*수|최소\s*\d+\s*자|\d+\s*자\s*이상)/i,
+    // 3. AI / 인공지능 / 직접 작성 관련
+    /(?:직접\s*작성한\s*응답|AI\s*활용|인공지능)/i,
+    // 4. 반복 응답 / 무의미 응답 관련
+    /(?:의미\s*없는\s*문장|반복\s*응답|질문과\s*무관한)/i,
+    // 5. 담당자 확인 / 검토 관련
+    /담당자\s*(?:확인|검토)/i,
+    // 6. 제품 발전 및 개선 목적
+    /제품\s*발전\s*및\s*개선/i,
+    // 7. 리뷰형 설문 키워드
+    /리뷰형/i,
+    // 8. 지급 대상 제외 페널티
+    /(?:지급\s*대상(?:에서)?\s*제외|지급\s*제외)/i,
+  ];
+
+  let matchCount = 0;
+  for (const p of patterns) {
+    if (p.test(t)) {
+      matchCount++;
+      if (matchCount >= 2) return true;
+    }
+  }
+
+  return false;
+}
+
+/**
  * 페이지의 모든 설문 문항 파싱 (퀴즈/일반 포함)
- * - li[data-question-number] 단위로 파싱하여 중복 방지
+ * - li[data-question-number] 단위로 파싱하여 중복 방지 (여러 문단 지문 끝까지 보존)
  * - 마커([퀴즈] 등) 있으면 kind 분류, 없으면 'poll'
  * - 필수 여부(*), inputType(radio/checkbox/text) 추출
  */
-async function parseAllSurveyQuestions(
+export async function parseAllSurveyQuestions(
   page: Page,
   cheatsheet?: Cheatsheet,
   httpQuizQuestionNums?: Set<number>,
@@ -226,12 +379,15 @@ async function parseAllSurveyQuestions(
   await page.waitForSelector('li[data-question-number]', { timeout: 5000 }).catch(() => {});
   await page.waitForTimeout(400);
 
-  const parsed = await page.evaluate(() => {
+  const rawParsed = await page.evaluate(() => {
     type Option = { index: number; text: string; value: string };
-    type ParsedQ = {
-      questionNumber: number;
-      questionLine: string;
-      marker: string | null;
+    type RawParsedQ = {
+      datasetQuestionNumber: number;
+      questionNumber?: number;
+      rawQuestionText: string;
+      questionLine?: string;
+      explicitMarker: string | null;
+      marker?: string | null;
       isRequired: boolean;
       inputType: 'radio' | 'checkbox' | 'text';
       options: Option[];
@@ -244,58 +400,58 @@ async function parseAllSurveyQuestions(
     });
     const targetItems = visibleItems.length > 0 ? visibleItems : items;
     const seenQuestionNums = new Set<number>();
-    const result: ParsedQ[] = [];
+    const result: RawParsedQ[] = [];
+
+    // fallback: li[data-question-number]가 없을 경우 번호 패턴을 가진 요소 검색
+    if (targetItems.length === 0) {
+      const candidateEls = Array.from(
+        document.querySelectorAll('form li, main li, div[class*="question"], div[data-question]'),
+      );
+      candidateEls.forEach((el) => {
+        const text = (el as HTMLElement).innerText?.trim() ?? '';
+        if (/^(?:Q\s*)?\d+\s*[.)]/i.test(text)) {
+          targetItems.push(el);
+        }
+      });
+    }
 
     targetItems.forEach((li) => {
-      const questionNumber = parseInt((li as HTMLElement).dataset['questionNumber'] ?? '0', 10);
-      if (questionNumber > 0 && seenQuestionNums.has(questionNumber)) {
+      const datasetQuestionNumber = parseInt((li as HTMLElement).dataset?.['questionNumber'] ?? '0', 10);
+      if (datasetQuestionNumber > 0 && seenQuestionNums.has(datasetQuestionNumber)) {
         return;
       }
-      if (questionNumber > 0) {
-        seenQuestionNums.add(questionNumber);
+      if (datasetQuestionNumber > 0) {
+        seenQuestionNums.add(datasetQuestionNumber);
       }
 
-      // 마커 탐색: li 내부의 모든 태그(span, div, p, label 등)에서 [퀴즈] 등 패턴 탐색
+      // 마커 탐색: li 내부 태그에서 [퀴즈], [OX], [주관식] 등 패턴 탐색
       const allTextNodes = Array.from(li.querySelectorAll('span, div, p, label, b, strong, em'));
-      let marker: string | null = null;
+      let explicitMarker: string | null = null;
       for (const el of allTextNodes) {
         const t = (el as HTMLElement).innerText?.trim() ?? '';
         const m = t.match(/\[\s*(퀴즈|OX|O\s*X|주관식|설문|일반|poll)\s*\]/i);
         if (m) {
-          marker = m[0].replace(/\s+/g, '');
+          explicitMarker = m[0].replace(/\s+/g, '');
           break;
         }
       }
 
-      // 문제 텍스트: whitespace-pre-wrap 컨테이너 또는 label 전체 innerText
-      const labelEl = li.querySelector('label.block, label') as HTMLElement | null;
-      const preWrap = (labelEl?.querySelector('.whitespace-pre-wrap') || labelEl) as HTMLElement | null;
-      let questionLine = '';
-      if (preWrap) {
-        const fullText = preWrap.innerText?.trim() ?? '';
-        const lines = fullText
-          .split('\n')
-          .map((l) => l.trim())
-          .filter((l) => l.length > 0);
-        // 첫 번째 줄에서 마커([퀴즈] 등) 감지 및 번호 접두어 부분 제거
-        const firstLine = lines[0] ?? '';
-        const inlineMarkerMatch = firstLine.match(/^\[\s*(퀴즈|OX|O\s*X|주관식|설문|일반|poll)\s*\]/i);
-        if (inlineMarkerMatch && !marker) {
-          marker = inlineMarkerMatch[0].replace(/\s+/g, '');
-        }
-
-        questionLine = firstLine
-          .replace(/^\[[\s\S]*?\]\s*/, '')
-          .replace(/^\d+\.\s*/, '')
-          .trim();
-        // 끝의 * 제거 (필수 표시)
-        questionLine = questionLine.replace(/\s*\*\s*(\(최소.*?\))?\s*$/, '').trim();
+      // 문제 지문 추출:
+      // 복수의 .whitespace-pre-wrap이 있으면 모든 문단을 줄바꿈으로 보존
+      let rawQuestionText = '';
+      const preWrapElements = Array.from(li.querySelectorAll('.whitespace-pre-wrap'));
+      if (preWrapElements.length > 0) {
+        rawQuestionText = preWrapElements
+          .map((el) => (el as HTMLElement).innerText?.trim() ?? '')
+          .filter(Boolean)
+          .join('\n\n');
+      } else {
+        const labelEl = li.querySelector('label.block, label') as HTMLElement | null;
+        rawQuestionText = (labelEl || (li as HTMLElement)).innerText?.trim() ?? '';
       }
 
-      if (!questionLine) return;
-
       // 필수 여부: label 내 span.text-red-600 중 '*' 가 있으면 필수
-      const redSpans = li.querySelectorAll('label .text-red-600');
+      const redSpans = li.querySelectorAll('label .text-red-600, .text-red-600');
       let isRequired = false;
       for (const s of Array.from(redSpans)) {
         if ((s as HTMLElement).innerText?.trim() === '*') {
@@ -315,12 +471,12 @@ async function parseAllSurveyQuestions(
         const checkboxes = Array.from(li.querySelectorAll('input[type="checkbox"]')).filter(
           (inp) => !(inp as HTMLElement).classList.contains('sr-only'),
         );
-        checkboxes.forEach((inp, idx) => {
+        checkboxes.forEach((inp, oIdx) => {
           const input = inp as HTMLInputElement;
           const labelParent = input.closest('label') as HTMLElement | null;
           const span = labelParent?.querySelector('span.col-start-2, span') as HTMLElement | null;
           options.push({
-            index: idx + 1,
+            index: oIdx + 1,
             text: (span?.innerText ?? labelParent?.innerText ?? '').trim(),
             value: input.value ?? '',
           });
@@ -329,33 +485,52 @@ async function parseAllSurveyQuestions(
         options.push({ index: 1, text: '[주관식]', value: '' });
       } else {
         const radios = Array.from(li.querySelectorAll('input[type="radio"]'));
-        radios.forEach((inp, idx) => {
+        radios.forEach((inp, oIdx) => {
           const input = inp as HTMLInputElement;
           const labelParent = input.closest('label') as HTMLElement | null;
           const span = labelParent?.querySelector('span.col-start-2, span') as HTMLElement | null;
           options.push({
-            index: idx + 1,
+            index: oIdx + 1,
             text: (span?.innerText ?? labelParent?.innerText ?? '').trim(),
             value: input.value ?? '',
           });
         });
       }
 
-      result.push({ questionNumber, questionLine, marker, isRequired, inputType, options });
+      result.push({
+        datasetQuestionNumber,
+        questionNumber: datasetQuestionNumber,
+        rawQuestionText,
+        questionLine: rawQuestionText,
+        explicitMarker,
+        marker: explicitMarker,
+        isRequired,
+        inputType,
+        options,
+      });
     });
 
     return result;
   });
 
-  return parsed.map((q) => ({
-    questionText: q.questionLine,
-    options: q.options,
-    marker: q.marker,
-    kind: markerKind(q.marker, httpQuizQuestionNums, q.questionNumber),
-    isRequired: q.isRequired,
-    inputType: q.inputType,
-    questionNumber: q.questionNumber,
-  }));
+  return rawParsed.map((q: Record<string, unknown>, idx) => {
+    const rawText = String(q['rawQuestionText'] ?? q['questionLine'] ?? q['questionText'] ?? '');
+    const datasetNum = Number(q['datasetQuestionNumber'] ?? q['questionNumber'] ?? 0);
+    const fallbackNum = datasetNum > 0 ? datasetNum : idx + 1;
+    const extracted = cleanAndExtractQuestionText(rawText, fallbackNum);
+    const finalQNum = extracted.questionNumber > 0 ? extracted.questionNumber : fallbackNum;
+    const finalMarker = (q['explicitMarker'] ?? q['marker'] ?? extracted.marker) as string | null;
+
+    return {
+      questionText: extracted.questionText || rawText,
+      options: (q['options'] || []) as QuizQuestion['options'],
+      marker: finalMarker,
+      kind: markerKind(finalMarker, httpQuizQuestionNums, finalQNum),
+      isRequired: Boolean(q['isRequired']),
+      inputType: (q['inputType'] || 'radio') as SurveyQuestion['inputType'],
+      questionNumber: finalQNum,
+    };
+  });
 }
 
 /**
@@ -831,7 +1006,7 @@ async function processSeminarQuiz(
       Boolean(isAdvancedSurvey) || Boolean(httpQuizResult?.isAdvancedSurvey) || isDbAdvanced;
 
     // 확정된 심화설문은 아니지만 HTTP 조회에서 심화설문 의심(마지막 페이지 주관식 1~3개)으로 판정된 경우
-    const suspectedAdvancedSurvey =
+    let suspectedAdvancedSurvey =
       !effectiveIsAdvancedSurvey &&
       (Boolean(isSuspectedAdvancedSurvey) || Boolean(httpQuizResult?.isSuspectedAdvancedSurvey));
 
@@ -853,6 +1028,20 @@ async function processSeminarQuiz(
       console.log(
         `[seminar_quiz] 설문 페이지 ${currentPageNum} 탐색 시작 (${seminarName ?? 'unknown'}, 심화설문: ${effectiveIsAdvancedSurvey})`,
       );
+
+      // 심화설문 안내 문구 감지 (페이지 전체 텍스트에서 포인트 지급, 최소 글자수 등 확인)
+      if (!suspectedAdvancedSurvey && !effectiveIsAdvancedSurvey) {
+        const rawBody = await page
+          .evaluate(() => (typeof document !== 'undefined' ? document.body?.innerText : ''))
+          .catch(() => '');
+        const pageBodyText = typeof rawBody === 'string' ? rawBody : '';
+        if (pageBodyText && containsAdvancedSurveyNotice(pageBodyText)) {
+          console.log(
+            `[seminar_quiz] 페이지 ${currentPageNum}에서 심화설문 안내 문구 감지 -> suspectedAdvancedSurvey 활성화`,
+          );
+          suspectedAdvancedSurvey = true;
+        }
+      }
 
       // 마커 또는 일반 설문 문항 감지 (렌더링 안정화 대기)
       const markerSel = ':text-matches("\\[\\s*(퀴즈|O\\s*X|주관식|설문|일반|poll)\\s*\\]", "i")';
@@ -887,6 +1076,14 @@ async function processSeminarQuiz(
       console.log(`[seminar_quiz] 페이지 ${currentPageNum} 문항 파싱 수: ${pageQuestions.length}`);
       lastPageQuestionCount = pageQuestions.length;
       lastPageQuestions = pageQuestions;
+
+      if (!suspectedAdvancedSurvey && !effectiveIsAdvancedSurvey) {
+        const hasNoticeInParsedQ = pageQuestions.some((q) => containsAdvancedSurveyNotice(q.questionText));
+        if (hasNoticeInParsedQ) {
+          console.log(`[seminar_quiz] 문항 지문에서 심화설문 안내 문구 감지 -> suspectedAdvancedSurvey 활성화`);
+          suspectedAdvancedSurvey = true;
+        }
+      }
 
       for (let i = 0; i < pageQuestions.length; i++) {
         const q = pageQuestions[i];
@@ -1177,9 +1374,31 @@ async function processSeminarQuiz(
       return { success: true, hasQuizResult: false, message };
     }
 
-    // 심화설문 문항 수: HTTP API 또는 마지막 페이지의 문항 수로 산정
+    // 심화설문인데 주관식이 0개인 경우 감지:
+    // 심화정보가 있으나 주관식이 0개인 경우 [심화설문?]으로 라벨을 부착하고 자동 제출은 생략 유지
+    const allParsedQuestions = accumulatedQuestions.concat(lastPageQuestions);
+    const hasSubjectiveInSurvey =
+      allParsedQuestions.some(
+        (q) =>
+          q.inputType === 'text' ||
+          (q.options?.length === 1 && /^\s*\[?\s*주관식\s*\]?\s*$/i.test(q.options[0]?.text || '')),
+      ) ||
+      (httpQuizResult?.allQuestions?.some(
+        (q) =>
+          /TEXT|ESSAY|SUBJECTIVE|SHORT|INPUT|TEXTAREA/.test(q.typeKey || '') ||
+          /주관식|서술형|단답형|텍스트/.test(q.typeName || ''),
+      ) ??
+        false);
+
+    const isAdvancedWithZeroSubjective = effectiveIsAdvancedSurvey && !hasSubjectiveInSurvey;
+    if (isAdvancedWithZeroSubjective) {
+      console.log(`[seminar_quiz] 심화정보가 있으나 주관식이 0개이므로 [심화설문?]으로 변경 (자동 제출은 생략 유지)`);
+      suspectedAdvancedSurvey = true;
+    }
+
+    // 심화설문 문항 수: HTTP API 또는 마지막 페이지의 문항 수로 산정 (주관식이 0개인 경우 심화N 대신 심화설문?으로 처리하기 위해 0)
     let depthSurveyCount = 0;
-    if (effectiveIsAdvancedSurvey) {
+    if (effectiveIsAdvancedSurvey && !isAdvancedWithZeroSubjective) {
       if (httpQuizResult && httpQuizResult.depthSurveyQuestionCnt > 0) {
         depthSurveyCount = httpQuizResult.depthSurveyQuestionCnt;
       } else if (lastPageQuestionCount > 0) {

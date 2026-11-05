@@ -159,6 +159,7 @@ describe('닥터빌 API 과다 호출 방지 및 라이브 모니터링 최적�
 
   it('3. syncSeminars: 10분 루틴에서는 detail API 미호출, 1시간 경과 시에만 detail 호출 검증', async () => {
     console.log('--- [Test 3] syncSeminars detail API 호출 조건부 제어 검증 ---');
+    const todayStr = new Date().toISOString().slice(0, 10);
 
     let detailApiCallCount = 0;
     vi.spyOn(seminarApiModule, 'fetchSeminarDetail').mockImplementation(async (id: number | string) => {
@@ -192,8 +193,8 @@ describe('닥터빌 API 과다 호출 방지 및 라이브 모니터링 최적�
         {
           seminarId: 201,
           seminarNm: '메인목록 세미나 201',
-          startDt: '2026-08-27 19:00:00',
-          endDt: '2026-08-27 20:00:00',
+          startDt: `${todayStr} 19:00:00`,
+          endDt: `${todayStr} 20:00:00`,
           useSurvey: 'Y',
           useDepthSurvey: 'N',
           processState: 0,
@@ -217,7 +218,7 @@ describe('닥터빌 API 과다 호출 방지 및 라이브 모니터링 최적�
         seminarId: '201',
         name: '메인목록 세미나 201',
         url: 'https://m.doctorville.co.kr/cme/seminar/201',
-        date: '2026-08-27',
+        date: todayStr,
         time: '19:00~20:00',
         currentCount: '0',
         totalCount: '100',

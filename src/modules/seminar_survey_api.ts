@@ -7,10 +7,13 @@ import {
   resolveBestKeywordMatch,
   formatQuizResults,
   formatAdvancedSurveyPrompt,
+  containsAdvancedSurveyNotice,
   type Cheatsheet,
   type QuizQuestion,
   type QuizResult,
 } from '../tasks/seminar_quiz';
+
+export { containsAdvancedSurveyNotice };
 
 export interface HttpQuizQuestion {
   pageNumber: number;
@@ -259,6 +262,15 @@ export async function fetchSeminarSurveyQuizHttp(
     const totalPageCnt = typeof surveyData.pageCnt === 'number' ? surveyData.pageCnt : 1;
     const totalQuestionCnt = typeof surveyData.questionCnt === 'number' ? surveyData.questionCnt : 0;
     const surveyTitle = surveyData.config?.title || '';
+    const surveyDesc = String(
+      surveyData.config?.description ||
+        surveyData.config?.guide ||
+        surveyData.description ||
+        surveyData.guide ||
+        surveyData.notice ||
+        '',
+    );
+    const hasNoticeInMeta = containsAdvancedSurveyNotice(surveyTitle) || containsAdvancedSurveyNotice(surveyDesc);
 
     // 심화설문 판별: 플래그(인자 또는 config) 및 제목("심화") 기반 ('만족도'는 제외)
     const isAdvancedSurvey =
@@ -293,7 +305,11 @@ export async function fetchSeminarSurveyQuizHttp(
       for (const q of rawQuestions) {
         const qId = Number(q.id ?? 0);
         const qNum = Number(q.questionNumber ?? 0);
-        const qText = String(q.subject ?? '').trim();
+        let qText = String(q.subject ?? '').trim();
+        const qDesc = String(q.description ?? q.content ?? q.guide ?? '').trim();
+        if (qDesc && !qText.includes(qDesc)) {
+          qText = qText ? `${qText}\n\n${qDesc}` : qDesc;
+        }
         const typeObj = (q.type || {}) as Record<string, unknown>;
         const typeKey = String(typeObj.key ?? '');
         const typeName = String(typeObj.nameKo ?? typeObj.value ?? '');
@@ -353,26 +369,39 @@ export async function fetchSeminarSurveyQuizHttp(
 
     // 6. 심화설문 문항 수: 심화설문인 경우 마지막 페이지(totalPageCnt)의 문항 개수
     const lastPageQuestions = allQuestions.filter((q) => q.pageNumber === totalPageCnt);
-    const depthSurveyQuestions = isAdvancedSurvey ? lastPageQuestions : [];
+    const lastPageSubjectiveQuestions = lastPageQuestions.filter(isSubjectiveQuestion);
+    const hasObjectiveOnLastPage = lastPageQuestions.some((q) => !isSubjectiveQuestion(q));
+    const allSubjectiveQuestions = allQuestions.filter(isSubjectiveQuestion);
+
+    // 심화정보(isAdvancedSurvey)가 있으나 주관식이 0개인 경우 감지:
+    // [심화설문?]으로 변경하되, 자동 제출은 제외(안 함) 유지
+    const isAdvancedWithZeroSubjective = isAdvancedSurvey && allSubjectiveQuestions.length === 0;
+
+    const depthSurveyQuestions = isAdvancedSurvey && !isAdvancedWithZeroSubjective ? lastPageQuestions : [];
     const depthSurveyQuestionCnt = depthSurveyQuestions.length;
     const advancedSurveyPrompt =
-      isAdvancedSurvey && depthSurveyQuestions.length > 0
+      isAdvancedSurvey && !isAdvancedWithZeroSubjective && depthSurveyQuestions.length > 0
         ? formatAdvancedSurveyPrompt(depthSurveyQuestions)
         : undefined;
 
-    // useDepthSurvey === 'N' (심화설문 아님)인데 설문 마지막 페이지에 주관식 항목이 1~3개 있고 객관식이 없는 경우 "심화설문?"으로 표시
-    const lastPageSubjectiveQuestions = lastPageQuestions.filter(isSubjectiveQuestion);
-    const hasObjectiveOnLastPage = lastPageQuestions.some((q) => !isSubjectiveQuestion(q));
+    // 심화설문 의심(심화설문?) 판정:
+    // 1) 심화정보가 있으나 주관식이 0개인 경우 -> [심화설문?] 부착
+    // 2) useDepthSurvey === 'N' 인데 마지막 페이지에 주관식 항목이 1~3개 있고 객관식이 없는 경우
+    // 3) 메타데이터(제목/설명/가이드) 또는 문항 지문에서 심화설문 안내 문구 키워드가 감지된 경우
+    const hasNoticeAnywhere = hasNoticeInMeta || allQuestions.some((q) => containsAdvancedSurveyNotice(q.questionText));
+
     const isSuspectedAdvancedSurvey =
-      !isAdvancedSurvey &&
-      lastPageSubjectiveQuestions.length >= 1 &&
-      lastPageSubjectiveQuestions.length <= 3 &&
-      !hasObjectiveOnLastPage;
+      isAdvancedWithZeroSubjective ||
+      (!isAdvancedSurvey &&
+        ((lastPageSubjectiveQuestions.length >= 1 &&
+          lastPageSubjectiveQuestions.length <= 3 &&
+          !hasObjectiveOnLastPage) ||
+          (hasNoticeAnywhere && (lastPageSubjectiveQuestions.length > 0 || allSubjectiveQuestions.length > 0))));
 
     // 퀴즈 정답 요약 메시지 생성 (예: "퀴즈 정답 412 + 심화1" 또는 "퀴즈 정답 412 + 심화설문?")
     let quizSummaryMessage = '';
     let depthSuffix = '';
-    if (isAdvancedSurvey && depthSurveyQuestionCnt > 0) {
+    if (isAdvancedSurvey && !isAdvancedWithZeroSubjective && depthSurveyQuestionCnt > 0) {
       depthSuffix = ` + 심화${depthSurveyQuestionCnt}`;
     } else if (isSuspectedAdvancedSurvey) {
       depthSuffix = ' + 심화설문?';
@@ -382,7 +411,7 @@ export async function fetchSeminarSurveyQuizHttp(
       const ansNums = quizzes.map((q) => (q.selectedIndex !== null ? String(q.selectedIndex) : '-')).join('');
       const hasUnknown = quizzes.some((q) => q.selectedIndex === null);
       quizSummaryMessage = `퀴즈 정답 ${ansNums}${depthSuffix}${hasUnknown ? ' (일부 미해결)' : ''}`;
-    } else if (isAdvancedSurvey && depthSurveyQuestionCnt > 0) {
+    } else if (isAdvancedSurvey && !isAdvancedWithZeroSubjective && depthSurveyQuestionCnt > 0) {
       quizSummaryMessage = `심화${depthSurveyQuestionCnt}`;
     } else if (isSuspectedAdvancedSurvey) {
       quizSummaryMessage = '심화설문?';

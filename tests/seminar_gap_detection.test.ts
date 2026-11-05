@@ -473,17 +473,19 @@ describe('세미나 ID 불연속(Gap) 탐색 및 비공개 세미나 발굴/알�
   });
 
   it('7. syncSeminars E2E: 마지막 저장된 세미나 번호 + 1로 신규 세미나 발굴 시 알림 발송 및 신청 대상(hasApplyTarget: true) 연계 검증', async () => {
+    const todayStr = new Date().toISOString().slice(0, 10);
     // DB에 5653번 저장
     seminarRepo.upsertSeminar({
       seminarId: '5653',
       name: '기존 세미나 5653',
       url: 'https://m.doctorville.co.kr/cme/seminar/5653',
+      date: todayStr,
       time: '13:00',
       currentCount: '10',
       totalCount: '1000',
       nightTime: false,
       isAdvancedSurvey: false,
-      detectedDate: '2026-08-26',
+      detectedDate: todayStr,
     });
 
     // 메인 API 목록에는 5653만 존재
@@ -493,8 +495,8 @@ describe('세미나 ID 불연속(Gap) 탐색 및 비공개 세미나 발굴/알�
         {
           seminarId: 5653,
           seminarNm: '기존 세미나 5653',
-          startDt: '2026-09-10 13:00:00',
-          endDt: '2026-09-10 14:00:00',
+          startDt: `${todayStr} 13:00:00`,
+          endDt: `${todayStr} 14:00:00`,
           maxPeopleCnt: 1000,
           applyCnt: 10,
           useDepthSurvey: 'N',
@@ -517,8 +519,8 @@ describe('세미나 ID 불연속(Gap) 탐색 및 비공개 세미나 발굴/알�
             seminarDetail: {
               seminarId: 5654,
               seminarNm: '최신 신규 세미나 5654',
-              startDt: '2026-09-15 13:00:00.0',
-              endDt: '2026-09-15 14:00:00.0',
+              startDt: `${todayStr} 13:00:00.0`,
+              endDt: `${todayStr} 14:00:00.0`,
               maxPeopleCnt: 3000,
               applyCnt: 5,
               hiddenYn: 'Y',

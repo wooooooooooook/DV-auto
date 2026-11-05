@@ -1040,10 +1040,10 @@ function formatSeminarDisplayName(item: SeminarDisplayItem, options: FormatSemin
     flags.push('🚫<b>[포인트미지급]</b>');
   }
 
-  if (item.isAdvancedSurvey) {
-    flags.push('✨<b>[심화설문]</b>');
-  } else if (item.isSuspectedAdvancedSurvey) {
+  if (item.isSuspectedAdvancedSurvey) {
     flags.push('✨<b>[심화설문?]</b>');
+  } else if (item.isAdvancedSurvey) {
+    flags.push('✨<b>[심화설문]</b>');
   }
 
   // 3. 세미나 제목

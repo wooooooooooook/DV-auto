@@ -665,11 +665,12 @@ describe('seminar_detail 단위 테스트', () => {
 
       // Case 16: 텔레그램 핸들러 - 관리자봇(alwaysRefresh=true)은 항상 실시간 API 호출, 공지봇(alwaysRefresh=false)은 캐시 우선 검증
       console.log('\n--- Case 16: 관리자봇 항상 실시간 조회 및 공지봇 캐시 우선 검증 ---');
+      const todayStr = new Date().toISOString().slice(0, 10);
       const mockAdminStoredItem: SeminarListItem = {
         seminarId: '8888',
         name: '저장소에 있던 구 세미나명 8888',
         url: 'https://m.doctorville.co.kr/cme/seminar/8888',
-        date: '2026-08-25',
+        date: todayStr,
         time: '13:00~14:00',
         currentCount: '100',
         totalCount: '500',
@@ -680,7 +681,7 @@ describe('seminar_detail 단위 테스트', () => {
         seminarId: '9999',
         name: '공지봇 캐시 세미나 9999',
         url: 'https://m.doctorville.co.kr/cme/seminar/9999',
-        date: '2026-08-26',
+        date: todayStr,
         time: '14:00~15:00',
         currentCount: '200',
         totalCount: '500',
@@ -699,6 +700,8 @@ describe('seminar_detail 단위 테스트', () => {
               ...mock5574Detail,
               seminarId: 8888,
               seminarNm: '관리자 실시간 최신 세미나 정보 8888',
+              startDt: `${todayStr} 13:00:00.0`,
+              endDt: `${todayStr} 14:00:00.0`,
             },
           };
         }

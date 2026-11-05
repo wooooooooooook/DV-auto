@@ -91,12 +91,9 @@ describe('seminar_survey_api (fetchSeminarSurveyQuizHttp)', () => {
                 {
                   id: 3,
                   questionNumber: 3,
-                  subject: '강의에 만족하십니까?',
-                  type: { key: 'MC_SELECT', nameKo: '객관식' },
-                  options: [
-                    { id: 31, optionNumber: 1, text: '매우 만족' },
-                    { id: 32, optionNumber: 2, text: '보통' },
-                  ],
+                  subject: '본 약제의 임상 경험을 서술해 주세요.',
+                  type: { key: 'TEXT', nameKo: '주관식 서술형' },
+                  options: [],
                 },
               ],
             },
@@ -256,8 +253,8 @@ describe('seminar_survey_api (fetchSeminarSurveyQuizHttp)', () => {
                   id: 4,
                   questionNumber: 4,
                   subject: '심화 설문 3',
-                  type: { key: 'MC_SELECT', nameKo: '객관식' },
-                  options: [{ id: 41, optionNumber: 1, text: '매우 만족' }],
+                  type: { key: 'TEXT', nameKo: '주관식 서술형' },
+                  options: [],
                 },
               ],
             },
@@ -560,5 +557,187 @@ describe('seminar_survey_api (fetchSeminarSurveyQuizHttp)', () => {
     expect(result.isAdvancedSurvey).toBe(false);
     expect(result.isSuspectedAdvancedSurvey).toBe(false); // 마지막 페이지에 객관식이 있으므로 의심 대상 제외!
     expect(result.quizSummaryMessage).toBe('퀴즈 정답 1'); // + 심화설문? 이 붙지 않아야 함!
+  });
+
+  it('설문 제목이나 설명에 포인트 지급 및 심화설문 안내 문구가 포함되어 있으면 isSuspectedAdvancedSurvey=true로 인식한다', async () => {
+    const mockCheatsheet = {
+      문제1: '정답1',
+    };
+
+    const createMockResponse = (body: string, status = 200): httpClient.HttpResponse => ({
+      status,
+      statusText: status === 200 ? 'OK' : 'Not Found',
+      body,
+      headers: {},
+      url: 'https://survey.villeway.com',
+      redirected: false,
+      resultType: status === 200 ? 'SUCCESS' : 'HTTP_ERROR',
+    });
+
+    vi.spyOn(httpClient, 'sendDoctorVilleRequest').mockImplementation(async (url: string) => {
+      if (url.includes('/survey-url')) {
+        return createMockResponse(
+          JSON.stringify({
+            surveyUrl: 'https://survey.villeway.com/s/c/testCompany/u/testSecureToken8888',
+          }),
+        );
+      }
+      if (url.includes('/auth/authenticate-via-client')) {
+        return createMockResponse(
+          JSON.stringify({
+            data: { accessToken: 'mock-access-token-8888' },
+          }),
+        );
+      }
+      if (url.includes('/user/survey-detail')) {
+        return createMockResponse(
+          JSON.stringify({
+            data: {
+              config: {
+                title: '[D-DDW 2026] 펙수클루 Triple Web Symposium 설문조사 (펙수클루_리뷰형_총 8문항)',
+                useDepthSurvey: 'N',
+                description:
+                  '제출해주시는 답변은 제품 발전 및 개선을 위한 목적으로 수집되며, 담당자 확인 후 소정의 포인트가 지급될 예정입니다. 단, 문항별 최소 글자 수 기준 미 충족 시 포인트 지급대상에서 제외될 수 있습니다.',
+              },
+              pageCnt: 2,
+              questionCnt: 2,
+            },
+          }),
+        );
+      }
+      if (url.includes('/user/survey-page/1')) {
+        return createMockResponse(
+          JSON.stringify({
+            data: {
+              questions: [
+                {
+                  id: 1,
+                  questionNumber: 1,
+                  subject: '[퀴즈] 문제1',
+                  type: { key: 'QUIZ_MULTIPLE_CHOICE', nameKo: '퀴즈형' },
+                  options: [{ id: 11, text: '정답1' }],
+                },
+              ],
+            },
+          }),
+        );
+      }
+      if (url.includes('/user/survey-page/2')) {
+        return createMockResponse(
+          JSON.stringify({
+            data: {
+              questions: [
+                {
+                  id: 2,
+                  questionNumber: 2,
+                  subject: '펙수프라잔에 대한 임상 의견을 자유롭게 서술해 주세요.',
+                  type: { key: 'TEXT', nameKo: '주관식' },
+                  options: [],
+                },
+              ],
+            },
+          }),
+        );
+      }
+      return createMockResponse('', 404);
+    });
+
+    const result = await fetchSeminarSurveyQuizHttp('8888', mockCheatsheet);
+    expect(result.success).toBe(true);
+    expect(result.isSuspectedAdvancedSurvey).toBe(true);
+    expect(result.quizSummaryMessage).toContain('심화설문?');
+  });
+
+  it('심화정보(isAdvancedSurvey=true)가 있으나 주관식이 0개인 경우 [심화설문?]으로 변경된다', async () => {
+    const mockCheatsheet = {
+      문제1: '정답1',
+    };
+
+    const createMockResponse = (body: string, status = 200): httpClient.HttpResponse => ({
+      status,
+      statusText: status === 200 ? 'OK' : 'Not Found',
+      body,
+      headers: {},
+      url: 'https://survey.villeway.com',
+      redirected: false,
+      resultType: status === 200 ? 'SUCCESS' : 'HTTP_ERROR',
+    });
+
+    vi.spyOn(httpClient, 'sendDoctorVilleRequest').mockImplementation(async (url: string) => {
+      if (url.includes('/survey-url')) {
+        return createMockResponse(
+          JSON.stringify({
+            surveyUrl: 'https://survey.villeway.com/s/c/testCompany/u/testSecureToken9999',
+          }),
+        );
+      }
+      if (url.includes('/auth/authenticate-via-client')) {
+        return createMockResponse(
+          JSON.stringify({
+            data: { accessToken: 'mock-access-token-9999' },
+          }),
+        );
+      }
+      if (url.includes('/user/survey-detail')) {
+        return createMockResponse(
+          JSON.stringify({
+            data: {
+              config: {
+                title: '2026 호흡기 심화 세미나 설문조사', // 제목에 '심화' 포함 -> isAdvancedSurvey = true
+                useDepthSurvey: 'Y',
+              },
+              pageCnt: 2,
+              questionCnt: 2,
+            },
+          }),
+        );
+      }
+      if (url.includes('/user/survey-page/1')) {
+        return createMockResponse(
+          JSON.stringify({
+            data: {
+              questions: [
+                {
+                  id: 1,
+                  questionNumber: 1,
+                  subject: '[퀴즈] 문제1',
+                  type: { key: 'QUIZ_MULTIPLE_CHOICE', nameKo: '퀴즈형' },
+                  options: [{ id: 11, text: '정답1' }],
+                },
+              ],
+            },
+          }),
+        );
+      }
+      if (url.includes('/user/survey-page/2')) {
+        // 객관식 문항만 존재 (주관식 0개)
+        return createMockResponse(
+          JSON.stringify({
+            data: {
+              questions: [
+                {
+                  id: 2,
+                  questionNumber: 2,
+                  subject: '강의 만족도는 어떠셨나요?',
+                  type: { key: 'SINGLE_CHOICE', nameKo: '객관식' },
+                  options: [
+                    { id: 21, text: '매우 만족' },
+                    { id: 22, text: '보통' },
+                  ],
+                },
+              ],
+            },
+          }),
+        );
+      }
+      return createMockResponse('', 404);
+    });
+
+    const result = await fetchSeminarSurveyQuizHttp('9999', mockCheatsheet);
+    expect(result.success).toBe(true);
+    expect(result.isAdvancedSurvey).toBe(true);
+    // 심화정보가 있으나 주관식이 0개이므로 isSuspectedAdvancedSurvey=true ([심화설문?])
+    expect(result.isSuspectedAdvancedSurvey).toBe(true);
+    expect(result.quizSummaryMessage).toBe('퀴즈 정답 1 + 심화설문?');
   });
 });

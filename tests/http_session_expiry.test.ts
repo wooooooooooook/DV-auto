@@ -80,6 +80,7 @@ describe('HTTP Session Expiry & Error Classification Tests', () => {
 
       // 6. 실제 작업 중 세션 만료(중간 만료) 시나리오 검증
       // Prepare initial storage data
+      const todayStr = new Date().toISOString().slice(0, 10);
       const initialStorageData: seminarRepo.SeminarListItem[] = [
         {
           name: '기존 세미나 1',
@@ -91,7 +92,7 @@ describe('HTTP Session Expiry & Error Classification Tests', () => {
           time: '13:00~14:00',
           currentCount: '10',
           totalCount: '100',
-          date: '2026-08-25',
+          date: todayStr,
         },
       ];
       seminarRepo.setAllSeminars(initialStorageData);
@@ -121,8 +122,8 @@ describe('HTTP Session Expiry & Error Classification Tests', () => {
             {
               seminarId: 101,
               seminarNm: '신규 세미나 101',
-              startDt: '2026-08-25 13:00:00',
-              endDt: '2026-08-25 14:00:00',
+              startDt: `${todayStr} 13:00:00`,
+              endDt: `${todayStr} 14:00:00`,
               applyCnt: 10,
               maxPeopleCnt: 100,
               processState: 2,
@@ -132,8 +133,8 @@ describe('HTTP Session Expiry & Error Classification Tests', () => {
             {
               seminarId: 102,
               seminarNm: '신규 세미나 102',
-              startDt: '2026-08-25 14:00:00',
-              endDt: '2026-08-25 15:00:00',
+              startDt: `${todayStr} 14:00:00`,
+              endDt: `${todayStr} 15:00:00`,
               applyCnt: 10,
               maxPeopleCnt: 100,
               processState: 2,
@@ -213,7 +214,7 @@ describe('HTTP Session Expiry & Error Classification Tests', () => {
       );
       assert.strictEqual(storedAfter?.[0].seminarId, '100');
       assert.strictEqual(storedAfter?.[0].name, '기존 세미나 1');
-      assert.strictEqual(storedAfter?.[0].date, '2026-08-25');
+      assert.strictEqual(storedAfter?.[0].date, todayStr);
 
       console.log(
         '  ✓ 작업 중간 AUTH_EXPIRED 발생 시 ensureLoggedIn 재호출 없음, Playwright 미실행, 추가 조회 즉시 중단, storage 보존 성공적 검증 완료',
