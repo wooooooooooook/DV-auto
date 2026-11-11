@@ -47,5 +47,8 @@ export function removeSeminarChangeSubscriber(chatId: number): boolean {
 export async function sendSeminarChangesToSubscribers(
   message: string,
 ): Promise<{ successCount: number; failCount: number }> {
-  return sendToTopicSubscribers('seminar_changes', message);
+  return sendToTopicSubscribers('seminar_changes', message, {
+    parse_mode: 'HTML',
+    link_preview_options: { is_disabled: true },
+  });
 }

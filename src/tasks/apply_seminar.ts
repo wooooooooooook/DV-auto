@@ -349,6 +349,12 @@ export function refreshStoredSeminarList(
     const key = seminarKey(seminar);
     const existing = storedByKey.get(key);
 
+    const merged = mergeSeminar(existing, {
+      ...seminar,
+      detectedDate: existing?.detectedDate ?? referenceDate,
+      detectedAt: existing?.detectedAt ?? now,
+    });
+
     if (existing) {
       // 이미 지나간 세미나의 정보 변경은 알림 제외
       const isPast = isSeminarInPast(existing, referenceDate) || isSeminarInPast(seminar, referenceDate);
@@ -359,21 +365,21 @@ export function refreshStoredSeminarList(
             seminarId: existing.seminarId || seminar.seminarId || '',
             name: seminar.name || existing.name || '',
             date: seminar.date || existing.date,
+            time: seminar.time || existing.time,
             url:
               seminar.url ||
               existing.url ||
               (seminar.seminarId ? `https://m.doctorville.co.kr/cme/seminar/${seminar.seminarId}` : ''),
+            hiddenYn: merged.hiddenYn,
+            diseaseCategoryNm: merged.diseaseCategoryNm,
+            isPointExcluded: merged.isPointExcluded,
+            isAdvancedSurvey: merged.isAdvancedSurvey,
+            isSuspectedAdvancedSurvey: merged.isSuspectedAdvancedSurvey,
             changes: fieldChanges,
           });
         }
       }
     }
-
-    const merged = mergeSeminar(existing, {
-      ...seminar,
-      detectedDate: existing?.detectedDate ?? referenceDate,
-      detectedAt: existing?.detectedAt ?? now,
-    });
 
     storedByKey.set(key, merged);
 
@@ -732,7 +738,7 @@ export async function syncSeminars(options: ApplySeminarOptions = {}): Promise<S
     const changeNotificationText = formatSeminarChangeNotification(infoChanges, pointChanges);
     if (changeNotificationText) {
       clearAdvancedSeminarsCache();
-      await sendTelegram(changeNotificationText).catch(() => {});
+      await sendTelegram(changeNotificationText, null, { parse_mode: 'HTML' }).catch(() => {});
       await sendSeminarChangesToSubscribers(changeNotificationText).catch(() => {});
     } else if (newlyAdded.length > 0) {
       clearAdvancedSeminarsCache();

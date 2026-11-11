@@ -7,7 +7,12 @@ import {
   type SeminarPointChange,
 } from '../src/tasks/apply_seminar_notice';
 import { refreshSeminarPointStatus } from '../src/services/seminar_point_sync';
-import { applySeminars as runApplySeminar, syncSeminars, syncSeminarsTask } from '../src/tasks/apply_seminar';
+import {
+  applySeminars as runApplySeminar,
+  syncSeminars,
+  syncSeminarsTask,
+  refreshStoredSeminarList,
+} from '../src/tasks/apply_seminar';
 import type { SeminarListItem } from '../src/services/seminar_repository';
 import { buildSingleNewSeminarMessage } from '../src/services/subscription_service';
 import * as runner from '../src/core/runner';
@@ -644,5 +649,125 @@ describe('apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스�
     assert(messageWithoutDate !== null);
     assert(!messageWithoutDate.includes('날짜:'));
     assert(messageWithoutDate.includes('seminarId: 778\n시간: 19:00 → 20:00'));
+  });
+
+  it('세미나 정보 변경 감지 알림에 비공개/심화설문 등 태그 포맷팅 검증', () => {
+    const infoChanges: SeminarInfoChange[] = [
+      {
+        seminarId: '1001',
+        name: '비공개 및 심화설문 세미나',
+        date: '2026-08-25',
+        hiddenYn: 'Y',
+        diseaseCategoryNm: '순환기내과',
+        isAdvancedSurvey: true,
+        changes: [{ field: 'totalCount', label: '총원', oldValue: '100', newValue: '150' }],
+      },
+      {
+        seminarId: '1002',
+        name: '단순 비공개 세미나',
+        date: '2026-08-25',
+        hiddenYn: 'Y',
+        changes: [{ field: 'time', label: '시간', oldValue: '19:00', newValue: '20:00' }],
+      },
+      {
+        seminarId: '1003',
+        name: '심화설문의심 세미나',
+        date: '2026-08-25',
+        isSuspectedAdvancedSurvey: true,
+        changes: [{ field: 'totalCount', label: '총원', oldValue: '200', newValue: '300' }],
+      },
+      {
+        seminarId: '1004',
+        name: '포인트미지급 세미나',
+        date: '2026-08-25',
+        isPointExcluded: true,
+        changes: [{ field: 'time', label: '시간', oldValue: '18:00', newValue: '19:00' }],
+      },
+      {
+        seminarId: '1005',
+        name: '일반 공개 세미나',
+        date: '2026-08-25',
+        changes: [{ field: 'totalCount', label: '총원', oldValue: '500', newValue: '600' }],
+      },
+    ];
+
+    const pointChanges: SeminarPointChange[] = [
+      {
+        seminarId: '2001',
+        name: '비공개 포인트 지급 세미나',
+        date: '2026-08-24',
+        hiddenYn: 'Y',
+        diseaseCategoryNm: '소화기내과',
+        isAdvancedSurvey: true,
+        point: 3000,
+        pointText: '3,000P',
+        pointDate: '2026-08-25',
+      },
+    ];
+
+    const message = formatSeminarChangeNotification(infoChanges, pointChanges);
+    assert(message !== null);
+
+    // [정보 변경] 섹션 검증
+    assert(
+      message.includes('🔒<b>[비공개][순환기내과]</b> ✨<b>[심화설문]</b> 비공개 및 심화설문 세미나'),
+      '비공개+진료과+심화설문 태그가 정상 부착되어야 함',
+    );
+    assert(
+      message.includes('🔒<b>[비공개]</b> 단순 비공개 세미나'),
+      '진료과 없는 비공개 세미나에 🔒<b>[비공개]</b> 태그 부착 확인',
+    );
+    assert(
+      message.includes('✨<b>[심화설문?]</b> 심화설문의심 세미나'),
+      '심화설문 의심 세미나에 ✨<b>[심화설문?]</b> 태그 부착 확인',
+    );
+    assert(
+      message.includes('🚫<b>[포인트미지급]</b> <s>포인트미지급 세미나</s>'),
+      '포인트 미지급 세미나에 🚫<b>[포인트미지급]</b> 태그 및 취소선 부착 확인',
+    );
+    assert(message.includes('일반 공개 세미나\nseminarId: 1005'), '일반 세미나는 태그 없이 세미나명 그대로 출력 확인');
+
+    // [포인트 지급] 섹션 검증
+    assert(
+      message.includes('🔒<b>[비공개][소화기내과]</b> ✨<b>[심화설문]</b> 비공개 포인트 지급 세미나'),
+      '포인트 지급 세미나에도 비공개 및 심화설문 태그가 정상 부착되어야 함',
+    );
+
+    // refreshStoredSeminarList 호출 시 infoChanges에 태그 정보가 정상 포함되는지 검증
+    const storedList: SeminarListItem[] = [
+      {
+        seminarId: '3001',
+        name: '비공개 심화 세미나',
+        url: 'https://m.doctorville.co.kr/cme/seminar/3001',
+        date: '2026-08-25',
+        time: '19:00',
+        currentCount: '10',
+        totalCount: '100',
+        nightTime: false,
+        hiddenYn: 'Y',
+        diseaseCategoryNm: '내분비내과',
+        isAdvancedSurvey: true,
+      },
+    ];
+    const incomingList: SeminarListItem[] = [
+      {
+        ...storedList[0],
+        totalCount: '150', // 총원 변경
+      },
+    ];
+
+    // syncSeminars의 refreshStoredSeminarList 함수 직접 검증
+    const refreshResult = refreshStoredSeminarList(incomingList, storedList, '2026-08-25');
+    assert.strictEqual(refreshResult.infoChanges.length, 1);
+    assert.strictEqual(refreshResult.infoChanges[0].hiddenYn, 'Y');
+    assert.strictEqual(refreshResult.infoChanges[0].diseaseCategoryNm, '내분비내과');
+    assert.strictEqual(refreshResult.infoChanges[0].isAdvancedSurvey, true);
+
+    const refreshedFormatted = formatSeminarChangeNotification(refreshResult.infoChanges, []);
+    assert(
+      refreshedFormatted !== null &&
+        refreshedFormatted.includes('🔒<b>[비공개][내분비내과]</b> ✨<b>[심화설문]</b> 비공개 심화 세미나'),
+      'refreshStoredSeminarList를 통해 생성된 변경 알림에 태그가 정상 반영되어야 함',
+    );
   });
 });

@@ -26,7 +26,13 @@ export type SeminarInfoChange = {
   seminarId: string;
   name: string;
   date?: string;
+  time?: string;
   url?: string;
+  hiddenYn?: string;
+  diseaseCategoryNm?: string;
+  isPointExcluded?: boolean;
+  isAdvancedSurvey?: boolean;
+  isSuspectedAdvancedSurvey?: boolean;
   changes: SeminarFieldChange[];
 };
 
@@ -34,7 +40,13 @@ export type SeminarPointChange = {
   seminarId: string;
   name: string;
   date?: string;
+  time?: string;
   url?: string;
+  hiddenYn?: string;
+  diseaseCategoryNm?: string;
+  isPointExcluded?: boolean;
+  isAdvancedSurvey?: boolean;
+  isSuspectedAdvancedSurvey?: boolean;
   point?: number;
   pointText?: string;
   pointDate?: string;
@@ -144,7 +156,8 @@ export function formatSeminarChangeNotification(
     sections.push('[포인트 지급]');
     for (const p of pointChanges) {
       const lines: string[] = [];
-      lines.push(p.name || '세미나');
+      const titleDisplay = formatSeminarDisplayName(p, { maxLen: false });
+      lines.push(titleDisplay || p.name || '세미나');
       lines.push(`seminarId: ${p.seminarId}`);
       if (p.date) {
         lines.push(`날짜: ${p.date}`);
@@ -168,7 +181,8 @@ export function formatSeminarChangeNotification(
     sections.push('[정보 변경]');
     for (const info of filteredInfoChanges) {
       const lines: string[] = [];
-      lines.push(info.name || '세미나');
+      const titleDisplay = formatSeminarDisplayName(info, { maxLen: false });
+      lines.push(titleDisplay || info.name || '세미나');
       lines.push(`seminarId: ${info.seminarId}`);
       if (info.date) {
         lines.push(`날짜: ${info.date}`);

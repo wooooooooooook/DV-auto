@@ -30,6 +30,7 @@ export type SeminarListItem = {
   isClosed?: boolean;
   hiddenYn?: string;
   diseaseCategoryNm?: string;
+  isSuspectedAdvancedSurvey?: boolean;
 } & SeminarPointStatus;
 
 export type SeminarDbRow = {
