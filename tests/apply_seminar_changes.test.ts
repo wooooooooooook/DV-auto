@@ -316,7 +316,8 @@ describe('apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스�
         formattedMessage.includes('https://m.doctorville.co.kr/cme/seminar/12345'),
         '포인트 지급 알림에 세미나 url 포함',
       );
-      assert(formattedMessage.includes('[정보 변경]'));
+      assert(formattedMessage.includes('[세미나시간변경]'));
+      assert(formattedMessage.includes('[증원]'));
       assert(formattedMessage.includes('seminarId: 12346'));
       assert(formattedMessage.includes('날짜: 2026-08-24'), '정보 변경 알림에 세미나 날짜 포함');
       assert(formattedMessage.includes('시간: 20:00 → 21:00'));
@@ -769,5 +770,138 @@ describe('apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스�
         refreshedFormatted.includes('🔒<b>[비공개][내분비내과]</b> ✨<b>[심화설문]</b> 비공개 심화 세미나'),
       'refreshStoredSeminarList를 통해 생성된 변경 알림에 태그가 정상 반영되어야 함',
     );
+  });
+
+  it('정보변경 카테고리화(세미나시간변경, 증원, 감원, 포인트지급, 비공개가 공개전환, 공개가 비공개전환, 포인트지급으로변경, 미지급으로 변경 등) 종합 검증', () => {
+    const infoChanges: SeminarInfoChange[] = [
+      {
+        seminarId: '5001',
+        name: '시간 변경 세미나',
+        date: '2026-08-25',
+        changes: [{ field: 'time', label: '시간', oldValue: '19:00', newValue: '20:00' }],
+      },
+      {
+        seminarId: '5002',
+        name: '날짜 변경 세미나',
+        date: '2026-08-26',
+        changes: [{ field: 'date', label: '날짜', oldValue: '2026-08-25', newValue: '2026-08-26' }],
+      },
+      {
+        seminarId: '5003',
+        name: '증원 세미나',
+        date: '2026-08-25',
+        changes: [{ field: 'totalCount', label: '총원', oldValue: '100', newValue: '200' }],
+      },
+      {
+        seminarId: '5004',
+        name: '감원 세미나',
+        date: '2026-08-25',
+        changes: [{ field: 'totalCount', label: '총원', oldValue: '300', newValue: '150' }],
+      },
+      {
+        seminarId: '5005',
+        name: '비공개에서 공개 전환 세미나',
+        date: '2026-08-25',
+        changes: [{ field: 'hiddenYn', label: '비공개', oldValue: true, newValue: false }],
+      },
+      {
+        seminarId: '5006',
+        name: '공개에서 비공개 전환 세미나',
+        date: '2026-08-25',
+        hiddenYn: 'Y',
+        changes: [{ field: 'hiddenYn', label: '비공개', oldValue: false, newValue: true }],
+      },
+      {
+        seminarId: '5007',
+        name: '포인트 지급으로 변경 세미나',
+        date: '2026-08-25',
+        changes: [{ field: 'isPointExcluded', label: '포인트미지급', oldValue: true, newValue: false }],
+      },
+      {
+        seminarId: '5008',
+        name: '포인트 미지급으로 변경 세미나',
+        date: '2026-08-25',
+        isPointExcluded: true,
+        changes: [{ field: 'isPointExcluded', label: '포인트미지급', oldValue: false, newValue: true }],
+      },
+      {
+        seminarId: '5009',
+        name: '심화설문 추가 세미나',
+        date: '2026-08-25',
+        isAdvancedSurvey: true,
+        changes: [{ field: 'isAdvancedSurvey', label: '심화설문', oldValue: false, newValue: true }],
+      },
+      {
+        seminarId: '5010',
+        name: '심화설문 해제 세미나',
+        date: '2026-08-25',
+        changes: [{ field: 'isAdvancedSurvey', label: '심화설문', oldValue: true, newValue: false }],
+      },
+    ];
+
+    const pointChanges: SeminarPointChange[] = [
+      {
+        seminarId: '6001',
+        name: '포인트 신규 지급 세미나',
+        date: '2026-08-24',
+        point: 2000,
+        pointText: '2,000P',
+        pointDate: '2026-08-25',
+      },
+    ];
+
+    const message = formatSeminarChangeNotification(infoChanges, pointChanges);
+    assert(message !== null);
+
+    // 1. 포인트지급 카테고리 헤더 및 내용 검증
+    assert(message.includes('[포인트 지급]'), '포인트 지급 카테고리 헤더 존재');
+    assert(message.includes('seminarId: 6001'));
+    assert(message.includes('포인트: 2,000P'));
+
+    // 2. 세미나시간변경 카테고리 헤더 및 내용 검증 (시간, 날짜)
+    assert(message.includes('[세미나시간변경]'), '세미나시간변경 카테고리 헤더 존재');
+    assert(message.includes('seminarId: 5001'));
+    assert(message.includes('시간: 19:00 → 20:00'));
+    assert(message.includes('seminarId: 5002'));
+    assert(message.includes('날짜: 2026-08-25 → 2026-08-26'));
+
+    // 3. 증원 카테고리 헤더 및 내용 검증
+    assert(message.includes('[증원]'), '증원 카테고리 헤더 존재');
+    assert(message.includes('seminarId: 5003'));
+    assert(message.includes('총원: 100 → 200'));
+
+    // 4. 감원 카테고리 헤더 및 내용 검증
+    assert(message.includes('[감원]'), '감원 카테고리 헤더 존재');
+    assert(message.includes('seminarId: 5004'));
+    assert(message.includes('총원: 300 → 150'));
+
+    // 5. 비공개가 공개전환 카테고리 헤더 및 내용 검증
+    assert(message.includes('[비공개가 공개전환]'), '비공개가 공개전환 카테고리 헤더 존재');
+    assert(message.includes('seminarId: 5005'));
+    assert(message.includes('비공개: true → false'));
+
+    // 6. 공개가 비공개전환 카테고리 헤더 및 내용 검증
+    assert(message.includes('[공개가 비공개전환]'), '공개가 비공개전환 카테고리 헤더 존재');
+    assert(message.includes('seminarId: 5006'));
+    assert(message.includes('비공개: false → true'));
+
+    // 7. 포인트지급으로변경 카테고리 헤더 및 내용 검증
+    assert(message.includes('[포인트지급으로변경]'), '포인트지급으로변경 카테고리 헤더 존재');
+    assert(message.includes('seminarId: 5007'));
+    assert(message.includes('포인트미지급: true → false'));
+
+    // 8. 미지급으로 변경 카테고리 헤더 및 내용 검증
+    assert(message.includes('[미지급으로 변경]'), '미지급으로 변경 카테고리 헤더 존재');
+    assert(message.includes('seminarId: 5008'));
+    assert(message.includes('포인트미지급: false → true'));
+
+    // 9. 심화설문 추가 및 해제 카테고리 헤더 및 내용 검증
+    assert(message.includes('[심화설문 추가]'), '심화설문 추가 카테고리 헤더 존재');
+    assert(message.includes('seminarId: 5009'));
+    assert(message.includes('심화설문: false → true'));
+
+    assert(message.includes('[심화설문 해제]'), '심화설문 해제 카테고리 헤더 존재');
+    assert(message.includes('seminarId: 5010'));
+    assert(message.includes('심화설문: true → false'));
   });
 });

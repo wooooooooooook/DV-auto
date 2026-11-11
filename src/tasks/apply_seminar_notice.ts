@@ -67,6 +67,88 @@ export const MEANINGFUL_FIELDS: Array<{
 
 export const BOOLEAN_FIELDS = new Set<keyof SeminarListItem>(['isPointExcluded', 'isAdvancedSurvey']);
 
+export type SeminarChangeCategory =
+  | 'time_changed' // 세미나시간변경
+  | 'capacity_increased' // 증원
+  | 'capacity_decreased' // 감원
+  | 'private_to_public' // 비공개가 공개전환
+  | 'public_to_private' // 공개가 비공개전환
+  | 'point_excluded_to_paid' // 포인트지급으로변경
+  | 'point_paid_to_excluded' // 미지급으로 변경
+  | 'advanced_survey_added' // 심화설문 추가
+  | 'advanced_survey_removed' // 심화설문 해제
+  | 'etc'; // 기타 정보 변경
+
+export const CHANGE_CATEGORY_HEADERS: Record<SeminarChangeCategory, string> = {
+  time_changed: '[세미나시간변경]',
+  capacity_increased: '[증원]',
+  capacity_decreased: '[감원]',
+  private_to_public: '[비공개가 공개전환]',
+  public_to_private: '[공개가 비공개전환]',
+  point_excluded_to_paid: '[포인트지급으로변경]',
+  point_paid_to_excluded: '[미지급으로 변경]',
+  advanced_survey_added: '[심화설문 추가]',
+  advanced_survey_removed: '[심화설문 해제]',
+  etc: '[기타 정보 변경]',
+};
+
+export const CATEGORY_ORDER: SeminarChangeCategory[] = [
+  'time_changed',
+  'capacity_increased',
+  'capacity_decreased',
+  'private_to_public',
+  'public_to_private',
+  'point_excluded_to_paid',
+  'point_paid_to_excluded',
+  'advanced_survey_added',
+  'advanced_survey_removed',
+  'etc',
+];
+
+export function categorizeSeminarFieldChange(change: SeminarFieldChange): SeminarChangeCategory {
+  const { field, oldValue, newValue } = change;
+
+  if (field === 'date' || field === 'time') {
+    return 'time_changed';
+  }
+
+  if (field === 'totalCount') {
+    const oldNum = parseInt(String(oldValue).replace(/,/g, ''), 10);
+    const newNum = parseInt(String(newValue).replace(/,/g, ''), 10);
+    if (!Number.isNaN(oldNum) && !Number.isNaN(newNum)) {
+      if (newNum > oldNum) return 'capacity_increased';
+      if (newNum < oldNum) return 'capacity_decreased';
+    }
+    return 'etc';
+  }
+
+  if (field === 'hiddenYn') {
+    const wasPrivate = oldValue === true || oldValue === 'Y' || oldValue === 'y';
+    const isPrivate = newValue === true || newValue === 'Y' || newValue === 'y';
+    if (wasPrivate && !isPrivate) return 'private_to_public';
+    if (!wasPrivate && isPrivate) return 'public_to_private';
+    return 'etc';
+  }
+
+  if (field === 'isPointExcluded') {
+    const wasExcluded = Boolean(oldValue);
+    const isExcluded = Boolean(newValue);
+    if (wasExcluded && !isExcluded) return 'point_excluded_to_paid';
+    if (!wasExcluded && isExcluded) return 'point_paid_to_excluded';
+    return 'etc';
+  }
+
+  if (field === 'isAdvancedSurvey') {
+    const wasAdv = Boolean(oldValue);
+    const isAdv = Boolean(newValue);
+    if (!wasAdv && isAdv) return 'advanced_survey_added';
+    if (wasAdv && !isAdv) return 'advanced_survey_removed';
+    return 'etc';
+  }
+
+  return 'etc';
+}
+
 export function getSeminarInfoChanges(
   existing: SeminarListItem,
   incoming: SeminarListItem,
@@ -177,24 +259,52 @@ export function formatSeminarChangeNotification(
   }
 
   if (filteredInfoChanges.length > 0) {
-    if (pointChanges.length > 0) sections.push('');
-    sections.push('[정보 변경]');
+    const categoryGroups = new Map<
+      SeminarChangeCategory,
+      Array<{ info: SeminarInfoChange; changes: SeminarFieldChange[] }>
+    >();
+
     for (const info of filteredInfoChanges) {
-      const lines: string[] = [];
-      const titleDisplay = formatSeminarDisplayName(info, { maxLen: false });
-      lines.push(titleDisplay || info.name || '세미나');
-      lines.push(`seminarId: ${info.seminarId}`);
-      if (info.date) {
-        lines.push(`날짜: ${info.date}`);
-      }
+      const changesByCategory = new Map<SeminarChangeCategory, SeminarFieldChange[]>();
       for (const ch of info.changes) {
-        lines.push(`${ch.label}: ${ch.oldValue} → ${ch.newValue}`);
+        const cat = categorizeSeminarFieldChange(ch);
+        if (!changesByCategory.has(cat)) {
+          changesByCategory.set(cat, []);
+        }
+        changesByCategory.get(cat)!.push(ch);
       }
-      const targetUrl = info.url || (info.seminarId ? `https://m.doctorville.co.kr/cme/seminar/${info.seminarId}` : '');
-      if (targetUrl) {
-        lines.push(targetUrl);
+
+      for (const [cat, catChanges] of changesByCategory) {
+        if (!categoryGroups.has(cat)) {
+          categoryGroups.set(cat, []);
+        }
+        categoryGroups.get(cat)!.push({ info, changes: catChanges });
       }
-      sections.push(lines.join('\n'));
+    }
+
+    for (const cat of CATEGORY_ORDER) {
+      const items = categoryGroups.get(cat);
+      if (!items || items.length === 0) continue;
+
+      sections.push(CHANGE_CATEGORY_HEADERS[cat]);
+      for (const { info, changes } of items) {
+        const lines: string[] = [];
+        const titleDisplay = formatSeminarDisplayName(info, { maxLen: false });
+        lines.push(titleDisplay || info.name || '세미나');
+        lines.push(`seminarId: ${info.seminarId}`);
+        if (info.date) {
+          lines.push(`날짜: ${info.date}`);
+        }
+        for (const ch of changes) {
+          lines.push(`${ch.label}: ${ch.oldValue} → ${ch.newValue}`);
+        }
+        const targetUrl =
+          info.url || (info.seminarId ? `https://m.doctorville.co.kr/cme/seminar/${info.seminarId}` : '');
+        if (targetUrl) {
+          lines.push(targetUrl);
+        }
+        sections.push(lines.join('\n'));
+      }
     }
   }
 
