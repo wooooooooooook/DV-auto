@@ -2,7 +2,7 @@ import type { BrowserContext } from 'playwright';
 import fs from 'fs/promises';
 import path from 'path';
 import { safeGoto, sendTelegram, ensureLoggedIn, loadCookies } from '../modules/utils';
-import { attendSeminarApi, type AttendSeminarApiResult } from '../modules/seminar_api';
+import { attendSeminarApi, ProcessState, type AttendSeminarApiResult } from '../modules/seminar_api';
 import { SEMINAR_DETAIL_PAGE, SEMINAR_DETAIL_PC_PAGE, type MonitoredSeminarItem } from './monitor_seminars_notice';
 
 /**
@@ -57,6 +57,63 @@ export async function withBrowserContext<T>(
 }
 
 /**
+ * 세미나가 자동 입장(Playwright/API) 대상인지 판별
+ * - 공지 메시지(보드)에는 '입장가능' 상태로 정상 노출되더라도,
+ *   본인이 신청하지 못한 세미나(정원초과 5, 미신청 2/4, 권한없음 accessAllowed=false, 미신청 비공개 등)는 입장 시도를 하지 않도록 방지
+ */
+export function isEligibleForAutoEnter(seminar: {
+  processState?: number;
+  cancelProcessState?: number;
+  accessAllowed?: boolean;
+  hiddenYn?: string;
+}): boolean {
+  // 1. 상세 API에서 명시적으로 접근/입장 권한이 없다고 응답한 경우 (e.g. 세미나 신청 대상자가 아닙니다)
+  if (seminar.accessAllowed === false) {
+    return false;
+  }
+
+  const ps = seminar.processState;
+  const cps = seminar.cancelProcessState;
+
+  // 2. 확실한 신청 완료 상태
+  // - cancelProcessState === 3 (PROCESS_CANCEL = 신청 취소 가능 상태 -> 본인이 신청함)
+  // - processState === 3 (PROCESS_CANCEL = 신청 완료)
+  // - processState === 1 (PROCESS_ENTER = 본인 계정으로 라이브 입장 가능)
+  // - processState === 6 (PROCESS_STARTED = 본인 계정으로 라이브 진행 중)
+  const isExplicitlyApplied =
+    cps === ProcessState.PROCESS_CANCEL ||
+    ps === ProcessState.PROCESS_CANCEL ||
+    ps === ProcessState.PROCESS_ENTER ||
+    ps === ProcessState.PROCESS_STARTED;
+
+  // 3. 미신청 상태 (정원초과 5, 신청하기 2, 대기/준비중 4)
+  // cancelProcessState가 3이 아니라면 본인이 신청하지 못한 세미나임
+  if (
+    ps === ProcessState.PROCESS_EXCESS ||
+    ps === ProcessState.PROCESS_APPLY ||
+    ps === ProcessState.PROCESS_PREPARING
+  ) {
+    if (cps !== ProcessState.PROCESS_CANCEL) {
+      return false;
+    }
+  }
+
+  // 4. 비공개 세미나 (hiddenYn === 'Y'):
+  // 사전에 확실하게 신청 완료된 세미나가 아니라면 입장 불가 (대상자 제한 세미나)
+  const isPrivate = seminar.hiddenYn === 'Y' || seminar.hiddenYn === 'y';
+  if (isPrivate && !isExplicitlyApplied) {
+    return false;
+  }
+
+  // 5. cancelProcessState === -1 (취소 불가 / 미신청)이면서 확실한 신청 상태가 아닌 경우
+  if (cps === -1 && !isExplicitlyApplied) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
  * Playwright로 세미나 라이브 방송에 자동 입장하는 함수
  */
 export async function performAutoEnter(
@@ -77,6 +134,22 @@ export async function performAutoEnter(
 
     const enterBtn = page.locator('text="입장하기"').first();
     if (!(await enterBtn.isVisible({ timeout: 5000 }))) {
+      // 신청 대상자가 아니거나 권한이 없는 경우 확인 (e.g. 세미나 신청 대상자가 아닙니다)
+      const pageText = (await page.textContent('body').catch(() => '')) || '';
+      const isNotEligible =
+        pageText.includes('세미나 신청 대상자가 아닙니다') ||
+        pageText.includes('신청 대상자가 아닙니다') ||
+        pageText.includes('대상자가 아닙니다') ||
+        pageText.includes('입장 권한이 없습니다');
+
+      if (isNotEligible) {
+        console.log(
+          `[monitor_seminars] 세미나(${seminarId}) 신청 대상자가 아니거나 입장 권한 없음이 화면에서 확인됨: ${seminarName}`,
+        );
+        // 대상자가 아니므로 불필요한 재시도 알림 없이 완료(true) 처리
+        return true;
+      }
+
       console.log(`[monitor_seminars] '입장하기' button not found for ${seminarId}. retry needed.`);
       const notFoundScreenshotPath = path.join(process.cwd(), `seminar_entry_notfound_${screenshotKey}.png`);
       try {
@@ -328,6 +401,18 @@ export async function checkAndPerformAutoEnter(
         });
         return true;
       } else {
+        // 만약 권한 없음/신청 대상자 아님 응답이라면 Playwright로 폴백할 필요 없이 바로 완료 처리
+        if (
+          lastApiRes.errorMessage?.includes('accessAllowed: false') ||
+          lastApiRes.errorMessage?.includes('세미나 신청 대상자가 아니거나') ||
+          lastApiRes.errorMessage?.includes('입장 권한이 없습니다')
+        ) {
+          console.log(
+            `[monitor_seminars] 1차 API 확인 결과 세미나(${seminarId}) 신청 대상자 아님/입장 권한 없음: Playwright 폴백 생략`,
+          );
+          return true;
+        }
+
         console.warn(
           `[monitor_seminars] 1차 API 자동 입장 미완료 (success=${lastApiRes.success}, hasEntryHistory=${lastApiRes.hasEntryHistory}, err=${lastApiRes.errorMessage || '없음'}). Playwright 브라우저로 폴백합니다.`,
         );
@@ -411,6 +496,16 @@ export async function performAutoEnterForActiveSeminars(
         seminar.autoEnterDone = true;
         continue;
       }
+
+      // 본인이 신청하지 못한 세미나(정원초과, 비공개 세미나, 권한 없음 등)는 자동 입장 대상에서 제외
+      if (!isEligibleForAutoEnter(seminar)) {
+        console.log(
+          `[${periodName}] 세미나(${seminar.seminarId})는 미신청/정원초과/권한없음 상태이므로 자동입장 생략: ${seminar.name} (ps: ${seminar.processState}, cps: ${seminar.cancelProcessState}, hidden: ${seminar.hiddenYn}, accessAllowed: ${seminar.accessAllowed})`,
+        );
+        seminar.autoEnterDone = true;
+        continue;
+      }
+
       targetSeminars.push(seminar);
     }
   }

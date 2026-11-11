@@ -132,6 +132,7 @@ export interface SeminarDetailApiResponse {
   surveyState?: number | string;
   termsInfo?: TermsInfo | null;
   isExistVod?: boolean;
+  accessAllowed?: boolean;
   code?: number | string;
   message?: string;
   [key: string]: unknown;
@@ -145,6 +146,7 @@ export type FetchSeminarDetailResult =
       surveyState?: number;
       isPointExcluded: boolean;
       hasEntryHistory: boolean;
+      accessAllowed?: boolean;
       isAuthExpired?: false;
       errorMessage?: undefined;
       statusCode?: number;
@@ -587,6 +589,7 @@ export async function fetchSeminarDetail(
     const intro = detail?.intro;
     const isPointExcluded = checkIsPointExcluded(intro);
     const hasEntryHistory = checkHasEntryHistory(parsed.seminarDetail, parsed.seminarMember);
+    const accessAllowed = typeof parsed.accessAllowed === 'boolean' ? parsed.accessAllowed : undefined;
     const surveyState =
       parsed.surveyState !== undefined
         ? Number(parsed.surveyState)
@@ -601,6 +604,7 @@ export async function fetchSeminarDetail(
       surveyState,
       isPointExcluded,
       hasEntryHistory,
+      accessAllowed,
       statusCode: res.status,
       isNotFound: false,
       rawResponse: parsed,

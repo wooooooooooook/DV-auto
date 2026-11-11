@@ -53,6 +53,7 @@ export interface MonitoredSeminarItem {
   processState?: number;
   cancelProcessState?: number;
   seminarCompleted?: number;
+  accessAllowed?: boolean;
   surveyState?: number;
   hiddenYn?: string;
   totalCount?: string | number;

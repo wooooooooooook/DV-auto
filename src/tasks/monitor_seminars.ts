@@ -261,6 +261,8 @@ export async function checkSeminarEndStatusFromApi(seminarId: string): Promise<{
   hasEntryHistory: boolean;
   isPrivate?: boolean;
   processState?: number;
+  cancelProcessState?: number;
+  accessAllowed?: boolean;
   startDt?: string;
   endDt?: string;
   hiddenYn?: string;
@@ -315,6 +317,8 @@ export async function checkSeminarEndStatusFromApi(seminarId: string): Promise<{
   const survey = (detail?.survey ?? raw?.survey ?? detailRes.survey ?? null) as SeminarSurveyInfo | null;
   const surveyState = detailRes.surveyState;
   const processState = detail?.processState !== undefined ? Number(detail.processState) : undefined;
+  const cancelProcessState = detail?.cancelProcessState !== undefined ? Number(detail.cancelProcessState) : undefined;
+  const accessAllowed = typeof raw?.accessAllowed === 'boolean' ? raw.accessAllowed : detailRes.accessAllowed;
   const seminarCompleted = detail?.seminarCompleted !== undefined ? Number(detail.seminarCompleted) : undefined;
   const hiddenYn = typeof detail?.hiddenYn === 'string' ? detail.hiddenYn : undefined;
   const isPrivate = hiddenYn === 'Y' || hiddenYn === 'y';
@@ -351,6 +355,8 @@ export async function checkSeminarEndStatusFromApi(seminarId: string): Promise<{
     isSurveyOpen,
     surveyState,
     processState,
+    cancelProcessState,
+    accessAllowed,
     startDt: typeof detail?.startDt === 'string' ? detail.startDt : undefined,
     endDt: typeof detail?.endDt === 'string' ? detail.endDt : undefined,
     isPointExcluded: detailRes.isPointExcluded,
@@ -452,6 +458,9 @@ export async function setupMonitoredSeminarItem(
     surveyMinutesLeft = detailCheck.surveyMinutesLeft ?? null;
     if (detailCheck.hiddenYn) info.hiddenYn = detailCheck.hiddenYn;
     if (detailCheck.diseaseCategoryNm) info.diseaseCategoryNm = detailCheck.diseaseCategoryNm;
+    if (detailCheck.accessAllowed !== undefined) info.accessAllowed = detailCheck.accessAllowed;
+    if (detailCheck.processState !== undefined) info.processState = detailCheck.processState;
+    if (detailCheck.cancelProcessState !== undefined) info.cancelProcessState = detailCheck.cancelProcessState;
     if (detailCheck.isEnded) {
       initialIsEnded = true;
     }
@@ -1115,6 +1124,15 @@ async function monitorSeminars(
           if (endCheck.isPointExcluded !== undefined) {
             isDetailPointExcluded = endCheck.isPointExcluded;
             currentSeminar.isSurveyPointExcluded = isDetailPointExcluded;
+          }
+          if (endCheck.accessAllowed !== undefined) {
+            currentSeminar.accessAllowed = endCheck.accessAllowed;
+          }
+          if (endCheck.processState !== undefined) {
+            currentSeminar.processState = endCheck.processState;
+          }
+          if (endCheck.cancelProcessState !== undefined) {
+            currentSeminar.cancelProcessState = endCheck.cancelProcessState;
           }
         }
 

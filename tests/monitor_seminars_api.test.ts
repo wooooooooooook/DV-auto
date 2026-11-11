@@ -6,6 +6,7 @@ import {
   monitorSeminars,
   buildStartDtFromStored,
 } from '../src/tasks/monitor_seminars';
+import { isEligibleForAutoEnter, performAutoEnterForActiveSeminars } from '../src/tasks/monitor_seminars_entry';
 import { isSeminarStartedByTime } from '../src/tasks/monitor_seminars_notice';
 import * as seminarApiModule from '../src/modules/seminar_api';
 import * as utilsModule from '../src/modules/utils';
@@ -676,5 +677,96 @@ describe('monitor_seminars API 기반 모니터링 기능 단위/통합 테스�
     assert.strictEqual(endCheck.processState, 1, 'detail API의 processState가 반환되어야 함');
     assert.ok(endCheck.startDt, 'detail API의 startDt가 반환되어야 함');
     assert.strictEqual(endCheck.isEnded, false, '입장가능 상태는 종료가 아님');
+  });
+
+  it('미신청/정원초과/비공개 세미나: 공지 상태는 입장가능이어도 자동 입장은 시도하지 않는다 (5907 케이스)', async () => {
+    // 1. isEligibleForAutoEnter 단위 검증
+    // 케이스 1: 5907 세미나 (비공개, 정원초과 5, cancelProcessState -1, accessAllowed false)
+    assert.strictEqual(
+      isEligibleForAutoEnter({
+        processState: 5,
+        cancelProcessState: -1,
+        accessAllowed: false,
+        hiddenYn: 'Y',
+      }),
+      false,
+      '5907 세미나는 자동입장 대상이 아니어야 함',
+    );
+
+    // 케이스 2: 정원 초과 미신청 세미나
+    assert.strictEqual(
+      isEligibleForAutoEnter({
+        processState: 5,
+        cancelProcessState: -1,
+      }),
+      false,
+      '정원 초과 미신청 세미나는 제외되어야 함',
+    );
+
+    // 케이스 3: 비공개 미신청 세미나
+    assert.strictEqual(
+      isEligibleForAutoEnter({
+        processState: 2,
+        hiddenYn: 'Y',
+      }),
+      false,
+      '비공개 미신청 세미나는 제외되어야 함',
+    );
+
+    // 케이스 4: accessAllowed: false인 세미나
+    assert.strictEqual(
+      isEligibleForAutoEnter({
+        accessAllowed: false,
+      }),
+      false,
+      '권한 없는 세미나는 제외되어야 함',
+    );
+
+    // 케이스 5: 본인이 신청한 일반 세미나 (cancelProcessState: 3 또는 processState: 3)
+    assert.strictEqual(
+      isEligibleForAutoEnter({
+        processState: 3,
+        cancelProcessState: 3,
+        hiddenYn: 'N',
+      }),
+      true,
+      '신청 완료된 세미나는 자동입장 대상이어야 함',
+    );
+
+    // 케이스 6: 라이브 입장 가능한 세미나 (processState: 1)
+    assert.strictEqual(
+      isEligibleForAutoEnter({
+        processState: 1,
+        cancelProcessState: 3,
+      }),
+      true,
+      '입장가능 상태 세미나는 자동입장 대상이어야 함',
+    );
+
+    // 2. performAutoEnterForActiveSeminars 통합 검증
+    // 5907 세미나가 '입장가능' 상태로 공지 보드에 존재하지만, 자동 입장 대상에서 제외되고 autoEnterDone=true 처리되는지 확인
+    const mock5907 = {
+      seminarId: '5907',
+      url: 'https://m.doctorville.co.kr/cme/seminar/5907',
+      name: 'Life Less Interrupted for your Patients: EBGLYSS',
+      status: '입장가능' as const,
+      processState: 5,
+      cancelProcessState: -1,
+      accessAllowed: false,
+      hiddenYn: 'Y',
+      isEnded: false,
+      autoEnterDone: false,
+    };
+
+    await performAutoEnterForActiveSeminars([mock5907], { periodName: '테스트' });
+
+    // 공지 보드용 status는 여전히 '입장가능'으로 유지 (공지메시지는 정상 발행)
+    assert.strictEqual(mock5907.status, '입장가능', '공지 상태는 입장가능을 유지해야 함');
+    // 실제 브라우저 입장 시도는 생략되고 autoEnterDone = true로 마킹되어 반복 시도 방지
+    assert.strictEqual(
+      mock5907.autoEnterDone,
+      true,
+      '미신청 세미나는 autoEnterDone=true 처리되어 반복 입장 시도를 방지해야 함',
+    );
   });
 });
