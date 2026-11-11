@@ -109,9 +109,15 @@ export async function publishAndReplaceChannelNotice(
 
     // 5. 기존 메시지 삭제 (새 메시지 발송 및 댓글 데이터 확보 성공 후에만 수행)
     try {
-      await channelRepo.deleteChannelMessage(prevMessageId, targetChannelId);
+      const delRes = await channelRepo.deleteChannelMessage(prevMessageId, {
+        channelId: targetChannelId,
+        retries: 3,
+      });
+      if (!delRes.success) {
+        logger.warn(`[${logPrefix}] 이전 메시지(ID: ${prevMessageId}) 삭제 실패: ${delRes.message}`);
+      }
     } catch (err) {
-      logger.warn(`[${logPrefix}] 이전 메시지(ID: ${prevMessageId}) 삭제 실패:`, err);
+      logger.warn(`[${logPrefix}] 이전 메시지(ID: ${prevMessageId}) 삭제 중 오류:`, err);
     }
   }
 

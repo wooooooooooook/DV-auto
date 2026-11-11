@@ -411,4 +411,115 @@ https://m.doctorville.co.kr/cme/seminar/101`;
     assert.strictEqual(notFoundRes.is429, false);
     assert.strictEqual(notFoundRes.isNotFound, true);
   });
+
+  it('deleteChannelMessage 재시도(429/네트워크오류) 및 not found 자체 치유 검증', async () => {
+    const testDate = '2026-11-11';
+    const mockChannelId = '@test_notice_channel_delete';
+
+    recordChannelMessage({
+      channelId: mockChannelId,
+      messageId: 9901,
+      date: testDate,
+      chunkIndex: 0,
+      totalChunks: 1,
+      text: '삭제 테스트 메시지 1',
+      mediaType: 'text',
+    });
+
+    recordChannelMessage({
+      channelId: mockChannelId,
+      messageId: 9902,
+      date: testDate,
+      chunkIndex: 0,
+      totalChunks: 1,
+      text: '삭제 테스트 메시지 2',
+      mediaType: 'text',
+    });
+
+    recordChannelMessage({
+      channelId: mockChannelId,
+      messageId: 9903,
+      date: testDate,
+      chunkIndex: 0,
+      totalChunks: 1,
+      text: '삭제 테스트 메시지 3',
+      mediaType: 'text',
+    });
+
+    // 1. 1~2회 실패 후 3회차에 성공하는 재시도 검증
+    let attemptCount = 0;
+    const retryBot = {
+      command: () => {},
+      telegram: {
+        deleteMessage: async () => {
+          attemptCount++;
+          if (attemptCount < 3) {
+            throw new Error('Network timeout');
+          }
+          return true;
+        },
+      },
+    } as unknown as Telegraf;
+    setBot('notice', retryBot);
+
+    const retryRes = await deleteChannelMessage(9901, {
+      channelId: mockChannelId,
+      retries: 3,
+      retryDelayMs: 10,
+    });
+    assert.strictEqual(retryRes.success, true);
+    assert.strictEqual(attemptCount, 3, '총 3회 시도 후 성공해야 함');
+    const msg9901 = getChannelMessageById(9901, mockChannelId);
+    assert.strictEqual(msg9901?.status, 'deleted', '성공 후 DB 상태가 deleted여야 함');
+
+    // 2. 이미 삭제된 메시지 (message to delete not found) 자체 치유 검증
+    const notFoundBot = {
+      command: () => {},
+      telegram: {
+        deleteMessage: async () => {
+          throw new Error('400: Bad Request: message to delete not found');
+        },
+      },
+    } as unknown as Telegraf;
+    setBot('notice', notFoundBot);
+
+    const notFoundRes = await deleteChannelMessage(9902, {
+      channelId: mockChannelId,
+      retries: 3,
+      retryDelayMs: 10,
+    });
+    assert.strictEqual(notFoundRes.success, true, 'not found 에러는 성공으로 간주해야 함');
+    assert.strictEqual(notFoundRes.isNotFound, true);
+    const msg9902 = getChannelMessageById(9902, mockChannelId);
+    assert.strictEqual(msg9902?.status, 'deleted', 'not found 시에도 DB 상태가 deleted로 치유되어야 함');
+
+    // 3. 429 Rate limit 지속 발생 시 최대 재시도 후 실패 검증
+    let rateLimitAttempts = 0;
+    const persistentRateLimitBot = {
+      command: () => {},
+      telegram: {
+        deleteMessage: async () => {
+          rateLimitAttempts++;
+          const err = new Error('429: Too Many Requests: retry after 0');
+          (err as unknown as { response?: { error_code?: number; parameters?: { retry_after?: number } } }).response = {
+            error_code: 429,
+            parameters: { retry_after: 0 },
+          };
+          throw err;
+        },
+      },
+    } as unknown as Telegraf;
+    setBot('notice', persistentRateLimitBot);
+
+    const rateLimitRes = await deleteChannelMessage(9903, {
+      channelId: mockChannelId,
+      retries: 2,
+      retryDelayMs: 10,
+    });
+    assert.strictEqual(rateLimitRes.success, false);
+    assert.strictEqual(rateLimitRes.is429, true);
+    assert.strictEqual(rateLimitAttempts, 2, '지정된 2회 시도 후 실패해야 함');
+    const msg9903 = getChannelMessageById(9903, mockChannelId);
+    assert.strictEqual(msg9903?.status, 'sent', '삭제 실패 시 DB 상태는 원래 상태(sent)를 유지해야 함');
+  });
 });

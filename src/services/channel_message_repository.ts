@@ -1,7 +1,7 @@
 import { getDatabase } from './storage';
 import { getBot } from './bot_instance';
 import * as logger from './logger';
-import { isTelegram429Error, getTelegramRetryAfter } from '../modules/utils';
+import { isTelegram429Error, getTelegramRetryAfter, sleep } from '../modules/utils';
 
 export interface ChannelMessageRecord {
   id?: number;
@@ -659,32 +659,89 @@ export async function editChannelMessage(
   }
 }
 
+export interface DeleteChannelMessageOptions {
+  channelId?: string;
+  retries?: number;
+  retryDelayMs?: number;
+}
+
 /**
  * 텔레그램 공지봇을 통해 공지방 메시지를 삭제하고 DB 상태를 'deleted'로 갱신합니다.
+ * - 429 Rate limit 또는 일시적 오류 발생 시 자동 재시도 (기본 3회)
+ * - 이미 삭제된 메시지(message to delete not found 등)는 성공으로 간주하고 DB 상태 동기화 (자체 치유)
  */
 export async function deleteChannelMessage(
   messageId: number,
-  channelId?: string,
-): Promise<{ success: boolean; message: string }> {
+  channelIdOrOptions?: string | DeleteChannelMessageOptions,
+): Promise<{ success: boolean; message: string; isNotFound?: boolean; is429?: boolean }> {
   const bot = getBot('notice');
   if (!bot) {
     return { success: false, message: 'Notice 봇이 초기화되지 않았습니다.' };
   }
 
-  const targetChannelId = channelId || process.env.NOTICE_CHANNEL_ID;
+  const options: DeleteChannelMessageOptions =
+    typeof channelIdOrOptions === 'string' ? { channelId: channelIdOrOptions } : channelIdOrOptions || {};
+
+  const targetChannelId = options.channelId || process.env.NOTICE_CHANNEL_ID;
   if (!targetChannelId) {
     return { success: false, message: 'NOTICE_CHANNEL_ID가 설정되지 않았습니다.' };
   }
 
-  try {
-    await bot.telegram.deleteMessage(targetChannelId, messageId);
-    updateChannelMessageStatus(messageId, 'deleted', undefined, targetChannelId);
-    return { success: true, message: `메시지(ID: ${messageId}) 삭제 완료` };
-  } catch (error) {
-    const errMsg = error instanceof Error ? error.message : String(error);
-    logger.error(`공지방 메시지(ID: ${messageId}) 삭제 실패:`, error);
-    return { success: false, message: `메시지 삭제 실패: ${errMsg}` };
+  const maxRetries = options.retries !== undefined ? Math.max(1, options.retries) : 3;
+  const initialDelayMs = options.retryDelayMs !== undefined ? options.retryDelayMs : 500;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await bot.telegram.deleteMessage(targetChannelId, messageId);
+      updateChannelMessageStatus(messageId, 'deleted', undefined, targetChannelId);
+      return { success: true, message: `메시지(ID: ${messageId}) 삭제 완료` };
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      const is429 = isTelegram429Error(error);
+      const isNotFound =
+        errMsg.includes('message to delete not found') ||
+        errMsg.includes('message not found') ||
+        errMsg.includes('MESSAGE_ID_INVALID');
+
+      if (isNotFound) {
+        // 이미 텔레그램 상에서 삭제되었거나 존재하지 않는 메시지 -> 성공으로 간주하고 DB 상태 동기화
+        logger.info(`공지방 메시지(ID: ${messageId}) 이미 삭제되었거나 존재하지 않음: ${errMsg}`);
+        updateChannelMessageStatus(messageId, 'deleted', undefined, targetChannelId);
+        return { success: true, message: `메시지(ID: ${messageId}) 이미 삭제됨`, isNotFound: true };
+      }
+
+      if (attempt < maxRetries) {
+        let delay = initialDelayMs * Math.pow(2, attempt - 1);
+        if (is429) {
+          const retryAfter = getTelegramRetryAfter(error);
+          if (retryAfter && retryAfter > 0) {
+            delay = Math.max(delay, retryAfter * 1000);
+          }
+          logger.warn(
+            `공지방 메시지(ID: ${messageId}) 삭제 Rate limit (429) (시도 ${attempt}/${maxRetries}, ${delay}ms 후 재시도): ${errMsg}`,
+          );
+        } else {
+          logger.warn(
+            `공지방 메시지(ID: ${messageId}) 삭제 실패 (시도 ${attempt}/${maxRetries}, ${delay}ms 후 재시도): ${errMsg}`,
+          );
+        }
+        await sleep(delay);
+        continue;
+      }
+
+      // 최종 실패
+      if (is429) {
+        logger.error(
+          `공지방 메시지(ID: ${messageId}) 삭제 Rate limit (429) 최종 실패 (${maxRetries}회 시도): ${errMsg}`,
+        );
+      } else {
+        logger.error(`공지방 메시지(ID: ${messageId}) 삭제 최종 실패 (${maxRetries}회 시도):`, error);
+      }
+      return { success: false, message: `메시지 삭제 실패: ${errMsg}`, isNotFound, is429 };
+    }
   }
+
+  return { success: false, message: '메시지 삭제 실패 (알 수 없는 오류)' };
 }
 
 /**
