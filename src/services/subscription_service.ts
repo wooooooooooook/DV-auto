@@ -6,6 +6,18 @@ import * as logger from './logger';
 import type { SeminarListItem } from './seminar_repository';
 import { isLowCapacitySeminar } from '../modules/seminar_api';
 import type { MedigateSymposiumItem } from '../modules/medigate_api';
+import {
+  type SeminarChangeCategoryKey,
+  ALL_SEMINAR_CHANGE_CATEGORIES,
+  SEMINAR_CHANGE_CATEGORY_LABELS,
+  mapToSeminarChangeCategoryKey,
+  categorizeSeminarFieldChange,
+  formatSeminarChangeNotification,
+  type SeminarInfoChange,
+  type SeminarPointChange,
+} from '../tasks/apply_seminar_notice';
+
+export { type SeminarChangeCategoryKey, ALL_SEMINAR_CHANGE_CATEGORIES, SEMINAR_CHANGE_CATEGORY_LABELS };
 
 export type SubscriptionTopic =
   | 'today_links'
@@ -50,6 +62,7 @@ export interface SubscriptionRecord {
   newSeminarIncludePointExcluded: boolean;
   intermdQuiz: boolean;
   seminarChanges: boolean;
+  seminarChangeCategories: Record<SeminarChangeCategoryKey, boolean>;
   seminarLive: boolean;
   surveyClosing20: boolean;
   surveyClosing10: boolean;
@@ -73,6 +86,7 @@ interface SubscriptionRow {
   new_seminar_include_point_excluded?: number;
   intermd_quiz?: number;
   seminar_changes?: number;
+  seminar_change_categories?: string | null;
   seminar_live?: number;
   survey_closing_20?: number;
   survey_closing_10?: number;
@@ -81,6 +95,58 @@ interface SubscriptionRow {
   medigate_symposium?: number;
   created_at?: number;
   updated_at?: number;
+}
+
+export function getDefaultSeminarChangeCategories(): Record<SeminarChangeCategoryKey, boolean> {
+  const result = {} as Record<SeminarChangeCategoryKey, boolean>;
+  for (const cat of ALL_SEMINAR_CHANGE_CATEGORIES) {
+    result[cat] = true;
+  }
+  return result;
+}
+
+export function parseSeminarChangeCategories(raw?: string | null): Record<SeminarChangeCategoryKey, boolean> {
+  const defaults = getDefaultSeminarChangeCategories();
+  if (!raw) {
+    return defaults;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed === 'object' && parsed !== null) {
+      for (const cat of ALL_SEMINAR_CHANGE_CATEGORIES) {
+        if (typeof parsed[cat] === 'boolean') {
+          defaults[cat] = parsed[cat];
+        }
+      }
+      // 레거시 키 호환: private_to_public / public_to_private -> visibility
+      if (typeof parsed.visibility !== 'boolean') {
+        if (typeof parsed.private_to_public === 'boolean') {
+          defaults.visibility = parsed.private_to_public;
+        } else if (typeof parsed.public_to_private === 'boolean') {
+          defaults.visibility = parsed.public_to_private;
+        }
+      }
+      // 레거시 키 호환: advanced_survey_added / advanced_survey_removed -> advanced_survey
+      if (typeof parsed.advanced_survey !== 'boolean') {
+        if (typeof parsed.advanced_survey_added === 'boolean') {
+          defaults.advanced_survey = parsed.advanced_survey_added;
+        } else if (typeof parsed.advanced_survey_removed === 'boolean') {
+          defaults.advanced_survey = parsed.advanced_survey_removed;
+        }
+      }
+      // 레거시 키 호환: point_excluded_to_paid / point_paid_to_excluded -> point_eligibility
+      if (typeof parsed.point_eligibility !== 'boolean') {
+        if (typeof parsed.point_excluded_to_paid === 'boolean') {
+          defaults.point_eligibility = parsed.point_excluded_to_paid;
+        } else if (typeof parsed.point_paid_to_excluded === 'boolean') {
+          defaults.point_eligibility = parsed.point_paid_to_excluded;
+        }
+      }
+    }
+  } catch (_e) {
+    // JSON 파싱 실패 시 기본값 유지
+  }
+  return defaults;
 }
 
 const seoulDateString = (): string => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
@@ -138,6 +204,7 @@ export function getSubscription(chatId: number): SubscriptionRecord {
       newSeminarIncludePointExcluded: false,
       intermdQuiz: false,
       seminarChanges: false,
+      seminarChangeCategories: getDefaultSeminarChangeCategories(),
       seminarLive: false,
       surveyClosing20: false,
       surveyClosing10: false,
@@ -158,6 +225,7 @@ export function getSubscription(chatId: number): SubscriptionRecord {
     newSeminarIncludePointExcluded: row.new_seminar_include_point_excluded === 1,
     intermdQuiz: row.intermd_quiz === 1,
     seminarChanges: row.seminar_changes === 1,
+    seminarChangeCategories: parseSeminarChangeCategories(row.seminar_change_categories),
     seminarLive: row.seminar_live === 1,
     surveyClosing20: row.survey_closing_20 === 1,
     surveyClosing10: row.survey_closing_10 === 1,
@@ -190,12 +258,14 @@ export function updateSubscription(
     `
     INSERT INTO subscriptions (
       chat_id, today_links, today_links_time, today_links_sent_date,
-      new_seminar, new_seminar_include_point_excluded, intermd_quiz, seminar_changes, seminar_live,
+      new_seminar, new_seminar_include_point_excluded, intermd_quiz, seminar_changes,
+      seminar_change_categories, seminar_live,
       survey_closing_20, survey_closing_10, point_conversion, doctorville_survey, medigate_symposium,
       created_at, updated_at
     ) VALUES (
       @chatId, @todayLinks, @todayLinksTime, @todayLinksSentDate,
-      @newSeminar, @newSeminarIncludePointExcluded, @intermdQuiz, @seminarChanges, @seminarLive,
+      @newSeminar, @newSeminarIncludePointExcluded, @intermdQuiz, @seminarChanges,
+      @seminarChangeCategories, @seminarLive,
       @surveyClosing20, @surveyClosing10, @pointConversion, @doctorvilleSurvey, @medigateSymposium,
       @createdAt, @updatedAt
     )
@@ -207,6 +277,7 @@ export function updateSubscription(
       new_seminar_include_point_excluded = excluded.new_seminar_include_point_excluded,
       intermd_quiz = excluded.intermd_quiz,
       seminar_changes = excluded.seminar_changes,
+      seminar_change_categories = excluded.seminar_change_categories,
       seminar_live = excluded.seminar_live,
       survey_closing_20 = excluded.survey_closing_20,
       survey_closing_10 = excluded.survey_closing_10,
@@ -224,6 +295,7 @@ export function updateSubscription(
     newSeminarIncludePointExcluded: next.newSeminarIncludePointExcluded ? 1 : 0,
     intermdQuiz: next.intermdQuiz ? 1 : 0,
     seminarChanges: next.seminarChanges ? 1 : 0,
+    seminarChangeCategories: JSON.stringify(next.seminarChangeCategories),
     seminarLive: next.seminarLive ? 1 : 0,
     surveyClosing20: next.surveyClosing20 ? 1 : 0,
     surveyClosing10: next.surveyClosing10 ? 1 : 0,
@@ -261,8 +333,20 @@ export function toggleTopic(
     case 'new_seminar_point_excluded':
     case 'new_seminar_include_point_excluded':
       return updateSubscription(chatId, { newSeminarIncludePointExcluded: !current.newSeminarIncludePointExcluded });
-    case 'seminar_changes':
-      return updateSubscription(chatId, { seminarChanges: !current.seminarChanges });
+    case 'seminar_changes': {
+      const willEnable = !current.seminarChanges;
+      const cats = { ...current.seminarChangeCategories };
+      const hasAny = ALL_SEMINAR_CHANGE_CATEGORIES.some((k) => cats[k]);
+      if (willEnable && !hasAny) {
+        for (const k of ALL_SEMINAR_CHANGE_CATEGORIES) {
+          cats[k] = true;
+        }
+      }
+      return updateSubscription(chatId, {
+        seminarChanges: willEnable,
+        seminarChangeCategories: cats,
+      });
+    }
     case 'seminar_live':
       return updateSubscription(chatId, { seminarLive: !current.seminarLive });
     case 'survey_closing_20':
@@ -276,6 +360,35 @@ export function toggleTopic(
     case 'medigate_symposium':
       return updateSubscription(chatId, { medigateSymposium: !current.medigateSymposium });
   }
+}
+
+export function toggleSeminarChangeCategory(chatId: number, category: SeminarChangeCategoryKey): SubscriptionRecord {
+  const current = getSubscription(chatId);
+  const currentCats = current.seminarChangeCategories || getDefaultSeminarChangeCategories();
+  const nextVal = !currentCats[category];
+  const nextCats = {
+    ...currentCats,
+    [category]: nextVal,
+  };
+
+  const hasAnyEnabled = ALL_SEMINAR_CHANGE_CATEGORIES.some((k) => nextCats[k]);
+
+  return updateSubscription(chatId, {
+    seminarChangeCategories: nextCats,
+    seminarChanges: nextVal ? true : hasAnyEnabled ? current.seminarChanges : false,
+  });
+}
+
+export function setSeminarChangeCategoriesAll(chatId: number, enable: boolean): SubscriptionRecord {
+  const current = getSubscription(chatId);
+  const nextCats = {} as Record<SeminarChangeCategoryKey, boolean>;
+  for (const cat of ALL_SEMINAR_CHANGE_CATEGORIES) {
+    nextCats[cat] = enable;
+  }
+  return updateSubscription(chatId, {
+    seminarChangeCategories: nextCats,
+    seminarChanges: enable ? true : current.seminarChanges,
+  });
 }
 
 export function toggleNewSeminarIncludePointExcluded(chatId: number): SubscriptionRecord {
@@ -292,11 +405,16 @@ export function setTodayLinksTime(chatId: number, time: string): SubscriptionRec
 }
 
 export function setAllTopics(chatId: number, enable: boolean): SubscriptionRecord {
+  const cats = {} as Record<SeminarChangeCategoryKey, boolean>;
+  for (const cat of ALL_SEMINAR_CHANGE_CATEGORIES) {
+    cats[cat] = enable;
+  }
   return updateSubscription(chatId, {
     todayLinks: enable,
     newSeminar: enable ? 'all' : 'off',
     intermdQuiz: enable,
     seminarChanges: enable,
+    seminarChangeCategories: cats,
     seminarLive: enable,
     surveyClosing20: enable,
     surveyClosing10: enable,
@@ -433,6 +551,130 @@ export async function sendToTopicSubscribers(
     }
     // 구독자 간 레이트리밋 방지 딜레이 (마지막 구독자 제외)
     if (idx < subscribers.length - 1) {
+      await sleep(50);
+    }
+  }
+
+  if (invalidChatIds.length > 0) {
+    for (const invalidId of invalidChatIds) {
+      removeSubscriberCompletely(invalidId);
+    }
+    logger.info(
+      `[subscription_service] 유효하지 않은 구독자 ${invalidChatIds.length}명 자동 구독 해제 완료:`,
+      invalidChatIds,
+    );
+  }
+
+  return { successCount, failCount };
+}
+
+/**
+ * 세미나 정보 변경 알림을 구독자들에게 발송합니다.
+ * 구독자별로 활성화된 카테고리에 맞는 변경 사항만 필터링하여 맞춤 메시지를 전송합니다.
+ */
+export async function sendSeminarChangesToSubscribers(
+  message: string,
+  options?: {
+    infoChanges?: SeminarInfoChange[];
+    pointChanges?: SeminarPointChange[];
+    parse_mode?: string;
+    link_preview_options?: Record<string, unknown>;
+  },
+): Promise<{ successCount: number; failCount: number }> {
+  const db = getDatabase();
+  const rows = db.prepare('SELECT * FROM subscriptions WHERE seminar_changes = 1').all() as SubscriptionRow[];
+
+  if (rows.length === 0) {
+    return { successCount: 0, failCount: 0 };
+  }
+
+  const bot = getBot('notice');
+  if (!bot) {
+    logger.warn('[subscription_service] 공지봇(noticeBot)이 초기화되지 않아 세미나 변경 알림을 발송할 수 없습니다.');
+    return { successCount: 0, failCount: rows.length };
+  }
+
+  const defaultSendOptions: Record<string, unknown> = {
+    parse_mode: options?.parse_mode || 'HTML',
+    link_preview_options: options?.link_preview_options || { is_disabled: true },
+  };
+
+  const hasStructuredChanges = options && (Array.isArray(options.infoChanges) || Array.isArray(options.pointChanges));
+
+  let successCount = 0;
+  let failCount = 0;
+  const invalidChatIds: number[] = [];
+
+  for (let idx = 0; idx < rows.length; idx++) {
+    const row = rows[idx];
+    const chatId = row.chat_id;
+
+    let targetMessage = message;
+
+    if (hasStructuredChanges) {
+      const userCategories = parseSeminarChangeCategories(row.seminar_change_categories);
+
+      const rawInfoChanges = options?.infoChanges || [];
+      const rawPointChanges = options?.pointChanges || [];
+
+      // 1. infoChanges 필터링 (구독자가 활성화한 카테고리에 속한 변경사항만 포함)
+      const filteredInfoChanges: SeminarInfoChange[] = [];
+      for (const info of rawInfoChanges) {
+        const matchedFieldChanges = info.changes.filter((ch) => {
+          const cat = categorizeSeminarFieldChange(ch);
+          const catKey = mapToSeminarChangeCategoryKey(cat);
+          return userCategories[catKey] === true;
+        });
+
+        if (matchedFieldChanges.length > 0) {
+          filteredInfoChanges.push({
+            ...info,
+            changes: matchedFieldChanges,
+          });
+        }
+      }
+
+      // 2. pointChanges 필터링 (point_paid 카테고리가 켜져 있을 때만 포함)
+      const filteredPointChanges: SeminarPointChange[] = userCategories['point_paid'] === true ? rawPointChanges : [];
+
+      if (filteredInfoChanges.length === 0 && filteredPointChanges.length === 0) {
+        // 이 구독자가 수신하도록 설정한 카테고리의 변경 사항이 없으므로 스킵
+        continue;
+      }
+
+      const formatted = formatSeminarChangeNotification(filteredInfoChanges, filteredPointChanges);
+      if (!formatted) {
+        continue;
+      }
+      targetMessage = formatted;
+    }
+
+    try {
+      const chunks = splitTelegramMessage(targetMessage, { maxLength: TELEGRAM_SAFE_MESSAGE_LENGTH });
+      for (let i = 0; i < chunks.length; i++) {
+        await bot.telegram.sendMessage(chatId, chunks[i], defaultSendOptions);
+        if (i < chunks.length - 1) {
+          await sleep(100);
+        }
+      }
+      successCount++;
+    } catch (error) {
+      failCount++;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error(`[subscription_service] [seminar_changes] chatId(${chatId}) 발송 실패:`, errorMessage);
+
+      const lower = errorMessage.toLowerCase();
+      if (
+        lower.includes('forbidden') ||
+        lower.includes('blocked') ||
+        lower.includes('chat not found') ||
+        lower.includes('deactivated')
+      ) {
+        invalidChatIds.push(chatId);
+      }
+    }
+
+    if (idx < rows.length - 1) {
       await sleep(50);
     }
   }
@@ -886,6 +1128,16 @@ export function buildMainMenu(chatId: number): { text: string; replyMarkup: Inli
       ? `${sub.surveyClosing20 ? '20분전🟢' : ''}${sub.surveyClosing20 && sub.surveyClosing10 ? ' ' : ''}${sub.surveyClosing10 ? '10분전🟢' : ''}`
       : 'OFF 🔴';
 
+  const cats = sub.seminarChangeCategories || getDefaultSeminarChangeCategories();
+  const enabledCatCount = ALL_SEMINAR_CHANGE_CATEGORIES.filter((k) => cats[k]).length;
+  const seminarChangesSummary = !sub.seminarChanges
+    ? '🔴 OFF'
+    : enabledCatCount === ALL_SEMINAR_CHANGE_CATEGORIES.length
+      ? '🟢 ON (전체 카테고리)'
+      : enabledCatCount === 0
+        ? '🔴 OFF (모든 카테고리 꺼짐)'
+        : `🟢 ON (${enabledCatCount}/${ALL_SEMINAR_CHANGE_CATEGORIES.length}개 선택)`;
+
   const text = [
     '🔔 <b>공지봇 맞춤 알림 구독 설정</b>',
     '',
@@ -897,7 +1149,7 @@ export function buildMainMenu(chatId: number): { text: string; replyMarkup: Inli
     '📋 <b>[닥터빌 알림 구독 현황]</b> <i>(👥 항목별 현재 구독자 수)</i>',
     `• 🔗 <b>오늘의 링크</b>: ${sub.todayLinks ? `🟢 ON (수신 시간: ${sub.todayLinksTime})` : '🔴 OFF'} <i>(👥 ${stats.todayLinks}명)</i>`,
     `• 🆕 <b>신규 세미나</b>: ${newSeminarStatusText} <i>(👥 ${stats.newSeminar}명)</i>`,
-    `• 🔄 <b>세미나 정보 변경/심화</b>: ${sub.seminarChanges ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.seminarChanges}명)</i>`,
+    `• 🔄 <b>세미나 정보 변경</b>: ${seminarChangesSummary} <i>(👥 ${stats.seminarChanges}명)</i>`,
     `• 🔴 <b>세미나 라이브/퀴즈</b>: ${sub.seminarLive ? '🟢 ON' : '🔴 OFF'} (마감알림: ${surveySummary}) <i>(👥 라이브 ${stats.seminarLive}명 / 20분 ${stats.surveyClosing20}명 / 10분 ${stats.surveyClosing10}명)</i>`,
     `• 💰 <b>네페 포인트 전환</b>: ${sub.pointConversion ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.pointConversion}명)</i>`,
     `• 📋 <b>닥터빌 설문 (시장조사 등)</b>: ${sub.doctorvilleSurvey ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.doctorvilleSurvey}명)</i>`,
@@ -922,8 +1174,8 @@ export function buildMainMenu(chatId: number): { text: string; replyMarkup: Inli
     ],
     [
       {
-        text: `🔄 세미나 정보 변경 (👥 ${stats.seminarChanges}명): ${sub.seminarChanges ? 'ON 🟢' : 'OFF 🔴'}`,
-        callback_data: 'sub:toggle:seminar_changes',
+        text: `🔄 세미나 정보 변경 (👥 ${stats.seminarChanges}명): ${sub.seminarChanges ? 'ON 🟢' : 'OFF 🔴'} ⚙️`,
+        callback_data: 'sub:menu:seminar_changes',
       },
     ],
     [
@@ -961,6 +1213,61 @@ export function buildMainMenu(chatId: number): { text: string; replyMarkup: Inli
     text,
     replyMarkup: {
       inline_keyboard: inlineKeyboard,
+    },
+  };
+}
+
+export function buildSeminarChangesMenu(chatId: number): { text: string; replyMarkup: InlineKeyboardMarkup } {
+  const sub = getSubscription(chatId);
+  const categories = sub.seminarChangeCategories || getDefaultSeminarChangeCategories();
+  const enabledCount = ALL_SEMINAR_CHANGE_CATEGORIES.filter((k) => categories[k]).length;
+
+  const text = [
+    '🔄 <b>세미나 정보 변경 알림 카테고리 설정</b>',
+    '',
+    '세미나의 시간, 정원, 비공개 여부, 포인트 지급 등의 변경 사항이 감지되었을 때 수신할 카테고리를 선택하세요.',
+    '',
+    `• 전체 수신 상태: <b>${sub.seminarChanges ? '🟢 ON' : '🔴 OFF'}</b>`,
+    `• 선택된 카테고리: <b>${enabledCount}/${ALL_SEMINAR_CHANGE_CATEGORIES.length}개 활성화</b>`,
+    '',
+    '💡 <i>버튼을 눌러 각 카테고리별로 알림을 켜거나(ON) 끌(OFF) 수 있습니다.</i>',
+    '💡 <i>증원/감원, 공개/비공개 전환, 심화설문 추가/해제, 포인트 주는/안주는 세미나로 변경은 각각 하나의 카테고리로 함께 관리됩니다.</i>',
+  ].join('\n');
+
+  const keyboardRows: Array<Array<{ text: string; callback_data: string }>> = [];
+
+  // 마스터 스위치 토글
+  keyboardRows.push([
+    {
+      text: `🔄 세미나 변경 알림: ${sub.seminarChanges ? 'ON 🟢 (알림 끄기)' : 'OFF 🔴 (알림 켜기)'}`,
+      callback_data: 'sub:toggle:seminar_changes',
+    },
+  ]);
+
+  // 전체 켜기 / 전체 끄기
+  keyboardRows.push([
+    { text: '✅ 전체 카테고리 켜기', callback_data: 'sub:set_cat_all:1' },
+    { text: '⬜ 전체 카테고리 끄기', callback_data: 'sub:set_cat_all:0' },
+  ]);
+
+  // 각 카테고리별 토글 버튼
+  for (const cat of ALL_SEMINAR_CHANGE_CATEGORIES) {
+    const isEnabled = Boolean(categories[cat]);
+    const label = SEMINAR_CHANGE_CATEGORY_LABELS[cat];
+    keyboardRows.push([
+      {
+        text: `${label}: ${isEnabled ? 'ON 🟢' : 'OFF 🔴'}`,
+        callback_data: `sub:toggle_cat:${cat}`,
+      },
+    ]);
+  }
+
+  keyboardRows.push([{ text: '◀ 메인 설정으로 돌아가기', callback_data: 'sub:menu:main' }]);
+
+  return {
+    text,
+    replyMarkup: {
+      inline_keyboard: keyboardRows,
     },
   };
 }

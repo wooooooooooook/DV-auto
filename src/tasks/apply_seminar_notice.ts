@@ -105,6 +105,51 @@ export const CATEGORY_ORDER: SeminarChangeCategory[] = [
   'etc',
 ];
 
+export type SeminarChangeCategoryKey =
+  | 'time_changed'
+  | 'capacity'
+  | 'visibility'
+  | 'advanced_survey'
+  | 'point_eligibility'
+  | 'point_paid'
+  | 'etc';
+
+export const ALL_SEMINAR_CHANGE_CATEGORIES: SeminarChangeCategoryKey[] = [
+  'time_changed',
+  'capacity',
+  'visibility',
+  'advanced_survey',
+  'point_eligibility',
+  'point_paid',
+  'etc',
+];
+
+export const SEMINAR_CHANGE_CATEGORY_LABELS: Record<SeminarChangeCategoryKey, string> = {
+  time_changed: '⏰ 세미나시간변경',
+  capacity: '👥 증원/감원',
+  visibility: '🔒 공개/비공개 전환',
+  advanced_survey: '✨ 심화설문 추가/해제',
+  point_eligibility: '💰 포인트 주는/안주는 세미나로 변경',
+  point_paid: '🎁 심화포인트지급',
+  etc: '📝 기타 정보 변경',
+};
+
+export function mapToSeminarChangeCategoryKey(category: SeminarChangeCategory): SeminarChangeCategoryKey {
+  if (category === 'capacity_increased' || category === 'capacity_decreased') {
+    return 'capacity';
+  }
+  if (category === 'private_to_public' || category === 'public_to_private') {
+    return 'visibility';
+  }
+  if (category === 'advanced_survey_added' || category === 'advanced_survey_removed') {
+    return 'advanced_survey';
+  }
+  if (category === 'point_excluded_to_paid' || category === 'point_paid_to_excluded') {
+    return 'point_eligibility';
+  }
+  return category;
+}
+
 export function categorizeSeminarFieldChange(change: SeminarFieldChange): SeminarChangeCategory {
   const { field, oldValue, newValue } = change;
 

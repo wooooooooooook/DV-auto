@@ -739,7 +739,7 @@ export async function syncSeminars(options: ApplySeminarOptions = {}): Promise<S
     if (changeNotificationText) {
       clearAdvancedSeminarsCache();
       await sendTelegram(changeNotificationText, null, { parse_mode: 'HTML' }).catch(() => {});
-      await sendSeminarChangesToSubscribers(changeNotificationText).catch(() => {});
+      await sendSeminarChangesToSubscribers(changeNotificationText, { infoChanges, pointChanges }).catch(() => {});
     } else if (newlyAdded.length > 0) {
       clearAdvancedSeminarsCache();
     }

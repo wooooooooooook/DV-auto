@@ -274,6 +274,15 @@ function setBot(name: BotName, instance: Telegraf | null): void {
                   alertMessage = updatedSub.seminarChanges
                     ? '🔄 세미나 정보 변경 알림이 켜졌습니다.'
                     : '🔄 세미나 정보 변경 알림이 꺼졌습니다.';
+                  await ctx.answerCbQuery(alertMessage).catch(() => {});
+                  const { text, replyMarkup } = subService.buildSeminarChangesMenu(chatId);
+                  await ctx
+                    .editMessageText(text, {
+                      parse_mode: 'HTML',
+                      reply_markup: replyMarkup,
+                    })
+                    .catch(() => {});
+                  return;
                 } else if (topic === 'seminar_live') {
                   alertMessage = updatedSub.seminarLive
                     ? '🔴 세미나 라이브/퀴즈 알림이 켜졌습니다.'
@@ -377,6 +386,56 @@ function setBot(name: BotName, instance: Telegraf | null): void {
               if (actionData === 'menu:seminar_live' || actionData === 'menu:survey_closing') {
                 await ctx.answerCbQuery().catch(() => {});
                 const { text, replyMarkup } = subService.buildSeminarLiveMenu(chatId);
+                await ctx
+                  .editMessageText(text, {
+                    parse_mode: 'HTML',
+                    reply_markup: replyMarkup,
+                  })
+                  .catch(() => {});
+                return;
+              }
+
+              if (actionData === 'menu:seminar_changes') {
+                await ctx.answerCbQuery().catch(() => {});
+                const { text, replyMarkup } = subService.buildSeminarChangesMenu(chatId);
+                await ctx
+                  .editMessageText(text, {
+                    parse_mode: 'HTML',
+                    reply_markup: replyMarkup,
+                  })
+                  .catch(() => {});
+                return;
+              }
+
+              if (actionData.startsWith('toggle_cat:')) {
+                const category = actionData.replace('toggle_cat:', '') as Parameters<
+                  typeof subService.toggleSeminarChangeCategory
+                >[1];
+                const updatedSub = subService.toggleSeminarChangeCategory(chatId, category);
+                const isEnabled = Boolean(updatedSub.seminarChangeCategories?.[category]);
+                const catLabel = subService.SEMINAR_CHANGE_CATEGORY_LABELS[category] || category;
+                const alertMessage = isEnabled
+                  ? `[${catLabel}] 알림이 켜졌습니다.`
+                  : `[${catLabel}] 알림이 꺼졌습니다.`;
+                await ctx.answerCbQuery(alertMessage).catch(() => {});
+                const { text, replyMarkup } = subService.buildSeminarChangesMenu(chatId);
+                await ctx
+                  .editMessageText(text, {
+                    parse_mode: 'HTML',
+                    reply_markup: replyMarkup,
+                  })
+                  .catch(() => {});
+                return;
+              }
+
+              if (actionData.startsWith('set_cat_all:')) {
+                const enable = actionData.replace('set_cat_all:', '') === '1';
+                subService.setSeminarChangeCategoriesAll(chatId, enable);
+                const alertMessage = enable
+                  ? '모든 세미나 변경 카테고리가 켜졌습니다.'
+                  : '모든 세미나 변경 카테고리가 꺼졌습니다.';
+                await ctx.answerCbQuery(alertMessage).catch(() => {});
+                const { text, replyMarkup } = subService.buildSeminarChangesMenu(chatId);
                 await ctx
                   .editMessageText(text, {
                     parse_mode: 'HTML',

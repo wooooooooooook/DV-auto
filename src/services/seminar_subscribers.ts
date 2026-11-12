@@ -2,8 +2,9 @@ import {
   getSubscribersForTopic,
   updateSubscription,
   getSubscription,
-  sendToTopicSubscribers,
+  sendSeminarChangesToSubscribers as sendSeminarChangesToSubscribersImpl,
 } from './subscription_service';
+import type { SeminarInfoChange, SeminarPointChange } from '../tasks/apply_seminar_notice';
 
 export const SEMINAR_CHANGE_SUBSCRIBERS_KEY = 'seminar_change_subscribers';
 
@@ -42,13 +43,15 @@ export function removeSeminarChangeSubscriber(chatId: number): boolean {
 
 /**
  * 공지봇(noticeBot)을 통해 세미나 정보 변경 알림 구독자들에게 메시지를 발송합니다.
+ * 카테고리별 맞춤 필터링이 적용됩니다.
  * 차단되었거나 유효하지 않은 채팅방은 자동으로 구독자 목록에서 정리됩니다.
  */
 export async function sendSeminarChangesToSubscribers(
   message: string,
+  options?: {
+    infoChanges?: SeminarInfoChange[];
+    pointChanges?: SeminarPointChange[];
+  },
 ): Promise<{ successCount: number; failCount: number }> {
-  return sendToTopicSubscribers('seminar_changes', message, {
-    parse_mode: 'HTML',
-    link_preview_options: { is_disabled: true },
-  });
+  return sendSeminarChangesToSubscribersImpl(message, options);
 }
