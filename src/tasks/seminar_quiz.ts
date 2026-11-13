@@ -908,6 +908,8 @@ type SeminarQuizResult = {
   success: boolean;
   hasQuizResult: boolean;
   message: string;
+  /** Playwright가 감지한 심화설문 의심 여부 (호출 측에서 채널 공지 edit 처리에 활용) */
+  isSuspectedAdvancedSurvey?: boolean;
 };
 
 /**
@@ -1095,26 +1097,27 @@ async function processSeminarQuiz(
 
         const isQuiz = q.kind === 'quiz' || httpQuizNums.has(qNum);
 
-        // [퀴즈] 문항: 족보 매칭 또는 HTTP API 결과 사용
+        // [퀴즈] 문항: HTTP API 정답을 1순위로 사용, 없을 때만 족보(UI 파싱) fallback
         if (isQuiz) {
-          const matchingKeywords = findMatchingKeywords(q.questionText, cheatsheet);
-          if (matchingKeywords.length > 1) {
-            _hasMultipleMatches = true;
-            multipleMatches = matchingKeywords;
-          }
-          const bestMatch = resolveBestKeywordMatch(q.questionText, q.options, cheatsheet);
-          if (bestMatch) {
-            matchedKeyword = bestMatch.keyword;
-            selectedIndex = bestMatch.option.index;
-            selectedText = bestMatch.option.text;
+          const httpQ = httpQuizMap.get(qNum);
+          if (httpQ && httpQ.selectedIndex !== null) {
+            // HTTP API 1순위
+            matchedKeyword = httpQ.matchedKeyword;
+            selectedIndex = httpQ.selectedIndex;
+            selectedText = httpQ.selectedText;
+            multipleMatches = httpQ.multipleMatches || null;
           } else {
-            // HTTP API 매칭 결과 fallback
-            const httpQ = httpQuizMap.get(qNum);
-            if (httpQ && httpQ.selectedIndex !== null) {
-              matchedKeyword = httpQ.matchedKeyword;
-              selectedIndex = httpQ.selectedIndex;
-              selectedText = httpQ.selectedText;
-              multipleMatches = httpQ.multipleMatches || null;
+            // HTTP API 결과 없음 → 족보 매칭 fallback
+            const matchingKeywords = findMatchingKeywords(q.questionText, cheatsheet);
+            if (matchingKeywords.length > 1) {
+              _hasMultipleMatches = true;
+              multipleMatches = matchingKeywords;
+            }
+            const bestMatch = resolveBestKeywordMatch(q.questionText, q.options, cheatsheet);
+            if (bestMatch) {
+              matchedKeyword = bestMatch.keyword;
+              selectedIndex = bestMatch.option.index;
+              selectedText = bestMatch.option.text;
             } else {
               _hasUnknown = true;
             }
@@ -1337,10 +1340,10 @@ async function processSeminarQuiz(
       }
     }
 
-    // 채널용 결과: [퀴즈] 문항만 필터링 (UI에서 누락되었더라도 HTTP API에서 발견된 경우 HTTP 결과로 채움)
-    let channelResults = accumulatedResults.filter((r) => CHANNEL_ELIGIBLE_KINDS.has(r.kind));
-    if (channelResults.length === 0 && httpQuizResult && httpQuizResult.quizzes.length > 0) {
-      console.log('[seminar_quiz] UI에서 퀴즈를 직접 감지하지 못했으나 HTTP API 퀴즈 결과로 대체합니다.');
+    // 채널용 결과: HTTP API 퀴즈 결과를 1순위로 사용 (UI 파싱 순서 오류 방지)
+    // HTTP API에 퀴즈가 있으면 그대로 사용, 없는 경우에만 UI 파싱 결과로 fallback
+    let channelResults: QuizResult[];
+    if (httpQuizResult && httpQuizResult.quizzes.length > 0) {
       channelResults = httpQuizResult.quizzes.map((q) => ({
         questionIndex: q.questionNumber,
         questionText: q.questionText,
@@ -1349,17 +1352,21 @@ async function processSeminarQuiz(
         matchedKeyword: q.matchedKeyword,
         multipleMatches: q.multipleMatches || null,
         marker: '[퀴즈]',
-        kind: 'quiz',
+        kind: 'quiz' as QuizResult['kind'],
       }));
+    } else {
+      // HTTP API 미사용 또는 실패 시 → UI 파싱 결과 fallback
+      channelResults = accumulatedResults.filter((r) => CHANNEL_ELIGIBLE_KINDS.has(r.kind));
     }
 
-    // questionIndex 기준 중복 방어
+    // questionIndex 기준 중복 방어 및 정렬 (DOM 순서와 문항 번호가 다를 수 있으므로 정렬 필수)
     const seenQuizIndices = new Set<number>();
     channelResults = channelResults.filter((r) => {
       if (seenQuizIndices.has(r.questionIndex)) return false;
       seenQuizIndices.add(r.questionIndex);
       return true;
     });
+    channelResults.sort((a, b) => a.questionIndex - b.questionIndex);
 
     _hasUnknown = channelResults.some((r) => r.selectedIndex === null);
     _hasMultipleMatches = channelResults.some((r) => r.multipleMatches && r.multipleMatches.length > 1);
@@ -1394,6 +1401,21 @@ async function processSeminarQuiz(
     if (isAdvancedWithZeroSubjective) {
       console.log(`[seminar_quiz] 심화정보가 있으나 주관식이 0개이므로 [심화설문?]으로 변경 (자동 제출은 생략 유지)`);
       suspectedAdvancedSurvey = true;
+    }
+
+    // containsAdvancedSurveyNotice(body.innerText) 오탐 방어:
+    // 단일 페이지(페이지 이동 없음)에서 주관식이 없고 퀴즈 문항만 존재하는 경우
+    // body.innerText의 안내 문구 키워드 매칭으로 인한 심화설문 의심을 해제한다.
+    if (suspectedAdvancedSurvey && !effectiveIsAdvancedSurvey && currentPageNum === 1) {
+      const hasQuizOnly = channelResults.length > 0 && !hasSubjectiveInSurvey;
+      // HTTP API에서도 심화설문 의심이 아닌 경우에만 해제
+      const httpAlsoNotSuspected = !httpQuizResult?.isSuspectedAdvancedSurvey;
+      if (hasQuizOnly && httpAlsoNotSuspected) {
+        console.log(
+          `[seminar_quiz] 단일 페이지 + 주관식 없음 + 퀴즈 존재 + HTTP API 심화의심 없음 → suspectedAdvancedSurvey 해제`,
+        );
+        suspectedAdvancedSurvey = false;
+      }
     }
 
     // 심화설문 문항 수: HTTP API 또는 마지막 페이지의 문항 수로 산정 (주관식이 0개인 경우 심화N 대신 심화설문?으로 처리하기 위해 0)
@@ -1495,6 +1517,7 @@ async function processSeminarQuiz(
         success: true,
         hasQuizResult: channelResults.length > 0,
         message: resultMessage,
+        isSuspectedAdvancedSurvey: suspectedAdvancedSurvey,
       };
     }
 
@@ -1526,6 +1549,7 @@ async function processSeminarQuiz(
         success: true,
         hasQuizResult: channelResults.length > 0,
         message: resultMessage,
+        isSuspectedAdvancedSurvey: false,
       };
     }
 
@@ -1614,7 +1638,12 @@ async function processSeminarQuiz(
       await handleUnknownQuestions(accumulatedQuestions, accumulatedResults, seminarId, isAdvancedSurvey);
     }
 
-    return { success: true, hasQuizResult: channelResults.length > 0, message: resultMessage };
+    return {
+      success: true,
+      hasQuizResult: channelResults.length > 0,
+      message: resultMessage,
+      isSuspectedAdvancedSurvey: false,
+    };
   } catch (e) {
     console.error('[seminar_quiz] 오류', e && typeof e === 'object' && 'stack' in e ? (e as Error).stack : e);
     const message = e instanceof Error ? e.message : String(e);

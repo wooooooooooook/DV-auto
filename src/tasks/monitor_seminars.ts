@@ -893,6 +893,7 @@ async function monitorSeminars(
 
         // 2. Playwright 브라우저 실행 (심화: 문항체크+마지막페이지 / 일반: 문항체크+자동제출)
         let browserQuizMessage: string | null = null;
+        let browserSuspectedAdvancedSurvey: boolean | undefined;
         try {
           await withBrowserContext(providedContext, async (ctx) => {
             const res = await handleSeminarEndAndQuiz(
@@ -907,14 +908,20 @@ async function monitorSeminars(
               item.url,
             );
             browserQuizMessage = res.message;
+            browserSuspectedAdvancedSurvey = res.isSuspectedAdvancedSurvey;
           });
         } catch (quizErr) {
           console.warn(`[${periodName}] 초기 세미나 퀴즈 처리 건너뜀 (${item.name}):`, quizErr);
         }
 
         // 3. 브라우저에서 새로운 정답이 획득되었거나 갱신된 경우 현황판 2차 갱신
-        if (browserQuizMessage && browserQuizMessage !== item.quizResultMessage) {
-          item.quizResultMessage = browserQuizMessage;
+        // Playwright가 심화설문?을 감지한 경우에도 채널 공지 수정
+        const suspectedFlagChanged2 = browserSuspectedAdvancedSurvey === true && !item.isSuspectedAdvancedSurvey;
+        if (suspectedFlagChanged2) {
+          item.isSuspectedAdvancedSurvey = true;
+        }
+        if ((browserQuizMessage && browserQuizMessage !== item.quizResultMessage) || suspectedFlagChanged2) {
+          item.quizResultMessage = browserQuizMessage || item.quizResultMessage;
           if (lastStatusNoticeMessageId) {
             const boardRes = await updateStatusBoardNotice(
               periodName,
@@ -1201,6 +1208,7 @@ async function monitorSeminars(
 
           // 3. Playwright 브라우저 실행 (심화: 문항체크+마지막페이지 / 일반: 문항체크+자동제출)
           let browserQuizMessage: string | null = null;
+          let browserSuspectedAdvancedSurvey: boolean | undefined;
           await withBrowserContext(providedContext, async (ctx) => {
             const res = await handleSeminarEndAndQuiz(
               ctx,
@@ -1214,11 +1222,18 @@ async function monitorSeminars(
               currentSeminar.url || targetUrl,
             );
             browserQuizMessage = res.message;
+            browserSuspectedAdvancedSurvey = res.isSuspectedAdvancedSurvey;
           });
 
           // 4. 브라우저에서 새로운 정답이 획득되었거나 갱신된 경우 현황판 2차 갱신 (인플레이스 수정)
-          if (browserQuizMessage && browserQuizMessage !== quizResultMessage) {
-            currentSeminar.quizResultMessage = browserQuizMessage;
+          // Playwright가 심화설문?을 감지한 경우에도 채널 공지 수정
+          const suspectedFlagChanged =
+            browserSuspectedAdvancedSurvey === true && !currentSeminar.isSuspectedAdvancedSurvey;
+          if (suspectedFlagChanged) {
+            currentSeminar.isSuspectedAdvancedSurvey = true;
+          }
+          if ((browserQuizMessage && browserQuizMessage !== quizResultMessage) || suspectedFlagChanged) {
+            currentSeminar.quizResultMessage = browserQuizMessage || quizResultMessage;
             if (lastStatusNoticeMessageId) {
               const boardRes = await updateStatusBoardNotice(
                 periodName,

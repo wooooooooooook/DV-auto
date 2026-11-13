@@ -50,7 +50,7 @@ export async function handleSeminarEndAndQuiz(
     isSuspectedAdvancedSurvey?: boolean;
   },
   fallbackUrl: string,
-): Promise<{ message: string | null; foundSurveyButton: boolean }> {
+): Promise<{ message: string | null; foundSurveyButton: boolean; isSuspectedAdvancedSurvey?: boolean }> {
   // 포인트미지급 세미나는 설문/퀴즈 처리 건너뛰기
   if (seminar.isSurveyPointExcluded) {
     console.log(
@@ -64,6 +64,7 @@ export async function handleSeminarEndAndQuiz(
   let quizPage: Page = surveyPage;
   let quizResultMessage: string | null = null;
   let foundSurveyButton = false;
+  let isSuspectedAdvancedSurveyResult: boolean | undefined = undefined;
 
   try {
     await ensureLoggedIn({ page: surveyPage, context });
@@ -150,6 +151,9 @@ export async function handleSeminarEndAndQuiz(
       if (quizResult.success && quizResult.hasQuizResult) {
         quizResultMessage = quizResult.message;
       }
+      if (quizResult.isSuspectedAdvancedSurvey !== undefined) {
+        isSuspectedAdvancedSurveyResult = quizResult.isSuspectedAdvancedSurvey;
+      }
     } else {
       console.log(`[monitor_seminars] "설문참여" 버튼을 찾지 못함 (${seminar.seminarId})`);
       // 버튼이 없어도 현재 페이지에서 퀴즈 찾기 시도
@@ -161,6 +165,9 @@ export async function handleSeminarEndAndQuiz(
       );
       if (quizResult.success && quizResult.hasQuizResult) {
         quizResultMessage = quizResult.message;
+      }
+      if (quizResult.isSuspectedAdvancedSurvey !== undefined) {
+        isSuspectedAdvancedSurveyResult = quizResult.isSuspectedAdvancedSurvey;
       }
     }
   } catch (e) {
@@ -189,5 +196,5 @@ export async function handleSeminarEndAndQuiz(
     }
     await surveyPage.close().catch(() => {});
   }
-  return { message: quizResultMessage, foundSurveyButton };
+  return { message: quizResultMessage, foundSurveyButton, isSuspectedAdvancedSurvey: isSuspectedAdvancedSurveyResult };
 }
