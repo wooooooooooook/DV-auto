@@ -678,6 +678,15 @@ describe('apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스�
         changes: [{ field: 'totalCount', label: '총원', oldValue: '200', newValue: '300' }],
       },
       {
+        seminarId: '1003_2',
+        name: '심화설문 어디갔지 세미나',
+        date: '2026-08-25',
+        isAdvancedSurvey: true,
+        isSuspectedAdvancedSurvey: true,
+        suspectedAdvancedType: 'advanced_without_subjective',
+        changes: [{ field: 'totalCount', label: '총원', oldValue: '100', newValue: '150' }],
+      },
+      {
         seminarId: '1004',
         name: '포인트미지급 세미나',
         date: '2026-08-25',
@@ -719,8 +728,12 @@ describe('apply_seminar 정보 변경 및 포인트 신규 지급 감지 테스�
       '진료과 없는 비공개 세미나에 🔒<b>[비공개]</b> 태그 부착 확인',
     );
     assert(
-      message.includes('✨<b>[심화설문?]</b> 심화설문의심 세미나'),
-      '심화설문 의심 세미나에 ✨<b>[심화설문?]</b> 태그 부착 확인',
+      message.includes('✨<b>[혹시 심화설문?]</b> 심화설문의심 세미나'),
+      '심화설문 의심 세미나에 ✨<b>[혹시 심화설문?]</b> 태그 부착 확인',
+    );
+    assert(
+      message.includes('✨<b>[심화설문 어디갔지🧐]</b> 심화설문 어디갔지 세미나'),
+      '심화설문 주관식 부재 세미나에 ✨<b>[심화설문 어디갔지🧐]</b> 태그 부착 확인',
     );
     assert(
       message.includes('🚫<b>[포인트미지급]</b> <s>포인트미지급 세미나</s>'),

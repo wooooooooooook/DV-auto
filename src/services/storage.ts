@@ -56,6 +56,8 @@ function initDatabase(db: Database.Database): void {
       is_closed INTEGER DEFAULT 0,
       hidden_yn TEXT DEFAULT 'N',
       disease_category_nm TEXT,
+      is_suspected_advanced_survey INTEGER DEFAULT 0,
+      suspected_advanced_type TEXT,
       updated_at INTEGER NOT NULL
     );
 
@@ -142,6 +144,24 @@ function initDatabase(db: Database.Database): void {
 
   try {
     db.exec('ALTER TABLE subscriptions ADD COLUMN seminar_change_categories TEXT DEFAULT NULL');
+  } catch (_e) {
+    // 이미 존재하는 경우 무시
+  }
+
+  try {
+    db.exec('ALTER TABLE seminars ADD COLUMN is_suspected_advanced_survey INTEGER DEFAULT 0');
+  } catch (_e) {
+    // 이미 존재하는 경우 무시
+  }
+
+  try {
+    db.exec('ALTER TABLE seminars ADD COLUMN suspected_advanced_type TEXT');
+  } catch (_e) {
+    // 이미 존재하는 경우 무시
+  }
+
+  try {
+    db.exec('CREATE INDEX IF NOT EXISTS idx_seminars_suspected ON seminars(is_suspected_advanced_survey, date)');
   } catch (_e) {
     // 이미 존재하는 경우 무시
   }

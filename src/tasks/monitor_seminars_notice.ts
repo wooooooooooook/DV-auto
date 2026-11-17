@@ -17,6 +17,7 @@ import {
   escapeHtml,
   getSeoulKoreanDate,
 } from '../modules/utils';
+import type { SuspectedAdvancedType } from '../services/seminar_repository';
 
 export { formatPrivateSeminarTag, truncateSeminarName, formatSeminarDisplayName };
 
@@ -40,6 +41,7 @@ export interface MonitoredSeminarItem {
   isSurveyPointExcluded?: boolean;
   isAdvancedSurvey?: boolean;
   isSuspectedAdvancedSurvey?: boolean;
+  suspectedAdvancedType?: SuspectedAdvancedType;
   hasEntryHistory?: boolean;
   autoEnterDone?: boolean;
   isEntryStarted?: boolean;

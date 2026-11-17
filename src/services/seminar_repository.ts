@@ -1,6 +1,8 @@
 import { getDatabase } from './storage';
 import { enrichSeminarFromDetail } from './seminar_enrichment';
 
+export type SuspectedAdvancedType = 'advanced_without_subjective' | 'not_advanced_suspected';
+
 export type SeminarPointStatus = {
   pointPaid?: boolean;
   point?: number;
@@ -31,6 +33,7 @@ export type SeminarListItem = {
   hiddenYn?: string;
   diseaseCategoryNm?: string;
   isSuspectedAdvancedSurvey?: boolean;
+  suspectedAdvancedType?: SuspectedAdvancedType;
 } & SeminarPointStatus;
 
 export type SeminarDbRow = {
@@ -59,6 +62,8 @@ export type SeminarDbRow = {
   is_closed?: number;
   hidden_yn?: string | null;
   disease_category_nm?: string | null;
+  is_suspected_advanced_survey?: number;
+  suspected_advanced_type?: string | null;
   updated_at: number;
 };
 
@@ -90,6 +95,8 @@ export function rowToSeminarListItem(row: SeminarDbRow): SeminarListItem {
     isClosed: row.is_closed === 1,
     hiddenYn: row.hidden_yn || (row.is_closed === 1 ? 'Y' : 'N'),
     diseaseCategoryNm: row.disease_category_nm ?? undefined,
+    isSuspectedAdvancedSurvey: row.is_suspected_advanced_survey === 1,
+    suspectedAdvancedType: (row.suspected_advanced_type as SuspectedAdvancedType) ?? undefined,
   };
 }
 
@@ -116,6 +123,8 @@ export function mergeSeminarRecord(existing: SeminarListItem | undefined, incomi
     return {
       ...incoming,
       isAdvancedSurvey: isPaid ? true : (incoming.isAdvancedSurvey ?? false),
+      isSuspectedAdvancedSurvey: incoming.isSuspectedAdvancedSurvey ?? false,
+      suspectedAdvancedType: incoming.suspectedAdvancedType,
     };
   }
 
@@ -129,6 +138,12 @@ export function mergeSeminarRecord(existing: SeminarListItem | undefined, incomi
 
   // 포인트 지급이 확인된 경우 심화세미나로 변경 및 유지
   const isAdvancedSurvey = pointPaid ? true : (incoming.isAdvancedSurvey ?? existing.isAdvancedSurvey ?? false);
+  const isSuspectedAdvancedSurvey =
+    incoming.isSuspectedAdvancedSurvey !== undefined
+      ? incoming.isSuspectedAdvancedSurvey
+      : (existing.isSuspectedAdvancedSurvey ?? false);
+  const suspectedAdvancedType =
+    incoming.suspectedAdvancedType !== undefined ? incoming.suspectedAdvancedType : existing.suspectedAdvancedType;
 
   return {
     ...existing,
@@ -142,6 +157,8 @@ export function mergeSeminarRecord(existing: SeminarListItem | undefined, incomi
     totalCount: incoming.totalCount || existing.totalCount || '',
     nightTime: incoming.nightTime ?? existing.nightTime ?? false,
     isAdvancedSurvey,
+    isSuspectedAdvancedSurvey,
+    suspectedAdvancedType,
     isPointExcluded: incoming.isPointExcluded ?? existing.isPointExcluded,
     processState: incoming.processState ?? existing.processState,
     cancelProcessState: incoming.cancelProcessState ?? existing.cancelProcessState,
@@ -206,13 +223,15 @@ export function upsertSeminar(incoming: SeminarListItem): SeminarListItem {
         night_time, is_point_excluded, is_advanced_survey, process_state,
         cancel_process_state, seminar_completed, point_paid, point,
         point_text, point_date, point_content, point_checked_at,
-        detected_date, detected_at, urgent_notified, is_closed, hidden_yn, disease_category_nm, updated_at
+        detected_date, detected_at, urgent_notified, is_closed, hidden_yn, disease_category_nm,
+        is_suspected_advanced_survey, suspected_advanced_type, updated_at
       ) VALUES (
         ?, ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?,
         ?, ?, ?, ?,
         ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?, ?,
+        ?, ?, ?
       )
     `);
 
@@ -242,6 +261,8 @@ export function upsertSeminar(incoming: SeminarListItem): SeminarListItem {
       merged.isClosed ? 1 : 0,
       merged.hiddenYn ?? 'N',
       merged.diseaseCategoryNm ?? null,
+      merged.isSuspectedAdvancedSurvey ? 1 : 0,
+      merged.suspectedAdvancedType ?? null,
       now,
     );
   });
@@ -267,13 +288,15 @@ export function upsertSeminars(incomingList: SeminarListItem[]): SeminarListItem
         night_time, is_point_excluded, is_advanced_survey, process_state,
         cancel_process_state, seminar_completed, point_paid, point,
         point_text, point_date, point_content, point_checked_at,
-        detected_date, detected_at, urgent_notified, is_closed, hidden_yn, disease_category_nm, updated_at
+        detected_date, detected_at, urgent_notified, is_closed, hidden_yn, disease_category_nm,
+        is_suspected_advanced_survey, suspected_advanced_type, updated_at
       ) VALUES (
         ?, ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?,
         ?, ?, ?, ?,
         ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?, ?,
+        ?, ?, ?
       )
     `);
 
@@ -312,6 +335,8 @@ export function upsertSeminars(incomingList: SeminarListItem[]): SeminarListItem
         merged.isClosed ? 1 : 0,
         merged.hiddenYn ?? 'N',
         merged.diseaseCategoryNm ?? null,
+        merged.isSuspectedAdvancedSurvey ? 1 : 0,
+        merged.suspectedAdvancedType ?? null,
         now,
       );
     }
@@ -570,7 +595,7 @@ export function getAdvancedSeminars(sinceDate: string, untilDate: string): Semin
   const db = getDatabase();
   const stmt = db.prepare(`
     SELECT * FROM seminars 
-    WHERE is_advanced_survey = 1 
+    WHERE (is_advanced_survey = 1 OR is_suspected_advanced_survey = 1)
       AND (
         (date IS NOT NULL AND date >= ? AND date <= ?)
         OR (date IS NULL AND detected_date IS NOT NULL AND detected_date >= ? AND detected_date <= ?)

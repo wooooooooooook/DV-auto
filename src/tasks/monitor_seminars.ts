@@ -504,6 +504,7 @@ export async function setupMonitoredSeminarItem(
       }
       if (httpQuizRes.isSuspectedAdvancedSurvey !== undefined) {
         info.isSuspectedAdvancedSurvey = httpQuizRes.isSuspectedAdvancedSurvey;
+        info.suspectedAdvancedType = httpQuizRes.suspectedAdvancedType;
       }
     }
 
@@ -522,6 +523,12 @@ export async function setupMonitoredSeminarItem(
         );
         if (res.message) {
           quizResultMessage = res.message;
+        }
+        if (res.isSuspectedAdvancedSurvey !== undefined) {
+          info.isSuspectedAdvancedSurvey = res.isSuspectedAdvancedSurvey;
+          if (res.suspectedAdvancedType !== undefined) {
+            info.suspectedAdvancedType = res.suspectedAdvancedType;
+          }
         }
       });
     } catch (quizErr) {
@@ -878,6 +885,7 @@ async function monitorSeminars(
           }
           if (httpQuizRes.isSuspectedAdvancedSurvey !== undefined) {
             item.isSuspectedAdvancedSurvey = httpQuizRes.isSuspectedAdvancedSurvey;
+            item.suspectedAdvancedType = httpQuizRes.suspectedAdvancedType;
           }
 
           if (lastStatusNoticeMessageId) {
@@ -894,6 +902,7 @@ async function monitorSeminars(
         // 2. Playwright 브라우저 실행 (심화: 문항체크+마지막페이지 / 일반: 문항체크+자동제출)
         let browserQuizMessage: string | null = null;
         let browserSuspectedAdvancedSurvey: boolean | undefined;
+        let browserSuspectedAdvancedType: typeof item.suspectedAdvancedType;
         try {
           await withBrowserContext(providedContext, async (ctx) => {
             const res = await handleSeminarEndAndQuiz(
@@ -909,6 +918,7 @@ async function monitorSeminars(
             );
             browserQuizMessage = res.message;
             browserSuspectedAdvancedSurvey = res.isSuspectedAdvancedSurvey;
+            browserSuspectedAdvancedType = res.suspectedAdvancedType;
           });
         } catch (quizErr) {
           console.warn(`[${periodName}] 초기 세미나 퀴즈 처리 건너뜀 (${item.name}):`, quizErr);
@@ -919,6 +929,9 @@ async function monitorSeminars(
         const suspectedFlagChanged2 = browserSuspectedAdvancedSurvey === true && !item.isSuspectedAdvancedSurvey;
         if (suspectedFlagChanged2) {
           item.isSuspectedAdvancedSurvey = true;
+          if (browserSuspectedAdvancedType) {
+            item.suspectedAdvancedType = browserSuspectedAdvancedType;
+          }
         }
         if ((browserQuizMessage && browserQuizMessage !== item.quizResultMessage) || suspectedFlagChanged2) {
           item.quizResultMessage = browserQuizMessage || item.quizResultMessage;
@@ -1169,6 +1182,7 @@ async function monitorSeminars(
             }
             if (httpQuizRes.isSuspectedAdvancedSurvey !== undefined) {
               currentSeminar.isSuspectedAdvancedSurvey = httpQuizRes.isSuspectedAdvancedSurvey;
+              currentSeminar.suspectedAdvancedType = httpQuizRes.suspectedAdvancedType;
             }
           }
 
@@ -1209,6 +1223,7 @@ async function monitorSeminars(
           // 3. Playwright 브라우저 실행 (심화: 문항체크+마지막페이지 / 일반: 문항체크+자동제출)
           let browserQuizMessage: string | null = null;
           let browserSuspectedAdvancedSurvey: boolean | undefined;
+          let browserSuspectedAdvancedType: typeof currentSeminar.suspectedAdvancedType;
           await withBrowserContext(providedContext, async (ctx) => {
             const res = await handleSeminarEndAndQuiz(
               ctx,
@@ -1223,6 +1238,7 @@ async function monitorSeminars(
             );
             browserQuizMessage = res.message;
             browserSuspectedAdvancedSurvey = res.isSuspectedAdvancedSurvey;
+            browserSuspectedAdvancedType = res.suspectedAdvancedType;
           });
 
           // 4. 브라우저에서 새로운 정답이 획득되었거나 갱신된 경우 현황판 2차 갱신 (인플레이스 수정)
@@ -1231,6 +1247,9 @@ async function monitorSeminars(
             browserSuspectedAdvancedSurvey === true && !currentSeminar.isSuspectedAdvancedSurvey;
           if (suspectedFlagChanged) {
             currentSeminar.isSuspectedAdvancedSurvey = true;
+            if (browserSuspectedAdvancedType) {
+              currentSeminar.suspectedAdvancedType = browserSuspectedAdvancedType;
+            }
           }
           if ((browserQuizMessage && browserQuizMessage !== quizResultMessage) || suspectedFlagChanged) {
             currentSeminar.quizResultMessage = browserQuizMessage || quizResultMessage;

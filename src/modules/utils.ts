@@ -10,6 +10,7 @@ import { getBot } from '../services/bot_instance';
 import { recordChannelMessage } from '../services/channel_message_repository';
 import { httpGet, httpGetJson } from './http_client';
 import { parseLoginStatusHtml, hasSurveyPointExcludedNoticeHtml } from './html_parser';
+import type { SuspectedAdvancedType } from '../services/seminar_repository';
 
 import {
   splitTelegramMessage,
@@ -991,6 +992,7 @@ export interface SeminarDisplayItem {
   isPointExcluded?: boolean;
   isAdvancedSurvey?: boolean;
   isSuspectedAdvancedSurvey?: boolean;
+  suspectedAdvancedType?: SuspectedAdvancedType;
 }
 
 /**
@@ -1041,7 +1043,14 @@ function formatSeminarDisplayName(item: SeminarDisplayItem, options: FormatSemin
   }
 
   if (item.isSuspectedAdvancedSurvey) {
-    flags.push('✨<b>[심화설문?]</b>');
+    const isWithoutSubjective =
+      item.suspectedAdvancedType === 'advanced_without_subjective' ||
+      (item.suspectedAdvancedType === undefined && item.isAdvancedSurvey);
+    if (isWithoutSubjective) {
+      flags.push('✨<b>[심화설문 어디갔지🧐]</b>');
+    } else {
+      flags.push('✨<b>[혹시 심화설문?]</b>');
+    }
   } else if (item.isAdvancedSurvey) {
     flags.push('✨<b>[심화설문]</b>');
   }

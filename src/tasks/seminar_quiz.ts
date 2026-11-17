@@ -3,6 +3,7 @@ import path from 'path';
 import type { Page } from 'playwright';
 import { sendTelegram } from '../modules/utils';
 import { enqueueLlmJob } from '../services/llm_queue';
+import type { SuspectedAdvancedType } from '../services/seminar_repository';
 
 const CHEATSHEET_PATH = path.join(process.cwd(), 'data/seminar_quiz_cheatsheet.json');
 
@@ -910,6 +911,8 @@ type SeminarQuizResult = {
   message: string;
   /** Playwright가 감지한 심화설문 의심 여부 (호출 측에서 채널 공지 edit 처리에 활용) */
   isSuspectedAdvancedSurvey?: boolean;
+  /** 심화설문 의심 세부 구분 ('advanced_without_subjective' | 'not_advanced_suspected') */
+  suspectedAdvancedType?: SuspectedAdvancedType;
 };
 
 /**
@@ -1418,6 +1421,15 @@ async function processSeminarQuiz(
       }
     }
 
+    let suspectedAdvancedType: SuspectedAdvancedType | undefined = httpQuizResult?.suspectedAdvancedType;
+    if (isAdvancedWithZeroSubjective) {
+      suspectedAdvancedType = 'advanced_without_subjective';
+    } else if (suspectedAdvancedSurvey && !suspectedAdvancedType) {
+      suspectedAdvancedType = 'not_advanced_suspected';
+    } else if (!suspectedAdvancedSurvey) {
+      suspectedAdvancedType = undefined;
+    }
+
     // 심화설문 문항 수: HTTP API 또는 마지막 페이지의 문항 수로 산정 (주관식이 0개인 경우 심화N 대신 심화설문?으로 처리하기 위해 0)
     let depthSurveyCount = 0;
     if (effectiveIsAdvancedSurvey && !isAdvancedWithZeroSubjective) {
@@ -1518,6 +1530,7 @@ async function processSeminarQuiz(
         hasQuizResult: channelResults.length > 0,
         message: resultMessage,
         isSuspectedAdvancedSurvey: suspectedAdvancedSurvey,
+        suspectedAdvancedType: suspectedAdvancedSurvey ? suspectedAdvancedType : undefined,
       };
     }
 

@@ -37,7 +37,7 @@ function setBot(name: BotName, instance: Telegraf | null): void {
 
     // Register these commands before any legacy Telegram handler in telegram.ts.
     if (instance && typeof instance.command === 'function') {
-      instance.command('check_advanced_seminars', async (ctx: Context) => {
+      const advancedSeminarsHandler = async (ctx: Context) => {
         try {
           if (name === 'notice' && ctx.from?.id && !checkNoticeCooldown(ctx.from.id)) {
             await ctx.reply('⏳ 요청이 너무 빠릅니다. 2초 후 다시 시도해주세요.');
@@ -50,7 +50,10 @@ function setBot(name: BotName, instance: Telegraf | null): void {
           const message = error instanceof Error ? error.message : String(error);
           await ctx.reply(`심화 세미나 조회 실패: ${message}`);
         }
-      });
+      };
+
+      instance.command('check_advanced_seminars', advancedSeminarsHandler);
+      instance.command('check_advanced_seminar', advancedSeminarsHandler);
 
       if (name === 'notice') {
         instance.command('today_links', async (ctx: Context) => {

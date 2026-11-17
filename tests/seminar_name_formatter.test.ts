@@ -89,12 +89,24 @@ describe('formatSeminarDisplayName 공통 함수 테스트', () => {
     expect(formatSeminarDisplayName(advancedSurvey)).toBe('✨<b>[심화설문]</b> 심화설문 세미나');
   });
 
-  it('7-1. 심화설문 의심 플래그 검증 (useDepthSurvey=N이지만 마지막페이지 주관식 <3개)', () => {
+  it('7-1. 심화설문 의심 플래그 검증 (useDepthSurvey=N이지만 마지막페이지 주관식 <3개: 혹시 심화설문?)', () => {
     const suspectedSurvey: SeminarDisplayItem = {
       name: '심화설문 의심 세미나',
       isSuspectedAdvancedSurvey: true,
     };
-    expect(formatSeminarDisplayName(suspectedSurvey)).toBe('✨<b>[심화설문?]</b> 심화설문 의심 세미나');
+    expect(formatSeminarDisplayName(suspectedSurvey)).toBe('✨<b>[혹시 심화설문?]</b> 심화설문 의심 세미나');
+  });
+
+  it('7-2. 심화설문 주관식 부재 플래그 검증 (useDepthSurvey=Y이지만 주관식 0개: 심화설문 어디갔지🧐)', () => {
+    const suspectedSurvey: SeminarDisplayItem = {
+      name: '심화설문 주관식 부재 세미나',
+      isSuspectedAdvancedSurvey: true,
+      isAdvancedSurvey: true,
+      suspectedAdvancedType: 'advanced_without_subjective',
+    };
+    expect(formatSeminarDisplayName(suspectedSurvey)).toBe(
+      '✨<b>[심화설문 어디갔지🧐]</b> 심화설문 주관식 부재 세미나',
+    );
   });
 
   it('8. 정원(현재/총원) 표시 검증 (둘 다 유효할 때만 표시, 하나라도 누락되면 미표시)', () => {

@@ -1,10 +1,40 @@
 import * as seminarRepo from '../services/seminar_repository';
-import type { SeminarListItem } from '../services/seminar_repository';
+import type { SeminarListItem, SuspectedAdvancedType } from '../services/seminar_repository';
 import { isLowCapacitySeminar } from '../modules/seminar_api';
 
 const LOOKBACK_DAYS = 14;
 
 type SeminarRecord = SeminarListItem;
+
+export type AdvancedSeminarCategory = 'advanced' | SuspectedAdvancedType;
+
+export function getAdvancedSeminarType(seminar: SeminarRecord): AdvancedSeminarCategory {
+  if (seminar.suspectedAdvancedType === 'advanced_without_subjective') {
+    return 'advanced_without_subjective';
+  }
+  if (seminar.suspectedAdvancedType === 'not_advanced_suspected') {
+    return 'not_advanced_suspected';
+  }
+  if (seminar.isSuspectedAdvancedSurvey) {
+    if (seminar.isAdvancedSurvey) {
+      return 'advanced_without_subjective';
+    }
+    return 'not_advanced_suspected';
+  }
+  return 'advanced';
+}
+
+export function getAdvancedSeminarTypeLabel(type: AdvancedSeminarCategory): string {
+  switch (type) {
+    case 'advanced_without_subjective':
+      return '[심화설문 어디갔지🧐]';
+    case 'not_advanced_suspected':
+      return '[혹시 심화설문?]';
+    case 'advanced':
+    default:
+      return '[심화설문]';
+  }
+}
 
 function getKstDate(): string {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -83,6 +113,18 @@ export function run(): { success: boolean; message: string } {
       return (a.seminar.seminarId || '').localeCompare(b.seminar.seminarId || '');
     });
 
+    const counts = {
+      advanced: 0,
+      advancedWithoutSubjective: 0,
+      notAdvancedSuspected: 0,
+    };
+    for (const entry of entries) {
+      const type = getAdvancedSeminarType(entry.seminar);
+      if (type === 'advanced_without_subjective') counts.advancedWithoutSubjective++;
+      else if (type === 'not_advanced_suspected') counts.notAdvancedSuspected++;
+      else counts.advanced++;
+    }
+
     const groupedByDate = new Map<string, Array<{ seminar: SeminarRecord }>>();
     for (const entry of entries) {
       const list = groupedByDate.get(entry.date) || [];
@@ -95,20 +137,29 @@ export function run(): { success: boolean; message: string } {
       const itemLines = items.map(({ seminar }) => {
         const rawName = seminar.name || '세미나';
         const truncatedName = rawName.length > 10 ? `${rawName.slice(0, 10)}...` : rawName;
+        const type = getAdvancedSeminarType(seminar);
+        const typeLabel = getAdvancedSeminarTypeLabel(type);
         const pointStatus =
           seminar.pointPaid === true
             ? `✅ ${seminar.pointText ?? `${seminar.point ?? 0}P`} 지급됨`
             : seminar.pointCheckedAt
               ? '❌ 미지급'
               : '⏳ 조회 대기';
-        return `${seminar.seminarId} | ${truncatedName} | ${pointStatus}`;
+        return `${seminar.seminarId} | ${truncatedName} | ${typeLabel} | ${pointStatus}`;
       });
       dateSections.push(`📅 ${date}\n${itemLines.join('\n')}`);
     }
 
+    const summaryParts: string[] = [];
+    if (counts.advanced > 0) summaryParts.push(`심화설문 ${counts.advanced}건`);
+    if (counts.advancedWithoutSubjective > 0)
+      summaryParts.push(`심화설문 어디갔지🧐 ${counts.advancedWithoutSubjective}건`);
+    if (counts.notAdvancedSuspected > 0) summaryParts.push(`혹시 심화설문? ${counts.notAdvancedSuspected}건`);
+    const summaryLine = summaryParts.length > 0 ? `\n(구분: ${summaryParts.join(' / ')})` : '';
+
     return {
       success: true,
-      message: `⭐ 최근 2주 심화설문 ${entries.length}건 (${pastStr} ~ ${todayStr})\n(※ 방장 계정 기준)\n\n${dateSections.join('\n\n')}`,
+      message: `⭐ 최근 2주 심화설문 ${entries.length}건 (${pastStr} ~ ${todayStr})\n(※ 방장 계정 기준)${summaryLine}\n\n${dateSections.join('\n\n')}`,
     };
   } catch (e) {
     return {

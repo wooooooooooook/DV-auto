@@ -405,13 +405,15 @@ describe('apply_seminar HTTP pre-check 및 조건부 Playwright 실행 테스트
 
     seminarRepo.clearSeminars();
 
+    const futureDateStr = new Date(Date.now() + 86400000 * 7).toISOString().slice(0, 10);
+
     // DB에 예정된 비공개 세미나(5700)와 종료된 비공개 세미나(5701) 저장
     seminarRepo.upsertSeminars([
       {
         seminarId: '5700',
         name: '비공개 예정 세미나',
         url: 'https://m.doctorville.co.kr/cme/seminar/5700',
-        date: '2026-09-15',
+        date: futureDateStr,
         time: '13:00~14:00',
         totalCount: '4000',
         currentCount: '100',
@@ -476,8 +478,8 @@ describe('apply_seminar HTTP pre-check 및 조건부 Playwright 실행 테스트
           seminarDetail: {
             seminarId: Number(id),
             seminarNm: `갱신된 세미나 ${id}`,
-            startDt: '2026-09-15 13:00:00',
-            endDt: '2026-09-15 14:00:00',
+            startDt: `${futureDateStr} 13:00:00`,
+            endDt: `${futureDateStr} 14:00:00`,
             maxPeopleCnt: 4000,
             applyCnt: 200,
             hiddenYn: 'Y',

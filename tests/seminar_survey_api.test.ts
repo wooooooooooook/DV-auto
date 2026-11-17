@@ -468,6 +468,7 @@ describe('seminar_survey_api (fetchSeminarSurveyQuizHttp)', () => {
     expect(result.success).toBe(true);
     expect(result.isAdvancedSurvey).toBe(false);
     expect(result.isSuspectedAdvancedSurvey).toBe(true); // 마지막 페이지 주관식 3개 (1~3개 범위, 객관식 없음)
+    expect(result.suspectedAdvancedType).toBe('not_advanced_suspected');
     expect(result.quizSummaryMessage).toBe('퀴즈 정답 1 + 심화설문?');
   });
 
@@ -738,6 +739,7 @@ describe('seminar_survey_api (fetchSeminarSurveyQuizHttp)', () => {
     expect(result.isAdvancedSurvey).toBe(true);
     // 심화정보가 있으나 주관식이 0개이므로 isSuspectedAdvancedSurvey=true ([심화설문?])
     expect(result.isSuspectedAdvancedSurvey).toBe(true);
+    expect(result.suspectedAdvancedType).toBe('advanced_without_subjective');
     expect(result.quizSummaryMessage).toBe('퀴즈 정답 1 + 심화설문?');
   });
 });

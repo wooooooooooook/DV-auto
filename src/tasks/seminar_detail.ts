@@ -644,12 +644,27 @@ export function formatStoredSeminarDetail(item: SeminarListItem): string {
   if (item.processState !== undefined || item.seminarCompleted !== undefined) {
     lines.push(`*상태:* ${formatStatus(item.processState, item.seminarCompleted, item.cancelProcessState)}`);
   }
-  if (item.isAdvancedSurvey !== undefined || item.isPointExcluded !== undefined) {
-    const surveyText = item.isAdvancedSurvey
-      ? '설문 있음 [심화설문]'
-      : item.isPointExcluded
-        ? '설문 없음'
-        : '설문 있음';
+  if (
+    item.isAdvancedSurvey !== undefined ||
+    item.isSuspectedAdvancedSurvey !== undefined ||
+    item.isPointExcluded !== undefined
+  ) {
+    const isSuspectedWithoutSubj =
+      item.suspectedAdvancedType === 'advanced_without_subjective' ||
+      (item.isSuspectedAdvancedSurvey && item.isAdvancedSurvey);
+    const isSuspectedNotAdv =
+      item.suspectedAdvancedType === 'not_advanced_suspected' ||
+      (item.isSuspectedAdvancedSurvey && !item.isAdvancedSurvey);
+
+    const surveyText = isSuspectedWithoutSubj
+      ? '설문 있음 [심화설문 어디갔지🧐]'
+      : isSuspectedNotAdv
+        ? '설문 있음 [혹시 심화설문?]'
+        : item.isAdvancedSurvey
+          ? '설문 있음 [심화설문]'
+          : item.isPointExcluded
+            ? '설문 없음'
+            : '설문 있음';
     lines.push(`*설문:* ${surveyText}`);
   }
   if (item.pointPaid === true) {

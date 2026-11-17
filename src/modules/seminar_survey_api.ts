@@ -1,5 +1,6 @@
 import { sendDoctorVilleRequest } from './http_client';
 import { checkIsAdvancedSurvey } from './seminar_api';
+import type { SuspectedAdvancedType } from '../services/seminar_repository';
 import { parseSurveyMainListHtml, type ActiveSurveyItem } from './html_parser';
 import {
   loadCheatsheet,
@@ -41,6 +42,7 @@ export interface SurveyQuizHttpResult {
   depthSurveyQuestionCnt: number;
   isAdvancedSurvey: boolean;
   isSuspectedAdvancedSurvey?: boolean;
+  suspectedAdvancedType?: SuspectedAdvancedType;
   quizzes: HttpQuizQuestion[];
   allQuestions: HttpQuizQuestion[];
   depthSurveyQuestions?: HttpQuizQuestion[];
@@ -390,13 +392,21 @@ export async function fetchSeminarSurveyQuizHttp(
     // 3) 메타데이터(제목/설명/가이드) 또는 문항 지문에서 심화설문 안내 문구 키워드가 감지된 경우
     const hasNoticeAnywhere = hasNoticeInMeta || allQuestions.some((q) => containsAdvancedSurveyNotice(q.questionText));
 
-    const isSuspectedAdvancedSurvey =
-      isAdvancedWithZeroSubjective ||
-      (!isAdvancedSurvey &&
-        ((lastPageSubjectiveQuestions.length >= 1 &&
-          lastPageSubjectiveQuestions.length <= 3 &&
-          !hasObjectiveOnLastPage) ||
-          (hasNoticeAnywhere && (lastPageSubjectiveQuestions.length > 0 || allSubjectiveQuestions.length > 0))));
+    const isNotAdvancedButSuspected =
+      !isAdvancedSurvey &&
+      ((lastPageSubjectiveQuestions.length >= 1 &&
+        lastPageSubjectiveQuestions.length <= 3 &&
+        !hasObjectiveOnLastPage) ||
+        (hasNoticeAnywhere && (lastPageSubjectiveQuestions.length > 0 || allSubjectiveQuestions.length > 0)));
+
+    const isSuspectedAdvancedSurvey = isAdvancedWithZeroSubjective || isNotAdvancedButSuspected;
+
+    let suspectedAdvancedType: SuspectedAdvancedType | undefined = undefined;
+    if (isAdvancedWithZeroSubjective) {
+      suspectedAdvancedType = 'advanced_without_subjective';
+    } else if (isNotAdvancedButSuspected) {
+      suspectedAdvancedType = 'not_advanced_suspected';
+    }
 
     // 퀴즈 정답 요약 메시지 생성 (예: "퀴즈 정답 412 + 심화1" 또는 "퀴즈 정답 412 + 심화설문?")
     let quizSummaryMessage = '';
@@ -450,6 +460,7 @@ export async function fetchSeminarSurveyQuizHttp(
       depthSurveyQuestionCnt,
       isAdvancedSurvey,
       isSuspectedAdvancedSurvey,
+      suspectedAdvancedType,
       quizzes,
       allQuestions,
       depthSurveyQuestions,

@@ -5,6 +5,7 @@ import { sendTelegram, ensureLoggedIn, safeGoto } from '../modules/utils';
 import { processSeminarQuiz, loadCheatsheet } from './seminar_quiz';
 import { fetchSeminarSurveyQuizHttp } from '../modules/seminar_survey_api';
 import { SEMINAR_DETAIL_PAGE } from './monitor_seminars_notice';
+import type { SuspectedAdvancedType } from '../services/seminar_repository';
 
 /**
  * 순수 HTTP API로 퀴즈 결과 및 심화설문 여부를 1~2초 내에 사전 조회합니다.
@@ -18,6 +19,7 @@ export async function tryFetchSeminarQuizHttpFast(
   quizResultMessage: string | null;
   isAdvancedSurvey?: boolean;
   isSuspectedAdvancedSurvey?: boolean;
+  suspectedAdvancedType?: SuspectedAdvancedType;
 } | null> {
   if (!seminarId) return null;
   try {
@@ -29,6 +31,7 @@ export async function tryFetchSeminarQuizHttpFast(
         quizResultMessage,
         isAdvancedSurvey: httpResult.isAdvancedSurvey || isAdvancedSurvey,
         isSuspectedAdvancedSurvey: httpResult.isSuspectedAdvancedSurvey,
+        suspectedAdvancedType: httpResult.suspectedAdvancedType,
       };
     }
   } catch (err) {
@@ -50,7 +53,12 @@ export async function handleSeminarEndAndQuiz(
     isSuspectedAdvancedSurvey?: boolean;
   },
   fallbackUrl: string,
-): Promise<{ message: string | null; foundSurveyButton: boolean; isSuspectedAdvancedSurvey?: boolean }> {
+): Promise<{
+  message: string | null;
+  foundSurveyButton: boolean;
+  isSuspectedAdvancedSurvey?: boolean;
+  suspectedAdvancedType?: SuspectedAdvancedType;
+}> {
   // 포인트미지급 세미나는 설문/퀴즈 처리 건너뛰기
   if (seminar.isSurveyPointExcluded) {
     console.log(
@@ -65,6 +73,7 @@ export async function handleSeminarEndAndQuiz(
   let quizResultMessage: string | null = null;
   let foundSurveyButton = false;
   let isSuspectedAdvancedSurveyResult: boolean | undefined = undefined;
+  let suspectedAdvancedTypeResult: SuspectedAdvancedType | undefined = undefined;
 
   try {
     await ensureLoggedIn({ page: surveyPage, context });
@@ -153,6 +162,7 @@ export async function handleSeminarEndAndQuiz(
       }
       if (quizResult.isSuspectedAdvancedSurvey !== undefined) {
         isSuspectedAdvancedSurveyResult = quizResult.isSuspectedAdvancedSurvey;
+        suspectedAdvancedTypeResult = quizResult.suspectedAdvancedType;
       }
     } else {
       console.log(`[monitor_seminars] "설문참여" 버튼을 찾지 못함 (${seminar.seminarId})`);
@@ -168,6 +178,7 @@ export async function handleSeminarEndAndQuiz(
       }
       if (quizResult.isSuspectedAdvancedSurvey !== undefined) {
         isSuspectedAdvancedSurveyResult = quizResult.isSuspectedAdvancedSurvey;
+        suspectedAdvancedTypeResult = quizResult.suspectedAdvancedType;
       }
     }
   } catch (e) {
@@ -196,5 +207,10 @@ export async function handleSeminarEndAndQuiz(
     }
     await surveyPage.close().catch(() => {});
   }
-  return { message: quizResultMessage, foundSurveyButton, isSuspectedAdvancedSurvey: isSuspectedAdvancedSurveyResult };
+  return {
+    message: quizResultMessage,
+    foundSurveyButton,
+    isSuspectedAdvancedSurvey: isSuspectedAdvancedSurveyResult,
+    suspectedAdvancedType: suspectedAdvancedTypeResult,
+  };
 }
