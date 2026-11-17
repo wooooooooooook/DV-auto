@@ -46,7 +46,10 @@ describe('monitor_seminars_closing (설문 가능 시간 및 마감 알림)', ()
     // 1. 서버 surveyEndDt 기준 ("2026-08-28 14:41:57.0" -> 14:03 기준 약 38분 남음 -> 40분)
     expect(getSurveyRemainingMinutes({ surveyEndDt: '2026-08-28 14:41:57.0' }, now)).toBe(40);
 
-    // 2. 서버 surveyMinutesLeft 기준 (38분 -> 40분, 18분 -> 20분, 8분 -> 10분)
+    // 2. 서버 surveyMinutesLeft 기준 (178분 -> 180분, 118분 -> 120분, 38분 -> 40분, 18분 -> 20분, 8분 -> 10분, 200분 -> 최대 180분 clamp)
+    expect(getSurveyRemainingMinutes({ surveyMinutesLeft: 178 }, now)).toBe(180);
+    expect(getSurveyRemainingMinutes({ surveyMinutesLeft: 200 }, now)).toBe(180);
+    expect(getSurveyRemainingMinutes({ surveyMinutesLeft: 118 }, now)).toBe(120);
     expect(getSurveyRemainingMinutes({ surveyMinutesLeft: 38 }, now)).toBe(40);
     expect(getSurveyRemainingMinutes({ surveyMinutesLeft: 18 }, now)).toBe(20);
     expect(getSurveyRemainingMinutes({ surveyMinutesLeft: 8 }, now)).toBe(10);

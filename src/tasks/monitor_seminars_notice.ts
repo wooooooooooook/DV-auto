@@ -170,7 +170,7 @@ export function getSeminarSurveyEndTime(
 /**
  * 설문 마감까지 남은 시간(분)을 10분 단위로 계산합니다.
  * 예: 45~54분 -> 50분, 15~24분 -> 20분, 5~14분 -> 10분
- * 60분 초과 시 최대 60분으로 clamp, 0분 이하 시 0분 반환.
+ * 180분 초과 시 최대 180분으로 clamp, 0분 이하 시 0분 반환.
  */
 export function getSurveyRemainingMinutes(
   seminar: {
@@ -188,7 +188,7 @@ export function getSurveyRemainingMinutes(
 
   const rawMinutes = diffMs / (60 * 1000);
   const rounded10 = Math.round(rawMinutes / 10) * 10;
-  return Math.min(60, Math.max(0, rounded10));
+  return Math.min(180, Math.max(0, rounded10));
 }
 
 /**
