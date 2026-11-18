@@ -39,10 +39,10 @@ FROM node:24-bookworm-slim AS runtime
 ENV DEBIAN_FRONTEND=noninteractive
 WORKDIR /app
 
-# TZ 처리를 위한 tzdata 와 CA 인증서 (slim 에는 포함되어 있지 않다)
+# TZ 처리를 위한 tzdata, CA 인증서, git 동기화를 위한 git (slim 에는 포함되어 있지 않다)
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends tzdata ca-certificates; \
+    apt-get install -y --no-install-recommends tzdata ca-certificates git; \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=prod-deps /app/node_modules ./node_modules
