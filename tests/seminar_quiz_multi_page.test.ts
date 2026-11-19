@@ -451,7 +451,7 @@ describe('seminar_quiz 다중 페이지 탐색 및 제출하기 감지 테스트
       return { ok: false, status: 404 } as unknown as Response;
     });
 
-    const result = await processSeminarQuiz(mockPage as Page, '5814', false);
+    const result = await processSeminarQuiz(mockPage as Page, '5814', false, true);
     await drainLlmQueue();
     globalThis.fetch = originalFetch;
 

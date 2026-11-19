@@ -467,9 +467,9 @@ describe('seminar_survey_api (fetchSeminarSurveyQuizHttp)', () => {
     const result = await fetchSeminarSurveyQuizHttp('8888', mockCheatsheet);
     expect(result.success).toBe(true);
     expect(result.isAdvancedSurvey).toBe(false);
-    expect(result.isSuspectedAdvancedSurvey).toBe(true); // 마지막 페이지 주관식 3개 (1~3개 범위, 객관식 없음)
-    expect(result.suspectedAdvancedType).toBe('not_advanced_suspected');
-    expect(result.quizSummaryMessage).toBe('퀴즈 정답 1 + 심화설문?');
+    expect(result.isSuspectedAdvancedSurvey).toBe(false);
+    expect(result.suspectedAdvancedType).toBeUndefined();
+    expect(result.quizSummaryMessage).toBe('퀴즈 정답 1');
   });
 
   it('useDepthSurvey === "N"이고 마지막 페이지에 주관식이 1~3개 있더라도, 객관식이 함께 포함되어 있으면 "심화설문?"으로 분류되지 않는다', async () => {
@@ -645,11 +645,12 @@ describe('seminar_survey_api (fetchSeminarSurveyQuizHttp)', () => {
 
     const result = await fetchSeminarSurveyQuizHttp('8888', mockCheatsheet);
     expect(result.success).toBe(true);
-    expect(result.isSuspectedAdvancedSurvey).toBe(true);
-    expect(result.quizSummaryMessage).toContain('심화설문?');
+    expect(result.isSuspectedAdvancedSurvey).toBe(false);
+    expect(result.suspectedAdvancedType).toBeUndefined();
+    expect(result.quizSummaryMessage).not.toContain('심화설문?');
   });
 
-  it('심화정보(isAdvancedSurvey=true)가 있으나 주관식이 0개인 경우 [심화설문?]으로 변경된다', async () => {
+  it('심화정보(isAdvancedSurvey=true)인 경우 API 단계에서는 의심 플래그를 붙이지 않고 심화 문항을 정상 계산한다 (브라우저에서만 의심 판정)', async () => {
     const mockCheatsheet = {
       문제1: '정답1',
     };
@@ -737,9 +738,9 @@ describe('seminar_survey_api (fetchSeminarSurveyQuizHttp)', () => {
     const result = await fetchSeminarSurveyQuizHttp('9999', mockCheatsheet);
     expect(result.success).toBe(true);
     expect(result.isAdvancedSurvey).toBe(true);
-    // 심화정보가 있으나 주관식이 0개이므로 isSuspectedAdvancedSurvey=true ([심화설문?])
-    expect(result.isSuspectedAdvancedSurvey).toBe(true);
-    expect(result.suspectedAdvancedType).toBe('advanced_without_subjective');
-    expect(result.quizSummaryMessage).toBe('퀴즈 정답 1 + 심화설문?');
+    expect(result.isSuspectedAdvancedSurvey).toBe(false);
+    expect(result.suspectedAdvancedType).toBeUndefined();
+    expect(result.depthSurveyQuestionCnt).toBe(1);
+    expect(result.quizSummaryMessage).toBe('퀴즈 정답 1 + 심화1');
   });
 });

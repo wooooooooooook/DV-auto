@@ -1010,10 +1010,9 @@ async function processSeminarQuiz(
     const effectiveIsAdvancedSurvey =
       Boolean(isAdvancedSurvey) || Boolean(httpQuizResult?.isAdvancedSurvey) || isDbAdvanced;
 
-    // 확정된 심화설문은 아니지만 HTTP 조회에서 심화설문 의심(마지막 페이지 주관식 1~3개)으로 판정된 경우
-    let suspectedAdvancedSurvey =
-      !effectiveIsAdvancedSurvey &&
-      (Boolean(isSuspectedAdvancedSurvey) || Boolean(httpQuizResult?.isSuspectedAdvancedSurvey));
+    // 확정된 심화설문은 아니지만 기존 DB/인자에 심화설문 의심으로 판정되어 전달된 경우
+    // (심화설문 의심 판정은 브라우저 실행 시에만 수행)
+    let suspectedAdvancedSurvey = !effectiveIsAdvancedSurvey && Boolean(isSuspectedAdvancedSurvey);
 
     // 채널 송신 자격: quiz ONLY ([퀴즈] 마커 및 퀴즈 문항)
     const CHANNEL_ELIGIBLE_KINDS: ReadonlySet<QuizQuestion['kind']> = new Set(['quiz']);
@@ -1374,18 +1373,6 @@ async function processSeminarQuiz(
     _hasUnknown = channelResults.some((r) => r.selectedIndex === null);
     _hasMultipleMatches = channelResults.some((r) => r.multipleMatches && r.multipleMatches.length > 1);
 
-    if (channelResults.length === 0 && accumulatedQuestions.length === 0) {
-      const message = seminarName
-        ? `ℹ️ ${seminarName} 설문 페이지에서 퀴즈를 찾지 못했습니다.`
-        : 'ℹ️ 설문 페이지에서 퀴즈를 찾지 못했습니다.';
-      const shotPath = `screenshot/quiz_not_found_${Date.now()}.png`;
-      await page.screenshot({ path: shotPath, fullPage: true }).catch(() => {});
-      await sendTelegram(message, shotPath);
-      return { success: true, hasQuizResult: false, message };
-    }
-
-    // 심화설문인데 주관식이 0개인 경우 감지:
-    // 심화정보가 있으나 주관식이 0개인 경우 [심화설문?]으로 라벨을 부착하고 자동 제출은 생략 유지
     const allParsedQuestions = accumulatedQuestions.concat(lastPageQuestions);
     const hasSubjectiveInSurvey =
       allParsedQuestions.some(
@@ -1400,34 +1387,68 @@ async function processSeminarQuiz(
       ) ??
         false);
 
+    // 1) 심화설문(effectiveIsAdvancedSurvey)인데 주관식이 0개인 경우 감지:
+    // 심화정보가 있으나 주관식이 0개인 경우 [심화설문 어디갔지🧐]로 라벨을 부착하고 자동 제출은 생략 유지
     const isAdvancedWithZeroSubjective = effectiveIsAdvancedSurvey && !hasSubjectiveInSurvey;
     if (isAdvancedWithZeroSubjective) {
-      console.log(`[seminar_quiz] 심화정보가 있으나 주관식이 0개이므로 [심화설문?]으로 변경 (자동 제출은 생략 유지)`);
+      console.log(`[seminar_quiz] 심화정보가 있으나 주관식이 0개이므로 [심화설문 어디갔지🧐]로 변경 (자동 제출은 생략 유지)`);
       suspectedAdvancedSurvey = true;
     }
 
-    // containsAdvancedSurveyNotice(body.innerText) 오탐 방어:
+    // 2) 일반 설문(!effectiveIsAdvancedSurvey)인데 심화설문 의심 감지:
+    // - 마지막 페이지 주관식 문항이 1~3개 있고 객관식이 없는 경우
+    // - 또는 기존 의심 플래그/안내 문구가 감지되었고 주관식이 있는 경우
+    const lastPageSubjectiveQuestions = lastPageQuestions.filter(
+      (q) =>
+        q.inputType === 'text' ||
+        (q.options?.length === 1 && /^\s*\[?\s*주관식\s*\]?\s*$/i.test(q.options[0]?.text || '')),
+    );
+    const hasObjectiveOnLastPage = lastPageQuestions.some(
+      (q) =>
+        q.inputType !== 'text' &&
+        !(q.options?.length === 1 && /^\s*\[?\s*주관식\s*\]?\s*$/i.test(q.options[0]?.text || '')),
+    );
+
+    const isNotAdvancedButSuspected =
+      !effectiveIsAdvancedSurvey &&
+      ((lastPageSubjectiveQuestions.length >= 1 &&
+        lastPageSubjectiveQuestions.length <= 3 &&
+        !hasObjectiveOnLastPage) ||
+        (suspectedAdvancedSurvey && hasSubjectiveInSurvey));
+
+    if (isNotAdvancedButSuspected) {
+      console.log(`[seminar_quiz] 일반 세미나이지만 주관식 문항 감지 -> 심화설문 의심 [혹시 심화설문?] 활성화`);
+      suspectedAdvancedSurvey = true;
+    }
+
+    // 3) containsAdvancedSurveyNotice(body.innerText) 오탐 방어:
     // 단일 페이지(페이지 이동 없음)에서 주관식이 없고 퀴즈 문항만 존재하는 경우
     // body.innerText의 안내 문구 키워드 매칭으로 인한 심화설문 의심을 해제한다.
     if (suspectedAdvancedSurvey && !effectiveIsAdvancedSurvey && currentPageNum === 1) {
       const hasQuizOnly = channelResults.length > 0 && !hasSubjectiveInSurvey;
-      // HTTP API에서도 심화설문 의심이 아닌 경우에만 해제
-      const httpAlsoNotSuspected = !httpQuizResult?.isSuspectedAdvancedSurvey;
-      if (hasQuizOnly && httpAlsoNotSuspected) {
+      if (hasQuizOnly) {
         console.log(
-          `[seminar_quiz] 단일 페이지 + 주관식 없음 + 퀴즈 존재 + HTTP API 심화의심 없음 → suspectedAdvancedSurvey 해제`,
+          `[seminar_quiz] 단일 페이지 + 주관식 없음 + 퀴즈 존재 → suspectedAdvancedSurvey 해제`,
         );
         suspectedAdvancedSurvey = false;
       }
     }
 
-    let suspectedAdvancedType: SuspectedAdvancedType | undefined = httpQuizResult?.suspectedAdvancedType;
+    let suspectedAdvancedType: SuspectedAdvancedType | undefined = undefined;
     if (isAdvancedWithZeroSubjective) {
       suspectedAdvancedType = 'advanced_without_subjective';
-    } else if (suspectedAdvancedSurvey && !suspectedAdvancedType) {
+    } else if (suspectedAdvancedSurvey) {
       suspectedAdvancedType = 'not_advanced_suspected';
-    } else if (!suspectedAdvancedSurvey) {
-      suspectedAdvancedType = undefined;
+    }
+
+    if (channelResults.length === 0 && !effectiveIsAdvancedSurvey && !suspectedAdvancedSurvey) {
+      const message = seminarName
+        ? `ℹ️ ${seminarName} 설문 페이지에서 퀴즈를 찾지 못했습니다.`
+        : 'ℹ️ 설문 페이지에서 퀴즈를 찾지 못했습니다.';
+      const shotPath = `screenshot/quiz_not_found_${Date.now()}.png`;
+      await page.screenshot({ path: shotPath, fullPage: true }).catch(() => {});
+      await sendTelegram(message, shotPath);
+      return { success: true, hasQuizResult: false, message };
     }
 
     // 심화설문 문항 수: HTTP API 또는 마지막 페이지의 문항 수로 산정 (주관식이 0개인 경우 심화N 대신 심화설문?으로 처리하기 위해 0)

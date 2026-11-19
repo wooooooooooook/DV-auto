@@ -526,9 +526,7 @@ export async function setupMonitoredSeminarItem(
         }
         if (res.isSuspectedAdvancedSurvey !== undefined) {
           info.isSuspectedAdvancedSurvey = res.isSuspectedAdvancedSurvey;
-          if (res.suspectedAdvancedType !== undefined) {
-            info.suspectedAdvancedType = res.suspectedAdvancedType;
-          }
+          info.suspectedAdvancedType = res.isSuspectedAdvancedSurvey ? res.suspectedAdvancedType : undefined;
         }
       });
     } catch (quizErr) {
@@ -925,15 +923,19 @@ async function monitorSeminars(
         }
 
         // 3. 브라우저에서 새로운 정답이 획득되었거나 갱신된 경우 현황판 2차 갱신
-        // Playwright가 심화설문?을 감지한 경우에도 채널 공지 수정
-        const suspectedFlagChanged2 = browserSuspectedAdvancedSurvey === true && !item.isSuspectedAdvancedSurvey;
-        if (suspectedFlagChanged2) {
-          item.isSuspectedAdvancedSurvey = true;
-          if (browserSuspectedAdvancedType) {
-            item.suspectedAdvancedType = browserSuspectedAdvancedType;
-          }
+        // Playwright 브라우저 결과로 심화설문 의심 플래그 동기화
+        const flagChanged2 =
+          browserSuspectedAdvancedSurvey !== undefined &&
+          (item.isSuspectedAdvancedSurvey !== browserSuspectedAdvancedSurvey ||
+            item.suspectedAdvancedType !==
+              (browserSuspectedAdvancedSurvey ? browserSuspectedAdvancedType : undefined));
+
+        if (browserSuspectedAdvancedSurvey !== undefined) {
+          item.isSuspectedAdvancedSurvey = browserSuspectedAdvancedSurvey;
+          item.suspectedAdvancedType = browserSuspectedAdvancedSurvey ? browserSuspectedAdvancedType : undefined;
         }
-        if ((browserQuizMessage && browserQuizMessage !== item.quizResultMessage) || suspectedFlagChanged2) {
+
+        if ((browserQuizMessage && browserQuizMessage !== item.quizResultMessage) || flagChanged2) {
           item.quizResultMessage = browserQuizMessage || item.quizResultMessage;
           if (lastStatusNoticeMessageId) {
             const boardRes = await updateStatusBoardNotice(
@@ -1242,16 +1244,21 @@ async function monitorSeminars(
           });
 
           // 4. 브라우저에서 새로운 정답이 획득되었거나 갱신된 경우 현황판 2차 갱신 (인플레이스 수정)
-          // Playwright가 심화설문?을 감지한 경우에도 채널 공지 수정
-          const suspectedFlagChanged =
-            browserSuspectedAdvancedSurvey === true && !currentSeminar.isSuspectedAdvancedSurvey;
-          if (suspectedFlagChanged) {
-            currentSeminar.isSuspectedAdvancedSurvey = true;
-            if (browserSuspectedAdvancedType) {
-              currentSeminar.suspectedAdvancedType = browserSuspectedAdvancedType;
-            }
+          // Playwright 브라우저 결과로 심화설문 의심 플래그 동기화
+          const flagChanged =
+            browserSuspectedAdvancedSurvey !== undefined &&
+            (currentSeminar.isSuspectedAdvancedSurvey !== browserSuspectedAdvancedSurvey ||
+              currentSeminar.suspectedAdvancedType !==
+                (browserSuspectedAdvancedSurvey ? browserSuspectedAdvancedType : undefined));
+
+          if (browserSuspectedAdvancedSurvey !== undefined) {
+            currentSeminar.isSuspectedAdvancedSurvey = browserSuspectedAdvancedSurvey;
+            currentSeminar.suspectedAdvancedType = browserSuspectedAdvancedSurvey
+              ? browserSuspectedAdvancedType
+              : undefined;
           }
-          if ((browserQuizMessage && browserQuizMessage !== quizResultMessage) || suspectedFlagChanged) {
+
+          if ((browserQuizMessage && browserQuizMessage !== quizResultMessage) || flagChanged) {
             currentSeminar.quizResultMessage = browserQuizMessage || quizResultMessage;
             if (lastStatusNoticeMessageId) {
               const boardRes = await updateStatusBoardNotice(

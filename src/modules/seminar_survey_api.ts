@@ -371,65 +371,35 @@ export async function fetchSeminarSurveyQuizHttp(
 
     // 6. 심화설문 문항 수: 심화설문인 경우 마지막 페이지(totalPageCnt)의 문항 개수
     const lastPageQuestions = allQuestions.filter((q) => q.pageNumber === totalPageCnt);
-    const lastPageSubjectiveQuestions = lastPageQuestions.filter(isSubjectiveQuestion);
-    const hasObjectiveOnLastPage = lastPageQuestions.some((q) => !isSubjectiveQuestion(q));
-    const allSubjectiveQuestions = allQuestions.filter(isSubjectiveQuestion);
-
-    // 심화정보(isAdvancedSurvey)가 있으나 주관식이 0개인 경우 감지:
-    // [심화설문?]으로 변경하되, 자동 제출은 제외(안 함) 유지
-    const isAdvancedWithZeroSubjective = isAdvancedSurvey && allSubjectiveQuestions.length === 0;
-
-    const depthSurveyQuestions = isAdvancedSurvey && !isAdvancedWithZeroSubjective ? lastPageQuestions : [];
+    const depthSurveyQuestions = isAdvancedSurvey ? lastPageQuestions : [];
     const depthSurveyQuestionCnt = depthSurveyQuestions.length;
     const advancedSurveyPrompt =
-      isAdvancedSurvey && !isAdvancedWithZeroSubjective && depthSurveyQuestions.length > 0
+      isAdvancedSurvey && depthSurveyQuestions.length > 0
         ? formatAdvancedSurveyPrompt(depthSurveyQuestions)
         : undefined;
 
-    // 심화설문 의심(심화설문?) 판정:
-    // 1) 심화정보가 있으나 주관식이 0개인 경우 -> [심화설문?] 부착
-    // 2) useDepthSurvey === 'N' 인데 마지막 페이지에 주관식 항목이 1~3개 있고 객관식이 없는 경우
-    // 3) 메타데이터(제목/설명/가이드) 또는 문항 지문에서 심화설문 안내 문구 키워드가 감지된 경우
-    const hasNoticeAnywhere = hasNoticeInMeta || allQuestions.some((q) => containsAdvancedSurveyNotice(q.questionText));
+    // API 단계에서는 심화설문 의심 플래그를 붙이지 않고 브라우저(Playwright) 탐색 시에만 판단합니다.
+    const isSuspectedAdvancedSurvey = false;
+    const suspectedAdvancedType: SuspectedAdvancedType | undefined = undefined;
 
-    const isNotAdvancedButSuspected =
-      !isAdvancedSurvey &&
-      ((lastPageSubjectiveQuestions.length >= 1 &&
-        lastPageSubjectiveQuestions.length <= 3 &&
-        !hasObjectiveOnLastPage) ||
-        (hasNoticeAnywhere && (lastPageSubjectiveQuestions.length > 0 || allSubjectiveQuestions.length > 0)));
-
-    const isSuspectedAdvancedSurvey = isAdvancedWithZeroSubjective || isNotAdvancedButSuspected;
-
-    let suspectedAdvancedType: SuspectedAdvancedType | undefined = undefined;
-    if (isAdvancedWithZeroSubjective) {
-      suspectedAdvancedType = 'advanced_without_subjective';
-    } else if (isNotAdvancedButSuspected) {
-      suspectedAdvancedType = 'not_advanced_suspected';
-    }
-
-    // 퀴즈 정답 요약 메시지 생성 (예: "퀴즈 정답 412 + 심화1" 또는 "퀴즈 정답 412 + 심화설문?")
+    // 퀴즈 정답 요약 메시지 생성 (예: "퀴즈 정답 412 + 심화1")
     let quizSummaryMessage = '';
     let depthSuffix = '';
-    if (isAdvancedSurvey && !isAdvancedWithZeroSubjective && depthSurveyQuestionCnt > 0) {
+    if (isAdvancedSurvey && depthSurveyQuestionCnt > 0) {
       depthSuffix = ` + 심화${depthSurveyQuestionCnt}`;
-    } else if (isSuspectedAdvancedSurvey) {
-      depthSuffix = ' + 심화설문?';
     }
 
     if (quizzes.length > 0) {
       const ansNums = quizzes.map((q) => (q.selectedIndex !== null ? String(q.selectedIndex) : '-')).join('');
       const hasUnknown = quizzes.some((q) => q.selectedIndex === null);
       quizSummaryMessage = `퀴즈 정답 ${ansNums}${depthSuffix}${hasUnknown ? ' (일부 미해결)' : ''}`;
-    } else if (isAdvancedSurvey && !isAdvancedWithZeroSubjective && depthSurveyQuestionCnt > 0) {
+    } else if (isAdvancedSurvey && depthSurveyQuestionCnt > 0) {
       quizSummaryMessage = `심화${depthSurveyQuestionCnt}`;
-    } else if (isSuspectedAdvancedSurvey) {
-      quizSummaryMessage = '심화설문?';
     }
 
     // 상세 내역을 포함한 전체 퀴즈 결과 메시지 생성
     let quizResultMessage = quizSummaryMessage;
-    if (quizzes.length > 0 || (isAdvancedSurvey && depthSurveyQuestionCnt > 0) || isSuspectedAdvancedSurvey) {
+    if (quizzes.length > 0 || (isAdvancedSurvey && depthSurveyQuestionCnt > 0)) {
       const channelResults: QuizResult[] = quizzes.map((q) => ({
         questionIndex: q.questionNumber,
         questionText: q.questionText,
@@ -445,7 +415,7 @@ export async function fetchSeminarSurveyQuizHttp(
         quizzes.some((q) => q.selectedIndex === null),
         quizzes.some((q) => q.multipleMatches && q.multipleMatches.length > 1),
         depthSurveyQuestionCnt,
-        isSuspectedAdvancedSurvey,
+        false,
       );
     }
 
