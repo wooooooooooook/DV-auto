@@ -264,15 +264,6 @@ export async function fetchSeminarSurveyQuizHttp(
     const totalPageCnt = typeof surveyData.pageCnt === 'number' ? surveyData.pageCnt : 1;
     const totalQuestionCnt = typeof surveyData.questionCnt === 'number' ? surveyData.questionCnt : 0;
     const surveyTitle = surveyData.config?.title || '';
-    const surveyDesc = String(
-      surveyData.config?.description ||
-        surveyData.config?.guide ||
-        surveyData.description ||
-        surveyData.guide ||
-        surveyData.notice ||
-        '',
-    );
-    const hasNoticeInMeta = containsAdvancedSurveyNotice(surveyTitle) || containsAdvancedSurveyNotice(surveyDesc);
 
     // 심화설문 판별: 플래그(인자 또는 config) 및 제목("심화") 기반 ('만족도'는 제외)
     const isAdvancedSurvey =

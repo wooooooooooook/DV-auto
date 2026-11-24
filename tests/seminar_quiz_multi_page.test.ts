@@ -19,7 +19,10 @@ describe('seminar_quiz 다중 페이지 탐색 및 제출하기 감지 테스트
   /**
    * 1페이지(다음 버튼) -> 2페이지(제출하기 버튼) 다중 페이지 동작을 시뮬레이션하는 mock Page 생성
    */
-  function createMultiPageMock(mockOpts?: { hasSubjectiveOnPage2?: boolean }) {
+  function createMultiPageMock(mockOpts?: {
+    hasSubjectiveOnPage2?: boolean;
+    quiz1Options?: Array<{ index: number; text: string; value: string }>;
+  }) {
     let currentPageNum = 1;
     const clickedButtons: string[] = [];
 
@@ -99,7 +102,7 @@ describe('seminar_quiz 다중 페이지 탐색 및 제출하기 감지 테스트
               marker: '[퀴즈]',
               isRequired: true,
               inputType: 'radio',
-              options: [
+              options: mockOpts?.quiz1Options || [
                 { index: 1, text: '골절 고위험군', value: '1' },
                 { index: 2, text: '정상군', value: '2' },
               ],
@@ -724,5 +727,61 @@ describe('seminar_quiz 다중 페이지 탐색 및 제출하기 감지 테스트
     // 미등록 퀴즈 알림 발송 확인
     const unknownCall = sendTelegramSpy.mock.calls.find((c) => String(c[0]).includes('족보에 없는 퀴즈'));
     expect(unknownCall).toBeDefined();
+  });
+
+  it('심화설문: 퀴즈 정답 텍스트에 부등호(<, >)가 포함된 경우 telegramNoticeText에 HTML 이스케이프가 적용되어 세미나 URL 및 모든 문항이 보존된다', async () => {
+    // 퀴즈 1번에 '<7.0%' 부등호가 포함된 mock Page 생성
+    const { mockPage, clickedButtons } = createMultiPageMock({
+      hasSubjectiveOnPage2: true,
+      quiz1Options: [
+        { index: 1, text: 'HbA1c 약 -0.8% 감소 및 60% 이상 목표혈당(<7.0% 미만) 도달', value: '1' },
+        { index: 2, text: '변화 없음', value: '2' },
+      ],
+    });
+
+    const cheatsheet = {
+      데노수맙: '목표혈당',
+      바이오시밀러: 'PK/PD',
+    };
+    vi.spyOn(await import('../src/tasks/seminar_quiz'), 'loadCheatsheet').mockResolvedValue(cheatsheet);
+
+    const surveyApiModule = await import('../src/modules/seminar_survey_api');
+    vi.spyOn(surveyApiModule, 'fetchSeminarSurveyQuizHttp').mockResolvedValue({
+      success: true,
+      seminarId: '5543',
+      totalPageCnt: 2,
+      totalQuestionCnt: 4,
+      quizQuestionCnt: 2,
+      depthSurveyQuestionCnt: 2,
+      isAdvancedSurvey: true,
+      quizzes: [],
+      allQuestions: [],
+      quizSummaryMessage: '퀴즈 정답 13 + 심화1',
+    });
+
+    const result = await processSeminarQuiz(mockPage, '5543', true, false, cheatsheet);
+    await drainLlmQueue();
+
+    expect(result.success).toBe(true);
+    expect(clickedButtons).not.toContain('submit');
+
+    const noticeMarker = '[심화설문] 퀴즈 정답 추출 완료 (자동 제출 제외)';
+    const call = sendTelegramSpy.mock.calls.find((c) => String(c[0]).includes(noticeMarker));
+    expect(call).toBeDefined();
+
+    const sentMessage = String(call?.[0] ?? '');
+    const callOptions = call?.[2] as Record<string, unknown> | undefined;
+
+    // HTML parse_mode로 발송됨
+    expect(callOptions?.parse_mode).toBe('HTML');
+
+    // 부등호 '<'가 '&lt;'로 안전하게 이스케이프되어 본문이 훼손되지 않아야 함
+    expect(sentMessage).toContain('&lt;7.0% 미만');
+    // Q2 문항 및 선택 결과가 정상 보존되어야 함
+    expect(sentMessage).toContain('바이오시밀러');
+    // 세미나 URL이 누락 없이 포함되어야 함
+    expect(sentMessage).toContain('🔗 세미나 URL: https://m.doctorville.co.kr/cme/seminar/5543');
+    // 심화설문 프롬프트 블록이 정상 포함되어야 함
+    expect(sentMessage).toContain('<pre><code class="language-text">');
   });
 });

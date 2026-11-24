@@ -204,11 +204,7 @@ async function sendTelegram(
         delete plainOptions.parse_mode;
 
         // HTML 태그 제거 및 기본 엔티티 디코딩
-        const plainText = text
-          .replace(/<[^>]+>/g, '')
-          .replace(/&lt;/g, '<')
-          .replace(/&gt;/g, '>')
-          .replace(/&amp;/g, '&');
+        const plainText = stripHtmlTags(text);
 
         const validImagePath = imagePath && fs.existsSync(imagePath) ? imagePath : null;
         if (validImagePath) {
@@ -977,6 +973,22 @@ function escapeHtml(text: string): string {
 }
 
 /**
+ * HTML 태그를 제거하고 기본 엔티티를 디코딩합니다.
+ * 단순 /<[^>]+>/g 대신 태그 형식의 문자열만 제거하여,
+ * '<7.0%' 같은 부등호 수식이나 줄바꿈을 건너뛰는 긴 텍스트 블록이 통째로 삭제되지 않도록 방지합니다.
+ */
+function stripHtmlTags(html: string): string {
+  if (!html) return '';
+  return html
+    .replace(/<(?:\/?[a-zA-Z][a-zA-Z0-9:-]*(?:\s+[^>\r\n]*)?|\/?)>/g, '')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&');
+}
+
+/**
  * 세미나 표시용 공통 아이템 인터페이스
  */
 export interface SeminarDisplayItem {
@@ -1100,6 +1112,7 @@ export {
   checkLoginStatusHttp,
   escapeMarkdownV2,
   escapeHtml,
+  stripHtmlTags,
   getSeminarIdFromUrl,
   hasSurveyPointExcludedNotice,
   ensureSeminarDetailReady,

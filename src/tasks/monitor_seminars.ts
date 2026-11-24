@@ -927,8 +927,7 @@ async function monitorSeminars(
         const flagChanged2 =
           browserSuspectedAdvancedSurvey !== undefined &&
           (item.isSuspectedAdvancedSurvey !== browserSuspectedAdvancedSurvey ||
-            item.suspectedAdvancedType !==
-              (browserSuspectedAdvancedSurvey ? browserSuspectedAdvancedType : undefined));
+            item.suspectedAdvancedType !== (browserSuspectedAdvancedSurvey ? browserSuspectedAdvancedType : undefined));
 
         if (browserSuspectedAdvancedSurvey !== undefined) {
           item.isSuspectedAdvancedSurvey = browserSuspectedAdvancedSurvey;

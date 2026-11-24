@@ -7,7 +7,7 @@ import {
   TELEGRAM_MAX_MESSAGE_LENGTH,
   TELEGRAM_SAFE_MESSAGE_LENGTH,
 } from '../src/modules/telegram_splitter';
-import { replyWithSplit } from '../src/modules/utils';
+import { replyWithSplit, stripHtmlTags } from '../src/modules/utils';
 import { formatTodayLinksBroadcast, type TodayLinksFormatInput } from '../src/tasks/today_links';
 import { describe, it } from 'vitest';
 
@@ -347,6 +347,37 @@ async function testSeminarSubscribersChunking() {
   console.log('  ✓ sendSeminarChangesToSubscribers 청킹 분할 전송 검증 성공');
 }
 
+// 8. stripHtmlTags 태그 제거 및 부등호 보존 테스트
+function testStripHtmlTags() {
+  console.log('8. stripHtmlTags 태그 제거 및 부등호 보존 테스트');
+
+  // 부등호와 여러 줄 텍스트가 있을 때 수식 및 중간 텍스트가 날아가지 않는지 검증
+  const input =
+    '✅ Q1: 질문\n   → 목표혈당(<7.0% 미만) 도달 (1번)\n✅ Q2: 질문2\n🔗 세미나 URL: https://m.doctorville.co.kr/cme/seminar/123\n\n<pre><code class="language-text">심화설문 프롬프트 내용</code></pre>';
+
+  const stripped = stripHtmlTags(input);
+
+  // HTML 태그인 <pre>와 <code>는 제거되어야 함
+  assert.ok(!stripped.includes('<pre>'), '<pre> 태그는 제거되어야 함');
+  assert.ok(!stripped.includes('</pre>'), '</pre> 태그는 제거되어야 함');
+  assert.ok(!stripped.includes('<code class="language-text">'), '<code> 태그는 제거되어야 함');
+  assert.ok(!stripped.includes('</code>'), '</code> 태그는 제거되어야 함');
+
+  // 부등호 및 중간 텍스트, 세미나 링크, 프롬프트 본문은 안전하게 보존되어야 함
+  assert.ok(stripped.includes('목표혈당(<7.0% 미만) 도달 (1번)'), '부등호 수식이 보존되어야 함');
+  assert.ok(stripped.includes('✅ Q2: 질문2'), 'Q2 문항이 보존되어야 함');
+  assert.ok(
+    stripped.includes('🔗 세미나 URL: https://m.doctorville.co.kr/cme/seminar/123'),
+    '세미나 URL이 보존되어야 함',
+  );
+  assert.ok(stripped.includes('심화설문 프롬프트 내용'), '프롬프트 본문이 보존되어야 함');
+
+  // 엔티티 디코딩 검증
+  assert.strictEqual(stripHtmlTags('&lt;7.0% &amp; &gt;60 &quot;A&#39;'), '<7.0% & >60 "A\'');
+
+  console.log('  ✓ stripHtmlTags 검증 성공');
+}
+
 describe('텔레그램 메시지 분할 전송(Message Splitting) 테스트', () => {
   it('testPlainTextSplitting', () => {
     testPlainTextSplitting();
@@ -374,5 +405,9 @@ describe('텔레그램 메시지 분할 전송(Message Splitting) 테스트', ()
 
   it('testSeminarSubscribersChunking', async () => {
     await testSeminarSubscribersChunking();
+  });
+
+  it('testStripHtmlTags', () => {
+    testStripHtmlTags();
   });
 });

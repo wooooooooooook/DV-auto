@@ -1391,7 +1391,9 @@ async function processSeminarQuiz(
     // 심화정보가 있으나 주관식이 0개인 경우 [심화설문 어디갔지🧐]로 라벨을 부착하고 자동 제출은 생략 유지
     const isAdvancedWithZeroSubjective = effectiveIsAdvancedSurvey && !hasSubjectiveInSurvey;
     if (isAdvancedWithZeroSubjective) {
-      console.log(`[seminar_quiz] 심화정보가 있으나 주관식이 0개이므로 [심화설문 어디갔지🧐]로 변경 (자동 제출은 생략 유지)`);
+      console.log(
+        `[seminar_quiz] 심화정보가 있으나 주관식이 0개이므로 [심화설문 어디갔지🧐]로 변경 (자동 제출은 생략 유지)`,
+      );
       suspectedAdvancedSurvey = true;
     }
 
@@ -1427,9 +1429,7 @@ async function processSeminarQuiz(
     if (suspectedAdvancedSurvey && !effectiveIsAdvancedSurvey && currentPageNum === 1) {
       const hasQuizOnly = channelResults.length > 0 && !hasSubjectiveInSurvey;
       if (hasQuizOnly) {
-        console.log(
-          `[seminar_quiz] 단일 페이지 + 주관식 없음 + 퀴즈 존재 → suspectedAdvancedSurvey 해제`,
-        );
+        console.log(`[seminar_quiz] 단일 페이지 + 주관식 없음 + 퀴즈 존재 → suspectedAdvancedSurvey 해제`);
         suspectedAdvancedSurvey = false;
       }
     }
@@ -1513,7 +1513,7 @@ async function processSeminarQuiz(
         ? `<pre><code class="language-text">${escapeHtml(rawPromptText)}</code></pre>`
         : '';
       const promptSection = promptBlock ? `\n\n${promptBlock}` : '';
-      const telegramNoticeText = `📋 ℹ️ [${surveyLabel}] 퀴즈 정답 추출 완료 (자동 제출 제외)\n${resultMessage}\n\n🔗 세미나 URL: ${seminarPageUrl}${promptSection}`;
+      const telegramNoticeText = `📋 ℹ️ [${escapeHtml(surveyLabel)}] 퀴즈 정답 추출 완료 (자동 제출 제외)\n${escapeHtml(resultMessage)}\n\n🔗 세미나 URL: ${escapeHtml(seminarPageUrl)}${promptSection}`;
 
       try {
         await fs.mkdir(baseDir, { recursive: true });
@@ -1533,7 +1533,7 @@ async function processSeminarQuiz(
           run: () => requestHermesAiSurveyAnswer(rawPromptText, '심화설문 AI 추천 답변'),
           onResult: async (aiAnswer) => {
             if (aiAnswer && aiAnswer.trim()) {
-              const aiTelegramText = `🤖 <b>[${surveyLabel} AI 추천 답변]</b>\n\n<pre><code class="language-text">${escapeHtml(aiAnswer.trim())}</code></pre>`;
+              const aiTelegramText = `🤖 <b>[${escapeHtml(surveyLabel)} AI 추천 답변]</b>\n\n<pre><code class="language-text">${escapeHtml(aiAnswer.trim())}</code></pre>`;
               await sendTelegram(aiTelegramText, null, { parse_mode: 'HTML' }).catch((err) => {
                 console.error('[seminar_quiz] Hermes AI 답변 텔레그램 발송 실패:', err);
               });
