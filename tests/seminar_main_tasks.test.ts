@@ -333,7 +333,6 @@ function testPointExcludedFormatting() {
         isPointExcluded: true,
       },
     ],
-    pointConversionInfo: null,
     targetDate: '2026-08-18 (8/18)',
     isCustomDate: true,
   };

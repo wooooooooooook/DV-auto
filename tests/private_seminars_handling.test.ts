@@ -205,7 +205,6 @@ describe('비공개 세미나 예외처리 및 today_links 비공개 플래그 �
           isAdvancedSurvey: false,
         },
       ],
-      pointConversionInfo: null,
     });
 
     expect(formatted.message).toContain('비공개 신규 세미나');

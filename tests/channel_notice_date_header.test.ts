@@ -32,7 +32,6 @@ describe('공지채널메시지 5종 날짜(MM월 DD일) 헤더 검증', () => {
         quizInfo: null,
         seminarMessage: null,
         storedNewSeminars: [],
-        pointConversionInfo: null,
         targetDate: '2026-09-18',
       });
 

@@ -1,5 +1,5 @@
 import type { PlaywrightRunArgs } from '../types';
-import { getPointConversionAvailabilityHttp, formatSeminarDisplayName, getSeoulKoreanDate } from '../modules/utils';
+import { formatSeminarDisplayName, getSeoulKoreanDate } from '../modules/utils';
 import * as storage from '../services/storage';
 import * as seminarRepo from '../services/seminar_repository';
 import { TODAY_QUIZ_INFO_KEY, type CachedTodayQuizInfo } from './today_quiz';
@@ -11,7 +11,6 @@ import type { ActiveSurveyItem } from '../modules/html_parser';
 const SEMINAR_PAGE = 'https://www.doctorville.co.kr/seminar/main';
 const SEMINAR_DETAIL_PAGE = 'https://m.doctorville.co.kr/cme/seminar/';
 const SURVEY_MAIN_PAGE = 'https://www.doctorville.co.kr/survey/main';
-const POINT_CONVERSION_URL = 'https://www.doctorville.co.kr/my/point/pointUseHistoryList';
 const TODAY_QUIZ_TEMP_KEY = 'today_quiz:temp_answers';
 export const TODAY_LINKS_CACHE_KEY = 'today_links_cache';
 
@@ -33,12 +32,6 @@ function setTodayLinksCache(cache: TodayLinksCache): void {
 function clearTodayLinksCache(): void {
   storage.deleteKey(TODAY_LINKS_CACHE_KEY);
 }
-
-type PointConversionInfo = {
-  available?: boolean;
-  availablePlannedAt?: string;
-  meridiem?: string;
-};
 
 type QuizInfo = { link: string; productTitle?: string; answers?: Array<string | number> };
 type SeminarData = {
@@ -396,75 +389,6 @@ async function collectTodaySeminarMessage(
   }
 }
 
-async function collectPointConversionInfo(_page?: PlaywrightRunArgs['page']): Promise<PointConversionInfo | null> {
-  try {
-    const httpData = await getPointConversionAvailabilityHttp();
-    return httpData ?? null;
-  } catch (_e) {
-    console.error(
-      'collectPointConversionInfo error',
-      _e && typeof _e === 'object' && 'stack' in _e ? (_e as Error).stack : _e,
-    );
-    return null;
-  }
-}
-
-function parsePointConversionPlannedDate(plannedAt: string | undefined): { month: number; day: number } | null {
-  if (!plannedAt) return null;
-  const m = plannedAt.match(/(\d{1,2})\s*월\s*(\d{1,2})\s*일/);
-  if (!m) return null;
-  const month = parseInt(m[1], 10);
-  const day = parseInt(m[2], 10);
-  if (!month || !day) return null;
-  return { month, day };
-}
-
-function getPointConversionDiffDays(plannedAt: string | undefined, todayIsoOverride?: string): number | null {
-  const planned = parsePointConversionPlannedDate(plannedAt);
-  if (!planned) return null;
-  const todayIso = todayIsoOverride ?? new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
-  const [y, mo, d] = todayIso.split('-').map(Number);
-  if (!y || !mo || !d) return null;
-  const todayMs = Date.UTC(y, mo - 1, d);
-  let targetYear = y;
-  let targetMs = Date.UTC(targetYear, planned.month - 1, planned.day);
-  if (targetMs < todayMs) {
-    targetYear += 1;
-    targetMs = Date.UTC(targetYear, planned.month - 1, planned.day);
-  }
-  return Math.round((targetMs - todayMs) / 86400000);
-}
-
-export function isPointConversionDay(info: PointConversionInfo | null | undefined, todayIsoOverride?: string): boolean {
-  if (!info || info.available) return false;
-  const diffDays = getPointConversionDiffDays(info.availablePlannedAt, todayIsoOverride);
-  return diffDays === 0;
-}
-
-function getPointConversionDdayLabel(plannedAt: string | undefined, todayIsoOverride?: string): string {
-  const diffDays = getPointConversionDiffDays(plannedAt, todayIsoOverride);
-  if (diffDays === null) return '';
-  if (diffDays === 0) return ' (D-Day)';
-  if (diffDays > 0) return ` (D-${diffDays})`;
-  return '';
-}
-
-function formatPointConversionMessage(info: PointConversionInfo | null, todayIsoOverride?: string): string {
-  if (!info) return '';
-  if (info.available) {
-    return `💳 <b>현재 네이버페이 포인트 전환 가능합니다.</b>\n${POINT_CONVERSION_URL}`;
-  }
-  if (isPointConversionDay(info, todayIsoOverride)) {
-    return `💳 <b>오늘 네이버페이포인트 전환 가능 예정입니다. 전환 가능 알림을 기다려주세요!</b>\n${POINT_CONVERSION_URL}`;
-  }
-  const plannedParts = [info.availablePlannedAt, info.meridiem].map((s) => s?.trim()).filter(Boolean);
-  if (plannedParts.length > 0) {
-    const dday = getPointConversionDdayLabel(info.availablePlannedAt, todayIsoOverride);
-    return `💳 <b>다음 네이버페이포인트 전환가능일:</b> ${escapeHtml(plannedParts.join(' '))}${dday}`;
-  }
-  return '💳 <b>다음 네이버페이포인트 전환가능일:</b> 미정';
-}
-
 async function collectActiveSurveys(targetDate?: string): Promise<ActiveSurveyItem[]> {
   try {
     const res = await fetchSurveyMainList(1, targetDate);
@@ -482,7 +406,6 @@ export type TodayLinksFormatInput = {
   quizInfo: QuizInfo | null;
   seminarMessage: SeminarMessageResult | null;
   storedNewSeminars: StoredNewSeminars['seminars'];
-  pointConversionInfo: PointConversionInfo | null;
   activeSurveys?: ActiveSurveyItem[] | null;
   targetDate?: string;
   isCustomDate?: boolean;
@@ -502,8 +425,7 @@ export type TodayLinksFormattedResult = {
 };
 
 function formatTodayLinksBroadcast(input: TodayLinksFormatInput): TodayLinksFormattedResult {
-  const { quizInfo, seminarMessage, storedNewSeminars, pointConversionInfo, activeSurveys, targetDate, isCustomDate } =
-    input;
+  const { quizInfo, seminarMessage, storedNewSeminars, activeSurveys, targetDate, isCustomDate } = input;
 
   const dateHeader = getSeoulKoreanDate(targetDate);
   let message = '';
@@ -565,14 +487,6 @@ function formatTodayLinksBroadcast(input: TodayLinksFormatInput): TodayLinksForm
     message += `\n🆕 <b>어제 추가된 신규 세미나</b>\n${newSeminarList}\n`;
   }
 
-  const pointConversionMessage = formatPointConversionMessage(
-    pointConversionInfo,
-    isCustomDate && targetDate ? targetDate.split(' ')[0] : undefined,
-  );
-  if (pointConversionMessage) {
-    message += `\n${pointConversionMessage}\n`;
-  }
-
   message += `\n<blockquote>🤖 <b>닥터빌 텔레그램방에 전송된 메시지입니다.</b>
 매일 오전 링크모음 발송, 세미나 시작/종료, 퀴즈 정답 알림, 지금 가입하세요!
 https://t.me/+J1UGmvLA9jU4NjQ1</blockquote>\n<blockquote>✨ <b>공지봇(@DV_notice_bot)에서 나만의 개인별 맞춤 알림을 설정해보세요!</b>
@@ -595,14 +509,6 @@ https://t.me/+J1UGmvLA9jU4NjQ1</blockquote>\n<blockquote>✨ <b>공지봇(@DV_no
   // 참여 가능한 설문이 있는 경우 바로가기 버튼 추가
   if (activeSurveys && activeSurveys.length > 0) {
     inlineKeyboard.push([{ text: '📋 설문 목록 바로가기', url: SURVEY_MAIN_PAGE }]);
-  }
-
-  // 포인트 전환 가능일(당일 전환 가능)인 경우 포인트 전환 바로가기 버튼 추가
-  const pointConversionDay = pointConversionInfo?.available
-    ? true
-    : isPointConversionDay(pointConversionInfo, isCustomDate && targetDate ? targetDate.split(' ')[0] : undefined);
-  if (pointConversionDay) {
-    inlineKeyboard.push([{ text: '💳 포인트 전환하러 가기', url: POINT_CONVERSION_URL }]);
   }
 
   // 세미나 목록 바로가기 버튼 추가
@@ -636,7 +542,6 @@ async function run({ page, args }: Partial<PlaywrightRunArgs> = {}, taskOptions?
 
     const quizInfo = await collectQuizInfo(page);
     const seminarMessage = await collectTodaySeminarMessage(page, inputDate);
-    const pointConversionInfo = await collectPointConversionInfo(page);
     const activeSurveys = await collectActiveSurveys(isCustomDate ? isoDate : undefined);
 
     const storedNewSeminars = getYesterdayAddedSeminars(yesterdayIso);
@@ -645,7 +550,6 @@ async function run({ page, args }: Partial<PlaywrightRunArgs> = {}, taskOptions?
       quizInfo,
       seminarMessage,
       storedNewSeminars,
-      pointConversionInfo,
       activeSurveys,
       targetDate: isCustomDate ? `${isoDate} (${todayString})` : undefined,
       isCustomDate,

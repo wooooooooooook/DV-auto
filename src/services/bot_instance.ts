@@ -299,10 +299,6 @@ function setBot(name: BotName, instance: Telegraf | null): void {
                     })
                     .catch(() => {});
                   return;
-                } else if (topic === 'point_conversion') {
-                  alertMessage = updatedSub.pointConversion
-                    ? '💰 네페 포인트 전환 알림이 켜졌습니다.'
-                    : '💰 네페 포인트 전환 알림이 꺼졌습니다.';
                 } else if (topic === 'new_seminar_point_excluded' || topic === 'new_seminar_include_point_excluded') {
                   if (updatedSub.newSeminarIncludePointExcluded) {
                     alertMessage = '🎁 포인트가 미지급되는 세미나도 신규 알림에 포함하여 수신합니다.';

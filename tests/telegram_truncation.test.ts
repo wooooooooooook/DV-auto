@@ -130,9 +130,6 @@ function testTodayLinksTelegramTruncation() {
         '<b>오늘의 세미나 리스트:</b>\n🍴 <b>[점심 세미나]</b>\n- 13:00. 점심 세미나\n🍴 <b>[저녁 세미나]</b>\n- 18:00. 저녁 세미나',
     },
     storedNewSeminars: hugeNewSeminars,
-    pointConversionInfo: {
-      available: true,
-    },
   };
 
   const { message, options } = formatTodayLinksBroadcast(input);

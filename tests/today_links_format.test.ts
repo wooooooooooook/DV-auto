@@ -64,10 +64,6 @@ function testTodayLinksFormatWithUserExample() {
         totalCount: '500',
       },
     ],
-    // 포인트 전환 정보
-    pointConversionInfo: {
-      available: true,
-    },
   };
 
   const { message, options } = formatTodayLinksBroadcast(mockInput);
@@ -95,59 +91,7 @@ function testTodayLinksFormatWithUserExample() {
   assert(message.includes('1. [9/1 13:00~13:40] 척수성 근위축증(SMA) 조기 진단과... (15/100)'));
   assert(message.includes('2. [8/20 13:00~14:00] 🚫<b>[포인트미지급]</b> <s>ChatGPT 실용 입문 — AI로 ...</s> (0/500)'));
 
-  // 5. 포인트 전환 안내 (available: true 일 때 현재 전환 가능 문구)
-  assert(message.includes('💳 <b>현재 네이버페이 포인트 전환 가능합니다.</b>'));
-
-  // 5-1. 포인트 전환 예정일 (D-2 표시) 검증
-  const ddayInput: TodayLinksFormatInput = {
-    ...mockInput,
-    pointConversionInfo: {
-      available: false,
-      availablePlannedAt: '08월 25일',
-      meridiem: '오후',
-    },
-    targetDate: '2026-08-23 (8/23)',
-    isCustomDate: true,
-  };
-  const { message: ddayMessage } = formatTodayLinksBroadcast(ddayInput);
-  assert(
-    ddayMessage.includes('💳 <b>다음 네이버페이포인트 전환가능일:</b> 08월 25일 오후 (D-2)'),
-    `D-day 표시 검증 실패: ${ddayMessage}`,
-  );
-
-  // 5-2. 포인트 전환 예정일이 오늘인 경우 (D-Day) 전환 예정 알림 문구 검증
-  const dday0Input: TodayLinksFormatInput = {
-    ...mockInput,
-    pointConversionInfo: {
-      available: false,
-      availablePlannedAt: '08월 23일',
-      meridiem: '오전',
-    },
-    targetDate: '2026-08-23 (8/23)',
-    isCustomDate: true,
-  };
-  const { message: dday0Message } = formatTodayLinksBroadcast(dday0Input);
-  assert(
-    dday0Message.includes('💳 <b>오늘 네이버페이포인트 전환 가능 예정입니다. 전환 가능 알림을 기다려주세요!</b>'),
-    `D-Day(당일) 검증 실패: ${dday0Message}`,
-  );
-
-  // 5-3. 포인트 전환 예정일이 없는 경우 (미정) 문구 검증
-  const unplannedInput: TodayLinksFormatInput = {
-    ...mockInput,
-    pointConversionInfo: {
-      available: false,
-      availablePlannedAt: undefined,
-      meridiem: undefined,
-    },
-  };
-  const { message: unplannedMessage } = formatTodayLinksBroadcast(unplannedInput);
-  assert(
-    unplannedMessage.includes('💳 <b>다음 네이버페이포인트 전환가능일:</b> 미정'),
-    `전환 예정일 미정 검증 실패: ${unplannedMessage}`,
-  );
-
-  // 6. 하단 봇 안내 인용구
+  // 5. 하단 봇 안내 인용구
   assert(
     message.includes(
       '<blockquote>🤖 <b>닥터빌 텔레그램방에 전송된 메시지입니다.</b>\n매일 오전 링크모음 발송, 세미나 시작/종료, 퀴즈 정답 알림, 지금 가입하세요!\nhttps://t.me/+J1UGmvLA9jU4NjQ1</blockquote>',
@@ -163,7 +107,7 @@ function testTodayLinksFormatWithUserExample() {
   // 7. 인라인 키보드 버튼 및 링크 미리보기 비활성화 검증
   assert.strictEqual(options.parse_mode, 'HTML');
   assert.strictEqual(options.link_preview_options?.is_disabled, true);
-  assert.strictEqual(options.reply_markup.inline_keyboard.length, 4);
+  assert.strictEqual(options.reply_markup.inline_keyboard.length, 3);
   assert.strictEqual(options.reply_markup.inline_keyboard[0][0].text, '✨ 출석체크 바로가기');
   assert.strictEqual(options.reply_markup.inline_keyboard[0][0].url, 'https://m.doctorville.co.kr/mypage/attendance');
   assert.strictEqual(options.reply_markup.inline_keyboard[0][1].text, '✏️ 오늘의 퀴즈 풀기');
@@ -171,15 +115,10 @@ function testTodayLinksFormatWithUserExample() {
     options.reply_markup.inline_keyboard[0][1].url,
     'https://www.doctorville.co.kr/product/productView?pId=161',
   );
-  assert.strictEqual(options.reply_markup.inline_keyboard[1][0].text, '💳 포인트 전환하러 가기');
-  assert.strictEqual(
-    options.reply_markup.inline_keyboard[1][0].url,
-    'https://www.doctorville.co.kr/my/point/pointUseHistoryList',
-  );
-  assert.strictEqual(options.reply_markup.inline_keyboard[2][0].text, '📋 세미나 목록 바로가기');
-  assert.strictEqual(options.reply_markup.inline_keyboard[2][0].url, 'https://www.doctorville.co.kr/seminar/main');
-  assert.strictEqual(options.reply_markup.inline_keyboard[3][0].text, '🔔 공지봇 맞춤 알림 설정');
-  assert.strictEqual(options.reply_markup.inline_keyboard[3][0].url, 'https://t.me/DV_notice_bot');
+  assert.strictEqual(options.reply_markup.inline_keyboard[1][0].text, '📋 세미나 목록 바로가기');
+  assert.strictEqual(options.reply_markup.inline_keyboard[1][0].url, 'https://www.doctorville.co.kr/seminar/main');
+  assert.strictEqual(options.reply_markup.inline_keyboard[2][0].text, '🔔 공지봇 맞춤 알림 설정');
+  assert.strictEqual(options.reply_markup.inline_keyboard[2][0].url, 'https://t.me/DV_notice_bot');
 
   console.log('\n✅ [Pass] 예시 문구 포맷팅 검증을 성공적으로 통과했습니다!\n');
 }
@@ -217,7 +156,6 @@ function testDateParsingAndCustomDateFormat() {
         '<b>[8/20] 세미나 리스트:</b>\n🍴 <b>[점심 세미나]</b>\n- 13:00~14:00. AI 실용 입문 https://m.doctorville.co.kr/cme/seminar/5573',
     },
     storedNewSeminars: [],
-    pointConversionInfo: null,
     targetDate: '2026-08-20 (8/20)',
     isCustomDate: true,
   };
@@ -370,84 +308,6 @@ function testYesterdayAddedSeminarsFilter() {
 
 testYesterdayAddedSeminarsFilter();
 
-function testPointConversionButtonConditions() {
-  console.log('--- [Test] 포인트 전환 버튼 표시 조건 테스트 시작 ---\n');
-
-  const baseInput: TodayLinksFormatInput = {
-    quizInfo: null,
-    seminarMessage: null,
-    storedNewSeminars: [],
-    pointConversionInfo: null,
-    targetDate: '2026-08-23 (8/23)',
-    isCustomDate: true,
-  };
-
-  const hasConversionButton = (input: TodayLinksFormatInput): boolean => {
-    const { options } = formatTodayLinksBroadcast(input);
-    return options.reply_markup.inline_keyboard.some((row) =>
-      row.some((btn) => btn.text === '💳 포인트 전환하러 가기'),
-    );
-  };
-
-  // 1. available: true -> 버튼 표시
-  const case1 = hasConversionButton({
-    ...baseInput,
-    pointConversionInfo: { available: true },
-  });
-  assert.strictEqual(case1, true, 'Case 1 실패: available: true 일 때는 버튼이 표시되어야 함');
-
-  // 2. available: false, availablePlannedAt = 오늘 (08월 23일) -> 버튼 표시
-  const case2 = hasConversionButton({
-    ...baseInput,
-    pointConversionInfo: {
-      available: false,
-      availablePlannedAt: '08월 23일',
-      meridiem: '오전',
-    },
-  });
-  assert.strictEqual(case2, true, 'Case 2 실패: availablePlannedAt이 오늘이면 버튼이 표시되어야 함');
-
-  // 3. available: false, availablePlannedAt = 내일 (08월 24일) -> 버튼 미표시
-  const case3 = hasConversionButton({
-    ...baseInput,
-    pointConversionInfo: {
-      available: false,
-      availablePlannedAt: '08월 24일',
-      meridiem: '오전',
-    },
-  });
-  assert.strictEqual(case3, false, 'Case 3 실패: availablePlannedAt이 내일이면 버튼이 미표시되어야 함');
-
-  // 4. available: false, availablePlannedAt = 과거 날짜 (08월 22일) -> 내년 롤오버되어 미표시
-  const case4 = hasConversionButton({
-    ...baseInput,
-    pointConversionInfo: {
-      available: false,
-      availablePlannedAt: '08월 22일',
-      meridiem: '오후',
-    },
-  });
-  assert.strictEqual(case4, false, 'Case 4 실패: 과거 날짜는 내년으로 롤오버되어 미표시되어야 함');
-
-  // 5. availablePlannedAt 없음/잘못된 형식 -> 버튼 미표시
-  const case5a = hasConversionButton({
-    ...baseInput,
-    pointConversionInfo: { available: false },
-  });
-  assert.strictEqual(case5a, false, 'Case 5a 실패: availablePlannedAt이 없으면 버튼 미표시');
-
-  const case5b = hasConversionButton({
-    ...baseInput,
-    pointConversionInfo: {
-      available: false,
-      availablePlannedAt: 'invalid date text',
-    },
-  });
-  assert.strictEqual(case5b, false, 'Case 5b 실패: availablePlannedAt 형식이 잘못되면 버튼 미표시');
-
-  console.log('✅ [Pass] 포인트 전환 버튼 조건 테스트 통과!\n');
-}
-
 async function testTodayQuizCacheIntegration() {
   console.log('--- [Test] today_quiz 캐시 및 today_links 연동 테스트 시작 ---');
   const storage = await import('../src/services/storage');
@@ -457,7 +317,6 @@ async function testTodayQuizCacheIntegration() {
   const utilsModule = await import('../src/modules/utils');
   const seminarApiModule = await import('../src/modules/seminar_api');
 
-  const pointAvailabilitySpy = vi.spyOn(utilsModule, 'getPointConversionAvailabilityHttp').mockResolvedValue(null);
   const telegramSpy = vi.spyOn(utilsModule, 'sendTelegram').mockResolvedValue(true);
   const pointExcludedSpy = vi
     .spyOn(utilsModule, 'isSurveyPointExcludedSeminarHttp')
@@ -496,7 +355,6 @@ async function testTodayQuizCacheIntegration() {
 
     console.log('✅ [Pass] today_quiz 캐시 연동 테스트 통과!\n');
   } finally {
-    pointAvailabilitySpy.mockRestore();
     telegramSpy.mockRestore();
     pointExcludedSpy.mockRestore();
     futureSeminarsSpy.mockRestore();
@@ -547,7 +405,6 @@ function testSeminarNameTruncationAndCapacityFormat() {
         url: 'https://m.doctorville.co.kr/cme/seminar/6004',
       },
     ],
-    pointConversionInfo: null,
   };
 
   const { message } = formatTodayLinksBroadcast(input);
@@ -709,7 +566,6 @@ function testActiveSurveysSectionFormat() {
     quizInfo: null,
     seminarMessage: null,
     storedNewSeminars: [],
-    pointConversionInfo: null,
     activeSurveys: [
       {
         title: '펙수프라잔 20mg 시장조사',
@@ -775,10 +631,6 @@ describe('today_links_format 단위 테스트', () => {
 
   it('testYesterdayAddedSeminarsFilter', () => {
     testYesterdayAddedSeminarsFilter();
-  });
-
-  it('testPointConversionButtonConditions', () => {
-    testPointConversionButtonConditions();
   });
 
   it('testSeminarNameTruncationAndCapacityFormat', () => {

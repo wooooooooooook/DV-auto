@@ -29,7 +29,6 @@ export type SubscriptionTopic =
   | 'seminar_live'
   | 'survey_closing_20'
   | 'survey_closing_10'
-  | 'point_conversion'
   | 'doctorville_survey'
   | 'medigate_symposium';
 
@@ -66,7 +65,6 @@ export interface SubscriptionRecord {
   seminarLive: boolean;
   surveyClosing20: boolean;
   surveyClosing10: boolean;
-  pointConversion: boolean;
   doctorvilleSurvey: boolean;
   medigateSymposium: boolean;
   createdAt: number;
@@ -90,7 +88,6 @@ interface SubscriptionRow {
   seminar_live?: number;
   survey_closing_20?: number;
   survey_closing_10?: number;
-  point_conversion?: number;
   doctorville_survey?: number;
   medigate_symposium?: number;
   created_at?: number;
@@ -208,7 +205,6 @@ export function getSubscription(chatId: number): SubscriptionRecord {
       seminarLive: false,
       surveyClosing20: false,
       surveyClosing10: false,
-      pointConversion: false,
       doctorvilleSurvey: false,
       medigateSymposium: false,
       createdAt: 0,
@@ -229,7 +225,6 @@ export function getSubscription(chatId: number): SubscriptionRecord {
     seminarLive: row.seminar_live === 1,
     surveyClosing20: row.survey_closing_20 === 1,
     surveyClosing10: row.survey_closing_10 === 1,
-    pointConversion: row.point_conversion === 1,
     doctorvilleSurvey: row.doctorville_survey === 1,
     medigateSymposium: row.medigate_symposium === 1,
     createdAt: row.created_at || 0,
@@ -260,13 +255,13 @@ export function updateSubscription(
       chat_id, today_links, today_links_time, today_links_sent_date,
       new_seminar, new_seminar_include_point_excluded, intermd_quiz, seminar_changes,
       seminar_change_categories, seminar_live,
-      survey_closing_20, survey_closing_10, point_conversion, doctorville_survey, medigate_symposium,
+      survey_closing_20, survey_closing_10, doctorville_survey, medigate_symposium,
       created_at, updated_at
     ) VALUES (
       @chatId, @todayLinks, @todayLinksTime, @todayLinksSentDate,
       @newSeminar, @newSeminarIncludePointExcluded, @intermdQuiz, @seminarChanges,
       @seminarChangeCategories, @seminarLive,
-      @surveyClosing20, @surveyClosing10, @pointConversion, @doctorvilleSurvey, @medigateSymposium,
+      @surveyClosing20, @surveyClosing10, @doctorvilleSurvey, @medigateSymposium,
       @createdAt, @updatedAt
     )
     ON CONFLICT(chat_id) DO UPDATE SET
@@ -281,7 +276,6 @@ export function updateSubscription(
       seminar_live = excluded.seminar_live,
       survey_closing_20 = excluded.survey_closing_20,
       survey_closing_10 = excluded.survey_closing_10,
-      point_conversion = excluded.point_conversion,
       doctorville_survey = excluded.doctorville_survey,
       medigate_symposium = excluded.medigate_symposium,
       updated_at = excluded.updated_at
@@ -299,7 +293,6 @@ export function updateSubscription(
     seminarLive: next.seminarLive ? 1 : 0,
     surveyClosing20: next.surveyClosing20 ? 1 : 0,
     surveyClosing10: next.surveyClosing10 ? 1 : 0,
-    pointConversion: next.pointConversion ? 1 : 0,
     doctorvilleSurvey: next.doctorvilleSurvey ? 1 : 0,
     medigateSymposium: next.medigateSymposium ? 1 : 0,
     createdAt: next.createdAt,
@@ -320,7 +313,6 @@ export function toggleTopic(
     | 'seminar_live'
     | 'survey_closing_20'
     | 'survey_closing_10'
-    | 'point_conversion'
     | 'doctorville_survey'
     | 'medigate_symposium',
 ): SubscriptionRecord {
@@ -353,8 +345,6 @@ export function toggleTopic(
       return updateSubscription(chatId, { surveyClosing20: !current.surveyClosing20 });
     case 'survey_closing_10':
       return updateSubscription(chatId, { surveyClosing10: !current.surveyClosing10 });
-    case 'point_conversion':
-      return updateSubscription(chatId, { pointConversion: !current.pointConversion });
     case 'doctorville_survey':
       return updateSubscription(chatId, { doctorvilleSurvey: !current.doctorvilleSurvey });
     case 'medigate_symposium':
@@ -418,7 +408,6 @@ export function setAllTopics(chatId: number, enable: boolean): SubscriptionRecor
     seminarLive: enable,
     surveyClosing20: enable,
     surveyClosing10: enable,
-    pointConversion: enable,
     doctorvilleSurvey: enable,
     medigateSymposium: enable,
   });
@@ -453,9 +442,6 @@ export function getSubscribersForTopic(topic: SubscriptionTopic): number[] {
       break;
     case 'survey_closing_10':
       query = 'SELECT chat_id FROM subscriptions WHERE survey_closing_10 = 1';
-      break;
-    case 'point_conversion':
-      query = 'SELECT chat_id FROM subscriptions WHERE point_conversion = 1';
       break;
     case 'doctorville_survey':
       query = 'SELECT chat_id FROM subscriptions WHERE doctorville_survey = 1';
@@ -1022,7 +1008,6 @@ export interface SubscriptionStats {
   seminarLive: number;
   surveyClosing20: number;
   surveyClosing10: number;
-  pointConversion: number;
   doctorvilleSurvey: number;
   medigateSymposium: number;
 }
@@ -1047,7 +1032,6 @@ export function getSubscriptionStats(): SubscriptionStats {
       SUM(CASE WHEN seminar_live = 1 THEN 1 ELSE 0 END) as seminarLive,
       SUM(CASE WHEN survey_closing_20 = 1 THEN 1 ELSE 0 END) as surveyClosing20,
       SUM(CASE WHEN survey_closing_10 = 1 THEN 1 ELSE 0 END) as surveyClosing10,
-      SUM(CASE WHEN point_conversion = 1 THEN 1 ELSE 0 END) as pointConversion,
       SUM(CASE WHEN doctorville_survey = 1 THEN 1 ELSE 0 END) as doctorvilleSurvey,
       SUM(CASE WHEN medigate_symposium = 1 THEN 1 ELSE 0 END) as medigateSymposium
     FROM subscriptions
@@ -1093,7 +1077,6 @@ export function getSubscriptionStats(): SubscriptionStats {
     seminarLive: safeNum(baseRow?.seminarLive),
     surveyClosing20: safeNum(baseRow?.surveyClosing20),
     surveyClosing10: safeNum(baseRow?.surveyClosing10),
-    pointConversion: safeNum(baseRow?.pointConversion),
     doctorvilleSurvey: safeNum(baseRow?.doctorvilleSurvey),
     medigateSymposium: safeNum(baseRow?.medigateSymposium),
   };
@@ -1151,7 +1134,6 @@ export function buildMainMenu(chatId: number): { text: string; replyMarkup: Inli
     `• 🆕 <b>신규 세미나</b>: ${newSeminarStatusText} <i>(👥 ${stats.newSeminar}명)</i>`,
     `• 🔄 <b>세미나 정보 변경</b>: ${seminarChangesSummary} <i>(👥 ${stats.seminarChanges}명)</i>`,
     `• 🔴 <b>세미나 라이브/퀴즈</b>: ${sub.seminarLive ? '🟢 ON' : '🔴 OFF'} (마감알림: ${surveySummary}) <i>(👥 라이브 ${stats.seminarLive}명 / 20분 ${stats.surveyClosing20}명 / 10분 ${stats.surveyClosing10}명)</i>`,
-    `• 💰 <b>네페 포인트 전환</b>: ${sub.pointConversion ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.pointConversion}명)</i>`,
     `• 📋 <b>닥터빌 설문 (시장조사 등)</b>: ${sub.doctorvilleSurvey ? '🟢 ON' : '🔴 OFF'} <i>(👥 ${stats.doctorvilleSurvey}명)</i>`,
     '',
     '🌐 <b>[닥터빌 외 서비스 알림 구독 현황]</b>',
@@ -1182,12 +1164,6 @@ export function buildMainMenu(chatId: number): { text: string; replyMarkup: Inli
       {
         text: `🔴 세미나 라이브/퀴즈 및 설문 마감: ${sub.seminarLive ? 'ON 🟢' : 'OFF 🔴'} (${surveySummary}) ⚙️`,
         callback_data: 'sub:menu:seminar_live',
-      },
-    ],
-    [
-      {
-        text: `💰 네페 포인트 전환 (👥 ${stats.pointConversion}명): ${sub.pointConversion ? 'ON 🟢' : 'OFF 🔴'}`,
-        callback_data: 'sub:toggle:point_conversion',
       },
     ],
     [

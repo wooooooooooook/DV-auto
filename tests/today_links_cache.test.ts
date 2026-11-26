@@ -115,7 +115,6 @@ describe('today_links 캐시 및 공지봇 전용 핸들러 테스트', () => {
         quizInfo: null,
         seminarMessage: { date: '2026-08-24', lunchSeminarIds: [], dinnerSeminarIds: [], message: '세미나 없음' },
         storedNewSeminars: [],
-        pointConversionInfo: null,
         isCustomDate: false,
       });
 

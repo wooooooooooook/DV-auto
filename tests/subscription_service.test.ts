@@ -56,7 +56,6 @@ describe('subscription_service', () => {
     expect(defaultSub.seminarLive).toBe(false);
     expect(defaultSub.surveyClosing20).toBe(false);
     expect(defaultSub.surveyClosing10).toBe(false);
-    expect(defaultSub.pointConversion).toBe(false);
     expect(defaultSub.doctorvilleSurvey).toBe(false);
     expect(defaultSub.medigateSymposium).toBe(false);
 
@@ -67,7 +66,6 @@ describe('subscription_service', () => {
       newSeminarIncludePointExcluded: true,
       surveyClosing20: true,
       surveyClosing10: true,
-      pointConversion: true,
       doctorvilleSurvey: true,
       medigateSymposium: true,
     });
@@ -78,7 +76,6 @@ describe('subscription_service', () => {
     expect(updated.newSeminarIncludePointExcluded).toBe(true);
     expect(updated.surveyClosing20).toBe(true);
     expect(updated.surveyClosing10).toBe(true);
-    expect(updated.pointConversion).toBe(true);
     expect(updated.doctorvilleSurvey).toBe(true);
     expect(updated.medigateSymposium).toBe(true);
 
@@ -89,7 +86,6 @@ describe('subscription_service', () => {
     expect(fetched.newSeminarIncludePointExcluded).toBe(true);
     expect(fetched.surveyClosing20).toBe(true);
     expect(fetched.surveyClosing10).toBe(true);
-    expect(fetched.pointConversion).toBe(true);
     expect(fetched.doctorvilleSurvey).toBe(true);
     expect(fetched.medigateSymposium).toBe(true);
   });
@@ -123,9 +119,6 @@ describe('subscription_service', () => {
 
     toggleTopic(100, 'survey_closing_10');
     expect(getSubscription(100).surveyClosing10).toBe(true);
-
-    toggleTopic(100, 'point_conversion');
-    expect(getSubscription(100).pointConversion).toBe(true);
 
     toggleTopic(100, 'doctorville_survey');
     expect(getSubscription(100).doctorvilleSurvey).toBe(true);
@@ -203,7 +196,6 @@ describe('subscription_service', () => {
     expect(sub.seminarLive).toBe(true);
     expect(sub.surveyClosing20).toBe(true);
     expect(sub.surveyClosing10).toBe(true);
-    expect(sub.pointConversion).toBe(true);
 
     setAllTopics(400, false);
     sub = getSubscription(400);
@@ -214,7 +206,6 @@ describe('subscription_service', () => {
     expect(sub.seminarLive).toBe(false);
     expect(sub.surveyClosing20).toBe(false);
     expect(sub.surveyClosing10).toBe(false);
-    expect(sub.pointConversion).toBe(false);
   });
 
   it('시간별 오늘의 링크 구독자 조회 및 당일 발송 완료 처리가 동작해야 한다', () => {
@@ -237,11 +228,10 @@ describe('subscription_service', () => {
   });
 
   it('토픽별 구독자 조회가 올바르게 동작해야 한다', () => {
-    updateSubscription(601, { pointConversion: true, seminarLive: true, surveyClosing20: true });
-    updateSubscription(602, { pointConversion: true, seminarLive: false, surveyClosing10: true });
+    updateSubscription(601, { seminarLive: true, surveyClosing20: true });
+    updateSubscription(602, { seminarLive: false, surveyClosing10: true });
     updateSubscription(603, { newSeminar: 'limit_3000', surveyClosing20: true, surveyClosing10: true });
 
-    expect(getSubscribersForTopic('point_conversion')).toEqual([601, 602]);
     expect(getSubscribersForTopic('seminar_live')).toEqual([601]);
     expect(getSubscribersForTopic('new_seminar')).toEqual([603]);
     expect(getSubscribersForTopic('survey_closing_20')).toEqual([601, 603]);
@@ -281,14 +271,12 @@ describe('subscription_service', () => {
       newSeminar: 'limit_3000',
       newSeminarIncludePointExcluded: true,
       surveyClosing10: true,
-      pointConversion: true,
     });
 
     updateSubscription(1004, {
       todayLinks: false,
       newSeminar: 'urgent_1000',
       intermdQuiz: true,
-      pointConversion: true,
     });
 
     stats = getSubscriptionStats();
@@ -308,7 +296,6 @@ describe('subscription_service', () => {
     expect(stats.seminarLive).toBe(1);
     expect(stats.surveyClosing20).toBe(1);
     expect(stats.surveyClosing10).toBe(1);
-    expect(stats.pointConversion).toBe(2);
   });
 
   it('UI 마크업 생성 헬퍼가 버튼과 텍스트에 구독자 수를 포함하여 정상 반환해야 한다', () => {

@@ -8,7 +8,7 @@ import type { Telegraf } from 'telegraf';
 import type { BrowserContext, Page } from 'playwright';
 import { getBot } from '../services/bot_instance';
 import { recordChannelMessage } from '../services/channel_message_repository';
-import { httpGet, httpGetJson } from './http_client';
+import { httpGet } from './http_client';
 import { parseLoginStatusHtml, hasSurveyPointExcludedNoticeHtml } from './html_parser';
 import type { SuspectedAdvancedType } from '../services/seminar_repository';
 
@@ -917,26 +917,6 @@ function getSeminarIdFromUrl(url: string): string | null {
     return null;
   } catch (_e) {
     console.error('Failed to extract seminarId from URL:', url, _e);
-    return null;
-  }
-}
-
-/**
- * 포인트 전환 가능 여부 API HTTP GET 조회
- */
-export async function getPointConversionAvailabilityHttp(): Promise<{
-  available?: boolean;
-  availablePlannedAt?: string;
-  meridiem?: string;
-} | null> {
-  try {
-    const API_URL = 'https://api.doctorville.co.kr/api/point/conversion/availability';
-    const json = await httpGetJson<{ data?: { available?: boolean; availablePlannedAt?: string; meridiem?: string } }>(
-      API_URL,
-    );
-    return json?.data ?? null;
-  } catch (err) {
-    console.error('getPointConversionAvailabilityHttp error:', err);
     return null;
   }
 }

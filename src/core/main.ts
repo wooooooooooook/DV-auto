@@ -29,7 +29,7 @@ import * as medigateApplyTaskModule from '../tasks/medigate_apply_symposium';
 import * as medigateWatchTaskModule from '../tasks/medigate_watch_symposium';
 import * as etcDailyQuestsTaskModule from '../tasks/etc_daily_quests';
 import { sendOrUpdateTodayLinksNotification } from '../services/broadcast_today_links';
-import { sendToTopicSubscribers, sendHourlyTodayLinksToSubscribers } from '../services/subscription_service';
+import { sendHourlyTodayLinksToSubscribers } from '../services/subscription_service';
 import { shouldResumeSeminarMonitor } from '../services/channel_message_repository';
 import { refreshPastUncompletedSeminars } from '../services/seminar_sync_service';
 import { checkAndWatchMedigateSymposiums } from '../services/medigate_monitor_service';
@@ -54,83 +54,6 @@ const HOURLY_TODAY_LINKS_EARLY_CRON = '0 2 0 * * *';
 const HOURLY_TODAY_LINKS_CRON = '5 0 1-12 * * *';
 const SYNC_SEMINARS_CRON = process.env.SYNC_SEMINARS_CRON || '10 */10 6-23 * * *';
 const MEDIGATE_MONITOR_CRON = process.env.MEDIGATE_MONITOR_CRON || '15 */10 11-22 * * *';
-const POINT_CONVERSION_STATE_KEY = 'point_conversion:last_available';
-let isFastPolling = false;
-let fastPollingInterval: NodeJS.Timeout | null = null;
-function readConversionState(): boolean | null {
-  return storage.get<boolean>(POINT_CONVERSION_STATE_KEY, null);
-}
-function writeConversionState(available: boolean): void {
-  storage.set(POINT_CONVERSION_STATE_KEY, available);
-}
-function getTodayKoreanString(): string {
-  const now = new Date();
-  const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
-  const month = String(kst.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(kst.getUTCDate()).padStart(2, '0');
-  return `${month}월 ${day}일`;
-}
-function isAfterFivePMKST(): boolean {
-  const now = new Date();
-  const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
-  return kst.getUTCHours() >= 17;
-}
-async function checkAndNotifyPointConversion(): Promise<void> {
-  if (isAfterFivePMKST() && isFastPolling) stopFastPolling();
-  try {
-    const data = await utils.getPointConversionAvailabilityHttp();
-    if (!data) return;
-
-    const available = data.available === true;
-    const plannedAt = data.availablePlannedAt ?? '';
-    const meridiem = data.meridiem ?? '';
-    const isToday = plannedAt === getTodayKoreanString();
-    if (!isToday) {
-      if (isFastPolling) stopFastPolling();
-    } else if (!isFastPolling && !isAfterFivePMKST()) startFastPolling();
-    const prev = readConversionState();
-    if (prev === available) return;
-    writeConversionState(available);
-    if (prev !== null) {
-      if (available) {
-        const msg = [
-          '네이버페이포인트 전환이 가능해졌습니다',
-          'https://www.doctorville.co.kr/my/point/pointUseHistoryList',
-          '',
-          '[FAQ]',
-          'Q. 연동된 네이버 계정 없음',
-          'A. 아닙니다 광클하세요',
-          '',
-          'Q. 포인트 월 한도 초과 안내 : 네이버페이포인트 전환에 실패했습니다.',
-          'A. 아닙니다 광클하세요',
-        ].join('\n');
-        await utils.sendNotificationToChannel(msg);
-        await sendToTopicSubscribers('point_conversion', msg).catch(() => {});
-      } else {
-        const msg = `네이버페이포인트 전환 마감되었습니다. 다음 전환 가능 예정: ${plannedAt} ${meridiem}`;
-        await utils.sendNotificationToChannel(msg);
-        await sendToTopicSubscribers('point_conversion', msg).catch(() => {});
-      }
-    }
-  } catch (err) {
-    logger.error('checkAndNotifyPointConversion error:', err);
-  }
-}
-function startFastPolling(): void {
-  isFastPolling = true;
-  if (fastPollingInterval) clearInterval(fastPollingInterval);
-  fastPollingInterval = setInterval(
-    () => checkAndNotifyPointConversion().catch((err) => logger.error('point_conversion_check 고속 폴링 에러:', err)),
-    2 * 60 * 1000,
-  );
-}
-function stopFastPolling(): void {
-  isFastPolling = false;
-  if (fastPollingInterval) {
-    clearInterval(fastPollingInterval);
-    fastPollingInterval = null;
-  }
-}
 
 const scheduledTask: Task = {
   name: 'daily_routine',
@@ -240,17 +163,6 @@ const syncSeminarsTask: Task = {
 };
 taskRegistry.registerTask(syncSeminarsTask);
 scheduler.scheduleTaskCron(syncSeminarsTask);
-const POINT_CONVERSION_CHECK_CRON = '10 0 9-16 * * *';
-const pointConversionCheckTask: Task = {
-  name: 'point_conversion_check',
-  schedule: POINT_CONVERSION_CHECK_CRON,
-  timezone: TIMEZONE,
-  run: async () => {
-    await checkAndNotifyPointConversion();
-  },
-};
-taskRegistry.registerTask(pointConversionCheckTask);
-scheduler.scheduleTaskCron(pointConversionCheckTask);
 const applySeminarsTaskStandalone: Task = {
   name: 'apply_seminars',
   options: { notifyNewSeminarsToChannel: true, notifyNewSeminarsToTelegram: true },
@@ -583,7 +495,6 @@ function setupGracefulShutdown(): void {
     isShuttingDown = true;
     logger.info(`Received ${signal}, starting graceful shutdown...`);
     try {
-      stopFastPolling();
       telegram.stop();
     } catch (e) {
       logger.error('Error during graceful shutdown:', e);
@@ -654,7 +565,6 @@ async function bootstrap(): Promise<void> {
     logger.error('Startup refreshPastUncompletedSeminars failed:', err),
   );
 
-  checkAndNotifyPointConversion().catch((err) => logger.error('Startup point-conversion check failed:', err));
   checkAndResumeTasks();
   runTask(syncSeminarsTask).catch((err) => logger.error('Startup sync_seminars check failed:', err));
   checkAndWatchMedigateSymposiums().catch((err) => logger.error('Startup medigate monitor check failed:', err));

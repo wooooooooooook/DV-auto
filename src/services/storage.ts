@@ -121,7 +121,6 @@ function initDatabase(db: Database.Database): void {
       seminar_live INTEGER DEFAULT 0,
       survey_closing_20 INTEGER DEFAULT 0,
       survey_closing_10 INTEGER DEFAULT 0,
-      point_conversion INTEGER DEFAULT 0,
       doctorville_survey INTEGER DEFAULT 0,
       medigate_symposium INTEGER DEFAULT 0,
       seminar_change_categories TEXT DEFAULT NULL,
@@ -328,9 +327,9 @@ function set<T = unknown>(key: string, value: T): void {
       const upsertStmt = db.prepare(`
         INSERT INTO subscriptions (
           chat_id, today_links, today_links_time, today_links_sent_date,
-          new_seminar, intermd_quiz, seminar_changes, seminar_live, point_conversion,
+          new_seminar, intermd_quiz, seminar_changes, seminar_live,
           created_at, updated_at
-        ) VALUES (?, 0, '09:00', NULL, 'off', 1, 0, 0, 0, ?, ?)
+        ) VALUES (?, 0, '09:00', NULL, 'off', 1, 0, 0, ?, ?)
         ON CONFLICT(chat_id) DO UPDATE SET intermd_quiz = 1, updated_at = ?
       `);
       for (const id of ids) {
@@ -349,9 +348,9 @@ function set<T = unknown>(key: string, value: T): void {
       const upsertStmt = db.prepare(`
         INSERT INTO subscriptions (
           chat_id, today_links, today_links_time, today_links_sent_date,
-          new_seminar, intermd_quiz, seminar_changes, seminar_live, point_conversion,
+          new_seminar, intermd_quiz, seminar_changes, seminar_live,
           created_at, updated_at
-        ) VALUES (?, 0, '09:00', NULL, 'off', 0, 1, 0, 0, ?, ?)
+        ) VALUES (?, 0, '09:00', NULL, 'off', 0, 1, 0, ?, ?)
         ON CONFLICT(chat_id) DO UPDATE SET seminar_changes = 1, updated_at = ?
       `);
       for (const id of ids) {
