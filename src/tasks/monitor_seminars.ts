@@ -23,7 +23,12 @@ import {
 } from '../services/channel_message_repository';
 import * as logger from '../services/logger';
 
-import { tryFetchSeminarQuizHttpFast, handleSeminarEndAndQuiz } from './monitor_seminars_quiz';
+import {
+  tryFetchSeminarQuizHttpFast,
+  handleSeminarEndAndQuiz,
+  applySeminarQuizHttpFetchResult,
+  completeSeminarQuizAnalysis,
+} from './monitor_seminars_quiz';
 
 import {
   SEMINAR_DETAIL_PAGE,
@@ -46,6 +51,7 @@ import {
   type MonitoredSeminarItem,
   type SeminarInfo,
   type ParsedPrevSeminar,
+  type SeminarQuizFetchStatus,
 } from './monitor_seminars_notice';
 
 import { withBrowserContext, performAutoEnterForActiveSeminars, mapConcurrent } from './monitor_seminars_entry';
@@ -497,16 +503,8 @@ export async function setupMonitoredSeminarItem(
     !quizResultMessage
   ) {
     const httpQuizRes = await tryFetchSeminarQuizHttpFast(seminarId, info.isAdvancedSurvey);
-    if (httpQuizRes?.quizResultMessage) {
-      quizResultMessage = httpQuizRes.quizResultMessage;
-      if (httpQuizRes.isAdvancedSurvey !== undefined) {
-        info.isAdvancedSurvey = httpQuizRes.isAdvancedSurvey;
-      }
-      if (httpQuizRes.isSuspectedAdvancedSurvey !== undefined) {
-        info.isSuspectedAdvancedSurvey = httpQuizRes.isSuspectedAdvancedSurvey;
-        info.suspectedAdvancedType = httpQuizRes.suspectedAdvancedType;
-      }
-    }
+    applySeminarQuizHttpFetchResult(info, httpQuizRes);
+    quizResultMessage = info.quizResultMessage || quizResultMessage;
 
     try {
       await withBrowserContext(providedContext, async (ctx) => {
@@ -521,15 +519,15 @@ export async function setupMonitoredSeminarItem(
           },
           targetUrl,
         );
-        if (res.message) {
-          quizResultMessage = res.message;
-        }
+        completeSeminarQuizAnalysis(info, res.message, res.quizAbsent);
         if (res.isSuspectedAdvancedSurvey !== undefined) {
           info.isSuspectedAdvancedSurvey = res.isSuspectedAdvancedSurvey;
           info.suspectedAdvancedType = res.isSuspectedAdvancedSurvey ? res.suspectedAdvancedType : undefined;
         }
+        quizResultMessage = info.quizResultMessage || quizResultMessage;
       });
     } catch (quizErr) {
+      completeSeminarQuizAnalysis(info, null);
       console.warn(`[${periodName}] 신규 세미나 퀴즈 처리 실패 (${info.name}):`, quizErr);
     }
   }
@@ -559,6 +557,10 @@ export async function setupMonitoredSeminarItem(
     ? resolveSeminarEndedAt(seminarItemForEndCheck, dynamicSurveyState, info.seminarCompleted)
     : undefined;
 
+  // 이전 공지에 "퀴즈없이 설문만😆" 표시가 있었다면 no_quiz 확정 상태를 복원합니다.
+  const restoredQuizFetchStatus: SeminarQuizFetchStatus | null | undefined =
+    matchedPrev?.quizAbsent && !quizResultMessage ? 'no_quiz' : info.quizFetchStatus;
+
   const item: MonitoredSeminarItem = {
     ...info,
     url: targetUrl,
@@ -569,6 +571,7 @@ export async function setupMonitoredSeminarItem(
     surveyStartDt,
     surveyMinutesLeft,
     quizResultMessage,
+    quizFetchStatus: restoredQuizFetchStatus,
     surveyState: dynamicSurveyState,
     hasEntryHistory,
     startNotified,
@@ -805,6 +808,25 @@ async function monitorSeminars(
       ).catch(() => {});
     }
 
+    // 0. 종료된 세미나 중 정답이 없는 항목의 HTTP 사전 조회
+    //    공지 현황판의 "문항분석중.." 표시와 개별 종료 알림의 "메인 채널에 정답이 업데이트됩니다" 안내를
+    //    공지/개별 알림 발송 전에 반영하기 위해 먼저 조회합니다. (HTTP 조회 실패 시에만 분석중 상태가 됩니다)
+    const initialQuizPrecheckTargets = seminarList.filter(
+      (item) =>
+        item.isEnded &&
+        !item.isSurveyPointExcluded &&
+        item.hasSurvey !== false &&
+        item.surveyState === SurveyState.SURVEY_PROGRESS &&
+        !item.quizResultMessage &&
+        !item.quizFetchStatus,
+    );
+    if (initialQuizPrecheckTargets.length > 0) {
+      await mapConcurrent(initialQuizPrecheckTargets, 2, async (item) => {
+        const httpQuizRes = await tryFetchSeminarQuizHttpFast(item.seminarId, item.isAdvancedSurvey);
+        applySeminarQuizHttpFetchResult(item, httpQuizRes);
+      });
+    }
+
     // 1. 공지채널 메시지 발송 우선 처리 (초기 발송 조건 체크: 입장가능 또는 종료 상태인 세미나가 있는 경우)
     const hasInitialActiveOrEnded = seminarList.some((s) => s.status === '입장가능' || s.status === '종료');
     let lastStatusNoticeText: string | null = null;
@@ -874,19 +896,12 @@ async function monitorSeminars(
         !item.quizResultMessage;
 
       if (shouldAttemptQuiz) {
-        // 1. HTTP API 퀴즈 선제 조회 (1~2초)
-        const httpQuizRes = await tryFetchSeminarQuizHttpFast(item.seminarId, item.isAdvancedSurvey);
-        if (httpQuizRes?.quizResultMessage) {
-          item.quizResultMessage = httpQuizRes.quizResultMessage;
-          if (httpQuizRes.isAdvancedSurvey !== undefined) {
-            item.isAdvancedSurvey = httpQuizRes.isAdvancedSurvey;
-          }
-          if (httpQuizRes.isSuspectedAdvancedSurvey !== undefined) {
-            item.isSuspectedAdvancedSurvey = httpQuizRes.isSuspectedAdvancedSurvey;
-            item.suspectedAdvancedType = httpQuizRes.suspectedAdvancedType;
-          }
+        // 1. HTTP API 퀴즈 선제 조회 (1~2초, 실패 시 짧은 간격으로 최대 3회 재시도)
+        if (!item.quizFetchStatus) {
+          const httpQuizRes = await tryFetchSeminarQuizHttpFast(item.seminarId, item.isAdvancedSurvey);
+          applySeminarQuizHttpFetchResult(item, httpQuizRes);
 
-          if (lastStatusNoticeMessageId) {
+          if (item.quizResultMessage && lastStatusNoticeMessageId) {
             const boardRes = await updateStatusBoardNotice(
               periodName,
               monitoredSeminarsMap,
@@ -897,8 +912,12 @@ async function monitorSeminars(
           }
         }
 
+        const wasAnalysisPending = Boolean(item.quizAnalysisPending);
+        const previousQuizMessage = item.quizResultMessage || null;
+
         // 2. Playwright 브라우저 실행 (심화: 문항체크+마지막페이지 / 일반: 문항체크+자동제출)
         let browserQuizMessage: string | null = null;
+        let browserQuizAbsent = false;
         let browserSuspectedAdvancedSurvey: boolean | undefined;
         let browserSuspectedAdvancedType: typeof item.suspectedAdvancedType;
         try {
@@ -915,10 +934,12 @@ async function monitorSeminars(
               item.url,
             );
             browserQuizMessage = res.message;
+            browserQuizAbsent = res.quizAbsent;
             browserSuspectedAdvancedSurvey = res.isSuspectedAdvancedSurvey;
             browserSuspectedAdvancedType = res.suspectedAdvancedType;
           });
         } catch (quizErr) {
+          completeSeminarQuizAnalysis(item, null);
           console.warn(`[${periodName}] 초기 세미나 퀴즈 처리 건너뜀 (${item.name}):`, quizErr);
         }
 
@@ -934,8 +955,11 @@ async function monitorSeminars(
           item.suspectedAdvancedType = browserSuspectedAdvancedSurvey ? browserSuspectedAdvancedType : undefined;
         }
 
-        if ((browserQuizMessage && browserQuizMessage !== item.quizResultMessage) || flagChanged2) {
-          item.quizResultMessage = browserQuizMessage || item.quizResultMessage;
+        // 브라우저 파싱 완료: 분석중 상태 해제 및 파싱 결과 반영
+        completeSeminarQuizAnalysis(item, browserQuizMessage, browserQuizAbsent);
+        const browserMessageChanged = Boolean(item.quizResultMessage && item.quizResultMessage !== previousQuizMessage);
+
+        if (browserMessageChanged || flagChanged2 || wasAnalysisPending) {
           if (lastStatusNoticeMessageId) {
             const boardRes = await updateStatusBoardNotice(
               periodName,
@@ -1173,19 +1197,11 @@ async function monitorSeminars(
             continue;
           }
 
-          // 1. HTTP API를 통한 초고속 퀴즈 사전 조회 시도 (1~2초)
-          let quizResultMessage: string | null = currentSeminar.quizResultMessage || null;
+          // 1. HTTP API를 통한 초고속 퀴즈 사전 조회 시도 (1~2초, 실패 시 짧은 간격으로 최대 3회 재시도)
           const httpQuizRes = await tryFetchSeminarQuizHttpFast(seminarId, currentSeminar.isAdvancedSurvey);
-          if (httpQuizRes?.quizResultMessage) {
-            quizResultMessage = httpQuizRes.quizResultMessage;
-            if (httpQuizRes.isAdvancedSurvey !== undefined) {
-              currentSeminar.isAdvancedSurvey = httpQuizRes.isAdvancedSurvey;
-            }
-            if (httpQuizRes.isSuspectedAdvancedSurvey !== undefined) {
-              currentSeminar.isSuspectedAdvancedSurvey = httpQuizRes.isSuspectedAdvancedSurvey;
-              currentSeminar.suspectedAdvancedType = httpQuizRes.suspectedAdvancedType;
-            }
-          }
+          applySeminarQuizHttpFetchResult(currentSeminar, httpQuizRes);
+          const quizResultMessage: string | null = currentSeminar.quizResultMessage || null;
+          const wasAnalysisPending = Boolean(currentSeminar.quizAnalysisPending);
 
           // 2. 상태 갱신 및 세미나 종료 새 메시지 발송(채널 알림 트리거) + 구독자 종료 알림
           currentSeminar.status = '종료';
@@ -1223,26 +1239,34 @@ async function monitorSeminars(
 
           // 3. Playwright 브라우저 실행 (심화: 문항체크+마지막페이지 / 일반: 문항체크+자동제출)
           let browserQuizMessage: string | null = null;
+          let browserQuizAbsent = false;
           let browserSuspectedAdvancedSurvey: boolean | undefined;
           let browserSuspectedAdvancedType: typeof currentSeminar.suspectedAdvancedType;
-          await withBrowserContext(providedContext, async (ctx) => {
-            const res = await handleSeminarEndAndQuiz(
-              ctx,
-              {
-                name,
-                seminarId,
-                isSurveyPointExcluded: false,
-                isAdvancedSurvey: currentSeminar.isAdvancedSurvey,
-                isSuspectedAdvancedSurvey: currentSeminar.isSuspectedAdvancedSurvey,
-              },
-              currentSeminar.url || targetUrl,
-            );
-            browserQuizMessage = res.message;
-            browserSuspectedAdvancedSurvey = res.isSuspectedAdvancedSurvey;
-            browserSuspectedAdvancedType = res.suspectedAdvancedType;
-          });
+          try {
+            await withBrowserContext(providedContext, async (ctx) => {
+              const res = await handleSeminarEndAndQuiz(
+                ctx,
+                {
+                  name,
+                  seminarId,
+                  isSurveyPointExcluded: false,
+                  isAdvancedSurvey: currentSeminar.isAdvancedSurvey,
+                  isSuspectedAdvancedSurvey: currentSeminar.isSuspectedAdvancedSurvey,
+                },
+                currentSeminar.url || targetUrl,
+              );
+              browserQuizMessage = res.message;
+              browserQuizAbsent = res.quizAbsent;
+              browserSuspectedAdvancedSurvey = res.isSuspectedAdvancedSurvey;
+              browserSuspectedAdvancedType = res.suspectedAdvancedType;
+            });
+          } catch (quizErr) {
+            // 브라우저 파싱 실패 시에도 분석중 상태는 해제해 두고 기존 에러 흐름을 유지합니다.
+            completeSeminarQuizAnalysis(currentSeminar, null);
+            throw quizErr;
+          }
 
-          // 4. 브라우저에서 새로운 정답이 획득되었거나 갱신된 경우 현황판 2차 갱신 (인플레이스 수정)
+          // 4. 브라우저 파싱 완료: 분석중 상태 해제 후 현황판 2차 갱신 (인플레이스 수정)
           // Playwright 브라우저 결과로 심화설문 의심 플래그 동기화
           const flagChanged =
             browserSuspectedAdvancedSurvey !== undefined &&
@@ -1257,8 +1281,12 @@ async function monitorSeminars(
               : undefined;
           }
 
-          if ((browserQuizMessage && browserQuizMessage !== quizResultMessage) || flagChanged) {
-            currentSeminar.quizResultMessage = browserQuizMessage || quizResultMessage;
+          completeSeminarQuizAnalysis(currentSeminar, browserQuizMessage, browserQuizAbsent);
+          const browserMessageChanged = Boolean(
+            currentSeminar.quizResultMessage && currentSeminar.quizResultMessage !== quizResultMessage,
+          );
+
+          if (browserMessageChanged || flagChanged || wasAnalysisPending) {
             if (lastStatusNoticeMessageId) {
               const boardRes = await updateStatusBoardNotice(
                 periodName,
