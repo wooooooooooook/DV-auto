@@ -29,6 +29,17 @@ export const seoulDateString = (): string => new Date().toLocaleDateString('en-C
 
 export type SeminarStatus = '대기' | '입장가능' | '종료';
 
+/**
+ * 순수 HTTP 퀴즈 사전 조회 결과 상태
+ * - found: 퀴즈 정답(또는 심화설문 문항) 메시지를 확보함
+ * - no_quiz: HTTP 조회는 성공했으나 실제로 퀴즈/심화 문항이 없음
+ * - http_failed: 재시도 후에도 HTTP 조회 자체가 실패함 (브라우저 파싱 대기 대상)
+ */
+export type SeminarQuizFetchStatus = 'found' | 'no_quiz' | 'http_failed';
+
+/** 공지 현황판에서 정답 확보 전(브라우저 파싱 대기) 상태를 표시하는 문구 */
+export const QUIZ_ANALYSIS_PENDING_TEXT = '문항분석중..';
+
 export interface MonitoredSeminarItem {
   seminarId: string | null;
   url: string;
@@ -52,6 +63,10 @@ export interface MonitoredSeminarItem {
   surveyStartDt?: string | null;
   surveyMinutesLeft?: number | null;
   quizResultMessage?: string | null;
+  /** HTTP 퀴즈 사전 조회 결과 상태 (found / no_quiz / http_failed) */
+  quizFetchStatus?: SeminarQuizFetchStatus | null;
+  /** HTTP 실패로 정답 없이 종료 공지 후 브라우저 파싱을 기다리는 상태 */
+  quizAnalysisPending?: boolean;
   processState?: number;
   cancelProcessState?: number;
   seminarCompleted?: number;
@@ -244,6 +259,26 @@ export function extractQuizSummaryOnly(quizMessage?: string | null): string | nu
   return lines[0];
 }
 
+/**
+ * 퀴즈 정답 없이 종료 공지가 먼저 나가고 브라우저 파싱 결과를 기다리는 상태인지 판별합니다.
+ * - HTTP 조회가 실패(http_failed)해 정답을 못 채운 경우에만 true
+ * - 실제 퀴즈 문항이 없는 세미나(no_quiz)에는 false ("문항분석중.." / 채널 업데이트 안내 제외)
+ */
+export function isQuizAnalysisPending(
+  seminar: Pick<MonitoredSeminarItem, 'quizResultMessage' | 'quizAnalysisPending'>,
+): boolean {
+  if (seminar.quizResultMessage) return false;
+  return Boolean(seminar.quizAnalysisPending);
+}
+
+/**
+ * 공지 본문에 복원된 "문항분석중.." 대기 표시 라인인지 판별합니다.
+ */
+export function isQuizAnalysisPendingLine(line: string): boolean {
+  if (!line) return false;
+  return line.replace(/[.\s]+$/g, '').trim() === QUIZ_ANALYSIS_PENDING_TEXT.replace(/[.\s]+$/g, '');
+}
+
 export interface ParsedPrevSeminar {
   status: SeminarStatus;
   seminarId: string | null;
@@ -315,7 +350,7 @@ export function parsePrevNoticeSeminars(prevText: string): ParsedPrevSeminar[] {
         const isSurveyLine =
           (nextLine.startsWith('(') && (nextLine.includes('설문') || nextLine.includes('마감'))) ||
           nextLine === '(설문이 없는 세미나)';
-        if (!isSurveyLine) {
+        if (!isSurveyLine && !isQuizAnalysisPendingLine(nextLine)) {
           quizResultMessage = quizResultMessage ? `${quizResultMessage}\n${nextLine}` : nextLine;
         }
       }
@@ -548,6 +583,9 @@ export function buildSeminarStatusMessage(
       const summaryQuiz = extractQuizSummaryOnly(s.quizResultMessage);
       if (summaryQuiz) {
         text += `\n${escapeHtml(summaryQuiz)}`;
+      } else if (isQuizAnalysisPending(s)) {
+        // HTTP 조회 실패로 정답 확보 전: 브라우저 파싱 결과로 업데이트될 때까지 분석중 표시
+        text += `\n${QUIZ_ANALYSIS_PENDING_TEXT}`;
       }
       if (s.hasSurvey === false) {
         text += `\n(설문이 없는 세미나)`;
@@ -649,6 +687,9 @@ export function buildSeminarLiveEndMessage(seminar: MonitoredSeminarItem): {
     }
   } else if (seminar.hasSurvey === false) {
     text += `\n\n(설문이 없는 세미나)`;
+  } else if (isQuizAnalysisPending(seminar)) {
+    // HTTP 조회 실패로 정답 없이 먼저 발송되는 경우: 메인 채널 업데이트 예정 안내
+    text += `\n\n💡 <b>메인 채널에 정답이 업데이트됩니다.</b>\n${SEMINAR_NOTICE_CHANNEL_INVITE_URL}`;
   }
 
   return {

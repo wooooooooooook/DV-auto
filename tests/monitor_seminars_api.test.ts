@@ -14,6 +14,9 @@ import * as seminarQuizModule from '../src/tasks/seminar_quiz';
 import * as storage from '../src/services/storage';
 import { describe, it, vi, beforeEach, afterEach } from 'vitest';
 
+// 모니터링 경로의 HTTP 퀴즈 재시도 대기(기본 1.5초)를 테스트에서는 즉시 동작하도록 단축
+process.env.SEMINAR_QUIZ_HTTP_RETRY_INTERVAL_MS = '0';
+
 describe('monitor_seminars API 기반 모니터링 기능 단위/통합 테스트', () => {
   beforeEach(() => {
     storage.setDatabasePath(':memory:');

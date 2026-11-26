@@ -1,11 +1,81 @@
 import type { BrowserContext, Page } from 'playwright';
 import fs from 'fs/promises';
 import path from 'path';
-import { sendTelegram, ensureLoggedIn, safeGoto } from '../modules/utils';
+import { sendTelegram, ensureLoggedIn, safeGoto, sleep } from '../modules/utils';
 import { processSeminarQuiz, loadCheatsheet } from './seminar_quiz';
 import { fetchSeminarSurveyQuizHttp } from '../modules/seminar_survey_api';
-import { SEMINAR_DETAIL_PAGE } from './monitor_seminars_notice';
+import { SEMINAR_DETAIL_PAGE, type MonitoredSeminarItem, type SeminarQuizFetchStatus } from './monitor_seminars_notice';
 import type { SuspectedAdvancedType } from '../services/seminar_repository';
+
+/** HTTP 퀴즈 사전 조회 최대 시도 횟수 (최초 1회 + 짧은 재시도 2회) */
+export const QUIZ_HTTP_FAST_MAX_ATTEMPTS = 3;
+/** 짧은 재시도 간격 (기본 1.5초) */
+export const QUIZ_HTTP_FAST_RETRY_INTERVAL_MS = 1500;
+
+/**
+ * 기본 재시도 간격을 반환합니다. 테스트/운영에서 SEMINAR_QUIZ_HTTP_RETRY_INTERVAL_MS 로 대기시간을 조절할 수 있습니다.
+ */
+export function resolveQuizHttpRetryIntervalMs(): number {
+  const fromEnv = Number(process.env.SEMINAR_QUIZ_HTTP_RETRY_INTERVAL_MS);
+  if (Number.isFinite(fromEnv) && fromEnv >= 0) return fromEnv;
+  return QUIZ_HTTP_FAST_RETRY_INTERVAL_MS;
+}
+
+/** 실제로 퀴즈 문항이 있는 세미나인지 판단할 때 참조하는 최소 응답 필드 */
+export interface QuizHttpFastResponseLike {
+  success: boolean;
+  quizResultMessage?: string;
+  quizSummaryMessage?: string;
+  quizQuestionCnt?: number;
+  depthSurveyQuestionCnt?: number;
+  errorMessage?: string;
+}
+
+export interface SeminarQuizHttpFastResult {
+  /** found: 정답 확보 / no_quiz: 진짜 문항 없음 / http_failed: 조회 자체 실패 */
+  status: SeminarQuizFetchStatus;
+  quizResultMessage: string | null;
+  /** 실제 HTTP 조회를 수행한 횟수 (seminarId 없음 등 사전 불가 케이스는 0) */
+  attempts: number;
+  seminarId: string | null;
+  errorMessage?: string;
+  isAdvancedSurvey?: boolean;
+  isSuspectedAdvancedSurvey?: boolean;
+  suspectedAdvancedType?: SuspectedAdvancedType;
+}
+
+export interface SeminarQuizHttpFastOptions {
+  maxAttempts?: number;
+  retryIntervalMs?: number;
+  sleepFn?: (ms: number) => Promise<void>;
+}
+
+/**
+ * 순수 HTTP 응답으로부터 퀴즈 결과 상태를 판별합니다.
+ * - 정답(또는 심화설문 문항) 메시지가 있으면 found
+ * - 조회는 성공했으나 퀴즈/심화 문항 수가 0이면 no_quiz(진짜 문항 없음)
+ * - 그 외(응답은 왔으나 정답 메시지 생성 불가)는 http_failed
+ */
+export function resolveQuizHttpFastStatus(httpResult: QuizHttpFastResponseLike): {
+  status: SeminarQuizFetchStatus;
+  quizResultMessage: string | null;
+  errorMessage?: string;
+} {
+  const quizResultMessage = httpResult.quizResultMessage || httpResult.quizSummaryMessage || null;
+  if (quizResultMessage) {
+    return { status: 'found', quizResultMessage };
+  }
+  const quizQuestionCnt = httpResult.quizQuestionCnt ?? 0;
+  const depthSurveyQuestionCnt = httpResult.depthSurveyQuestionCnt ?? 0;
+  if (quizQuestionCnt === 0 && depthSurveyQuestionCnt === 0) {
+    return { status: 'no_quiz', quizResultMessage: null };
+  }
+  return {
+    status: 'http_failed',
+    quizResultMessage: null,
+    errorMessage: httpResult.errorMessage || '퀴즈 정답 메시지를 생성하지 못했습니다',
+  };
+}
 
 /**
  * 순수 HTTP API로 퀴즈 결과 및 심화설문 여부를 1~2초 내에 사전 조회합니다.
@@ -15,29 +85,125 @@ import type { SuspectedAdvancedType } from '../services/seminar_repository';
 export async function tryFetchSeminarQuizHttpFast(
   seminarId: string | null | undefined,
   isAdvancedSurvey?: boolean,
-): Promise<{
-  quizResultMessage: string | null;
-  isAdvancedSurvey?: boolean;
-  isSuspectedAdvancedSurvey?: boolean;
-  suspectedAdvancedType?: SuspectedAdvancedType;
-} | null> {
-  if (!seminarId) return null;
-  try {
-    const cheatsheet = await loadCheatsheet();
-    const httpResult = await fetchSeminarSurveyQuizHttp(seminarId, cheatsheet, isAdvancedSurvey);
-    if (httpResult && httpResult.success) {
-      const quizResultMessage = httpResult.quizResultMessage || httpResult.quizSummaryMessage || null;
-      return {
-        quizResultMessage,
-        isAdvancedSurvey: httpResult.isAdvancedSurvey || isAdvancedSurvey,
-        isSuspectedAdvancedSurvey: httpResult.isSuspectedAdvancedSurvey,
-        suspectedAdvancedType: httpResult.suspectedAdvancedType,
-      };
-    }
-  } catch (err) {
-    console.warn(`[monitor_seminars] HTTP 퀴즈 사전 조회 실패 (${seminarId}):`, err);
+  options?: SeminarQuizHttpFastOptions,
+): Promise<SeminarQuizHttpFastResult> {
+  const sid = seminarId ? String(seminarId).trim() : '';
+  if (!sid) {
+    return {
+      status: 'http_failed',
+      quizResultMessage: null,
+      attempts: 0,
+      seminarId: null,
+      errorMessage: 'seminarId 없음',
+    };
   }
-  return null;
+
+  const maxAttempts = Math.max(1, options?.maxAttempts ?? QUIZ_HTTP_FAST_MAX_ATTEMPTS);
+  const retryIntervalMs = options?.retryIntervalMs ?? resolveQuizHttpRetryIntervalMs();
+  const wait = options?.sleepFn ?? sleep;
+
+  let lastErrorMessage: string | undefined;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const cheatsheet = await loadCheatsheet();
+      const httpResult = await fetchSeminarSurveyQuizHttp(sid, cheatsheet, isAdvancedSurvey);
+      if (httpResult && httpResult.success) {
+        const resolved = resolveQuizHttpFastStatus(httpResult);
+        // 응답은 받았으나 정답 메시지가 없는 비정상 형태는 재시도 없이 그대로 반환
+        return {
+          status: resolved.status,
+          quizResultMessage: resolved.quizResultMessage,
+          attempts: attempt,
+          seminarId: sid,
+          errorMessage: resolved.errorMessage,
+          isAdvancedSurvey: httpResult.isAdvancedSurvey || isAdvancedSurvey,
+          isSuspectedAdvancedSurvey: httpResult.isSuspectedAdvancedSurvey,
+          suspectedAdvancedType: httpResult.suspectedAdvancedType,
+        };
+      }
+      lastErrorMessage = httpResult?.errorMessage || 'HTTP 퀴즈 조회 실패';
+      console.warn(
+        `[monitor_seminars] HTTP 퀴즈 사전 조회 실패 (${sid}, ${attempt}/${maxAttempts}): ${lastErrorMessage}`,
+      );
+    } catch (err) {
+      lastErrorMessage = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `[monitor_seminars] HTTP 퀴즈 사전 조회 예외 (${sid}, ${attempt}/${maxAttempts}):`,
+        lastErrorMessage,
+      );
+    }
+
+    if (attempt < maxAttempts) {
+      await wait(retryIntervalMs);
+    }
+  }
+
+  return {
+    status: 'http_failed',
+    quizResultMessage: null,
+    attempts: maxAttempts,
+    seminarId: sid,
+    errorMessage: lastErrorMessage,
+  };
+}
+
+/**
+ * HTTP 사전 조회 결과를 세미나 항목 상태에 반영합니다.
+ * - found: 정답 메시지 저장 / 분석중 해제
+ * - no_quiz: 문항 없음 확정 / 분석중 해제 및 "문항분석중.." 미표시
+ * - http_failed: 정답이 없으면 브라우저 파싱 대기(분석중) 상태로 표시
+ */
+export function applySeminarQuizHttpFetchResult(
+  target: Pick<
+    MonitoredSeminarItem,
+    | 'quizResultMessage'
+    | 'quizFetchStatus'
+    | 'quizAnalysisPending'
+    | 'isAdvancedSurvey'
+    | 'isSuspectedAdvancedSurvey'
+    | 'suspectedAdvancedType'
+  >,
+  result: SeminarQuizHttpFastResult,
+): SeminarQuizHttpFastResult {
+  if (result.isAdvancedSurvey !== undefined) {
+    target.isAdvancedSurvey = result.isAdvancedSurvey;
+  }
+  if (result.isSuspectedAdvancedSurvey !== undefined) {
+    target.isSuspectedAdvancedSurvey = result.isSuspectedAdvancedSurvey;
+    target.suspectedAdvancedType = result.isSuspectedAdvancedSurvey ? result.suspectedAdvancedType : undefined;
+  }
+
+  target.quizFetchStatus = result.status;
+
+  if (result.status === 'found') {
+    if (result.quizResultMessage) {
+      target.quizResultMessage = result.quizResultMessage;
+    }
+    target.quizAnalysisPending = false;
+  } else if (result.status === 'no_quiz') {
+    target.quizAnalysisPending = false;
+  } else {
+    // HTTP 조회 실패: 기존 정답이 없을 때만 브라우저 파싱 대기 상태로 둡니다.
+    target.quizAnalysisPending = !target.quizResultMessage;
+  }
+
+  return result;
+}
+
+/**
+ * Playwright 브라우저 파싱(handleSeminarEndAndQuiz) 완료 후 분석중 상태를 해제합니다.
+ * 브라우저에서 정답을 얻었으면 found 로 갱신하고, 못 얻었으면 분석중만 내립니다.
+ */
+export function completeSeminarQuizAnalysis(
+  target: Pick<MonitoredSeminarItem, 'quizResultMessage' | 'quizFetchStatus' | 'quizAnalysisPending'>,
+  browserMessage: string | null | undefined,
+): void {
+  if (browserMessage) {
+    target.quizResultMessage = browserMessage;
+    target.quizFetchStatus = 'found';
+  }
+  target.quizAnalysisPending = false;
 }
 
 /**
