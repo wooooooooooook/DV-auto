@@ -193,15 +193,20 @@ export function applySeminarQuizHttpFetchResult(
 
 /**
  * Playwright 브라우저 파싱(handleSeminarEndAndQuiz) 완료 후 분석중 상태를 해제합니다.
- * 브라우저에서 정답을 얻었으면 found 로 갱신하고, 못 얻었으면 분석중만 내립니다.
+ * - 브라우저에서 정답을 얻었으면 found 로 갱신
+ * - 브라우저 파싱으로 퀴즈 문항이 정말 없음이 확인되었으면(quizAbsent) no_quiz 로 갱신
+ * - 그 외는 분석중만 내립니다.
  */
 export function completeSeminarQuizAnalysis(
   target: Pick<MonitoredSeminarItem, 'quizResultMessage' | 'quizFetchStatus' | 'quizAnalysisPending'>,
   browserMessage: string | null | undefined,
+  quizAbsent = false,
 ): void {
   if (browserMessage) {
     target.quizResultMessage = browserMessage;
     target.quizFetchStatus = 'found';
+  } else if (quizAbsent) {
+    target.quizFetchStatus = 'no_quiz';
   }
   target.quizAnalysisPending = false;
 }
@@ -222,6 +227,8 @@ export async function handleSeminarEndAndQuiz(
 ): Promise<{
   message: string | null;
   foundSurveyButton: boolean;
+  /** 브라우저 파싱 결과 설문은 있으나 퀴즈 문항이 실제로 없음이 확인됨 */
+  quizAbsent: boolean;
   isSuspectedAdvancedSurvey?: boolean;
   suspectedAdvancedType?: SuspectedAdvancedType;
 }> {
@@ -230,7 +237,7 @@ export async function handleSeminarEndAndQuiz(
     console.log(
       `[monitor_seminars] Skipping quiz/survey handling for point-excluded seminar: ${seminar.name} (${seminar.seminarId})`,
     );
-    return { message: null, foundSurveyButton: false };
+    return { message: null, foundSurveyButton: false, quizAbsent: false };
   }
   const targetUrl = seminar.seminarId ? `${SEMINAR_DETAIL_PAGE}${seminar.seminarId}` : fallbackUrl;
   const surveyPage = await context.newPage();
@@ -238,6 +245,7 @@ export async function handleSeminarEndAndQuiz(
   let quizPage: Page = surveyPage;
   let quizResultMessage: string | null = null;
   let foundSurveyButton = false;
+  let quizAbsent = false;
   let isSuspectedAdvancedSurveyResult: boolean | undefined = undefined;
   let suspectedAdvancedTypeResult: SuspectedAdvancedType | undefined = undefined;
 
@@ -325,6 +333,10 @@ export async function handleSeminarEndAndQuiz(
       );
       if (quizResult.success && quizResult.hasQuizResult) {
         quizResultMessage = quizResult.message;
+      } else if (quizResult.success && !seminar.isAdvancedSurvey && !quizResult.isSuspectedAdvancedSurvey) {
+        // 설문참여 플로우를 수행한 뒤 퀴즈 문항이 실제로 없음이 확인된 경우
+        // (심화설문·심화설문 의심 세미나는 주관식 문항이 정답 역할을 하므로 대상에서 제외)
+        quizAbsent = true;
       }
       if (quizResult.isSuspectedAdvancedSurvey !== undefined) {
         isSuspectedAdvancedSurveyResult = quizResult.isSuspectedAdvancedSurvey;
@@ -376,6 +388,7 @@ export async function handleSeminarEndAndQuiz(
   return {
     message: quizResultMessage,
     foundSurveyButton,
+    quizAbsent,
     isSuspectedAdvancedSurvey: isSuspectedAdvancedSurveyResult,
     suspectedAdvancedType: suspectedAdvancedTypeResult,
   };

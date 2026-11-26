@@ -40,6 +40,9 @@ export type SeminarQuizFetchStatus = 'found' | 'no_quiz' | 'http_failed';
 /** 공지 현황판에서 정답 확보 전(브라우저 파싱 대기) 상태를 표시하는 문구 */
 export const QUIZ_ANALYSIS_PENDING_TEXT = '문항분석중..';
 
+/** 설문은 있으나 퀴즈 문항이 실제로 없는 세미나(no_quiz)에 표시하는 문구 */
+export const QUIZ_ABSENT_TEXT = '퀴즈없이 설문만😆';
+
 export interface MonitoredSeminarItem {
   seminarId: string | null;
   url: string;
@@ -279,12 +282,37 @@ export function isQuizAnalysisPendingLine(line: string): boolean {
   return line.replace(/[.\s]+$/g, '').trim() === QUIZ_ANALYSIS_PENDING_TEXT.replace(/[.\s]+$/g, '');
 }
 
+/**
+ * 설문은 있으나 퀴즈 문항이 실제로 없음이 확정된 세미나(no_quiz)인지 판별합니다.
+ * - HTTP 조회 또는 브라우저 파싱으로 quizFetchStatus가 'no_quiz'가 된 경우에만 true
+ * - 설문 자체가 없는 세미나(hasSurvey === false)와 포인트 미지급 세미나는 대상에서 제외합니다.
+ */
+export function isQuizAbsentOnly(
+  seminar: Pick<MonitoredSeminarItem, 'quizResultMessage' | 'quizFetchStatus' | 'hasSurvey' | 'isSurveyPointExcluded'>,
+): boolean {
+  if (seminar.quizResultMessage) return false;
+  if (seminar.quizFetchStatus !== 'no_quiz') return false;
+  if (seminar.hasSurvey === false) return false;
+  if (seminar.isSurveyPointExcluded) return false;
+  return true;
+}
+
+/**
+ * 공지 본문에 표시된 "퀴즈없이 설문만😆" 라인인지 판별합니다.
+ */
+export function isQuizAbsentLine(line: string): boolean {
+  if (!line) return false;
+  return line.trim() === QUIZ_ABSENT_TEXT;
+}
+
 export interface ParsedPrevSeminar {
   status: SeminarStatus;
   seminarId: string | null;
   url: string | null;
   title: string | null;
   quizResultMessage?: string | null;
+  /** 이전 공지에 "퀴즈없이 설문만😆"(no_quiz 확정) 표시가 있었는지 */
+  quizAbsent?: boolean;
 }
 
 const STATUS_PREFIX_REGEX = /^(?:(🔴)\s*종료|(🟢)\s*입장가능|(⏳)\s*대기)/;
@@ -323,6 +351,7 @@ export function parsePrevNoticeSeminars(prevText: string): ParsedPrevSeminar[] {
     let seminarId: string | null = null;
     let url: string | null = null;
     let quizResultMessage: string | null = null;
+    let quizAbsent = false;
     let urlFound = false;
 
     for (let j = i + 1; j < lines.length; j++) {
@@ -350,13 +379,24 @@ export function parsePrevNoticeSeminars(prevText: string): ParsedPrevSeminar[] {
         const isSurveyLine =
           (nextLine.startsWith('(') && (nextLine.includes('설문') || nextLine.includes('마감'))) ||
           nextLine === '(설문이 없는 세미나)';
+        if (isQuizAbsentLine(nextLine)) {
+          quizAbsent = true;
+          continue;
+        }
         if (!isSurveyLine && !isQuizAnalysisPendingLine(nextLine)) {
           quizResultMessage = quizResultMessage ? `${quizResultMessage}\n${nextLine}` : nextLine;
         }
       }
     }
 
-    results.push({ status, seminarId, url, title, quizResultMessage: quizResultMessage || undefined });
+    results.push({
+      status,
+      seminarId,
+      url,
+      title,
+      quizResultMessage: quizResultMessage || undefined,
+      quizAbsent: quizAbsent || undefined,
+    });
   }
 
   return results;
@@ -586,6 +626,9 @@ export function buildSeminarStatusMessage(
       } else if (isQuizAnalysisPending(s)) {
         // HTTP 조회 실패로 정답 확보 전: 브라우저 파싱 결과로 업데이트될 때까지 분석중 표시
         text += `\n${QUIZ_ANALYSIS_PENDING_TEXT}`;
+      } else if (isQuizAbsentOnly(s)) {
+        // 설문만 있고 퀴즈 문항이 실제로 없음이 확정된 세미나
+        text += `\n${QUIZ_ABSENT_TEXT}`;
       }
       if (s.hasSurvey === false) {
         text += `\n(설문이 없는 세미나)`;
@@ -687,6 +730,9 @@ export function buildSeminarLiveEndMessage(seminar: MonitoredSeminarItem): {
     }
   } else if (seminar.hasSurvey === false) {
     text += `\n\n(설문이 없는 세미나)`;
+  } else if (isQuizAbsentOnly(seminar)) {
+    // 설문만 있고 퀴즈 문항이 실제로 없음이 확정된 세미나
+    text += `\n\n${QUIZ_ABSENT_TEXT}`;
   } else if (isQuizAnalysisPending(seminar)) {
     // HTTP 조회 실패로 정답 없이 먼저 발송되는 경우: 메인 채널 업데이트 예정 안내
     text += `\n\n💡 <b>메인 채널에 정답이 업데이트됩니다.</b>\n${SEMINAR_NOTICE_CHANNEL_INVITE_URL}`;

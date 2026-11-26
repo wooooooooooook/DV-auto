@@ -51,6 +51,7 @@ import {
   type MonitoredSeminarItem,
   type SeminarInfo,
   type ParsedPrevSeminar,
+  type SeminarQuizFetchStatus,
 } from './monitor_seminars_notice';
 
 import { withBrowserContext, performAutoEnterForActiveSeminars, mapConcurrent } from './monitor_seminars_entry';
@@ -518,7 +519,7 @@ export async function setupMonitoredSeminarItem(
           },
           targetUrl,
         );
-        completeSeminarQuizAnalysis(info, res.message);
+        completeSeminarQuizAnalysis(info, res.message, res.quizAbsent);
         if (res.isSuspectedAdvancedSurvey !== undefined) {
           info.isSuspectedAdvancedSurvey = res.isSuspectedAdvancedSurvey;
           info.suspectedAdvancedType = res.isSuspectedAdvancedSurvey ? res.suspectedAdvancedType : undefined;
@@ -556,6 +557,10 @@ export async function setupMonitoredSeminarItem(
     ? resolveSeminarEndedAt(seminarItemForEndCheck, dynamicSurveyState, info.seminarCompleted)
     : undefined;
 
+  // 이전 공지에 "퀴즈없이 설문만😆" 표시가 있었다면 no_quiz 확정 상태를 복원합니다.
+  const restoredQuizFetchStatus: SeminarQuizFetchStatus | null | undefined =
+    matchedPrev?.quizAbsent && !quizResultMessage ? 'no_quiz' : info.quizFetchStatus;
+
   const item: MonitoredSeminarItem = {
     ...info,
     url: targetUrl,
@@ -566,6 +571,7 @@ export async function setupMonitoredSeminarItem(
     surveyStartDt,
     surveyMinutesLeft,
     quizResultMessage,
+    quizFetchStatus: restoredQuizFetchStatus,
     surveyState: dynamicSurveyState,
     hasEntryHistory,
     startNotified,
@@ -911,6 +917,7 @@ async function monitorSeminars(
 
         // 2. Playwright 브라우저 실행 (심화: 문항체크+마지막페이지 / 일반: 문항체크+자동제출)
         let browserQuizMessage: string | null = null;
+        let browserQuizAbsent = false;
         let browserSuspectedAdvancedSurvey: boolean | undefined;
         let browserSuspectedAdvancedType: typeof item.suspectedAdvancedType;
         try {
@@ -927,6 +934,7 @@ async function monitorSeminars(
               item.url,
             );
             browserQuizMessage = res.message;
+            browserQuizAbsent = res.quizAbsent;
             browserSuspectedAdvancedSurvey = res.isSuspectedAdvancedSurvey;
             browserSuspectedAdvancedType = res.suspectedAdvancedType;
           });
@@ -948,7 +956,7 @@ async function monitorSeminars(
         }
 
         // 브라우저 파싱 완료: 분석중 상태 해제 및 파싱 결과 반영
-        completeSeminarQuizAnalysis(item, browserQuizMessage);
+        completeSeminarQuizAnalysis(item, browserQuizMessage, browserQuizAbsent);
         const browserMessageChanged = Boolean(item.quizResultMessage && item.quizResultMessage !== previousQuizMessage);
 
         if (browserMessageChanged || flagChanged2 || wasAnalysisPending) {
@@ -1231,6 +1239,7 @@ async function monitorSeminars(
 
           // 3. Playwright 브라우저 실행 (심화: 문항체크+마지막페이지 / 일반: 문항체크+자동제출)
           let browserQuizMessage: string | null = null;
+          let browserQuizAbsent = false;
           let browserSuspectedAdvancedSurvey: boolean | undefined;
           let browserSuspectedAdvancedType: typeof currentSeminar.suspectedAdvancedType;
           try {
@@ -1247,6 +1256,7 @@ async function monitorSeminars(
                 currentSeminar.url || targetUrl,
               );
               browserQuizMessage = res.message;
+              browserQuizAbsent = res.quizAbsent;
               browserSuspectedAdvancedSurvey = res.isSuspectedAdvancedSurvey;
               browserSuspectedAdvancedType = res.suspectedAdvancedType;
             });
@@ -1271,7 +1281,7 @@ async function monitorSeminars(
               : undefined;
           }
 
-          completeSeminarQuizAnalysis(currentSeminar, browserQuizMessage);
+          completeSeminarQuizAnalysis(currentSeminar, browserQuizMessage, browserQuizAbsent);
           const browserMessageChanged = Boolean(
             currentSeminar.quizResultMessage && currentSeminar.quizResultMessage !== quizResultMessage,
           );

@@ -13,6 +13,9 @@ import {
   parsePrevNoticeSeminars,
   sendSeminarLiveEndNotice,
   isQuizAnalysisPending,
+  isQuizAbsentOnly,
+  isQuizAbsentLine,
+  QUIZ_ABSENT_TEXT,
   QUIZ_ANALYSIS_PENDING_TEXT,
   type MonitoredSeminarItem,
 } from '../src/tasks/monitor_seminars_notice';
@@ -256,11 +259,36 @@ describe('개별 종료 알림 문구 분기', () => {
     expect(text).not.toContain(QUIZ_ANALYSIS_PENDING_TEXT);
   });
 
-  it('진짜 퀴즈 문항이 없는 세미나(no_quiz)에는 메인 채널 안내를 넣지 않는다', () => {
+  it('진짜 퀴즈 문항이 없는 세미나(no_quiz)에는 메인 채널 안내 대신 퀴즈없이 설문만😆 문구를 넣는다', () => {
     const seminar = buildSeminar({ quizFetchStatus: 'no_quiz', quizAnalysisPending: false });
     const { text } = buildSeminarLiveEndMessage(seminar);
 
+    expect(text).toContain(QUIZ_ABSENT_TEXT);
     expect(text).not.toContain(CHANNEL_GUIDE_TEXT);
+    expect(text).not.toContain(QUIZ_ANALYSIS_PENDING_TEXT);
+  });
+
+  it('http_failed(분석 대기)일 때는 퀴즈없이 설문만😆 문구를 넣지 않는다', () => {
+    const seminar = buildSeminar({ quizFetchStatus: 'http_failed', quizAnalysisPending: true });
+    const { text } = buildSeminarLiveEndMessage(seminar);
+
+    expect(text).not.toContain(QUIZ_ABSENT_TEXT);
+    expect(text).toContain(CHANNEL_GUIDE_TEXT);
+  });
+
+  it('no_quiz여도 설문 자체가 없는 세미나는 퀴즈없이 설문만😆 대신 (설문이 없는 세미나)를 표시한다', () => {
+    const seminar = buildSeminar({ quizFetchStatus: 'no_quiz', hasSurvey: false });
+    const { text } = buildSeminarLiveEndMessage(seminar);
+
+    expect(text).toContain('(설문이 없는 세미나)');
+    expect(text).not.toContain(QUIZ_ABSENT_TEXT);
+  });
+
+  it('포인트 미지급(설문 포인트 제외) 세미나는 no_quiz여도 퀴즈없이 설문만😆 문구를 넣지 않는다', () => {
+    const seminar = buildSeminar({ quizFetchStatus: 'no_quiz', isSurveyPointExcluded: true });
+    const { text } = buildSeminarLiveEndMessage(seminar);
+
+    expect(text).not.toContain(QUIZ_ABSENT_TEXT);
   });
 
   it('정답을 확보한 세미나는 기존처럼 정답을 담고 채널 안내를 넣지 않는다', () => {
@@ -303,6 +331,33 @@ describe('공지봇 개별 발송 (sendSeminarLiveEndNotice)', () => {
 
     storage.closeDatabase();
   });
+
+  it('no_quiz 세미나의 종료 알림을 구독자에게 퀴즈없이 설문만😆 문구와 함께 보낸다', async () => {
+    const sentMessages: Array<{ chatId: number; text: string }> = [];
+    const mockBot = {
+      command: () => {},
+      action: () => {},
+      telegram: {
+        sendMessage: async (chatId: number, text: string) => {
+          sentMessages.push({ chatId, text });
+          return { message_id: 1002 };
+        },
+      },
+    };
+    setBot('notice', mockBot as unknown as Parameters<typeof setBot>[1]);
+    updateSubscription(302, { seminarLive: true });
+
+    const seminar = buildSeminar({ quizFetchStatus: 'no_quiz', quizAnalysisPending: false });
+    const res = await sendSeminarLiveEndNotice(seminar);
+
+    expect(res.successCount).toBe(1);
+    expect(sentMessages).toHaveLength(1);
+    expect(sentMessages[0].chatId).toBe(302);
+    expect(sentMessages[0].text).toContain(QUIZ_ABSENT_TEXT);
+    expect(sentMessages[0].text).not.toContain(CHANNEL_GUIDE_TEXT);
+
+    storage.closeDatabase();
+  });
 });
 
 describe('메인 채널 현황판 문항분석중 표시와 브라우저 파싱 후 업데이트', () => {
@@ -340,11 +395,42 @@ describe('메인 채널 현황판 문항분석중 표시와 브라우저 파싱 
     expect(seminar.quizFetchStatus).toBe('http_failed');
   });
 
-  it('no_quiz 세미나는 현황판에 문항분석중.. 을 표시하지 않는다', () => {
+  it('no_quiz 세미나는 현황판에 문항분석중.. 대신 퀴즈없이 설문만😆 을 표시한다', () => {
     const seminar = buildSeminar({ quizFetchStatus: 'no_quiz' });
     const { text } = buildSeminarStatusMessage('저녁', [seminar]);
 
+    expect(text).toContain(QUIZ_ABSENT_TEXT);
     expect(text).not.toContain(QUIZ_ANALYSIS_PENDING_TEXT);
+  });
+
+  it('no_quiz여도 설문 자체가 없는 세미나 현황판에는 퀴즈없이 설문만😆 을 표시하지 않는다', () => {
+    const seminar = buildSeminar({ quizFetchStatus: 'no_quiz', hasSurvey: false });
+    const { text } = buildSeminarStatusMessage('저녁', [seminar]);
+
+    expect(text).not.toContain(QUIZ_ABSENT_TEXT);
+    expect(text).toContain('(설문이 없는 세미나)');
+  });
+
+  it('http_failed 후 브라우저 파싱으로 퀴즈가 없음이 확인되면 현황판이 퀴즈없이 설문만😆 으로 바뀐다', () => {
+    const seminar = buildSeminar({ quizFetchStatus: 'http_failed', quizAnalysisPending: true });
+    expect(buildSeminarStatusMessage('저녁', [seminar]).text).toContain(QUIZ_ANALYSIS_PENDING_TEXT);
+
+    completeSeminarQuizAnalysis(seminar, null, true);
+
+    const { text } = buildSeminarStatusMessage('저녁', [seminar]);
+    expect(text).toContain(QUIZ_ABSENT_TEXT);
+    expect(text).not.toContain(QUIZ_ANALYSIS_PENDING_TEXT);
+    expect(seminar.quizFetchStatus).toBe('no_quiz');
+  });
+
+  it('브라우저 파싱으로 정답을 얻은 세미나는 퀴즈없이 설문만😆 을 표시하지 않는다', () => {
+    const seminar = buildSeminar({ quizFetchStatus: 'http_failed', quizAnalysisPending: true });
+
+    completeSeminarQuizAnalysis(seminar, '퀴즈 정답 31', true);
+
+    const { text } = buildSeminarStatusMessage('저녁', [seminar]);
+    expect(text).toContain('퀴즈 정답 31');
+    expect(text).not.toContain(QUIZ_ABSENT_TEXT);
   });
 
   it('이전 공지 본문의 문항분석중.. 라인은 퀴즈 정답으로 복원하지 않는다', () => {
@@ -361,5 +447,35 @@ describe('메인 채널 현황판 문항분석중 표시와 브라우저 파싱 
     expect(parsed).toHaveLength(1);
     expect(parsed[0].seminarId).toBe('6001');
     expect(parsed[0].quizResultMessage).toBeUndefined();
+  });
+
+  it('이전 공지 본문의 퀴즈없이 설문만😆 라인은 퀴즈 정답으로 복원하지 않고 no_quiz 표시로만 인식한다', () => {
+    const prevText = [
+      '🔔 [2026-11-26 (목)] 저녁세미나',
+      '',
+      '🔴 종료 | 19:00~20:00 설문만 있는 세미나',
+      'https://m.doctorville.co.kr/cme/seminar/6002',
+      QUIZ_ABSENT_TEXT,
+      '(설문 마감 약 50분 남음)',
+    ].join('\n');
+
+    const parsed = parsePrevNoticeSeminars(prevText);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].seminarId).toBe('6002');
+    expect(parsed[0].quizResultMessage).toBeUndefined();
+    expect(parsed[0].quizAbsent).toBe(true);
+    expect(isQuizAbsentLine(QUIZ_ABSENT_TEXT)).toBe(true);
+    expect(isQuizAbsentLine('문항분석중..')).toBe(false);
+  });
+
+  it('isQuizAbsentOnly는 no_quiz 확정 + 설문 존재 세미나에서만 true다', () => {
+    expect(isQuizAbsentOnly(buildSeminar({ quizFetchStatus: 'no_quiz' }))).toBe(true);
+    expect(isQuizAbsentOnly(buildSeminar({ quizFetchStatus: 'http_failed' }))).toBe(false);
+    expect(isQuizAbsentOnly(buildSeminar({ quizFetchStatus: 'found' }))).toBe(false);
+    expect(isQuizAbsentOnly(buildSeminar({ quizFetchStatus: 'no_quiz', hasSurvey: false }))).toBe(false);
+    expect(isQuizAbsentOnly(buildSeminar({ quizFetchStatus: 'no_quiz', isSurveyPointExcluded: true }))).toBe(false);
+    expect(isQuizAbsentOnly(buildSeminar({ quizFetchStatus: 'no_quiz', quizResultMessage: '퀴즈 정답 12' }))).toBe(
+      false,
+    );
   });
 });
