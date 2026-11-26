@@ -913,6 +913,11 @@ type SeminarQuizResult = {
   isSuspectedAdvancedSurvey?: boolean;
   /** 심화설문 의심 세부 구분 ('advanced_without_subjective' | 'not_advanced_suspected') */
   suspectedAdvancedType?: SuspectedAdvancedType;
+  /**
+   * 브라우저에서 실제로 읽어낸 설문 문항 수.
+   * 0이면 설문을 읽지 못한 조회 실패이므로 "퀴즈없이 설문만" 판정에 쓰지 않습니다.
+   */
+  surveyQuestionCnt: number;
 };
 
 /**
@@ -996,8 +1001,7 @@ async function processSeminarQuiz(
       try {
         const { getDb } = await import('../services/storage');
         const row = getDb().prepare('SELECT is_advanced_survey FROM seminars WHERE seminar_id = ?').get(seminarId) as
-          | { is_advanced_survey: number }
-          | undefined;
+          { is_advanced_survey: number } | undefined;
         if (row && row.is_advanced_survey === 1) {
           isDbAdvanced = true;
           console.log(`[seminar_quiz] DB에서 심화설문 감지 (seminarId=${seminarId})`);
@@ -1448,7 +1452,7 @@ async function processSeminarQuiz(
       const shotPath = `screenshot/quiz_not_found_${Date.now()}.png`;
       await page.screenshot({ path: shotPath, fullPage: true }).catch(() => {});
       await sendTelegram(message, shotPath);
-      return { success: true, hasQuizResult: false, message };
+      return { success: true, hasQuizResult: false, message, surveyQuestionCnt: accumulatedQuestions.length };
     }
 
     // 심화설문 문항 수: HTTP API 또는 마지막 페이지의 문항 수로 산정 (주관식이 0개인 경우 심화N 대신 심화설문?으로 처리하기 위해 0)
@@ -1552,6 +1556,7 @@ async function processSeminarQuiz(
         message: resultMessage,
         isSuspectedAdvancedSurvey: suspectedAdvancedSurvey,
         suspectedAdvancedType: suspectedAdvancedSurvey ? suspectedAdvancedType : undefined,
+        surveyQuestionCnt: accumulatedQuestions.length,
       };
     }
 
@@ -1584,6 +1589,7 @@ async function processSeminarQuiz(
         hasQuizResult: channelResults.length > 0,
         message: resultMessage,
         isSuspectedAdvancedSurvey: false,
+        surveyQuestionCnt: accumulatedQuestions.length,
       };
     }
 
@@ -1677,6 +1683,7 @@ async function processSeminarQuiz(
       hasQuizResult: channelResults.length > 0,
       message: resultMessage,
       isSuspectedAdvancedSurvey: false,
+      surveyQuestionCnt: accumulatedQuestions.length,
     };
   } catch (e) {
     console.error('[seminar_quiz] 오류', e && typeof e === 'object' && 'stack' in e ? (e as Error).stack : e);
@@ -1684,7 +1691,7 @@ async function processSeminarQuiz(
     const errShotPath = `screenshot/quiz_error_${Date.now()}.png`;
     await page.screenshot({ path: errShotPath, fullPage: true }).catch(() => {});
     await sendTelegram(`❗ 세미나 퀴즈 처리 오류: ${message}`, errShotPath).catch(() => {});
-    return { success: false, hasQuizResult: false, message: `세미나 퀴즈 처리 오류: ${message}` };
+    return { success: false, hasQuizResult: false, message: `세미나 퀴즈 처리 오류: ${message}`, surveyQuestionCnt: 0 };
   }
 }
 

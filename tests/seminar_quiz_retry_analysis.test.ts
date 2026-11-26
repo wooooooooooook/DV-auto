@@ -20,6 +20,8 @@ import {
   type MonitoredSeminarItem,
 } from '../src/tasks/monitor_seminars_notice';
 import * as storage from '../src/services/storage';
+import * as httpClient from '../src/modules/http_client';
+import { fetchSeminarSurveyQuizHttp } from '../src/modules/seminar_survey_api';
 import { setBot } from '../src/services/bot_instance';
 import { updateSubscription } from '../src/services/subscription_service';
 import * as seminarSurveyApi from '../src/modules/seminar_survey_api';
@@ -44,6 +46,11 @@ function buildHttpFailure(errorMessage = 'HTTP 500') {
 }
 
 function buildHttpSuccess(overrides: Record<string, unknown> = {}) {
+  const defaultQuestions = [
+    { pageNumber: 1, questionNumber: 1, questionText: '설문1' },
+    { pageNumber: 1, questionNumber: 2, questionText: '[퀴즈] 퀴즈1' },
+    { pageNumber: 1, questionNumber: 3, questionText: '[퀴즈] 퀴즈2' },
+  ];
   return {
     success: true as const,
     seminarId: '6001',
@@ -53,11 +60,43 @@ function buildHttpSuccess(overrides: Record<string, unknown> = {}) {
     depthSurveyQuestionCnt: 0,
     isAdvancedSurvey: false,
     quizzes: [],
-    allQuestions: [],
+    allQuestions: defaultQuestions,
     quizSummaryMessage: '퀴즈 정답 12',
     quizResultMessage: '퀴즈 정답 12',
+    incomplete: false,
+    failedPages: [] as number[],
     ...overrides,
   };
+}
+
+/** 퀴즈 문항은 없고 설문 문항만 3개 있는 응답 */
+function buildHttpSurveyOnly(overrides: Record<string, unknown> = {}) {
+  return buildHttpSuccess({
+    totalQuestionCnt: 3,
+    quizQuestionCnt: 0,
+    depthSurveyQuestionCnt: 0,
+    quizSummaryMessage: '',
+    quizResultMessage: '',
+    allQuestions: [
+      { pageNumber: 1, questionNumber: 1, questionText: '설문1' },
+      { pageNumber: 1, questionNumber: 2, questionText: '설문2' },
+      { pageNumber: 1, questionNumber: 3, questionText: '설문3' },
+    ],
+    ...overrides,
+  });
+}
+
+/** 설문 문항을 하나도 읽지 못한 응답 (페이지 조회 실패 등) */
+function buildHttpEmptySurvey(overrides: Record<string, unknown> = {}) {
+  return buildHttpSuccess({
+    totalQuestionCnt: 0,
+    quizQuestionCnt: 0,
+    depthSurveyQuestionCnt: 0,
+    quizSummaryMessage: '',
+    quizResultMessage: '',
+    allQuestions: [],
+    ...overrides,
+  });
 }
 
 function buildSeminar(overrides: Partial<MonitoredSeminarItem> = {}): MonitoredSeminarItem {
@@ -140,13 +179,58 @@ describe('http_failed vs no_quiz 구별', () => {
     vi.restoreAllMocks();
   });
 
-  it('HTTP 성공 응답에 퀴즈 문항이 0개이고 정답 메시지도 없으면 no_quiz이며 재시도하지 않는다', async () => {
+  it('HTTP 성공 응답에 설문 문항은 있지만 퀴즈 문항이 0개이고 정답 메시지도 없으면 no_quiz이며 재시도하지 않는다', async () => {
     const sleepFn = vi.fn().mockResolvedValue(undefined);
     vi.spyOn(seminarQuiz, 'loadCheatsheet').mockResolvedValue({});
-    const fetchSpy = vi.spyOn(seminarSurveyApi, 'fetchSeminarSurveyQuizHttp').mockResolvedValue(
-      buildHttpSuccess({
-        quizQuestionCnt: 0,
-        depthSurveyQuestionCnt: 0,
+    const fetchSpy = vi.spyOn(seminarSurveyApi, 'fetchSeminarSurveyQuizHttp').mockResolvedValue(buildHttpSurveyOnly());
+
+    const res = await tryFetchSeminarQuizHttpFast('6001', false, { sleepFn });
+
+    expect(res.status).toBe('no_quiz');
+    expect(res.quizResultMessage).toBeNull();
+    expect(res.attempts).toBe(1);
+    expect(res.surveyQuestionCnt).toBe(3);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(sleepFn).not.toHaveBeenCalled();
+  });
+
+  it('설문 문항이 0개(success: true, allQuestions: [])면 no_quiz가 아니라 3회 재시도 뒤 http_failed가 된다', async () => {
+    const sleepFn = vi.fn().mockResolvedValue(undefined);
+    vi.spyOn(seminarQuiz, 'loadCheatsheet').mockResolvedValue({});
+    const fetchSpy = vi.spyOn(seminarSurveyApi, 'fetchSeminarSurveyQuizHttp').mockResolvedValue(buildHttpEmptySurvey());
+
+    const res = await tryFetchSeminarQuizHttpFast('6001', false, { sleepFn });
+
+    expect(res.status).toBe('http_failed');
+    expect(res.quizResultMessage).toBeNull();
+    expect(res.attempts).toBe(3);
+    expect(res.errorMessage).toContain('0개');
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(sleepFn).toHaveBeenCalledTimes(2);
+  });
+
+  it('설문 0문항 응답이 재시도 중 정상 응답(설문만 3문항)으로 바뀌면 no_quiz로 확정된다', async () => {
+    const sleepFn = vi.fn().mockResolvedValue(undefined);
+    vi.spyOn(seminarQuiz, 'loadCheatsheet').mockResolvedValue({});
+    vi.spyOn(seminarSurveyApi, 'fetchSeminarSurveyQuizHttp')
+      .mockResolvedValueOnce(buildHttpEmptySurvey())
+      .mockResolvedValueOnce(buildHttpSurveyOnly());
+
+    const res = await tryFetchSeminarQuizHttpFast('6001', false, { sleepFn });
+
+    expect(res.status).toBe('no_quiz');
+    expect(res.attempts).toBe(2);
+    expect(res.surveyQuestionCnt).toBe(3);
+  });
+
+  it('일부 페이지만 조회 실패(incomplete)한 응답은 문항이 보여도 no_quiz로 확정하지 않고 http_failed로 처리한다', async () => {
+    const sleepFn = vi.fn().mockResolvedValue(undefined);
+    vi.spyOn(seminarQuiz, 'loadCheatsheet').mockResolvedValue({});
+    vi.spyOn(seminarSurveyApi, 'fetchSeminarSurveyQuizHttp').mockResolvedValue(
+      buildHttpSurveyOnly({
+        totalPageCnt: 2,
+        incomplete: true,
+        failedPages: [2],
         quizSummaryMessage: '',
         quizResultMessage: '',
       }),
@@ -154,11 +238,10 @@ describe('http_failed vs no_quiz 구별', () => {
 
     const res = await tryFetchSeminarQuizHttpFast('6001', false, { sleepFn });
 
-    expect(res.status).toBe('no_quiz');
-    expect(res.quizResultMessage).toBeNull();
-    expect(res.attempts).toBe(1);
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(sleepFn).not.toHaveBeenCalled();
+    expect(res.status).toBe('http_failed');
+    expect(res.incomplete).toBe(true);
+    expect(res.attempts).toBe(3);
+    expect(res.errorMessage).toContain('2');
   });
 
   it('심화설문 문항만 있는 경우(quizSummaryMessage = 심화N)는 found로 취급한다', async () => {
@@ -181,12 +264,75 @@ describe('http_failed vs no_quiz 구별', () => {
 
   it('resolveQuizHttpFastStatus는 응답 형태별로 상태를 구분한다', () => {
     expect(resolveQuizHttpFastStatus({ success: true, quizResultMessage: '퀴즈 정답 1' }).status).toBe('found');
-    expect(resolveQuizHttpFastStatus({ success: true, quizQuestionCnt: 0, depthSurveyQuestionCnt: 0 }).status).toBe(
-      'no_quiz',
-    );
-    const abnormal = resolveQuizHttpFastStatus({ success: true, quizQuestionCnt: 2 });
+
+    // 설문 문항이 실제로 존재하는 응답만 no_quiz로 확정합니다.
+    const surveyOnly = resolveQuizHttpFastStatus({
+      success: true,
+      totalQuestionCnt: 3,
+      quizQuestionCnt: 0,
+      depthSurveyQuestionCnt: 0,
+    });
+    expect(surveyOnly.status).toBe('no_quiz');
+    expect(surveyOnly.surveyQuestionCnt).toBe(3);
+    expect(surveyOnly.retryable).toBe(false);
+
+    // 설문 문항 0개(또는 문항 수 미상)는 조회 실패이며 재시도 대상입니다.
+    const empty = resolveQuizHttpFastStatus({ success: true, quizQuestionCnt: 0, depthSurveyQuestionCnt: 0 });
+    expect(empty.status).toBe('http_failed');
+    expect(empty.retryable).toBe(true);
+    expect(empty.errorMessage).toBeTruthy();
+
+    const emptyWithMeta = resolveQuizHttpFastStatus({
+      success: true,
+      totalQuestionCnt: 3,
+      allQuestions: [],
+      quizQuestionCnt: 0,
+      depthSurveyQuestionCnt: 0,
+    });
+    expect(emptyWithMeta.status).toBe('http_failed');
+    expect(emptyWithMeta.retryable).toBe(true);
+
+    // 일부 페이지 조회 실패는 문항이 보여도 no_quiz로 확정하지 않습니다.
+    const partial = resolveQuizHttpFastStatus({
+      success: true,
+      totalQuestionCnt: 3,
+      allQuestions: [{}, {}, {}],
+      quizQuestionCnt: 0,
+      depthSurveyQuestionCnt: 0,
+      incomplete: true,
+      failedPages: [2],
+    });
+    expect(partial.status).toBe('http_failed');
+    expect(partial.retryable).toBe(true);
+    expect(partial.errorMessage).toContain('2');
+
+    const abnormal = resolveQuizHttpFastStatus({ success: true, totalQuestionCnt: 3, quizQuestionCnt: 2 });
     expect(abnormal.status).toBe('http_failed');
+    expect(abnormal.retryable).toBe(false);
     expect(abnormal.errorMessage).toBeTruthy();
+  });
+
+  it('설문 0문항으로 최종 실패하면 분석중(문항분석중..) 상태와 메인 채널 안내로 처리된다', async () => {
+    vi.spyOn(seminarQuiz, 'loadCheatsheet').mockResolvedValue({});
+    vi.spyOn(seminarSurveyApi, 'fetchSeminarSurveyQuizHttp').mockResolvedValue(buildHttpEmptySurvey());
+
+    const res = await tryFetchSeminarQuizHttpFast('6001', false, { sleepFn: async () => {} });
+    expect(res.status).toBe('http_failed');
+
+    const seminar = buildSeminar();
+    applySeminarQuizHttpFetchResult(seminar, res);
+
+    expect(seminar.quizFetchStatus).toBe('http_failed');
+    expect(seminar.quizAnalysisPending).toBe(true);
+    expect(isQuizAnalysisPending(seminar)).toBe(true);
+
+    const board = buildSeminarStatusMessage('저녁', [seminar]).text;
+    expect(board).toContain(QUIZ_ANALYSIS_PENDING_TEXT);
+    expect(board).not.toContain(QUIZ_ABSENT_TEXT);
+
+    const { text: endText } = buildSeminarLiveEndMessage(seminar);
+    expect(endText).toContain(CHANNEL_GUIDE_TEXT);
+    expect(endText).not.toContain(QUIZ_ABSENT_TEXT);
   });
 });
 
@@ -477,5 +623,175 @@ describe('메인 채널 현황판 문항분석중 표시와 브라우저 파싱 
     expect(isQuizAbsentOnly(buildSeminar({ quizFetchStatus: 'no_quiz', quizResultMessage: '퀴즈 정답 12' }))).toBe(
       false,
     );
+  });
+});
+
+describe('설문 페이지 조회 실패 시 no_quiz 확정 금지 (P1 리뷰)', () => {
+  const createMockResponse = (body: string, status = 200): httpClient.HttpResponse => ({
+    status,
+    statusText: status === 200 ? 'OK' : 'Not Found',
+    body,
+    headers: {},
+    url: 'https://survey.villeway.com',
+    redirected: false,
+    resultType: status === 200 ? 'SUCCESS' : 'HTTP_ERROR',
+  });
+
+  const surveyQuestion = (id: number, title: string) => ({
+    id,
+    questionNumber: id,
+    subject: title,
+    type: { key: 'SINGLE_CHOICE', nameKo: '객관식' },
+    options: [
+      { id: id * 10 + 1, optionNumber: 1, text: '매우 만족' },
+      { id: id * 10 + 2, optionNumber: 2, text: '보통' },
+    ],
+  });
+
+  /** 영큐먼트: 설문 URL/인증/상세는 정상, 페이지 응답은 시나리오대로 반환 */
+  function mockSurveyHttp(options: {
+    pageCnt: number;
+    questionCnt: number;
+    pages: Record<number, 'ok' | 'http500' | 'badjson'>;
+    pageQuestions?: Record<number, unknown[]>;
+  }) {
+    return vi.spyOn(httpClient, 'sendDoctorVilleRequest').mockImplementation(async (url: string) => {
+      if (url.includes('/survey-url')) {
+        return createMockResponse(
+          JSON.stringify({ surveyUrl: 'https://survey.villeway.com/s/c/testCompany/u/testSecureToken123' }),
+        );
+      }
+      if (url.includes('/auth/authenticate-via-')) {
+        return createMockResponse(JSON.stringify({ data: { accessToken: 'mock-access-token' } }));
+      }
+      if (url.includes('/user/survey-detail')) {
+        return createMockResponse(
+          JSON.stringify({
+            data: {
+              config: { title: '페이지 조회 실패 테스트 세미나' },
+              pageCnt: options.pageCnt,
+              questionCnt: options.questionCnt,
+            },
+          }),
+        );
+      }
+      const pageMatch = url.match(/\/user\/survey-page\/(\d+)/);
+      if (pageMatch) {
+        const pageNo = Number(pageMatch[1]);
+        const mode = options.pages[pageNo] ?? 'http500';
+        if (mode === 'http500') return createMockResponse('', 500);
+        if (mode === 'badjson') return createMockResponse('<html>not json</html>');
+        const questions = options.pageQuestions?.[pageNo] ?? [surveyQuestion(pageNo, `설문${pageNo}`)];
+        return createMockResponse(JSON.stringify({ data: { pageNumber: pageNo, questions } }));
+      }
+      return createMockResponse('', 404);
+    });
+  }
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('일부 페이지 요청 실패(비-200) 시 incomplete로 표시되고 no_quiz가 아니라 http_failed로 판정된다', async () => {
+    mockSurveyHttp({
+      pageCnt: 2,
+      questionCnt: 2,
+      pages: { 1: 'ok', 2: 'http500' },
+      pageQuestions: {
+        1: [surveyQuestion(1, '설문1'), surveyQuestion(2, '설문2')],
+        2: [surveyQuestion(3, '설문3')],
+      },
+    });
+
+    const result = await fetchSeminarSurveyQuizHttp('7001', {});
+
+    expect(result.success).toBe(true);
+    expect(result.incomplete).toBe(true);
+    expect(result.failedPages).toEqual([2]);
+    expect(result.pageFetchAttemptCnt).toBe(2);
+    expect(result.pageFetchSuccessCnt).toBe(1);
+    expect(result.quizQuestionCnt).toBe(0);
+    expect(result.quizResultMessage).toBeFalsy();
+
+    const resolved = resolveQuizHttpFastStatus(result);
+    expect(resolved.status).toBe('http_failed');
+    expect(resolved.retryable).toBe(true);
+    expect(resolved.incomplete).toBe(true);
+    expect(resolved.errorMessage).toContain('2');
+  });
+
+  it('모든 페이지 요청 실패 시 문항 0개로 보여도 no_quiz가 아니라 http_failed로 판정된다', async () => {
+    mockSurveyHttp({ pageCnt: 2, questionCnt: 3, pages: { 1: 'http500', 2: 'http500' } });
+
+    const result = await fetchSeminarSurveyQuizHttp('7002', {});
+
+    expect(result.success).toBe(true);
+    expect(result.incomplete).toBe(true);
+    expect(result.failedPages).toEqual([1, 2]);
+    expect(result.allQuestions).toHaveLength(0);
+    expect(result.totalQuestionCnt).toBe(3); // 메타데이터상 문항 수는 존재
+
+    const resolved = resolveQuizHttpFastStatus(result);
+    expect(resolved.status).toBe('http_failed');
+    expect(resolved.retryable).toBe(true);
+    expect(resolved.surveyQuestionCnt).toBe(0);
+  });
+
+  it('페이지 JSON 파싱 실패 시에도 incomplete로 표시되고 no_quiz로 확정되지 않는다', async () => {
+    mockSurveyHttp({
+      pageCnt: 2,
+      questionCnt: 3,
+      pages: { 1: 'badjson', 2: 'ok' },
+      pageQuestions: { 2: [surveyQuestion(3, '설문3')] },
+    });
+
+    const result = await fetchSeminarSurveyQuizHttp('7003', {});
+
+    expect(result.success).toBe(true);
+    expect(result.incomplete).toBe(true);
+    expect(result.failedPages).toEqual([1]);
+
+    const resolved = resolveQuizHttpFastStatus(result);
+    expect(resolved.status).toBe('http_failed');
+    expect(resolved.retryable).toBe(true);
+  });
+
+  it('모든 페이지 정상 조회 + 설문 문항 존재 + 퀴즈 0문항일 때만 no_quiz로 확정된다', async () => {
+    mockSurveyHttp({
+      pageCnt: 2,
+      questionCnt: 3,
+      pages: { 1: 'ok', 2: 'ok' },
+      pageQuestions: {
+        1: [surveyQuestion(1, '설문1'), surveyQuestion(2, '설문2')],
+        2: [surveyQuestion(3, '설문3')],
+      },
+    });
+
+    const result = await fetchSeminarSurveyQuizHttp('7004', {});
+
+    expect(result.success).toBe(true);
+    expect(result.incomplete).toBe(false);
+    expect(result.failedPages).toEqual([]);
+    expect(result.pageFetchSuccessCnt).toBe(2);
+    expect(result.allQuestions).toHaveLength(3);
+    expect(result.quizQuestionCnt).toBe(0);
+
+    const resolved = resolveQuizHttpFastStatus(result);
+    expect(resolved.status).toBe('no_quiz');
+    expect(resolved.surveyQuestionCnt).toBe(3);
+  });
+
+  it('일부 페이지 실패 응답은 tryFetchSeminarQuizHttpFast에서도 재시도 후 http_failed로 남는다', async () => {
+    vi.spyOn(seminarQuiz, 'loadCheatsheet').mockResolvedValue({});
+    mockSurveyHttp({ pageCnt: 2, questionCnt: 2, pages: { 1: 'ok', 2: 'http500' } });
+
+    const fetchSpy = vi.spyOn(httpClient, 'sendDoctorVilleRequest');
+    const res = await tryFetchSeminarQuizHttpFast('7005', false, { sleepFn: async () => {} });
+
+    expect(res.status).toBe('http_failed');
+    expect(res.attempts).toBe(3);
+    expect(res.incomplete).toBe(true);
+    // 3회 재시도 × (survey-url + 인증 + 상세 + 페이지2) 요청이 반복 수행된다.
+    expect(fetchSpy).toHaveBeenCalled();
   });
 });

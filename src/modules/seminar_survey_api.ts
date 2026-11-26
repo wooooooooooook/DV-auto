@@ -50,6 +50,17 @@ export interface SurveyQuizHttpResult {
   quizSummaryMessage: string;
   quizResultMessage?: string;
   errorMessage?: string;
+  /**
+   * 설문 페이지 중 하나라도 요청/JSON 파싱에 실패해 문항을 온전히 읽지 못했는지 여부.
+   * true이면 문항이 0개처럼 보여도 "퀴즈없이 설문만"(no_quiz)으로 확정하지 않습니다.
+   */
+  incomplete?: boolean;
+  /** 조회에 실패한 설문 페이지 번호 목록 */
+  failedPages?: number[];
+  /** 조회를 시도한 설문 페이지 수 */
+  pageFetchAttemptCnt?: number;
+  /** 정상 조회(200 + JSON 파싱 성공)된 설문 페이지 수 */
+  pageFetchSuccessCnt?: number;
 }
 
 /**
@@ -272,8 +283,11 @@ export async function fetchSeminarSurveyQuizHttp(
       surveyTitle.includes('심화');
 
     // 4. 각 페이지 순회 및 문항 수집
+    //    페이지 요청 실패(비-200/빈 body)나 JSON 파싱 실패는 "문항 0개"와 구분해야 하므로 실패 페이지를 추적합니다.
     const allQuestions: HttpQuizQuestion[] = [];
+    const failedPages: number[] = [];
     const cheatsheet = customCheatsheet || (await loadCheatsheet());
+    let pageFetchSuccessCnt = 0;
 
     for (let pageNo = 1; pageNo <= totalPageCnt; pageNo++) {
       const pageRes = await sendDoctorVilleRequest(`${VILLEWAY_API_BASE_URL}/user/survey-page/${pageNo}`, {
@@ -284,15 +298,26 @@ export async function fetchSeminarSurveyQuizHttp(
         },
       });
 
-      if (pageRes.status !== 200 || !pageRes.body) continue;
+      if (pageRes.status !== 200 || !pageRes.body) {
+        failedPages.push(pageNo);
+        console.warn(
+          `[seminar_survey_api] 설문 페이지 ${pageNo}/${totalPageCnt} 조회 실패 (${sid}, HTTP ${pageRes.status}) - 불완전 조회`,
+        );
+        continue;
+      }
 
       let pageData: { data?: { questions?: unknown[] }; questions?: unknown[] };
       try {
         pageData = JSON.parse(pageRes.body);
       } catch {
+        failedPages.push(pageNo);
+        console.warn(
+          `[seminar_survey_api] 설문 페이지 ${pageNo}/${totalPageCnt} JSON 파싱 실패 (${sid}) - 불완전 조회`,
+        );
         continue;
       }
 
+      pageFetchSuccessCnt += 1;
       const rawQuestions = (pageData.data?.questions || pageData.questions || []) as Array<Record<string, unknown>>;
 
       for (const q of rawQuestions) {
@@ -410,6 +435,13 @@ export async function fetchSeminarSurveyQuizHttp(
       );
     }
 
+    const incomplete = failedPages.length > 0;
+    if (incomplete) {
+      console.warn(
+        `[seminar_survey_api] 설문 ${totalPageCnt}페이지 중 ${failedPages.length}페이지 조회 실패 (${sid}, 실패 페이지: ${failedPages.join(', ')}) - 퀴즈없이 설문만(no_quiz) 판정 제외`,
+      );
+    }
+
     return {
       success: true,
       seminarId: sid,
@@ -428,6 +460,10 @@ export async function fetchSeminarSurveyQuizHttp(
       advancedSurveyPrompt,
       quizSummaryMessage,
       quizResultMessage,
+      incomplete,
+      failedPages,
+      pageFetchAttemptCnt: totalPageCnt,
+      pageFetchSuccessCnt,
     };
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
